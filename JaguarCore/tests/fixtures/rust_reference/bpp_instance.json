@@ -1,0 +1,25 @@
+{
+  "name": "differential-bpp",
+  "items": [
+    {
+      "id": 301,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "rectangle",
+        "data": {"x_min": 0, "y_min": 0, "width": 2, "height": 2}
+      }
+    }
+  ],
+  "bins": [
+    {
+      "id": 401,
+      "shape": {
+        "type": "rectangle",
+        "data": {"x_min": 0, "y_min": 0, "width": 6, "height": 6}
+      },
+      "stock": 1,
+      "cost": 10
+    }
+  ]
+}

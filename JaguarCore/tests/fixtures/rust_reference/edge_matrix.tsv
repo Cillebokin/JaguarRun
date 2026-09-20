@@ -1,0 +1,10 @@
+# name ax ay bx by cx cy dx dy expected
+proper_cross 0 0 4 4 0 4 4 0 1
+endpoint_touch 0 0 4 0 4 0 4 4 1
+t_junction 0 0 4 0 2 0 2 3 1
+disjoint 0 0 1 0 2 0 3 0 0
+collinear_overlap 0 0 4 0 2 0 6 0 0
+collinear_touch 0 0 4 0 4 0 6 0 0
+parallel 0 0 4 0 0 1 4 1 0
+small_gap 0 0 4 0 4.0000000005 0 8 1 1
+large_gap 0 0 4 0 4.0000005 0 8 1 0

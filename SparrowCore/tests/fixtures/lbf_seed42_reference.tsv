@@ -1,0 +1,11 @@
+# Task1 reference schema. Values use SplitMix64 seed expansion followed by
+# xoshiro256++ next_u64 and the top 24 bits for uniform_f32.
+# seed primitive ordinal decimal_value hex_value_or_float
+42 raw_u64 0 15021278609987233951 d0764d4f4476689f
+42 raw_u64 1 5881210131331364753 519e4174576f3791
+42 raw_u64 2 18149643915985481100 fbe07cfb0c24ed8c
+42 raw_u64 3 12933668939759105464 b37d9f600cd835b8
+42 uniform_f32 0 0.8143051266670227 -
+42 uniform_f32 1 0.3188210129737854 -
+42 uniform_f32 2 0.9838941097259521 -
+42 uniform_f32 3 0.7011355757713318 -

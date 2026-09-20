@@ -1,0 +1,15 @@
+{
+  "name": "differential-mspp",
+  "items": [
+    {
+      "id": 501,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "rectangle",
+        "data": {"x_min": 0, "y_min": 0, "width": 2, "height": 2}
+      }
+    }
+  ],
+  "strips": {"height": 5, "max_width": 10}
+}

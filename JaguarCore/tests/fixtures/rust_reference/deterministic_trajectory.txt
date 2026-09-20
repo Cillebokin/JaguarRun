@@ -1,0 +1,12 @@
+seed=0x4A47524312345678
+steps=256
+container_width=52
+container_height=26
+item_width=2
+item_height=2
+placements=91
+removals=80
+restores=85
+active=11
+checksum=4bfd29cfe028430b
+state=e607235f6e91befa

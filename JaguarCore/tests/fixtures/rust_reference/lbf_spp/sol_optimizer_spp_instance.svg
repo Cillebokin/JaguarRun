@@ -1,0 +1,49 @@
+<svg viewBox="-0.2859162 -0.36600006 4.9701557 6.7320004" xmlns="http://www.w3.org/2000/svg">
+<g>
+<g id="container">
+<path d="M0,0 L4.398323,0 L4.398323,6 L0,6 z" fill="#CC824A" stroke="black" stroke-width="0.018073292"/>
+<title>container, bbox: [x_min: 0.000, y_min: 0.000, x_max: 4.398, y_max: 6.000]</title>
+</g>
+<g id="items">
+<defs>
+<g id="item_101">
+<path d="M0,0 L3,0 L3,2 L0,2 z" fill="#FFC879" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.009036646"/>
+</g>
+<g id="cd_shape_101">
+<path d="M0,0 L3,0 L3,2 L0,2 z" fill="none" stroke="black" stroke-dasharray="0.009036646 0.018073292" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.004518323"/>
+</g>
+<g id="item_100">
+<path d="M0,0 L2,0 L2,2 L0,2 z" fill="#FFC879" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.009036646"/>
+</g>
+<g id="cd_shape_100">
+<path d="M0,0 L2,0 L2,2 L0,2 z" fill="none" stroke="black" stroke-dasharray="0.009036646 0.018073292" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.004518323"/>
+</g>
+</defs>
+<use href="#item_101" transform="translate(0.008635879 3.1487856), rotate(0)">
+<title>item, id: 101, transf: [r: 0.000°, t: (0.009, 3.149)]</title>
+</use>
+<use href="#item_100" transform="translate(0.061572075 0.10978603), rotate(0)">
+<title>item, id: 100, transf: [r: 0.000°, t: (0.062, 0.110)]</title>
+</use>
+<use href="#item_100" transform="translate(2.398279 0.71217275), rotate(0)">
+<title>item, id: 100, transf: [r: 0.000°, t: (2.398, 0.712)]</title>
+</use>
+</g>
+<g id="quality_zones"/>
+<g id="optionals">
+<g id="highlight_cd_shapes">
+<use href="#cd_shape_101" transform="translate(0.008635879 3.1487856), rotate(0)"/>
+<use href="#cd_shape_100" transform="translate(0.061572075 0.10978603), rotate(0)"/>
+<use href="#cd_shape_100" transform="translate(2.398279 0.71217275), rotate(0)"/>
+<path d="M0,0 L4.398323,0 L4.398323,6 L0,6 z" fill="none" stroke="black" stroke-dasharray="0.009036646 0.018073292" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.004518323"/>
+</g>
+<g id="surrogates">
+<defs/>
+</g>
+<g id="collision_lines"/>
+</g>
+<text font-family="monospace" font-size="0.109958075" font-weight="500" x="0" y="-0.054979037">
+h: 6.000 | w: 4.398 | d: 53.051% | 
+</text>
+</g>
+</svg>

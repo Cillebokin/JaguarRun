@@ -1,0 +1,9 @@
+{
+  "id": 101,
+  "orientation": {"rotation": {"mode": "discrete", "angles": [-90, 270, 0, 360]}},
+  "shape": {
+    "type": "rectangle",
+    "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 20}
+  },
+  "min_quality": 1
+}

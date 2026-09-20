@@ -1,0 +1,10 @@
+[package]
+name = "jaguarcore-rust-oracle"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+jagua-rs = { path = "../../../jagua-rs/jagua-rs" }
+geo-buffer = "0.2"
+geo-types = "0.7"

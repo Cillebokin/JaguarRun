@@ -1,0 +1,10 @@
+# name qx1 qy1 qx2 qy2 hx1 hy1 hx2 hy2 hazard_kind expected
+hole_inside 3 3 4 4 2 2 8 8 hole 1
+hole_enclosing 1 1 9 9 2 2 8 8 hole 1
+hole_crossing 1 4 3 6 2 2 8 8 hole 1
+hole_corner_touch 8 8 9 9 2 2 8 8 hole 1
+hole_disjoint 0 0 1 1 2 2 8 8 hole 0
+exterior_inside 3 3 4 4 2 2 8 8 exterior 0
+exterior_crossing 1 4 3 6 2 2 8 8 exterior 1
+exterior_outside 0 0 1 1 2 2 8 8 exterior 1
+exterior_enclosing 0 0 10 10 2 2 8 8 exterior 1

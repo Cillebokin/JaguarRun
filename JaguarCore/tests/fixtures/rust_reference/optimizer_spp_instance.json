@@ -1,0 +1,18 @@
+{
+  "name": "optimizer-differential-spp",
+  "items": [
+    {
+      "id": 100,
+      "demand": 2,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 180]}},
+      "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 2, "height": 2}}
+    },
+    {
+      "id": 101,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 180]}},
+      "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 3, "height": 2}}
+    }
+  ],
+  "strip_height": 6
+}

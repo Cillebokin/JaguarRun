@@ -1,0 +1,15 @@
+{
+  "name": "differential-spp",
+  "items": [
+    {
+      "id": 201,
+      "demand": 2,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "rectangle",
+        "data": {"x_min": 0, "y_min": 0, "width": 2, "height": 2}
+      }
+    }
+  ],
+  "strip_height": 4
+}

@@ -1,0 +1,223 @@
+<svg viewBox="-0.54898494 -2.0002005 12.077665 44.004406" xmlns="http://www.w3.org/2000/svg">
+<g id="container_0">
+<path d="M0,0 L10.979696,0 L10.979696,40.004 L0,40.004 z" fill="#D3D3D3" stroke="black" stroke-width="0.06038833"/>
+<title>container, id: 0, bbox: [x_min: 0.000, y_min: 0.000, x_max: 10.980, y_max: 40.004]</title>
+</g>
+<g id="items">
+<defs>
+<g id="item_0">
+<path d="M0,0 L2,0 L0,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L2,0 L0,2 z" fill="none" id="cd_shape_0" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_1">
+<path d="M0,0 L3,0 L0,3 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L3,0 L0,3 z" fill="none" id="cd_shape_1" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_2">
+<path d="M0,0 L4,0 L0,4 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L4,0 L0,4 z" fill="none" id="cd_shape_2" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_3">
+<path d="M5,0 L5,5 L0,5 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M5,0 L5,5 L0,5 z" fill="none" id="cd_shape_3" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_4">
+<path d="M0,3 L6,0 L6,3 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,3 L6,0 L6,3 z" fill="none" id="cd_shape_4" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_5">
+<path d="M0,4 L7,0 L7,4 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,4 L7,0 L7,4 z" fill="none" id="cd_shape_5" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_6">
+<path d="M0,0 L5,0 L5,3 L3,3 L3,5 L0,5 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L5,0 L5,3 L3,3 L3,5 L0,5 z" fill="none" id="cd_shape_6" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_7">
+<path d="M0,0 L4,0 L4,1 L2,1 L2,4 L0,4 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L4,0 L4,1 L2,1 L2,4 L0,4 z" fill="none" id="cd_shape_7" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_8">
+<path d="M0,0 L6,0 L6,3 L4,3 L4,6 L0,6 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L6,0 L6,3 L4,3 L4,6 L0,6 z" fill="none" id="cd_shape_8" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_9">
+<path d="M0,0 L5,0 L5,2 L3,2 L3,1 L0,1 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L5,0 L5,2 L3,2 L3,1 L0,1 z" fill="none" id="cd_shape_9" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_10">
+<path d="M0,0 L4,0 L4,2 L3,2 L3,1 L0,1 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L4,0 L4,2 L3,2 L3,1 L0,1 z" fill="none" id="cd_shape_10" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_11">
+<path d="M0,0 L6,0 L6,3 L4,3 L4,6 L0,6 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L6,0 L6,3 L4,3 L4,6 L0,6 z" fill="none" id="cd_shape_11" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_12">
+<path d="M0,0 L6,0 L6,6 L0,6 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L6,0 L6,6 L0,6 z" fill="none" id="cd_shape_12" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_13">
+<path d="M0,0 L5,0 L5,5 L0,5 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L5,0 L5,5 L0,5 z" fill="none" id="cd_shape_13" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_14">
+<path d="M0,0 L4,0 L4,4 L0,4 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L4,0 L4,4 L0,4 z" fill="none" id="cd_shape_14" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_15">
+<path d="M2,0 L4,0 L4,2 L6,2 L6,4 L4,4 L4,6 L2,6 L2,4 L0,4 L0,2 L2,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M2,0 L4,0 L4,2 L6,2 L6,4 L4,4 L4,6 L2,6 L2,4 L0,4 L0,2 L2,2 z" fill="none" id="cd_shape_15" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_16">
+<path d="M1,0 L2,0 L2,1 L3,1 L3,2 L2,2 L2,3 L1,3 L1,2 L0,2 L0,1 L1,1 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M1,0 L2,0 L2,1 L3,1 L3,2 L2,2 L2,3 L1,3 L1,2 L0,2 L0,1 L1,1 z" fill="none" id="cd_shape_16" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_17">
+<path d="M2,0 L4,0 L4,2 L6,2 L6,4 L4,4 L4,6 L2,6 L2,4 L0,4 L0,2 L2,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M2,0 L4,0 L4,2 L6,2 L6,4 L4,4 L4,6 L2,6 L2,4 L0,4 L0,2 L2,2 z" fill="none" id="cd_shape_17" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_18">
+<path d="M1,0 L2,0 L2,1 L3,1 L3,2 L2,2 L2,3 L1,3 L1,2 L0,2 L0,1 L1,1 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M1,0 L2,0 L2,1 L3,1 L3,2 L2,2 L2,3 L1,3 L1,2 L0,2 L0,1 L1,1 z" fill="none" id="cd_shape_18" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_19">
+<path d="M0,0 L6,0 L6,3 L0,3 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L6,0 L6,3 L0,3 z" fill="none" id="cd_shape_19" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_20">
+<path d="M0,0 L1,0 L1,4 L0,4 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L1,0 L1,4 L0,4 z" fill="none" id="cd_shape_20" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_21">
+<path d="M0,0 L5,0 L5,2 L0,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,0 L5,0 L5,2 L0,2 z" fill="none" id="cd_shape_21" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_22">
+<path d="M2,0 L4,0 L6,2 L6,4 L4,6 L2,6 L0,4 L0,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M2,0 L4,0 L6,2 L6,4 L4,6 L2,6 L0,4 L0,2 z" fill="none" id="cd_shape_22" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_23">
+<path d="M3,0 L6,0 L8,2 L8,4 L6,6 L3,6 L0,4 L0,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M3,0 L6,0 L8,2 L8,4 L6,6 L3,6 L0,4 L0,2 z" fill="none" id="cd_shape_23" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+<g id="item_24">
+<path d="M0,1 L2,0 L4,0 L6,1 L6,2 L4,3 L2,3 L0,2 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.030194165"/>
+</g>
+<path d="M0,1 L2,0 L4,0 L6,1 L6,2 L4,3 L2,3 L0,2 z" fill="none" id="cd_shape_24" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+</defs>
+<use href="#item_23" transform="translate(6.000289 14.93305), rotate(90)">
+<title>item, id: 23, transf: [r: 90.000°, t: (6.000, 14.933)]</title>
+</use>
+<use href="#item_12" transform="translate(6.000102 33.993454), rotate(90)">
+<title>item, id: 12, transf: [r: 90.000°, t: (6.000, 33.993)]</title>
+</use>
+<use href="#item_8" transform="translate(0.00032043457 0.0015263557), rotate(0)">
+<title>item, id: 8, transf: [r: 0.000°, t: (0.000, 0.002)]</title>
+</use>
+<use href="#item_11" transform="translate(0.000078201294 33.986534), rotate(-90)">
+<title>item, id: 11, transf: [r: -90.000°, t: (0.000, 33.987)]</title>
+</use>
+<use href="#item_15" transform="translate(8.00035 5.0213594), rotate(90)">
+<title>item, id: 15, transf: [r: 90.000°, t: (8.000, 5.021)]</title>
+</use>
+<use href="#item_17" transform="translate(10.000371 7.021084), rotate(-180)">
+<title>item, id: 17, transf: [r: -180.000°, t: (10.000, 7.021)]</title>
+</use>
+<use href="#item_22" transform="translate(4.8031693 18.136612), rotate(-90)">
+<title>item, id: 22, transf: [r: -90.000°, t: (4.803, 18.137)]</title>
+</use>
+<use href="#item_13" transform="translate(5.976859 20.960306), rotate(0)">
+<title>item, id: 13, transf: [r: 0.000°, t: (5.977, 20.960)]</title>
+</use>
+<use href="#item_6" transform="translate(0.31925225 22.949018), rotate(0)">
+<title>item, id: 6, transf: [r: 0.000°, t: (0.319, 22.949)]</title>
+</use>
+<use href="#item_19" transform="translate(9.951487 28.960365), rotate(-180)">
+<title>item, id: 19, transf: [r: -180.000°, t: (9.951, 28.960)]</title>
+</use>
+<use href="#item_5" transform="translate(7.000183 16.023874), rotate(-180)">
+<title>item, id: 5, transf: [r: -180.000°, t: (7.000, 16.024)]</title>
+</use>
+<use href="#item_14" transform="translate(6.500429 36.00328), rotate(0)">
+<title>item, id: 14, transf: [r: 0.000°, t: (6.500, 36.003)]</title>
+</use>
+<use href="#item_3" transform="translate(5.979615 15.960216), rotate(0)">
+<title>item, id: 3, transf: [r: 0.000°, t: (5.980, 15.960)]</title>
+</use>
+<use href="#item_24" transform="translate(7.979472 35.960915), rotate(-90)">
+<title>item, id: 24, transf: [r: -90.000°, t: (7.979, 35.961)]</title>
+</use>
+<use href="#item_7" transform="translate(0.00000059604645 6.0038853), rotate(0)">
+<title>item, id: 7, transf: [r: 0.000°, t: (0.000, 6.004)]</title>
+</use>
+<use href="#item_4" transform="translate(9.000306 30.002789), rotate(90)">
+<title>item, id: 4, transf: [r: 90.000°, t: (9.000, 30.003)]</title>
+</use>
+<use href="#item_21" transform="translate(10.050986 5.021224), rotate(90)">
+<title>item, id: 21, transf: [r: 90.000°, t: (10.051, 5.021)]</title>
+</use>
+<use href="#item_9" transform="translate(3.479201 28.96044), rotate(0)">
+<title>item, id: 9, transf: [r: 0.000°, t: (3.479, 28.960)]</title>
+</use>
+<use href="#item_2" transform="translate(10.979613 0.00020349026), rotate(90)">
+<title>item, id: 2, transf: [r: 90.000°, t: (10.980, 0.000)]</title>
+</use>
+<use href="#item_10" transform="translate(10.977564 25.960636), rotate(90)">
+<title>item, id: 10, transf: [r: 90.000°, t: (10.978, 25.961)]</title>
+</use>
+<use href="#item_16" transform="translate(1.0001738 9.021946), rotate(0)">
+<title>item, id: 16, transf: [r: 0.000°, t: (1.000, 9.022)]</title>
+</use>
+<use href="#item_18" transform="translate(9.04292 12.021655), rotate(-180)">
+<title>item, id: 18, transf: [r: -180.000°, t: (9.043, 12.022)]</title>
+</use>
+<use href="#item_1" transform="translate(10.97755 12.099096), rotate(-180)">
+<title>item, id: 1, transf: [r: -180.000°, t: (10.978, 12.099)]</title>
+</use>
+<use href="#item_20" transform="translate(3.005455 12.02237), rotate(-90)">
+<title>item, id: 20, transf: [r: -90.000°, t: (3.005, 12.022)]</title>
+</use>
+<use href="#item_0" transform="translate(6.1235037 18.664564), rotate(0)">
+<title>item, id: 0, transf: [r: 0.000°, t: (6.124, 18.665)]</title>
+</use>
+</g>
+<g id="quality_zones"/>
+<g id="optionals">
+<g id="highlight_cd_shapes">
+<use href="#cd_shape_23" transform="translate(6.000289 14.93305), rotate(90)"/>
+<use href="#cd_shape_12" transform="translate(6.000102 33.993454), rotate(90)"/>
+<use href="#cd_shape_8" transform="translate(0.00032043457 0.0015263557), rotate(0)"/>
+<use href="#cd_shape_11" transform="translate(0.000078201294 33.986534), rotate(-90)"/>
+<use href="#cd_shape_15" transform="translate(8.00035 5.0213594), rotate(90)"/>
+<use href="#cd_shape_17" transform="translate(10.000371 7.021084), rotate(-180)"/>
+<use href="#cd_shape_22" transform="translate(4.8031693 18.136612), rotate(-90)"/>
+<use href="#cd_shape_13" transform="translate(5.976859 20.960306), rotate(0)"/>
+<use href="#cd_shape_6" transform="translate(0.31925225 22.949018), rotate(0)"/>
+<use href="#cd_shape_19" transform="translate(9.951487 28.960365), rotate(-180)"/>
+<use href="#cd_shape_5" transform="translate(7.000183 16.023874), rotate(-180)"/>
+<use href="#cd_shape_14" transform="translate(6.500429 36.00328), rotate(0)"/>
+<use href="#cd_shape_3" transform="translate(5.979615 15.960216), rotate(0)"/>
+<use href="#cd_shape_24" transform="translate(7.979472 35.960915), rotate(-90)"/>
+<use href="#cd_shape_7" transform="translate(0.00000059604645 6.0038853), rotate(0)"/>
+<use href="#cd_shape_4" transform="translate(9.000306 30.002789), rotate(90)"/>
+<use href="#cd_shape_21" transform="translate(10.050986 5.021224), rotate(90)"/>
+<use href="#cd_shape_9" transform="translate(3.479201 28.96044), rotate(0)"/>
+<use href="#cd_shape_2" transform="translate(10.979613 0.00020349026), rotate(90)"/>
+<use href="#cd_shape_10" transform="translate(10.977564 25.960636), rotate(90)"/>
+<use href="#cd_shape_16" transform="translate(1.0001738 9.021946), rotate(0)"/>
+<use href="#cd_shape_18" transform="translate(9.04292 12.021655), rotate(-180)"/>
+<use href="#cd_shape_1" transform="translate(10.97755 12.099096), rotate(-180)"/>
+<use href="#cd_shape_20" transform="translate(3.005455 12.02237), rotate(-90)"/>
+<use href="#cd_shape_0" transform="translate(6.1235037 18.664564), rotate(0)"/>
+<path d="M0,0 L10.979696,0 L10.979696,40.004 L0,40.004 z" fill="none" stroke="black" stroke-dasharray="0.030194165 0.06038833" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="0.015097083"/>
+</g>
+<g id="surrogates">
+<defs/>
+</g>
+<g id="collision_lines"/>
+</g>
+<text font-family="monospace" font-size="0.2744924" font-weight="500" x="0" y="-0.1372462">
+height: 40.004 | width: 10.980 | density: 89.247% | final_best
+</text>
+</svg>

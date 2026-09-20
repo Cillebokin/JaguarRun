@@ -1,0 +1,255 @@
+<svg viewBox="-277.0827 -287.60007 6095.818 6327.2" xmlns="http://www.w3.org/2000/svg">
+<g id="container_0">
+<path d="M0,0 L5541.653,0 L5541.653,5752 L0,5752 z" fill="#D3D3D3" stroke="black" stroke-width="30.47909"/>
+<title>container, id: 0, bbox: [x_min: 0.000, y_min: 0.000, x_max: 5541.653, y_max: 5752.000]</title>
+</g>
+<g id="items">
+<defs>
+<g id="item_0">
+<path d="M0,0 L-5,-321 L1,-642 L151,-660 L259,-691 L423,-738 L547,-770 L680,-801 L858,-837 L988,-682 L1075,-620 L1211,-553 L1319,-527 L1481,-526 L1597,-540 L1737,-564 L1719,-440 L1708,-317 L1718,-194 L1736,-70 L1596,-95 L1480,-109 L1318,-109 L1210,-83 L1074,-17 L986,45 L856,199 L678,162 L545,131 L421,98 L257,50 L149,19 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,0 L-5,-321 L1,-642 L151,-660 L552.12354,-775.1373 L858,-837 L988,-682 L1075,-620 L1211,-553 L1319,-527 L1481,-526 L1597,-540 L1737,-564 L1719,-440 L1708,-317 L1718,-194 L1736,-70 L1596,-95 L1480,-109 L1318,-109 L1210,-83 L1074,-17 L986,45 L856,198.99997 L549.1085,135.20798 L149,19 z" fill="none" id="cd_shape_0" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_1">
+<path d="M0,0 L8,-148 L26.962263,-299.69812 L68.443474,-462.4321 L179,-449 L288,-446 L401,-463 L548,-497 L764.0157,-545.56165 L805,-350 L887,-196 L755,-176 L655,-155 L523,-121 L272,-52 L117.45331,-11.877301 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,0 L8,-148 L26.96225,-299.69812 L68.44348,-462.4321 L179,-449 L288,-446 L401,-463 L763.7356,-546.8981 L805,-350 L887,-196 L755,-176 L655,-155 L523,-121 L272,-52 L117.45331,-11.877289 z" fill="none" id="cd_shape_1" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_2">
+<path d="M-159,-185 L-328,-228 L-474,-262 L-694.8461,-307.57144 L-806.64514,-359.47812 L-532,-384 L-408,-400 L-215,-443 L-77,-501 L130,-620 L264,-589 L477.87183,-543.8493 L652.5122,-485.0418 L766,-431 L893,-362 L1115,-258 L1125,-131 L1133,-7 L940,23 L792,45 L680,59 L524,70 L357.5263,70 L181,44 L0.952833,4.181876 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M-159,-185 L-474,-262 L-694.84607,-307.57144 L-806.64514,-359.47812 L-532,-384 L-408,-400 L-215,-443 L-77,-501 L130,-620 L264,-589 L477.87183,-543.8493 L652.5122,-485.0418 L766,-431 L893,-362 L1115,-258 L1134.7424,-7.2708282 L731.9797,55.334778 L524,70 L357.5263,70 L181,44 L0.9528198,4.1818695 z" fill="none" id="cd_shape_2" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_3">
+<path d="M0,0 L8,-172 L309,-166 L484,-165 L616,-167 L718,-172 L876,-194 L1031,-248 L1351.455,-111.0968 L1209,-57 L1048.9706,-6.821297 L909,16 L785,26 L668,29 L511,26 L213,14 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,0 L8,-172 L309,-166 L484,-165 L616,-167 L718,-172 L876,-194 L1031,-248 L1351.455,-111.0968 L1209,-57 L1048.9706,-6.8212967 L909,16 L732.5139,30.23275 L511,26 L213,14 z" fill="none" id="cd_shape_3" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_4">
+<path d="M0,0 L33.96,-142.915 L77,-268 L89,-388 L-826,-439 L-824,-598 L39,-607 L169,-650 L209,-800 L251,-940 L371,-924 L354,-726 L348,-610 L350,-412 L360,-264 L382,-94 L488.69122,232.11281 L352,54 L217,0 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,0 L33.96,-142.91501 L77,-268 L89,-388 L-826,-439 L-824,-598 L39,-607 L169,-650 L246.49358,-940.6008 L371,-924 L354,-726 L348,-610 L350,-412 L360,-264 L382,-94 L488.69122,232.11282 L352,54 L217,0 z" fill="none" id="cd_shape_4" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_5">
+<path d="M0,-7.222222 L129.8,-36.066666 L306.8846,22.961538 L495,110 L616,172 L737,238 L855,290 L959,313 L1071,306 L1275,255 L1260,394 L1250,499 L1260,606 L1275,745 L1071,694 L959,687 L855,710 L737,762 L616,828 L495,890 L306.8846,977.03845 L129.8,1036.0667 L0,1007.2222 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,-7.222229 L129.79999,-36.06665 L306.8846,22.961548 L543.3278,132.36063 L737,238 L855,290 L959,313 L1071,306 L1275,255 L1250,499 L1275,745 L1071,694 L959,687 L855,710 L737,762 L543.3278,867.6394 L306.8846,977.03845 L129.79999,1036.0667 L0,1007.2222 z" fill="none" id="cd_shape_5" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_6">
+<path d="M0,0 L-4,-123 L-8,-291 L-17,-454 L-40,-620 L119,-619 L246,-538 L352,-501 L492,-458 L647,-416 L766,-369 L913,-302 L1061,-224 L1046,-100 L1037,2 L1061,224 L913,302 L766,369 L647,416 L492,458 L352,501 L246,538 L119,619 L-40,620 L-17,454 L-8,291 L-4,123 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M0,0 L-4,-123 L-8,-291 L-17,-454 L-40,-620 L119,-619 L246,-538 L352,-501 L492,-458 L686.16406,-405.3878 L913,-302 L1061,-224 L1037,2 L1061,224 L913,302 L686.16406,405.3878 L492,458 L352,501 L246,538 L119,619 L-40,620 L-17,454 L-8,291 L-4,123 z" fill="none" id="cd_shape_6" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_7">
+<path d="M-76,-85 L-178,-200 L-270,-306 L-412,-374 L-958,-383 L-954,-543 L-366,-560 L-269,-659 L-90,-708 L-4,-539 L40,-443 L94,-312 L140.2381,-190.31746 L189,-42 L4.52434,5.060117 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M3.998413,5.194275 L-178,-200 L-270,-306 L-412,-374 L-958,-383 L-954,-543 L-366,-560 L-269,-659 L-90,-708 L19.30841,-493.19626 L124.78949,-237.30698 L189,-42 z" fill="none" id="cd_shape_7" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_8">
+<path d="M-135.87357,-80.44827 L-238.05281,-203.06339 L-240.87816,-366.93304 L-197.36069,-485.8808 L-114.328445,-625.618 L-32.885136,-555.0338 L58.285713,-445 L118.14286,-305.33334 L108.69903,-151.08414 L7.1138,13.387181 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M-135.87357,-80.44827 L-238.0528,-203.06339 L-240.87814,-366.93304 L-197.36069,-485.8808 L-114.328445,-625.618 L-32.885136,-555.0338 L58.285713,-445 L118.14286,-305.33334 L108.69903,-151.08414 L7.1138,13.3871765 z" fill="none" id="cd_shape_8" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+<g id="item_9">
+<path d="M-175.38889,-72.47953 L-304,-151 L-407,-193 L-510,-208 L-673,-192 L-790,-169 L-990,-124 L-1029,-292 L-760,-353 L-531,-404 L-413,-430 L-288,-510 L-252,-700 L-252,-862 L-274,-1015 L-533,-1157 L-762,-1207 L-1031,-1267 L-993,-1435 L-793,-1391 L-675,-1368 L-512,-1353 L-409,-1368 L-307,-1411 L-180.41176,-1488.2854 L6.421687,-1568.9188 L319,-1499 L270,-1290 L248,-1143 L241,-922 L242,-782 L242,-642 L246,-494 L257,-358 L322,-65 L15.847507,8.041056 z" fill="#7A7A7A" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="15.239545"/>
+</g>
+<path d="M-175.38889,-72.47955 L-304,-151 L-407,-193 L-510,-208 L-673,-192 L-790,-169 L-990,-124 L-1029,-292 L-675.60785,-372.13727 L-413,-430 L-288,-510 L-252,-700 L-252,-862 L-274,-1015 L-533,-1157 L-1031.273,-1265.7932 L-993,-1435 L-675,-1368 L-512,-1353 L-409,-1368 L-307,-1411 L-180.41176,-1488.2854 L6.421692,-1568.9188 L319,-1499 L270,-1290 L248,-1143 L241,-922 L246,-494 L257,-358 L322,-65 L15.847504,8.041077 z" fill="none" id="cd_shape_9" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+</defs>
+<use href="#item_9" transform="translate(322.05817 502.15796), rotate(-180)">
+<title>item, id: 9, transf: [r: -180.000°, t: (322.058, 502.158)]</title>
+</use>
+<use href="#item_9" transform="translate(322.06036 4162.668), rotate(-180)">
+<title>item, id: 9, transf: [r: -180.000°, t: (322.060, 4162.668)]</title>
+</use>
+<use href="#item_9" transform="translate(4115.911 2047.9796), rotate(0)">
+<title>item, id: 9, transf: [r: 0.000°, t: (4115.911, 2047.980)]</title>
+</use>
+<use href="#item_0" transform="translate(5.33374 4042.9438), rotate(0)">
+<title>item, id: 0, transf: [r: 0.000°, t: (5.334, 4042.944)]</title>
+</use>
+<use href="#item_0" transform="translate(1356.1096 2208.843), rotate(0)">
+<title>item, id: 0, transf: [r: 0.000°, t: (1356.110, 2208.843)]</title>
+</use>
+<use href="#item_0" transform="translate(4264.9014 2074.4233), rotate(-180)">
+<title>item, id: 0, transf: [r: -180.000°, t: (4264.901, 2074.423)]</title>
+</use>
+<use href="#item_2" transform="translate(3680.4658 70.030655), rotate(-180)">
+<title>item, id: 2, transf: [r: -180.000°, t: (3680.466, 70.031)]</title>
+</use>
+<use href="#item_2" transform="translate(1135.1188 72.05867), rotate(-180)">
+<title>item, id: 2, transf: [r: -180.000°, t: (1135.119, 72.059)]</title>
+</use>
+<use href="#item_2" transform="translate(3641.7878 4742.152), rotate(-180)">
+<title>item, id: 2, transf: [r: -180.000°, t: (3641.788, 4742.152)]</title>
+</use>
+<use href="#item_2" transform="translate(3268.0398 2754.4531), rotate(-180)">
+<title>item, id: 2, transf: [r: -180.000°, t: (3268.040, 2754.453)]</title>
+</use>
+<use href="#item_2" transform="translate(4406.877 5671.247), rotate(0)">
+<title>item, id: 2, transf: [r: 0.000°, t: (4406.877, 5671.247)]</title>
+</use>
+<use href="#item_2" transform="translate(4280.6245 3258.0188), rotate(0)">
+<title>item, id: 2, transf: [r: 0.000°, t: (4280.625, 3258.019)]</title>
+</use>
+<use href="#item_5" transform="translate(5541.619 2929.0176), rotate(-180)">
+<title>item, id: 5, transf: [r: -180.000°, t: (5541.619, 2929.018)]</title>
+</use>
+<use href="#item_5" transform="translate(0.3944397 2348.357), rotate(0)">
+<title>item, id: 5, transf: [r: 0.000°, t: (0.394, 2348.357)]</title>
+</use>
+<use href="#item_5" transform="translate(5541.3413 5290.1543), rotate(-180)">
+<title>item, id: 5, transf: [r: -180.000°, t: (5541.341, 5290.154)]</title>
+</use>
+<use href="#item_6" transform="translate(5501.3076 678.4167), rotate(-180)">
+<title>item, id: 6, transf: [r: -180.000°, t: (5501.308, 678.417)]</title>
+</use>
+<use href="#item_6" transform="translate(4451.5923 1590.6615), rotate(0)">
+<title>item, id: 6, transf: [r: 0.000°, t: (4451.592, 1590.661)]</title>
+</use>
+<use href="#item_6" transform="translate(1767.842 4935.808), rotate(-180)">
+<title>item, id: 6, transf: [r: -180.000°, t: (1767.842, 4935.808)]</title>
+</use>
+<use href="#item_4" transform="translate(3778.4949 4326.817), rotate(0)">
+<title>item, id: 4, transf: [r: 0.000°, t: (3778.495, 4326.817)]</title>
+</use>
+<use href="#item_4" transform="translate(1798.0146 4706.6367), rotate(0)">
+<title>item, id: 4, transf: [r: 0.000°, t: (1798.015, 4706.637)]</title>
+</use>
+<use href="#item_4" transform="translate(3003.194 3497.727), rotate(-180)">
+<title>item, id: 4, transf: [r: -180.000°, t: (3003.194, 3497.727)]</title>
+</use>
+<use href="#item_4" transform="translate(4554.5903 3378.7961), rotate(-180)">
+<title>item, id: 4, transf: [r: -180.000°, t: (4554.590, 3378.796)]</title>
+</use>
+<use href="#item_4" transform="translate(2653.7908 4070.2656), rotate(-180)">
+<title>item, id: 4, transf: [r: -180.000°, t: (2653.791, 4070.266)]</title>
+</use>
+<use href="#item_4" transform="translate(2909.5857 535.7429), rotate(-180)">
+<title>item, id: 4, transf: [r: -180.000°, t: (2909.586, 535.743)]</title>
+</use>
+<use href="#item_7" transform="translate(1996.339 3765.6228), rotate(0)">
+<title>item, id: 7, transf: [r: 0.000°, t: (1996.339, 3765.623)]</title>
+</use>
+<use href="#item_7" transform="translate(3755.0562 4817.392), rotate(0)">
+<title>item, id: 7, transf: [r: 0.000°, t: (3755.056, 4817.392)]</title>
+</use>
+<use href="#item_7" transform="translate(1052.5015 870.6112), rotate(-180)">
+<title>item, id: 7, transf: [r: -180.000°, t: (1052.501, 870.611)]</title>
+</use>
+<use href="#item_7" transform="translate(1959.7623 4810.341), rotate(-180)">
+<title>item, id: 7, transf: [r: -180.000°, t: (1959.762, 4810.341)]</title>
+</use>
+<use href="#item_7" transform="translate(2359.8926 1534.6868), rotate(0)">
+<title>item, id: 7, transf: [r: 0.000°, t: (2359.893, 1534.687)]</title>
+</use>
+<use href="#item_7" transform="translate(958.0044 2655.7908), rotate(0)">
+<title>item, id: 7, transf: [r: 0.000°, t: (958.004, 2655.791)]</title>
+</use>
+<use href="#item_3" transform="translate(2547.902 30.392067), rotate(-180)">
+<title>item, id: 3, transf: [r: -180.000°, t: (2547.902, 30.392)]</title>
+</use>
+<use href="#item_3" transform="translate(1318.5886 5721.761), rotate(0)">
+<title>item, id: 3, transf: [r: 0.000°, t: (1318.589, 5721.761)]</title>
+</use>
+<use href="#item_3" transform="translate(2539.8318 2439.1316), rotate(-180)">
+<title>item, id: 3, transf: [r: -180.000°, t: (2539.832, 2439.132)]</title>
+</use>
+<use href="#item_3" transform="translate(3001.1755 5721.749), rotate(0)">
+<title>item, id: 3, transf: [r: 0.000°, t: (3001.176, 5721.749)]</title>
+</use>
+<use href="#item_3" transform="translate(3734.5938 5376.554), rotate(-180)">
+<title>item, id: 3, transf: [r: -180.000°, t: (3734.594, 5376.554)]</title>
+</use>
+<use href="#item_3" transform="translate(3851.8193 256.604), rotate(0)">
+<title>item, id: 3, transf: [r: 0.000°, t: (3851.819, 256.604)]</title>
+</use>
+<use href="#item_1" transform="translate(5541.3145 3236.7007), rotate(-180)">
+<title>item, id: 1, transf: [r: -180.000°, t: (5541.314, 3236.701)]</title>
+</use>
+<use href="#item_1" transform="translate(4025.0542 3178.5898), rotate(-180)">
+<title>item, id: 1, transf: [r: -180.000°, t: (4025.054, 3178.590)]</title>
+</use>
+<use href="#item_1" transform="translate(1336.0497 998.651), rotate(0)">
+<title>item, id: 1, transf: [r: 0.000°, t: (1336.050, 998.651)]</title>
+</use>
+<use href="#item_1" transform="translate(4308.7114 4527.036), rotate(0)">
+<title>item, id: 1, transf: [r: 0.000°, t: (4308.711, 4527.036)]</title>
+</use>
+<use href="#item_1" transform="translate(2141.6748 2609.7844), rotate(-180)">
+<title>item, id: 1, transf: [r: -180.000°, t: (2141.675, 2609.784)]</title>
+</use>
+<use href="#item_1" transform="translate(2816.315 1682.714), rotate(0)">
+<title>item, id: 1, transf: [r: 0.000°, t: (2816.315, 1682.714)]</title>
+</use>
+<use href="#item_8" transform="translate(2523.6458 4056.6006), rotate(0)">
+<title>item, id: 8, transf: [r: 0.000°, t: (2523.646, 4056.601)]</title>
+</use>
+<use href="#item_8" transform="translate(4027.9814 4362.2134), rotate(-180)">
+<title>item, id: 8, transf: [r: -180.000°, t: (4027.981, 4362.213)]</title>
+</use>
+<use href="#item_8" transform="translate(2376.4011 834.87006), rotate(0)">
+<title>item, id: 8, transf: [r: 0.000°, t: (2376.401, 834.870)]</title>
+</use>
+<use href="#item_8" transform="translate(701.4267 1011.92584), rotate(-180)">
+<title>item, id: 8, transf: [r: -180.000°, t: (701.427, 1011.926)]</title>
+</use>
+<use href="#item_8" transform="translate(2160.6138 3031.1338), rotate(-180)">
+<title>item, id: 8, transf: [r: -180.000°, t: (2160.614, 3031.134)]</title>
+</use>
+<use href="#item_8" transform="translate(1116.2157 1907.4063), rotate(-180)">
+<title>item, id: 8, transf: [r: -180.000°, t: (1116.216, 1907.406)]</title>
+</use>
+</g>
+<g id="quality_zones"/>
+<g id="optionals">
+<g id="highlight_cd_shapes">
+<use href="#cd_shape_9" transform="translate(322.05817 502.15796), rotate(-180)"/>
+<use href="#cd_shape_9" transform="translate(322.06036 4162.668), rotate(-180)"/>
+<use href="#cd_shape_9" transform="translate(4115.911 2047.9796), rotate(0)"/>
+<use href="#cd_shape_0" transform="translate(5.33374 4042.9438), rotate(0)"/>
+<use href="#cd_shape_0" transform="translate(1356.1096 2208.843), rotate(0)"/>
+<use href="#cd_shape_0" transform="translate(4264.9014 2074.4233), rotate(-180)"/>
+<use href="#cd_shape_2" transform="translate(3680.4658 70.030655), rotate(-180)"/>
+<use href="#cd_shape_2" transform="translate(1135.1188 72.05867), rotate(-180)"/>
+<use href="#cd_shape_2" transform="translate(3641.7878 4742.152), rotate(-180)"/>
+<use href="#cd_shape_2" transform="translate(3268.0398 2754.4531), rotate(-180)"/>
+<use href="#cd_shape_2" transform="translate(4406.877 5671.247), rotate(0)"/>
+<use href="#cd_shape_2" transform="translate(4280.6245 3258.0188), rotate(0)"/>
+<use href="#cd_shape_5" transform="translate(5541.619 2929.0176), rotate(-180)"/>
+<use href="#cd_shape_5" transform="translate(0.3944397 2348.357), rotate(0)"/>
+<use href="#cd_shape_5" transform="translate(5541.3413 5290.1543), rotate(-180)"/>
+<use href="#cd_shape_6" transform="translate(5501.3076 678.4167), rotate(-180)"/>
+<use href="#cd_shape_6" transform="translate(4451.5923 1590.6615), rotate(0)"/>
+<use href="#cd_shape_6" transform="translate(1767.842 4935.808), rotate(-180)"/>
+<use href="#cd_shape_4" transform="translate(3778.4949 4326.817), rotate(0)"/>
+<use href="#cd_shape_4" transform="translate(1798.0146 4706.6367), rotate(0)"/>
+<use href="#cd_shape_4" transform="translate(3003.194 3497.727), rotate(-180)"/>
+<use href="#cd_shape_4" transform="translate(4554.5903 3378.7961), rotate(-180)"/>
+<use href="#cd_shape_4" transform="translate(2653.7908 4070.2656), rotate(-180)"/>
+<use href="#cd_shape_4" transform="translate(2909.5857 535.7429), rotate(-180)"/>
+<use href="#cd_shape_7" transform="translate(1996.339 3765.6228), rotate(0)"/>
+<use href="#cd_shape_7" transform="translate(3755.0562 4817.392), rotate(0)"/>
+<use href="#cd_shape_7" transform="translate(1052.5015 870.6112), rotate(-180)"/>
+<use href="#cd_shape_7" transform="translate(1959.7623 4810.341), rotate(-180)"/>
+<use href="#cd_shape_7" transform="translate(2359.8926 1534.6868), rotate(0)"/>
+<use href="#cd_shape_7" transform="translate(958.0044 2655.7908), rotate(0)"/>
+<use href="#cd_shape_3" transform="translate(2547.902 30.392067), rotate(-180)"/>
+<use href="#cd_shape_3" transform="translate(1318.5886 5721.761), rotate(0)"/>
+<use href="#cd_shape_3" transform="translate(2539.8318 2439.1316), rotate(-180)"/>
+<use href="#cd_shape_3" transform="translate(3001.1755 5721.749), rotate(0)"/>
+<use href="#cd_shape_3" transform="translate(3734.5938 5376.554), rotate(-180)"/>
+<use href="#cd_shape_3" transform="translate(3851.8193 256.604), rotate(0)"/>
+<use href="#cd_shape_1" transform="translate(5541.3145 3236.7007), rotate(-180)"/>
+<use href="#cd_shape_1" transform="translate(4025.0542 3178.5898), rotate(-180)"/>
+<use href="#cd_shape_1" transform="translate(1336.0497 998.651), rotate(0)"/>
+<use href="#cd_shape_1" transform="translate(4308.7114 4527.036), rotate(0)"/>
+<use href="#cd_shape_1" transform="translate(2141.6748 2609.7844), rotate(-180)"/>
+<use href="#cd_shape_1" transform="translate(2816.315 1682.714), rotate(0)"/>
+<use href="#cd_shape_8" transform="translate(2523.6458 4056.6006), rotate(0)"/>
+<use href="#cd_shape_8" transform="translate(4027.9814 4362.2134), rotate(-180)"/>
+<use href="#cd_shape_8" transform="translate(2376.4011 834.87006), rotate(0)"/>
+<use href="#cd_shape_8" transform="translate(701.4267 1011.92584), rotate(-180)"/>
+<use href="#cd_shape_8" transform="translate(2160.6138 3031.1338), rotate(-180)"/>
+<use href="#cd_shape_8" transform="translate(1116.2157 1907.4063), rotate(-180)"/>
+<path d="M0,0 L5541.653,0 L5541.653,5752 L0,5752 z" fill="none" stroke="black" stroke-dasharray="15.239545 30.47909" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" stroke-width="7.6197724"/>
+</g>
+<g id="surrogates">
+<defs/>
+</g>
+<g id="collision_lines"/>
+</g>
+<text font-family="monospace" font-size="138.54132" font-weight="500" x="0" y="-69.27066">
+height: 5752.000 | width: 5541.653 | density: 79.826% | final_best
+</text>
+</svg>

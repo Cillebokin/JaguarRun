@@ -11,8 +11,10 @@ release/
 .codegraph/
 .superpowers/
 .codex*/
-docs/
 Temp/
+
+!docs/
+!CodeResource/
 
 !*.dll
 !*.lib

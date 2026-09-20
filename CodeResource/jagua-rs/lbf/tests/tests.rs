@@ -1,0 +1,280 @@
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use jagua_rs::io::import::Importer;
+    use jagua_rs::probs::{bpp, spp};
+    use lbf::config::LBFConfig;
+    use lbf::io::{read_bpp_instance, read_spp_instance};
+    use lbf::opt::lbf_bpp::LBFOptimizerBP;
+    use lbf::opt::lbf_spp::LBFOptimizerSP;
+    use rand::SeedableRng;
+    use rand::prelude::IteratorRandom;
+    use rand::prelude::SmallRng;
+    use std::path::Path;
+    use test_case::test_case;
+
+    const N_ITEMS_TO_REMOVE: usize = 5;
+
+    const QT_DEPTHS: [u8; 3] = [0, 3, 10];
+
+    #[test_case("../assets/albano.json"; "albano")]
+    #[test_case("../assets/blaz1.json"; "blaz1")]
+    #[test_case("../assets/dagli.json"; "dagli")]
+    #[test_case("../assets/fu.json"; "fu")]
+    #[test_case("../assets/jakobs1.json"; "jakobs1")]
+    #[test_case("../assets/jakobs2.json"; "jakobs2")]
+    #[test_case("../assets/mao.json"; "mao")]
+    #[test_case("../assets/marques.json"; "marques")]
+    #[test_case("../assets/shapes0.json"; "shapes0")]
+    #[test_case("../assets/shapes1.json"; "shapes1")]
+    #[test_case("../assets/shirts.json"; "shirts")]
+    #[test_case("../assets/swim.json"; "swim")]
+    #[test_case("../assets/trousers.json"; "trousers")]
+    fn test_strip_packing(instance_path: &str) -> Result<()> {
+        let ext_instance = read_spp_instance(Path::new(instance_path))?;
+        let instance = spp::io::import_instance(&importer(), &ext_instance)?;
+
+        for qt_depth in QT_DEPTHS {
+            let mut config = config();
+            config.cde_config.quadtree_depth = qt_depth;
+
+            let mut opt = LBFOptimizerSP::new(instance.clone(), config, SmallRng::seed_from_u64(0));
+
+            let mut rng = SmallRng::seed_from_u64(0);
+
+            // a first lbf run
+            opt.solve();
+            {
+                // remove some items
+                let problem = &mut opt.problem;
+                for _ in 0..N_ITEMS_TO_REMOVE {
+                    //pick random existing layout
+                    let random_placed_item = problem
+                        .layout
+                        .placed_items
+                        .iter()
+                        .choose(&mut rng)
+                        .map(|(key, _)| key);
+
+                    if let Some(random_placed_item) = random_placed_item {
+                        // remove the item
+                        problem.remove_item(random_placed_item);
+                    } else {
+                        // no items to remove
+                        break;
+                    }
+                }
+
+                let solution = opt.problem.save();
+                // second optimization run
+                opt.solve();
+                // restore the solution
+                opt.problem.restore(&solution);
+                // third optimization run
+                opt.solve();
+            }
+        }
+        Ok(())
+    }
+
+    #[test_case("../assets/baldacci1.json"; "baldacci1")]
+    #[test_case("../assets/baldacci2.json"; "baldacci2")]
+    #[test_case("../assets/baldacci3.json"; "baldacci3")]
+    #[test_case("../assets/baldacci4.json"; "baldacci4")]
+    #[test_case("../assets/baldacci5.json"; "baldacci5")]
+    #[test_case("../assets/baldacci6.json"; "baldacci6")]
+    fn test_bin_packing(instance_path: &str) -> Result<()> {
+        let ext_instance = read_bpp_instance(Path::new(instance_path))?;
+        let instance = bpp::io::import_instance(&importer(), &ext_instance)?;
+
+        for qt_depth in QT_DEPTHS {
+            let mut config = config();
+            config.cde_config.quadtree_depth = qt_depth;
+            let mut opt = LBFOptimizerBP::new(instance.clone(), config, SmallRng::seed_from_u64(0));
+
+            let mut rng = SmallRng::seed_from_u64(0);
+
+            // a first optimization run
+            opt.solve();
+
+            {
+                // remove some items
+                let problem = &mut opt.problem;
+                for _ in 0..N_ITEMS_TO_REMOVE {
+                    //pick random existing layout
+                    let lkey = problem.layouts.keys().choose(&mut rng).unwrap();
+                    let random_placed_item = problem.layouts[lkey]
+                        .placed_items
+                        .iter()
+                        .choose(&mut rng)
+                        .map(|(key, _)| key);
+
+                    if let Some(random_placed_item) = random_placed_item {
+                        // remove the item
+                        problem.remove_item(lkey, random_placed_item);
+                    } else {
+                        // no items to remove
+                        break;
+                    }
+                }
+
+                let solution = opt.problem.save();
+                // second optimization run
+                opt.solve();
+                // restore the solution
+                opt.problem.restore(&solution);
+                // third optimization run
+                opt.solve();
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_rejects_self_intersecting_polygon() -> Result<()> {
+        let ext_instance = read_spp_instance(Path::new("../assets/self_intersecting.json"))?;
+
+        assert!(spp::io::import_instance(&importer(), &ext_instance).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn item_holes_are_rejected_but_container_holes_are_preserved() -> Result<()> {
+        use jagua_rs::io::ext_repr::{ExtContainer, ExtPolygon, ExtSPolygon, ExtShape};
+
+        let mut input = read_spp_instance(Path::new("../assets/fu.json"))?;
+        let polygon = ExtPolygon {
+            outer: ExtSPolygon(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+            inner: vec![ExtSPolygon(vec![(2.0, 2.0), (3.0, 2.0), (2.0, 3.0)])],
+        };
+        input.items[0].base.shape = ExtShape::Polygon(polygon.clone());
+        assert!(spp::io::import_instance(&importer(), &input).is_err());
+        let container = importer().import_container(&ExtContainer {
+            id: 0,
+            shape: ExtShape::Polygon(polygon.clone()),
+            zones: vec![],
+        })?;
+        assert_eq!(
+            container.quality_zones[0].as_ref().unwrap().shapes_cd.len(),
+            1
+        );
+        input.items[0].base.shape = ExtShape::Polygon(ExtPolygon {
+            inner: vec![],
+            ..polygon
+        });
+        assert!(spp::io::import_instance(&importer(), &input).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn instance_separation_controls_item_and_container_geometry() -> Result<()> {
+        let mut input = read_spp_instance(Path::new("../assets/fu.json"))?;
+        assert_eq!(input.min_item_separation, 0.0);
+        let plain = spp::io::import_instance(&importer(), &input)?;
+        assert_eq!(plain.item(0).shape_orig.modify_config.offset, None);
+
+        input.min_item_separation = 2.0;
+        let spaced = spp::io::import_instance(&importer(), &input)?;
+        assert_eq!(spaced.item(0).shape_orig.modify_config.offset, Some(1.0));
+        let problem = jagua_rs::probs::spp::entities::SPProblem::new(spaced);
+        assert_eq!(
+            problem.layout.container.outer_orig.modify_config.offset,
+            Some(1.0)
+        );
+
+        for invalid in [-1.0, f32::INFINITY, f32::NAN] {
+            input.min_item_separation = invalid;
+            assert!(spp::io::import_instance(&importer(), &input).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_rotations_import_solve_and_round_trip() -> Result<()> {
+        use jagua_rs::geometry::geo_enums::RotationRange;
+        use jagua_rs::probs::spp::io::ext_repr::ExtSPInstance;
+        use serde_json::json;
+
+        let input = |rotation| {
+            json!({
+                "name": "rotations", "strip_height": 10,
+                "items": [{
+                    "id": 42, "demand": 2, "orientation": {"rotation": rotation},
+                    "shape": {"type": "rectangle", "data": {
+                        "x_min": 0, "y_min": 0, "width": 2, "height": 3
+                    }}
+                }]
+            })
+        };
+        for (rotation, expected) in [
+            (
+                json!({"mode": "discrete", "angles": [360, 0, -180, 180]}),
+                RotationRange::Discrete(vec![0.0, std::f32::consts::PI]),
+            ),
+            (
+                json!({"mode": "stepped", "step": 180}),
+                RotationRange::Discrete(vec![0.0, std::f32::consts::PI]),
+            ),
+            (json!({"mode": "stepped", "step": 360}), RotationRange::None),
+            (json!({"mode": "continuous"}), RotationRange::Continuous),
+        ] {
+            let external: ExtSPInstance = serde_json::from_value(input(rotation))?;
+            let instance = spp::io::import_instance(&importer(), &external)?;
+            assert_eq!(instance.item(0).allowed_rotation, expected);
+            let round_trip: ExtSPInstance =
+                serde_json::from_value(serde_json::to_value(&external)?)?;
+            assert_eq!(
+                round_trip.items[0].base.orientation,
+                external.items[0].base.orientation
+            );
+            let epoch = jagua_rs::Instant::now();
+            let solution =
+                LBFOptimizerSP::new(instance.clone(), config(), SmallRng::seed_from_u64(0)).solve();
+            let exported = spp::io::export(&solution, epoch);
+            let restored = spp::io::import_solution(&instance, &exported)?;
+            assert_eq!(restored.layout_snapshot.placed_items.len(), 2);
+        }
+        for rotation in [
+            json!(null),
+            json!({"mode": "discrete", "angles": []}),
+            json!({"mode": "stepped", "step": 0}),
+            json!({"mode": "stepped", "step": 7}),
+            json!({"mode": "stepped", "step": 0.0001}),
+            json!({"mode": "continuous", "angles": [0]}),
+        ] {
+            let parsed = serde_json::from_value::<ExtSPInstance>(input(rotation));
+            assert!(parsed.is_err() || spp::io::import_instance(&importer(), &parsed?).is_err());
+        }
+        let mut legacy = input(json!({"mode": "continuous"}));
+        legacy["items"][0]["allowed_orientations"] = json!(null);
+        assert!(serde_json::from_value::<ExtSPInstance>(legacy).is_err());
+        let mut missing = input(json!({"mode": "continuous"}));
+        missing["items"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("orientation");
+        assert!(serde_json::from_value::<ExtSPInstance>(missing).is_err());
+        let decimal: ExtSPInstance =
+            serde_json::from_value(input(json!({"mode": "stepped", "step": 0.1})))?;
+        let instance = spp::io::import_instance(&importer(), &decimal)?;
+        assert!(
+            matches!(&instance.item(0).allowed_rotation, RotationRange::Discrete(a) if a.len() == 3600)
+        );
+        Ok(())
+    }
+
+    fn config() -> LBFConfig {
+        LBFConfig {
+            n_samples: 100,
+            ..LBFConfig::default()
+        }
+    }
+
+    fn importer() -> Importer {
+        Importer::new(
+            config().cde_config,
+            config().poly_simpl_tolerance,
+            config().narrow_concavity_cutoff,
+        )
+    }
+}

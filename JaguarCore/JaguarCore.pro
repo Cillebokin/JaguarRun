@@ -150,10 +150,14 @@ jaguarcore_package_verifier.path = $$JAGUARCORE_PACKAGE_ROOT
 jaguarcore_deployment_guide.files = $$PWD/../docs/deployment.md
 jaguarcore_deployment_guide.path = $$JAGUARCORE_PACKAGE_ROOT/Docs
 
+jaguarcore_api_migration_guide.files = $$PWD/../docs/jaguarcore-api-v2-migration.md
+jaguarcore_api_migration_guide.path = $$JAGUARCORE_PACKAGE_ROOT/Docs
+
 INSTALLS += \
     jaguarcore_runtime \
     jaguarcore_import_library \
     jaguarcore_public_headers \
     jaguarcore_package_readme \
     jaguarcore_package_verifier \
-    jaguarcore_deployment_guide
+    jaguarcore_deployment_guide \
+    jaguarcore_api_migration_guide

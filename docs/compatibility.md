@@ -1,28 +1,28 @@
 # JaguarCore 与 jagua-rs 外部表示兼容性
 
-本文记录 JaguarCore JSON codec 对 jagua-rs `external representation` 的兼容边界。JSON codec 位于 `JaguarCore/io`，核心几何、碰撞检测和问题模型不依赖 JSON parser、Qt 或 Rust。
+本文记录 JaguarCore JSON codec 对 jagua-rs `external representation` 的兼容边界。JSON codec 位于 `JaguarCore/IO`，核心几何、碰撞检测和问题模型不依赖 JSON parser、Qt 或 Rust。
 
 ## 支持的根对象
 
 | jagua-rs 类型 | JaguarCore 类型 | JSON API |
 |---|---|---|
-| `ExtItem` | `ExternalItem` | `parseExternalItemJson` / `serializeExternalItemJson` |
-| `ExtContainer` | `ExternalContainer` | `parseExternalContainerJson` / `serializeExternalContainerJson` |
-| `ExtLayout` | `ExternalLayout` | `parseExternalLayoutJson` / `serializeExternalLayoutJson` |
-| `ExtSPInstance` / `ExtSPSolution` | `ExternalSPInstance` / `ExternalSPSolution` | `parse...` / `serialize...` |
-| `ExtBPInstance` / `ExtBPSolution` | `ExternalBPInstance` / `ExternalBPSolution` | `parse...` / `serialize...` |
-| `ExtMSPInstance` / `ExtMSPSolution` | `ExternalMSPInstance` / `ExternalMSPSolution` | `parse...` / `serialize...` |
+| `ExtItem` | `ExternalItem` | `ParseExternalItemJson` / `SerializeExternalItemJson` |
+| `ExtContainer` | `ExternalContainer` | `ParseExternalContainerJson` / `SerializeExternalContainerJson` |
+| `ExtLayout` | `ExternalLayout` | `ParseExternalLayoutJson` / `SerializeExternalLayoutJson` |
+| `ExtSPInstance` / `ExtSPSolution` | `ExternalSPInstance` / `ExternalSPSolution` | `Parse...` / `Serialize...` |
+| `ExtBPInstance` / `ExtBPSolution` | `ExternalBPInstance` / `ExternalBPSolution` | `Parse...` / `Serialize...` |
+| `ExtMSPInstance` / `ExtMSPSolution` | `ExternalMSPInstance` / `ExternalMSPSolution` | `Parse...` / `Serialize...` |
 
 所有 API 都以 `std::string` 和 JaguarCore 自己的 external structs 为边界，不暴露 parser 内部类型。
-`externalLayoutFromLayout` 可将现有 `Layout` 转换为 `ExternalLayout`；它按 jagua-rs 规则把 Item 的 `preTransform` 与内部 placement 合成为外部旋转/平移。
-`Importer::importItemJson` 和 `Importer::importContainerJson` 提供 JSON 到内部 Item/Container 的便捷入口；解析失败保留 `SerializationFailure`，几何或旋转校验仍由原有 Importer 逻辑完成。
+`ExternalLayoutFromLayout` 可将现有 `Layout` 转换为 `ExternalLayout`；它按 jagua-rs 规则把 Item 的 `preTransform` 与内部 placement 合成为外部旋转/平移。
+`Importer::ImportItemJson` 和 `Importer::ImportContainerJson` 提供 JSON 到内部 Item/Container 的便捷入口；解析失败保留 `SerializationFailure`，几何或旋转校验仍由原有 Importer 逻辑完成。
 
 问题模型也提供一站式 JSON 闭环：
 
-- `Importer::importSPInstanceJson` / `importSPSolutionJson`；
-- `Importer::importBPInstanceJson` / `importBPSolutionJson`；
-- `Importer::importMSPInstanceJson` / `importMSPSolutionJson`；
-- `externalSPSolutionFromSolution`、`externalBPSolutionFromSolution`、`externalMSPSolutionFromSolution`。
+- `Importer::ImportSPInstanceJson` / `ImportSPSolutionJson`；
+- `Importer::ImportBPInstanceJson` / `ImportBPSolutionJson`；
+- `Importer::ImportMSPInstanceJson` / `ImportMSPSolutionJson`；
+- `ExternalSPSolutionFromSolution`、`ExternalBPSolutionFromSolution`、`ExternalMSPSolutionFromSolution`。
 
 这些入口通过真实 `SPProblem`、`BPProblem`、`MSPProblem` 放置流程重建内部状态，因此会校验外部 item ID、需求、库存、Bin/Container ID、布局可行性和变换有限性；不会直接拼接未经验证的内部 Snapshot。外部变换遵循 jagua-rs 语义：导入时撤销 Item 的 `preTransform`，再应用外部旋转/平移；导出时先合成 `preTransform`，再合成内部 placement。
 
@@ -50,7 +50,7 @@ JSON 语法、字段缺失、类型错误、重复键、未知旋转模式和不
 
 ## Offset 实现边界
 
-`offsetShape` 的私有 rounded straight-skeleton 实现按 geo-buffer 0.2.0 的 shrink/split event 语义重实现；当内缩产生多个外轮廓时，单多边形 API 按 jagua-rs importer 行为返回第一个外轮廓。`offsetShapes` 同时提供全部外部组件，空结果返回成功的空 vector；实现不链接 Rust，也不暴露 skeleton 内部类型。参考项目为 [geo-buffer](https://github.com/1011-git/geo-buffer)，其 Apache-2.0 许可和来源说明保留在 `JaguarCore/Source/Geometry/ShapeModification/StraightSkeleton.cpp` 文件头。
+`OffsetShape` 的私有 rounded straight-skeleton 实现按 geo-buffer 0.2.0 的 shrink/split event 语义重实现；当内缩产生多个外轮廓时，单多边形 API 按 jagua-rs importer 行为返回第一个外轮廓。`OffsetShapes` 同时提供全部外部组件，空结果返回成功的空 vector；实现不链接 Rust，也不暴露 skeleton 内部类型。参考项目为 [geo-buffer](https://github.com/1011-git/geo-buffer)，其 Apache-2.0 许可和来源说明保留在 `JaguarCore/Source/Geometry/ShapeModification/StraightSkeleton.cpp` 文件头。
 
 当前仅承诺上述固定多结果/空结果 fixture 的行为；尚未承诺所有事件拓扑、复杂多区域
 或带孔洞 `SimplePolygon` 输入的完整公共 API 等价，这些场景仍需继续通过 Rust
@@ -59,7 +59,7 @@ fixture 扩展验证后才能作为稳定能力使用。
 2026-09-18 已补充凹形内缩分裂的逐组件数值断言：两个组件均为三角形，面积约
 `1.419689345789`，并分别校验 `x_min/y_min/x_max/y_max`，容差为 `1e-6`。
 这保留了 Rust `f32` round-trip 与 C++ `double` skeleton 实现之间的可解释数值边界。
-同日增加 L 形 Deflate fixture；当 skeleton 在该事件拓扑下返回空组件时，`offsetShapes`
+同日增加 L 形 Deflate fixture；当 skeleton 在该事件拓扑下返回空组件时，`OffsetShapes`
 复用既有 rounded fallback，得到 1 个 22 顶点组件，面积差异控制在 `2e-6` 内。
 
 容器的孔洞不是多环 `SimplePolygon` offset 输入，而是按 jagua-rs importer
@@ -105,7 +105,7 @@ Layout 也是合法内部状态，Importer 会保留该 layout，而 BPP 的空 
 
 ## SVG 调试导出
 
-`exportLayoutSvg` 是只读诊断 API，不修改 `Layout`。输出包含：
+`ExportLayoutSvg` 是只读诊断 API，不修改 `Layout`。输出包含：
 
 - 容器原始轮廓和碰撞轮廓；
 - 每个 Item 的原始轮廓、碰撞轮廓、外部旋转/平移、external ID；

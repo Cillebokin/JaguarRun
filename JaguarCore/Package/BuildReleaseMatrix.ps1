@@ -6,7 +6,8 @@ param(
     [string]$PackageRoot = 'D:\MyWorks\ProQt\package-JaguarCore-0.1.0-msvc2019-x64',
     [string]$ExpectedPublicVersion = '0.1.0-dev',
     [string]$ExpectedFileVersion = '0.1.0.0',
-    [int]$ExpectedApiVersion = 2
+    [int]$ExpectedApiVersion = 2,
+    [switch]$RequireEmptyPackageRoot
 )
 
 Set-StrictMode -Version Latest
@@ -121,6 +122,24 @@ if (-not (Test-Path -LiteralPath $qmake -PathType Leaf)) {
 }
 if (-not (Get-Command nmake.exe -ErrorAction SilentlyContinue)) {
     throw 'nmake.exe is not available after importing the Visual Studio environment'
+}
+
+$sourceContractScript = Join-Path $sourceRoot 'Package\VerifySourceContract.ps1'
+if (-not (Test-Path -LiteralPath $sourceContractScript -PathType Leaf)) {
+    throw "Source contract verifier does not exist: $sourceContractScript"
+}
+Invoke-Checked 'powershell.exe' @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', $sourceContractScript,
+    '-RepoRoot', $repoRoot
+) $repoRoot
+
+if ($RequireEmptyPackageRoot -and (Test-Path -LiteralPath $packageRootPath)) {
+    $existingPackageEntries = @(Get-ChildItem -LiteralPath $packageRootPath -Force)
+    if ($existingPackageEntries.Count -gt 0) {
+        throw "PackageRoot must be empty when -RequireEmptyPackageRoot is used: $packageRootPath"
+    }
 }
 
 $runRoot = New-IsolatedRunRoot $buildRootPath

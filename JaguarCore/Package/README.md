@@ -1,8 +1,8 @@
 # JaguarCore MSVC2019 x64 package
 
 This package contains the public C++ headers, JaguarCore DLL/import library
-pairs, the standalone runtime checker, and the deployment guide. It does not
-contain Qt or Rust runtime components.
+pairs, the standalone runtime checker, the deployment guide, and the API v2
+migration guide. It does not contain Qt or Rust runtime components.
 
 ## Layout
 
@@ -10,7 +10,8 @@ contain Qt or Rust runtime components.
 JaguarCore-0.1.0-msvc2019-x64/
   README.md
   VerifyPackage.ps1
-  docs/deployment.md
+  Docs/deployment.md
+  Docs/jaguarcore-api-v2-migration.md
   Include/JaguarCore/**/*.h
   Debug/
     AVX2/Bin/JaguarCored.dll
@@ -44,8 +45,15 @@ and import libraries only, runs the matching DLL checker, and invokes
 `VerifyPackage.ps1`. Override `-QtBin`, `-VcVars`, `-BuildRoot`,
 `-PackageRoot`, `-ExpectedPublicVersion`, `-ExpectedFileVersion`, or
 `-ExpectedApiVersion` when using a different toolchain or release contract.
+Pass `-RequireEmptyPackageRoot` when the package root must be a newly created
+or empty directory; the script then refuses to mix old artifacts with the
+current release.
 Keep the physical build-root path free of `debug` and `release` tokens because
 Qt 5.12 qmake rewrites shadow-build output paths containing those tokens.
+
+Before compiling, the matrix invokes `VerifySourceContract.ps1`. It checks the
+31-header public surface, uppercase code paths and filenames, public API
+naming, and the project-level no-exception/no-Qt-object conventions.
 
 ## Runtime validation
 
@@ -133,5 +141,6 @@ while `workerCount == 0` selects workers automatically.
   require external serialization against all queries and other mutations on
   that engine.
 
-See `docs/deployment.md` for build, installation, dependency, ABI, ownership,
-and compatibility requirements.
+See `Docs/deployment.md` for build, installation, dependency, ABI, ownership,
+and compatibility requirements. See
+`Docs/jaguarcore-api-v2-migration.md` for source-level migration details.

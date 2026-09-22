@@ -34,7 +34,8 @@ $resolvedRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
 $includeRoot = Join-Path $resolvedRoot 'Include\JaguarCore'
 $requiredSharedFiles = @(
     (Join-Path $resolvedRoot 'README.md'),
-    (Join-Path $resolvedRoot 'docs\deployment.md'),
+    (Join-Path $resolvedRoot 'Docs\deployment.md'),
+    (Join-Path $resolvedRoot 'Docs\jaguarcore-api-v2-migration.md'),
     (Join-Path $includeRoot 'Version.h')
 )
 
@@ -47,6 +48,24 @@ foreach ($path in $requiredSharedFiles) {
 $headers = @(Get-ChildItem -LiteralPath $includeRoot -Recurse -File -Filter '*.h')
 if ($headers.Count -ne 31) {
     throw "Expected 31 public headers, found $($headers.Count)"
+}
+
+$nonConformingHeaders = @(
+    $headers | Where-Object { $_.Name -notmatch '^[A-Z][A-Za-z0-9_.-]*\.h$' }
+)
+if ($nonConformingHeaders.Count -gt 0) {
+    $paths = ($nonConformingHeaders | ForEach-Object { $_.FullName }) -join ', '
+    throw "Package contains non-conforming public header names: $paths"
+}
+
+$foreignRuntimePattern = '^(Qt[56].*\.dll|qwindows\.dll|libstdc\+\+.*\.(dll|lib)|libgcc.*\.(dll|lib)|libwinpthread.*\.dll|rust.*\.(dll|lib|exe))$'
+$foreignRuntimeFiles = @(
+    Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File |
+        Where-Object { $_.Name -match $foreignRuntimePattern }
+)
+if ($foreignRuntimeFiles.Count -gt 0) {
+    $paths = ($foreignRuntimeFiles | ForEach-Object { $_.FullName }) -join ', '
+    throw "Package contains forbidden Qt/Rust runtime files: $paths"
 }
 
 $cases = @(

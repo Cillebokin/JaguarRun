@@ -1,5 +1,13 @@
 # JaguarCore deployment
 
+## API v2 migration
+
+The public C++ API is currently version `2`. The naming and error-handling
+changes are source-compatible only after the caller is migrated; old lowercase
+API names and lowercase include paths are not compatibility aliases. Use
+`docs/jaguarcore-api-v2-migration.md` for the complete mapping and the required
+`Result<T>` handling pattern.
+
 ## Reproducible release matrix
 
 From the repository root, run the complete clean release gate with one
@@ -32,6 +40,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\JaguarCore\Package\Bui
   -ExpectedPublicVersion '0.1.0-dev' `
   -ExpectedFileVersion '0.1.0.0' `
   -ExpectedApiVersion 2
+```
+
+For a clean package assembly, use a new or empty package root and add
+`-RequireEmptyPackageRoot`. This is a non-destructive guard: it refuses to
+overwrite or mix an existing package instead of deleting it.
+
+Run the source/API contract check independently with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\JaguarCore\Package\VerifySourceContract.ps1
 ```
 
 Use a neutral build-root name without `debug` or `release`; Qt 5.12 qmake
@@ -190,6 +208,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File <package-root>\VerifyPac
 
 It validates the package layout and runs the correct checker against all four
 installed DLLs. Success ends with `package_check,result,pass`.
+
+The package verifier also rejects non-conforming public header names and any
+Qt or Rust runtime DLL/import-library artifacts. The API v2 migration guide is
+installed as `Docs/jaguarcore-api-v2-migration.md` beside this document.
 
 ## Ownership and ABI rules
 

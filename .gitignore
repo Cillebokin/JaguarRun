@@ -3,9 +3,13 @@
 
 build-*/
 build*/
+bin/
 debug/
 release/
 .qtcreator/
+
+.obj/
+.pch/
 
 .serena/
 .codegraph/

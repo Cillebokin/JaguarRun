@@ -1,6 +1,8 @@
 *.user
 *.autosave
+.qmake.stash
 
+.*/
 build-*/
 build*/
 bin/

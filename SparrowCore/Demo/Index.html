@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SparrowCore WASM Demo</title>
+  <link rel="stylesheet" href="Style.css">
+</head>
+<body>
+  <main class="page">
+    <section class="card">
+      <p class="eyebrow">JaguarRun / SparrowCore</p>
+      <h1>Strip-packing optimizer</h1>
+      <p class="lede">Load an external Sparrow/Jaguar SPP instance and run the WASM adapter in the browser.</p>
+      <label class="file-picker">
+        <span>Choose instance JSON</span>
+        <input id="instanceFile" type="file" accept="application/json,.json">
+      </label>
+      <button id="runButton" type="button" disabled>Run SparrowCore</button>
+      <p id="status" class="status">Waiting for a JSON instance.</p>
+      <pre id="output" class="output" aria-live="polite"></pre>
+    </section>
+  </main>
+  <script src="App.js"></script>
+</body>
+</html>

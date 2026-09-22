@@ -3,42 +3,70 @@ TARGET = SparrowCore
 CONFIG += staticlib c++17 warn_on
 QT -= core gui
 
-INCLUDEPATH += $$PWD/include
-INCLUDEPATH += $$PWD/../JaguarCore/include
+INCLUDEPATH += $$PWD/Include
+INCLUDEPATH += $$PWD/../JaguarCore/Include
 
 HEADERS += \
-    $$PWD/include/SparrowCore/export.h \
-    $$PWD/include/SparrowCore/result_alias.h \
-    $$PWD/include/SparrowCore/version.h \
-    $$PWD/include/SparrowCore/lbf_config.h \
-    $$PWD/include/SparrowCore/lbf_metrics.h \
-    $$PWD/include/SparrowCore/random/sparrow_rng.h \
-    $$PWD/include/SparrowCore/sampling/rotation_distribution.h \
-    $$PWD/include/SparrowCore/sampling/uniform_rect_sampler.h \
-    $$PWD/include/SparrowCore/optimizer/sample_eval.h \
-    $$PWD/include/SparrowCore/optimizer/lbf_loss.h \
-    $$PWD/include/SparrowCore/optimizer/lbf_search.h \
-    $$PWD/include/SparrowCore/optimizer/spp_lbf_optimizer.h \
-    $$PWD/include/SparrowCore/optimizer/bpp_lbf_optimizer.h \
-    $$PWD/include/SparrowCore/eval/lbf_evaluator.h \
-    $$PWD/include/SparrowCore/sampling/local_search_sampler.h \
-    $$PWD/include/SparrowCore/sampling/coordinate_descent.h \
-    $$PWD/include/SparrowCore/sampling/best_samples.h
+    $$PWD/Include/SparrowCore/Export.h \
+    $$PWD/Include/SparrowCore/ResultAlias.h \
+    $$PWD/Include/SparrowCore/Version.h \
+    $$PWD/Include/SparrowCore/LbfConfig.h \
+    $$PWD/Include/SparrowCore/LbfMetrics.h \
+    $$PWD/Include/SparrowCore/Random/SparrowRng.h \
+    $$PWD/Include/SparrowCore/Sampling/RotationDistribution.h \
+    $$PWD/Include/SparrowCore/Sampling/UniformRectSampler.h \
+    $$PWD/Include/SparrowCore/Optimizer/SampleEval.h \
+    $$PWD/Include/SparrowCore/Optimizer/LbfLoss.h \
+    $$PWD/Include/SparrowCore/Optimizer/LbfSearch.h \
+    $$PWD/Include/SparrowCore/Optimizer/SppLbfOptimizer.h \
+    $$PWD/Include/SparrowCore/Optimizer/BppLbfOptimizer.h \
+    $$PWD/Include/SparrowCore/Optimizer/OptimizationTerminator.h \
+    $$PWD/Include/SparrowCore/Optimizer/OptimizationListener.h \
+    $$PWD/Include/SparrowCore/Optimizer/SparrowConfig.h \
+    $$PWD/Include/SparrowCore/Optimizer/Exploration.h \
+    $$PWD/Include/SparrowCore/Optimizer/Compression.h \
+    $$PWD/Include/SparrowCore/Optimizer/SeparatorWorker.h \
+    $$PWD/Include/SparrowCore/Optimizer/Separator.h \
+    $$PWD/Include/SparrowCore/Optimizer/SparrowOptimizer.h \
+    $$PWD/Include/SparrowCore/Eval/LbfEvaluator.h \
+    $$PWD/Include/SparrowCore/Eval/SparrowLbfEvaluator.h \
+    $$PWD/Include/SparrowCore/Eval/SeparationEvaluator.h \
+    $$PWD/Include/SparrowCore/Sampling/LocalSearchSampler.h \
+    $$PWD/Include/SparrowCore/Sampling/CoordinateDescent.h \
+    $$PWD/Include/SparrowCore/Sampling/BestSamples.h \
+    $$PWD/Include/SparrowCore/Optimizer/SparrowLbfBuilder.h \
+    $$PWD/Include/SparrowCore/Quantify/OverlapProxy.h \
+    $$PWD/Include/SparrowCore/Quantify/PairMatrix.h \
+    $$PWD/Include/SparrowCore/Quantify/CollisionTracker.h
 
 SOURCES += \
-    $$PWD/src/support/version.cpp \
-    $$PWD/src/random/sparrow_rng.cpp \
-    $$PWD/src/sampling/rotation_distribution.cpp \
-    $$PWD/src/sampling/uniform_rect_sampler.cpp \
-    $$PWD/src/sampling/local_search_sampler.cpp \
-    $$PWD/src/sampling/coordinate_descent.cpp \
-    $$PWD/src/optimizer/sample_eval.cpp \
-    $$PWD/src/optimizer/lbf_loss.cpp \
-    $$PWD/src/optimizer/lbf_search.cpp \
-    $$PWD/src/optimizer/spp_lbf_optimizer.cpp \
-    $$PWD/src/optimizer/bpp_lbf_optimizer.cpp \
-    $$PWD/src/sampling/best_samples.cpp \
-    $$PWD/src/eval/lbf_evaluator.cpp
+    $$PWD/Source/Support/Version.cpp \
+    $$PWD/Source/Random/SparrowRng.cpp \
+    $$PWD/Source/Sampling/RotationDistribution.cpp \
+    $$PWD/Source/Sampling/UniformRectSampler.cpp \
+    $$PWD/Source/Sampling/LocalSearchSampler.cpp \
+    $$PWD/Source/Sampling/CoordinateDescent.cpp \
+    $$PWD/Source/Optimizer/SampleEval.cpp \
+    $$PWD/Source/Optimizer/LbfLoss.cpp \
+    $$PWD/Source/Optimizer/LbfSearch.cpp \
+    $$PWD/Source/Optimizer/SppLbfOptimizer.cpp \
+    $$PWD/Source/Optimizer/BppLbfOptimizer.cpp \
+    $$PWD/Source/Optimizer/OptimizationTerminator.cpp \
+    $$PWD/Source/Optimizer/OptimizationListener.cpp \
+    $$PWD/Source/Optimizer/SparrowConfig.cpp \
+    $$PWD/Source/Optimizer/Exploration.cpp \
+    $$PWD/Source/Optimizer/Compression.cpp \
+    $$PWD/Source/Optimizer/SeparatorWorker.cpp \
+    $$PWD/Source/Optimizer/Separator.cpp \
+    $$PWD/Source/Optimizer/SparrowOptimizer.cpp \
+    $$PWD/Source/Sampling/BestSamples.cpp \
+    $$PWD/Source/Eval/LbfEvaluator.cpp \
+    $$PWD/Source/Eval/SparrowLbfEvaluator.cpp \
+    $$PWD/Source/Eval/SeparationEvaluator.cpp \
+    $$PWD/Source/Optimizer/SparrowLbfBuilder.cpp \
+    $$PWD/Source/Quantify/OverlapProxy.cpp \
+    $$PWD/Source/Quantify/PairMatrix.cpp \
+    $$PWD/Source/Quantify/CollisionTracker.cpp
 
 CONFIG(debug, debug|release) {
     isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$OUT_PWD

@@ -4,8 +4,8 @@ CONFIG += console c++17 warn_on
 CONFIG -= app_bundle
 QT -= core gui
 
-INCLUDEPATH += $$PWD/../include
-INCLUDEPATH += $$PWD/../../JaguarCore/include
+INCLUDEPATH += $$PWD/../Include
+INCLUDEPATH += $$PWD/../../JaguarCore/Include
 
 isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$PWD/../../build-SparrowCore-MSVC2019x64-Debug
 
@@ -24,9 +24,12 @@ CONFIG(debug, debug|release) {
 }
 
 SOURCES += \
-    $$PWD/test_support.cpp \
-    $$PWD/test_rng.cpp \
-    $$PWD/test_sampling.cpp \
-    $$PWD/test_lbf_loss.cpp \
-    $$PWD/test_spp_lbf.cpp \
-    $$PWD/test_bpp_lbf.cpp
+    $$PWD/TestSupport.cpp \
+    $$PWD/TestRng.cpp \
+    $$PWD/TestSampling.cpp \
+    $$PWD/TestLbfLoss.cpp \
+    $$PWD/TestSppLbf.cpp \
+    $$PWD/TestBppLbf.cpp \
+    $$PWD/TestQuantify.cpp \
+    $$PWD/TestSeparator.cpp \
+    $$PWD/TestExploration.cpp

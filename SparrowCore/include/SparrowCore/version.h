@@ -1,8 +1,8 @@
 #pragma once
 
-#include "SparrowCore/export.h"
+#include "SparrowCore/Export.h"
 
 namespace sparrow
 {
-SPARROWCORE_API const char* version() noexcept;
+SPARROWCORE_API const char* Version() noexcept;
 }

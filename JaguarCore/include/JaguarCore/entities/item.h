@@ -1,9 +1,9 @@
 #pragma once
 
-#include "JaguarCore/export.h"
-#include "JaguarCore/fail_fast/surrogate.h"
-#include "JaguarCore/geometry/original_shape.h"
-#include "JaguarCore/result.h"
+#include "JaguarCore/Export.h"
+#include "JaguarCore/FailFast/Surrogate.h"
+#include "JaguarCore/Geometry/OriginalShape.h"
+#include "JaguarCore/Result.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +31,7 @@ struct RotationRange
 class Item
 {
 public:
-    static JAGUARCORE_API Result<Item> create(
+    static JAGUARCORE_API Result<Item> Create(
         ItemIndex index,
         ItemId externalId,
         OriginalShape originalShape,
@@ -39,14 +39,14 @@ public:
         std::optional<std::size_t> minQuality = std::nullopt,
         RotationRange allowedRotation = {});
 
-    JAGUARCORE_API ItemIndex index() const noexcept;
-    JAGUARCORE_API ItemId externalId() const noexcept;
-    JAGUARCORE_API const OriginalShape& originalShape() const noexcept;
-    JAGUARCORE_API const SimplePolygon& collisionShape() const noexcept;
-    JAGUARCORE_API const SurrogateConfig& surrogateConfig() const noexcept;
-    JAGUARCORE_API std::optional<std::size_t> minQuality() const noexcept;
-    JAGUARCORE_API const RotationRange& allowedRotation() const noexcept;
-    JAGUARCORE_API double area() const noexcept;
+    JAGUARCORE_API ItemIndex Index() const noexcept;
+    JAGUARCORE_API ItemId ExternalId() const noexcept;
+    JAGUARCORE_API const OriginalShape& GetOriginalShape() const noexcept;
+    JAGUARCORE_API const SimplePolygon& CollisionShape() const noexcept;
+    JAGUARCORE_API const SurrogateConfig& GetSurrogateConfig() const noexcept;
+    JAGUARCORE_API std::optional<std::size_t> MinQuality() const noexcept;
+    JAGUARCORE_API const RotationRange& AllowedRotation() const noexcept;
+    JAGUARCORE_API double Area() const noexcept;
 
 private:
     Item(ItemIndex index,

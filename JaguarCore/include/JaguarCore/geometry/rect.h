@@ -1,7 +1,7 @@
 #pragma once
 
-#include "JaguarCore/geometry/point.h"
-#include "JaguarCore/result.h"
+#include "JaguarCore/Geometry/Point.h"
+#include "JaguarCore/Result.h"
 
 #include <algorithm>
 #include <array>
@@ -24,26 +24,27 @@ struct Rect2d
     double xMax = 0.0;
     double yMax = 0.0;
 
-    static Result<Rect2d> create(double xMin, double yMin, double xMax, double yMax)
+    inline static Result<Rect2d> Create(
+        double xMin, double yMin, double xMax, double yMax)
     {
-        if (!Point2d{xMin, yMin}.isFinite() || !Point2d{xMax, yMax}.isFinite() ||
+        if (!Point2d{xMin, yMin}.IsFinite() || !Point2d{xMax, yMax}.IsFinite() ||
             xMin >= xMax || yMin >= yMax)
         {
-            return Result<Rect2d>::fromError({ErrorCode::InvalidInput, "invalid rectangle"});
+            return Result<Rect2d>::FromError({ErrorCode::InvalidInput, "invalid rectangle"});
         }
-        return Result<Rect2d>::fromValue(Rect2d{xMin, yMin, xMax, yMax});
+        return Result<Rect2d>::FromValue(Rect2d{xMin, yMin, xMax, yMax});
     }
 
-    double width() const noexcept { return xMax - xMin; }
-    double height() const noexcept { return yMax - yMin; }
-    double area() const noexcept { return width() * height(); }
+    inline double Width() const noexcept { return xMax - xMin; }
+    inline double Height() const noexcept { return yMax - yMin; }
+    inline double Area() const noexcept { return Width() * Height(); }
 
-    Rect2d inflated(double dx, double dy) const noexcept
+    inline Rect2d Inflated(double dx, double dy) const noexcept
     {
         return Rect2d{xMin - dx, yMin - dy, xMax + dx, yMax + dy};
     }
 
-    std::array<Rect2d, 4> quadrants() const noexcept
+    inline std::array<Rect2d, 4> Quadrants() const noexcept
     {
         const double midX = (xMin + xMax) * 0.5;
         const double midY = (yMin + yMax) * 0.5;
@@ -51,20 +52,20 @@ struct Rect2d
                 Rect2d{midX, midY, xMax, yMax}, Rect2d{xMin, midY, midX, yMax}};
     }
 
-    bool contains(const Point2d& point) const noexcept
+    inline bool Contains(const Point2d& point) const noexcept
     {
         return point.x >= xMin && point.x <= xMax && point.y >= yMin && point.y <= yMax;
     }
 
-    bool intersects(const Rect2d& other) const noexcept
+    inline bool Intersects(const Rect2d& other) const noexcept
     {
         return std::max(xMin, other.xMin) <= std::min(xMax, other.xMax) &&
                std::max(yMin, other.yMin) <= std::min(yMax, other.yMax);
     }
 
-    RectRelation relationTo(const Rect2d& other) const noexcept
+    inline RectRelation RelationTo(const Rect2d& other) const noexcept
     {
-        if (!intersects(other))
+        if (!Intersects(other))
             return RectRelation::Disjoint;
         if (xMin <= other.xMin && yMin <= other.yMin && xMax >= other.xMax &&
             yMax >= other.yMax)
@@ -75,7 +76,7 @@ struct Rect2d
         return RectRelation::Intersecting;
     }
 
-    std::optional<Rect2d> intersection(const Rect2d& other) const noexcept
+    inline std::optional<Rect2d> Intersection(const Rect2d& other) const noexcept
     {
         const double newXMin = std::max(xMin, other.xMin);
         const double newYMin = std::max(yMin, other.yMin);

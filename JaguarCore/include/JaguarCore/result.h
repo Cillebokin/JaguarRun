@@ -33,27 +33,30 @@ template <typename T>
 class Result
 {
 public:
-    static Result fromValue(T value)
+    inline static Result FromValue(T value)
     {
         return Result(std::move(value));
     }
 
-    static Result fromError(Error error)
+    inline static Result FromError(Error error)
     {
         return Result(std::move(error));
     }
 
-    bool hasValue() const noexcept { return std::holds_alternative<T>(m_Value); }
+    inline bool HasValue() const noexcept
+    {
+        return std::holds_alternative<T>(m_Value);
+    }
 
-    const T& value() const& { return std::get<T>(m_Value); }
-    T& value() & { return std::get<T>(m_Value); }
-    T&& value() && { return std::get<T>(std::move(m_Value)); }
+    inline const T& Value() const& { return std::get<T>(m_Value); }
+    inline T& Value() & { return std::get<T>(m_Value); }
+    inline T&& Value() && { return std::get<T>(std::move(m_Value)); }
 
-    const Error& error() const& { return std::get<Error>(m_Value); }
+    inline const Error& GetError() const& { return std::get<Error>(m_Value); }
 
 private:
-    explicit Result(T value) : m_Value(std::move(value)) {}
-    explicit Result(Error error) : m_Value(std::move(error)) {}
+    inline explicit Result(T value) : m_Value(std::move(value)) {}
+    inline explicit Result(Error error) : m_Value(std::move(error)) {}
 
     std::variant<T, Error> m_Value;
 };
@@ -62,15 +65,21 @@ template <>
 class Result<void>
 {
 public:
-    static Result fromValue() { return Result(true, {}); }
+    inline static Result FromValue() { return Result(true, {}); }
 
-    static Result fromError(Error error) { return Result(false, std::move(error)); }
+    inline static Result FromError(Error error)
+    {
+        return Result(false, std::move(error));
+    }
 
-    bool hasValue() const noexcept { return m_Success; }
-    const Error& error() const& { return m_Error; }
+    inline bool HasValue() const noexcept { return m_Success; }
+    inline const Error& GetError() const& { return m_Error; }
 
 private:
-    Result(bool success, Error error) : m_Success(success), m_Error(std::move(error)) {}
+    inline Result(bool success, Error error)
+        : m_Success(success), m_Error(std::move(error))
+    {
+    }
 
     bool m_Success = false;
     Error m_Error;

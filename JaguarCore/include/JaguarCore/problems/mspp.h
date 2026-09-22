@@ -1,7 +1,7 @@
 #pragma once
 
-#include "JaguarCore/entities/layout.h"
-#include "JaguarCore/export.h"
+#include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Export.h"
 
 #include <cstddef>
 #include <memory>
@@ -18,20 +18,20 @@ struct MultiStrip
     CDEConfig cdeConfig{};
     ShapeModifyConfig shapeModifyConfig{};
 
-    static JAGUARCORE_API Result<MultiStrip> create(
+    static JAGUARCORE_API Result<MultiStrip> Create(
         double maxWidth,
         double fixedHeight,
         CDEConfig cdeConfig,
         ShapeModifyConfig shapeModifyConfig,
         double width);
-    JAGUARCORE_API Result<void> setWidth(double newWidth);
-    JAGUARCORE_API Result<Container> createContainer(ContainerId id = 0) const;
+    JAGUARCORE_API Result<void> SetWidth(double newWidth);
+    JAGUARCORE_API Result<Container> CreateContainer(ContainerId id = 0) const;
 };
 
 class MSPInstance
 {
 public:
-    static JAGUARCORE_API Result<MSPInstance> create(
+    static JAGUARCORE_API Result<MSPInstance> Create(
         std::vector<Item> items,
         std::vector<std::size_t> demands,
         double maxWidth,
@@ -39,10 +39,10 @@ public:
         CDEConfig cdeConfig,
         ShapeModifyConfig shapeModifyConfig);
 
-    JAGUARCORE_API std::size_t itemCount() const noexcept;
-    JAGUARCORE_API const Item& item(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t itemDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API const MultiStrip& baseStrip() const noexcept;
+    JAGUARCORE_API std::size_t ItemCount() const noexcept;
+    JAGUARCORE_API const Item& GetItem(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t ItemDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API const MultiStrip& BaseStrip() const noexcept;
 
 private:
     MSPInstance(std::vector<std::shared_ptr<const Item>> items,
@@ -58,7 +58,7 @@ struct MSPPlacement
 {
     std::size_t layoutIndex = 0;
     ItemIndex itemIndex = 0;
-    Transform2d transform = Transform2d::identity();
+    Transform2d transform = Transform2d::Identity();
 };
 
 struct MSPPlacedHandle
@@ -78,39 +78,39 @@ struct MSPSolution
 {
     std::vector<MSPLayoutSnapshot> layouts;
 
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API double totalStripWidth() const noexcept;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API double TotalStripWidth() const noexcept;
 };
 
 class MSPProblem
 {
 public:
-    static JAGUARCORE_API Result<MSPProblem> create(MSPInstance instance);
+    static JAGUARCORE_API Result<MSPProblem> Create(MSPInstance instance);
 
     MSPProblem(const MSPProblem&) = delete;
     MSPProblem& operator=(const MSPProblem&) = delete;
     MSPProblem(MSPProblem&&) noexcept = default;
     MSPProblem& operator=(MSPProblem&&) noexcept = default;
 
-    JAGUARCORE_API Result<std::size_t> addLayout(MultiStrip strip);
-    JAGUARCORE_API Result<void> removeLayout(std::size_t layoutIndex);
-    JAGUARCORE_API Result<MSPPlacedHandle> placeItem(
+    JAGUARCORE_API Result<std::size_t> AddLayout(MultiStrip strip);
+    JAGUARCORE_API Result<void> RemoveLayout(std::size_t layoutIndex);
+    JAGUARCORE_API Result<MSPPlacedHandle> PlaceItem(
         const MSPPlacement& placement);
-    JAGUARCORE_API Result<MSPPlacement> removeItem(
+    JAGUARCORE_API Result<MSPPlacement> RemoveItem(
         const MSPPlacedHandle& handle);
-    JAGUARCORE_API Result<void> changeStripWidth(std::size_t layoutIndex,
+    JAGUARCORE_API Result<void> ChangeStripWidth(std::size_t layoutIndex,
                                                  double width);
-    JAGUARCORE_API Result<void> fitStrip(std::size_t layoutIndex);
-    JAGUARCORE_API MSPSolution save() const;
-    JAGUARCORE_API Result<void> restore(const MSPSolution& solution);
+    JAGUARCORE_API Result<void> FitStrip(std::size_t layoutIndex);
+    JAGUARCORE_API MSPSolution Save() const;
+    JAGUARCORE_API Result<void> Restore(const MSPSolution& solution);
 
-    JAGUARCORE_API std::size_t remainingDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t placedItemCount() const noexcept;
-    JAGUARCORE_API std::size_t layoutCount() const noexcept;
-    JAGUARCORE_API double stripWidth(std::size_t layoutIndex) const noexcept;
-    JAGUARCORE_API double totalStripWidth() const noexcept;
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API const MSPInstance& instance() const noexcept;
+    JAGUARCORE_API std::size_t RemainingDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t PlacedItemCount() const noexcept;
+    JAGUARCORE_API std::size_t LayoutCount() const noexcept;
+    JAGUARCORE_API double StripWidth(std::size_t layoutIndex) const noexcept;
+    JAGUARCORE_API double TotalStripWidth() const noexcept;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API const MSPInstance& Instance() const noexcept;
 
 private:
     struct LayoutSlot
@@ -121,8 +121,8 @@ private:
 
     MSPProblem(MSPInstance instance,
                std::vector<std::size_t> remainingDemand);
-    LayoutSlot* getLayout(std::size_t layoutIndex) noexcept;
-    const LayoutSlot* getLayout(std::size_t layoutIndex) const noexcept;
+    LayoutSlot* GetLayout(std::size_t layoutIndex) noexcept;
+    const LayoutSlot* GetLayout(std::size_t layoutIndex) const noexcept;
 
     MSPInstance m_Instance;
     std::vector<LayoutSlot> m_Layouts;

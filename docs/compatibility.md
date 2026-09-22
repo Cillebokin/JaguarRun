@@ -50,7 +50,7 @@ JSON 语法、字段缺失、类型错误、重复键、未知旋转模式和不
 
 ## Offset 实现边界
 
-`offsetShape` 的私有 rounded straight-skeleton 实现按 geo-buffer 0.2.0 的 shrink/split event 语义重实现；当内缩产生多个外轮廓时，单多边形 API 按 jagua-rs importer 行为返回第一个外轮廓。`offsetShapes` 同时提供全部外部组件，空结果返回成功的空 vector；实现不链接 Rust，也不暴露 skeleton 内部类型。参考项目为 [geo-buffer](https://github.com/1011-git/geo-buffer)，其 Apache-2.0 许可和来源说明保留在 `JaguarCore/src/geometry/shape_modification/straight_skeleton.cpp` 文件头。
+`offsetShape` 的私有 rounded straight-skeleton 实现按 geo-buffer 0.2.0 的 shrink/split event 语义重实现；当内缩产生多个外轮廓时，单多边形 API 按 jagua-rs importer 行为返回第一个外轮廓。`offsetShapes` 同时提供全部外部组件，空结果返回成功的空 vector；实现不链接 Rust，也不暴露 skeleton 内部类型。参考项目为 [geo-buffer](https://github.com/1011-git/geo-buffer)，其 Apache-2.0 许可和来源说明保留在 `JaguarCore/Source/Geometry/ShapeModification/StraightSkeleton.cpp` 文件头。
 
 当前仅承诺上述固定多结果/空结果 fixture 的行为；尚未承诺所有事件拓扑、复杂多区域
 或带孔洞 `SimplePolygon` 输入的完整公共 API 等价，这些场景仍需继续通过 Rust
@@ -129,24 +129,24 @@ SVG 失败只返回 `SerializationFailure`，不会改变布局或碰撞检测�
 
 ## CDE 状态和虚拟根
 
-`CollisionEngine::restore` 采用临时 Slot/QuadTree 重建后一次性替换的原子语义。快照包含空形状或非 dynamic Hazard 时返回 `InvalidInput`/`SnapshotMismatch`，原有动态 Hazard 和索引保持不变。
+`CollisionEngine::Restore` 采用临时 Slot/QuadTree 重建后一次性替换的原子语义。快照包含空形状或非 dynamic Hazard 时返回 `InvalidInput`/`SnapshotMismatch`，原有动态 Hazard 和索引保持不变。
 
 四叉树同时保留完整根查询和 virtual-root 查询；CDE 的 Polygon、Surrogate 查询使用完全包围查询 bbox 的最低节点，结果集合与完整根查询保持一致。
 
-`HazardCollector` 提供按句柄和按实体的去重/移除，以及带 `stopAfterCollision` 回调的
-`collectPolygonCollisionsUntil`。回调在首次加入碰撞实体后执行，返回 `true` 即停止遍历；
+`HazardCollector` 提供按句柄和按实体的去重/移除，以及带 `StopAfterCollision` 回调的
+`CollectPolygonCollisionsUntil`。回调在首次加入碰撞实体后执行，返回 `true` 即停止遍历；
 已加入 collector 的句柄不会重复触发回调；CDE 查询按稳定 `HazardHandle` 去重，因此同一
-Item 的不同放置实例即使 `HazardEntity` 字段相同也不会被错误合并。`collectSurrogateCollisionsUntil`
+Item 的不同放置实例即使 `HazardEntity` 字段相同也不会被错误合并。`CollectSurrogateCollisionsUntil`
 只遍历 fail-fast pole 前缀，不把 Pier 或完整多边形碰撞混入 Surrogate 筛选结果。
 
 越界查询优先报告容器注册的 Exterior Hazard 及其稳定句柄；只有没有注册 Exterior 时才
-使用隐式边界 Exterior，避免同一外部区域被报告两次。`containsEntity` 仍作为 Collector
+使用隐式边界 Exterior，避免同一外部区域被报告两次。`ContainsEntity` 仍作为 Collector
 的显式实体查询/移除工具保留，但不替代 CDE 的句柄级唯一性。
 Polygon 和 Surrogate 的越界检测都使用同一条规则：优先解析注册 Exterior 的真实句柄，
 再交给 `HazardFilter`；没有注册 Exterior 时才使用隐式句柄。
 
 边界数值约定与 jagua-rs 保持一致：非共线端点接触、T 形相交和相切属于碰撞；共线重叠
-和共线端点接触不属于 `Edge2d::intersects` 碰撞。CDE 仍使用完整多边形精确检查，边界
+和共线端点接触不属于 `Edge2d::Intersects` 碰撞。CDE 仍使用完整多边形精确检查，边界
 矩阵同时覆盖 `5e-10` 近接和 `5e-7` 明显间隙样例。
 
 问题模型的随机一致性回归使用固定 `mt19937_64` 种子，分别对 SPP、BPP、MSPP 执行
@@ -157,7 +157,7 @@ layout 数量、宽度、密度和成本。无最小间距时 `ShapeModifyConfig
 测试工程的 Release 配置显式加入 `/UNDEBUG`，因此 Release JaguarCoreTests 和
 JaguarCoreBench 也会执行断言表达式；这不改变 JaguarCore DLL 的 Release ABI 或优化配置。
 
-Surrogate 固定 oracle 位于 `JaguarCore/tests/fixtures/rust_reference/surrogate_u_shape_*.txt`。
+Surrogate 固定 oracle 位于 `JaguarCore/Tests/Fixtures/RustReference/surrogate_u_shape_*.txt`。
 Pole 使用 Rust FIFO BFS 与四象限顺序；Pier 网格内部使用 Rust 的 f32/FPA 点包含规则，
 Debug 与 Release 分别对应 Rust 的低/高分辨率搜索参数。
 

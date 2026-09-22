@@ -1,7 +1,7 @@
 #pragma once
 
-#include "JaguarCore/entities/layout.h"
-#include "JaguarCore/export.h"
+#include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Export.h"
 
 #include <cstddef>
 #include <memory>
@@ -16,31 +16,31 @@ struct Strip
     CDEConfig cdeConfig{};
     ShapeModifyConfig shapeModifyConfig{};
 
-    static JAGUARCORE_API Result<Strip> create(
+    static JAGUARCORE_API Result<Strip> Create(
         double fixedHeight,
         CDEConfig cdeConfig,
         ShapeModifyConfig shapeModifyConfig,
         double width);
-    JAGUARCORE_API Result<void> setWidth(double newWidth);
-    JAGUARCORE_API Result<Container> createContainer(ContainerId id = 0) const;
+    JAGUARCORE_API Result<void> SetWidth(double newWidth);
+    JAGUARCORE_API Result<Container> CreateContainer(ContainerId id = 0) const;
 };
 
 class SPInstance
 {
 public:
-    static JAGUARCORE_API Result<SPInstance> create(
+    static JAGUARCORE_API Result<SPInstance> Create(
         std::vector<Item> items,
         std::vector<std::size_t> demands,
         double fixedHeight,
         CDEConfig cdeConfig,
         ShapeModifyConfig shapeModifyConfig);
 
-    JAGUARCORE_API std::size_t itemCount() const noexcept;
-    JAGUARCORE_API const Item& item(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t itemDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t totalDemand() const noexcept;
-    JAGUARCORE_API double totalItemArea() const noexcept;
-    JAGUARCORE_API const Strip& baseStrip() const noexcept;
+    JAGUARCORE_API std::size_t ItemCount() const noexcept;
+    JAGUARCORE_API const Item& GetItem(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t ItemDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t TotalDemand() const noexcept;
+    JAGUARCORE_API double TotalItemArea() const noexcept;
+    JAGUARCORE_API const Strip& BaseStrip() const noexcept;
 
 private:
     SPInstance(std::vector<std::shared_ptr<const Item>> items,
@@ -55,7 +55,7 @@ private:
 struct SPPlacement
 {
     ItemIndex itemIndex = 0;
-    Transform2d transform = Transform2d::identity();
+    Transform2d transform = Transform2d::Identity();
 };
 
 struct SPSolution
@@ -63,33 +63,33 @@ struct SPSolution
     Strip strip;
     LayoutSnapshot layoutSnapshot;
 
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API double stripWidth() const noexcept;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API double StripWidth() const noexcept;
 };
 
 class SPProblem
 {
 public:
-    static JAGUARCORE_API Result<SPProblem> create(SPInstance instance);
+    static JAGUARCORE_API Result<SPProblem> Create(SPInstance instance);
 
     SPProblem(const SPProblem&) = delete;
     SPProblem& operator=(const SPProblem&) = delete;
     SPProblem(SPProblem&&) noexcept = default;
     SPProblem& operator=(SPProblem&&) noexcept = default;
 
-    JAGUARCORE_API Result<PlacedItemHandle> placeItem(
+    JAGUARCORE_API Result<PlacedItemHandle> PlaceItem(
         const SPPlacement& placement);
-    JAGUARCORE_API Result<SPPlacement> removeItem(PlacedItemHandle handle);
-    JAGUARCORE_API Result<void> changeStripWidth(double newWidth);
-    JAGUARCORE_API Result<void> fitStrip();
-    JAGUARCORE_API SPSolution save() const;
-    JAGUARCORE_API Result<void> restore(const SPSolution& solution);
+    JAGUARCORE_API Result<SPPlacement> RemoveItem(PlacedItemHandle handle);
+    JAGUARCORE_API Result<void> ChangeStripWidth(double newWidth);
+    JAGUARCORE_API Result<void> FitStrip();
+    JAGUARCORE_API SPSolution Save() const;
+    JAGUARCORE_API Result<void> Restore(const SPSolution& solution);
 
-    JAGUARCORE_API std::size_t remainingDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t placedItemCount() const noexcept;
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API double stripWidth() const noexcept;
-    JAGUARCORE_API const SPInstance& instance() const noexcept;
+    JAGUARCORE_API std::size_t RemainingDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t PlacedItemCount() const noexcept;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API double StripWidth() const noexcept;
+    JAGUARCORE_API const SPInstance& Instance() const noexcept;
 
 private:
     SPProblem(SPInstance instance, Strip strip, Layout layout);

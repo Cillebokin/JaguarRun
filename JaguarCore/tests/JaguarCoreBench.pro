@@ -9,33 +9,33 @@ QT -= core gui
 CONFIG(release, debug|release) {
     DEFINES -= NDEBUG
     QMAKE_CXXFLAGS_RELEASE += /UNDEBUG
-    QMAKE_CXXFLAGS_RELEASE += /FI$$PWD/test_release_asserts.h
+    QMAKE_CXXFLAGS_RELEASE += /FI$$PWD/TestReleaseAsserts.h
 }
 
 CONFIG += simd
 !contains(CONFIG, jaguarcore_no_avx2) {
     CONFIG += avx2
     DEFINES += JAGUARCORE_AVX2_COMPILED
-    AVX2_SOURCES += $$PWD/../src/collision/soa_geometry_avx2.cpp
+    AVX2_SOURCES += $$PWD/../Source/Collision/SoaGeometryAvx2.cpp
 } else {
-    SOURCES += $$PWD/../src/collision/soa_geometry_avx2_fallback.cpp
+    SOURCES += $$PWD/../Source/Collision/SoaGeometryAvx2Fallback.cpp
 }
 
-INCLUDEPATH += $$PWD/../include
+INCLUDEPATH += $$PWD/../Include
 
 CONFIG(debug, debug|release) {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Debug
-    LIBS += -L$$JAGUARCORE_BUILD_DIR/bin -lJaguarCored
-    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/bin/JaguarCored.lib
+    LIBS += -L$$JAGUARCORE_BUILD_DIR/Bin -lJaguarCored
+    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCored.lib
 } else {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Release
-    LIBS += -L$$JAGUARCORE_BUILD_DIR/bin -lJaguarCore
-    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/bin/JaguarCore.lib
+    LIBS += -L$$JAGUARCORE_BUILD_DIR/Bin -lJaguarCore
+    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCore.lib
 }
 
 SOURCES += \
-    $$PWD/bench/bench_main.cpp \
-    $$PWD/bench/bench_geometry.cpp \
-    $$PWD/bench/bench_collision.cpp \
-    $$PWD/bench/bench_layout.cpp \
-    $$PWD/../src/collision/soa_geometry.cpp
+    $$PWD/Bench/BenchMain.cpp \
+    $$PWD/Bench/BenchGeometry.cpp \
+    $$PWD/Bench/BenchCollision.cpp \
+    $$PWD/Bench/BenchLayout.cpp \
+    $$PWD/../Source/Collision/SoaGeometry.cpp

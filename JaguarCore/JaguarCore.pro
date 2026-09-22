@@ -1,7 +1,22 @@
 TEMPLATE = lib
 TARGET = JaguarCore
-CONFIG += dll c++17 warn_on
+CONFIG += dll c++17 warn_on skip_target_version_ext
 QT -= core gui
+
+# Define output directories before JaguarCorePackage.pri expands its install
+# source paths. This keeps clean qmake shadow builds installable.
+DESTDIR = $$OUT_PWD/Bin
+OBJECTS_DIR = $$OUT_PWD/obj
+MOC_DIR = $$OUT_PWD/moc
+RCC_DIR = $$OUT_PWD/rcc
+
+include($$PWD/Package/JaguarCorePackage.pri)
+
+# Keep the PE file version numeric and stable for deployment checks. The
+# public C++ version string may carry a development suffix independently.
+VERSION = $$JAGUARCORE_BINARY_VERSION
+QMAKE_TARGET_PRODUCT = JaguarCore
+QMAKE_TARGET_DESCRIPTION = JaguarCore geometry and nesting core
 
 # AVX2 is compiled as an isolated source file. Use CONFIG+=jaguarcore_no_avx2
 # to build the same module with the scalar implementation only.
@@ -9,9 +24,9 @@ CONFIG += simd
 !contains(CONFIG, jaguarcore_no_avx2) {
     CONFIG += avx2
     DEFINES += JAGUARCORE_AVX2_COMPILED
-    AVX2_SOURCES += $$PWD/src/collision/soa_geometry_avx2.cpp
+    AVX2_SOURCES += $$PWD/Source/Collision/SoaGeometryAvx2.cpp
 } else {
-    SOURCES += $$PWD/src/collision/soa_geometry_avx2_fallback.cpp
+    SOURCES += $$PWD/Source/Collision/SoaGeometryAvx2Fallback.cpp
 }
 
 CONFIG(debug, debug|release) {
@@ -20,83 +35,125 @@ CONFIG(debug, debug|release) {
 
 DEFINES += JAGUARCORE_BUILD
 
-INCLUDEPATH += $$PWD/include
+INCLUDEPATH += $$PWD/Include
 
 HEADERS += \
-    $$PWD/include/JaguarCore/export.h \
-    $$PWD/include/JaguarCore/version.h \
-    $$PWD/include/JaguarCore/result.h \
-    $$PWD/include/JaguarCore/numeric_policy.h \
-    $$PWD/include/JaguarCore/geometry/point.h \
-    $$PWD/include/JaguarCore/geometry/rect.h \
-    $$PWD/include/JaguarCore/geometry/edge.h \
-    $$PWD/include/JaguarCore/geometry/circle.h \
-    $$PWD/include/JaguarCore/geometry/transformation.h \
-    $$PWD/include/JaguarCore/geometry/convex_hull.h \
-    $$PWD/include/JaguarCore/geometry/simple_polygon.h \
-    $$PWD/include/JaguarCore/geometry/shape_modification.h \
-    $$PWD/include/JaguarCore/geometry/original_shape.h \
-    $$PWD/include/JaguarCore/entities/item.h \
-    $$PWD/include/JaguarCore/entities/container.h \
-    $$PWD/include/JaguarCore/entities/placed_item.h \
-    $$PWD/include/JaguarCore/entities/layout.h \
-    $$PWD/include/JaguarCore/io/external_repr.h \
-    $$PWD/include/JaguarCore/io/importer.h \
-    $$PWD/include/JaguarCore/io/json_codec.h \
-    $$PWD/include/JaguarCore/io/svg_export.h \
-    $$PWD/include/JaguarCore/problems/spp.h \
-    $$PWD/include/JaguarCore/problems/bpp.h \
-    $$PWD/include/JaguarCore/problems/mspp.h \
-    $$PWD/include/JaguarCore/assertions.h \
-    $$PWD/include/JaguarCore/fail_fast/surrogate.h \
-    $$PWD/include/JaguarCore/collision/hazard.h \
-    $$PWD/include/JaguarCore/collision/hazard_filter.h \
-    $$PWD/include/JaguarCore/collision/hazard_collector.h \
-    $$PWD/include/JaguarCore/collision/quadtree.h \
-    $$PWD/include/JaguarCore/collision/collision_engine.h
+    $$PWD/Include/JaguarCore/Export.h \
+    $$PWD/Include/JaguarCore/Version.h \
+    $$PWD/Include/JaguarCore/Result.h \
+    $$PWD/Include/JaguarCore/NumericPolicy.h \
+    $$PWD/Include/JaguarCore/Geometry/Point.h \
+    $$PWD/Include/JaguarCore/Geometry/Rect.h \
+    $$PWD/Include/JaguarCore/Geometry/Edge.h \
+    $$PWD/Include/JaguarCore/Geometry/Circle.h \
+    $$PWD/Include/JaguarCore/Geometry/Transformation.h \
+    $$PWD/Include/JaguarCore/Geometry/ConvexHull.h \
+    $$PWD/Include/JaguarCore/Geometry/SimplePolygon.h \
+    $$PWD/Include/JaguarCore/Geometry/ShapeModification.h \
+    $$PWD/Include/JaguarCore/Geometry/OriginalShape.h \
+    $$PWD/Include/JaguarCore/Entities/Item.h \
+    $$PWD/Include/JaguarCore/Entities/Container.h \
+    $$PWD/Include/JaguarCore/Entities/PlacedItem.h \
+    $$PWD/Include/JaguarCore/Entities/Layout.h \
+    $$PWD/Include/JaguarCore/IO/ExternalRepr.h \
+    $$PWD/Include/JaguarCore/IO/Importer.h \
+    $$PWD/Include/JaguarCore/IO/JsonCodec.h \
+    $$PWD/Include/JaguarCore/IO/SvgExport.h \
+    $$PWD/Include/JaguarCore/Problems/Spp.h \
+    $$PWD/Include/JaguarCore/Problems/Bpp.h \
+    $$PWD/Include/JaguarCore/Problems/MSpp.h \
+    $$PWD/Include/JaguarCore/Assertions.h \
+    $$PWD/Include/JaguarCore/FailFast/Surrogate.h \
+    $$PWD/Include/JaguarCore/Collision/Hazard.h \
+    $$PWD/Include/JaguarCore/Collision/HazardFilter.h \
+    $$PWD/Include/JaguarCore/Collision/HazardCollector.h \
+    $$PWD/Include/JaguarCore/Collision/Quadtree.h \
+    $$PWD/Include/JaguarCore/Collision/CollisionEngine.h
 
 SOURCES += \
-    $$PWD/src/support/version.cpp \
-    $$PWD/src/support/result.cpp \
-    $$PWD/src/geometry/primitives/edge.cpp \
-    $$PWD/src/geometry/primitives/circle.cpp \
-    $$PWD/src/geometry/transformation/transformation.cpp \
-    $$PWD/src/geometry/primitives/simple_polygon.cpp \
-    $$PWD/src/geometry/convex_hull/convex_hull.cpp \
-    $$PWD/src/geometry/original_shape/original_shape.cpp \
-    $$PWD/src/geometry/shape_modification/simplify.cpp \
-    $$PWD/src/geometry/shape_modification/offset.cpp \
-    $$PWD/src/geometry/shape_modification/straight_skeleton.cpp \
-    $$PWD/src/geometry/shape_modification/narrow_concavity.cpp \
-    $$PWD/src/entities/item.cpp \
-    $$PWD/src/entities/container.cpp \
-    $$PWD/src/entities/placed_item.cpp \
-    $$PWD/src/entities/layout.cpp \
-    $$PWD/src/io/external_repr.cpp \
-    $$PWD/src/io/importer.cpp \
-    $$PWD/src/io/json_codec.cpp \
-    $$PWD/src/io/svg_export.cpp \
-    $$PWD/src/problems/spp/strip.cpp \
-    $$PWD/src/problems/spp/instance.cpp \
-    $$PWD/src/problems/spp/problem.cpp \
-    $$PWD/src/problems/spp/solution.cpp \
-    $$PWD/src/problems/bpp/bpp_bin.cpp \
-    $$PWD/src/problems/bpp/bpp_instance.cpp \
-    $$PWD/src/problems/bpp/bpp_problem.cpp \
-    $$PWD/src/problems/bpp/bpp_solution.cpp \
-    $$PWD/src/problems/mspp/msp_strip.cpp \
-    $$PWD/src/problems/mspp/msp_instance.cpp \
-    $$PWD/src/problems/mspp/msp_problem.cpp \
-    $$PWD/src/problems/mspp/msp_solution.cpp \
-    $$PWD/src/support/assertions.cpp \
-    $$PWD/src/fail_fast/surrogate.cpp \
-    $$PWD/src/collision/hazards/collector.cpp \
-    $$PWD/src/collision/quadtree/quadtree.cpp \
-    $$PWD/src/collision/thread_pool.cpp \
-    $$PWD/src/collision/soa_geometry.cpp \
-    $$PWD/src/collision/collision_engine.cpp
+    $$PWD/Source/Support/Version.cpp \
+    $$PWD/Source/Support/Result.cpp \
+    $$PWD/Source/Geometry/Primitives/Edge.cpp \
+    $$PWD/Source/Geometry/Primitives/Circle.cpp \
+    $$PWD/Source/Geometry/Transformation/Transformation.cpp \
+    $$PWD/Source/Geometry/Primitives/SimplePolygon.cpp \
+    $$PWD/Source/Geometry/ConvexHull/ConvexHull.cpp \
+    $$PWD/Source/Geometry/OriginalShape/OriginalShape.cpp \
+    $$PWD/Source/Geometry/ShapeModification/Simplify.cpp \
+    $$PWD/Source/Geometry/ShapeModification/Offset.cpp \
+    $$PWD/Source/Geometry/ShapeModification/StraightSkeleton.cpp \
+    $$PWD/Source/Geometry/ShapeModification/NarrowConcavity.cpp \
+    $$PWD/Source/Entities/Item.cpp \
+    $$PWD/Source/Entities/Container.cpp \
+    $$PWD/Source/Entities/PlacedItem.cpp \
+    $$PWD/Source/Entities/Layout.cpp \
+    $$PWD/Source/IO/ExternalRepr.cpp \
+    $$PWD/Source/IO/Importer.cpp \
+    $$PWD/Source/IO/JsonCodec.cpp \
+    $$PWD/Source/IO/SvgExport.cpp \
+    $$PWD/Source/Problems/SPP/Strip.cpp \
+    $$PWD/Source/Problems/SPP/Instance.cpp \
+    $$PWD/Source/Problems/SPP/Problem.cpp \
+    $$PWD/Source/Problems/SPP/Solution.cpp \
+    $$PWD/Source/Problems/BPP/BppBin.cpp \
+    $$PWD/Source/Problems/BPP/BppInstance.cpp \
+    $$PWD/Source/Problems/BPP/BppProblem.cpp \
+    $$PWD/Source/Problems/BPP/BppSolution.cpp \
+    $$PWD/Source/Problems/MSPP/MspStrip.cpp \
+    $$PWD/Source/Problems/MSPP/MspInstance.cpp \
+    $$PWD/Source/Problems/MSPP/MspProblem.cpp \
+    $$PWD/Source/Problems/MSPP/MspSolution.cpp \
+    $$PWD/Source/Support/Assertions.cpp \
+    $$PWD/Source/FailFast/Surrogate.cpp \
+    $$PWD/Source/Collision/Hazards/Collector.cpp \
+    $$PWD/Source/Collision/Quadtree/Quadtree.cpp \
+    $$PWD/Source/Collision/ThreadPool.cpp \
+    $$PWD/Source/Collision/SoaGeometry.cpp \
+    $$PWD/Source/Collision/CollisionEngine.cpp
 
-DESTDIR = $$OUT_PWD/bin
-OBJECTS_DIR = $$OUT_PWD/obj
-MOC_DIR = $$OUT_PWD/moc
-RCC_DIR = $$OUT_PWD/rcc
+CONFIG(debug, debug|release) {
+    JAGUARCORE_PACKAGE_CONFIGURATION = Debug
+} else {
+    JAGUARCORE_PACKAGE_CONFIGURATION = Release
+}
+
+contains(CONFIG, jaguarcore_no_avx2) {
+    JAGUARCORE_PACKAGE_VARIANT = Scalar
+} else {
+    JAGUARCORE_PACKAGE_VARIANT = AVX2
+}
+
+isEmpty(JAGUARCORE_PACKAGE_ROOT) {
+    JAGUARCORE_PACKAGE_ROOT = $$OUT_PWD/Package/$${JAGUARCORE_PACKAGE_DIRNAME}
+}
+
+JAGUARCORE_PACKAGE_CONFIG_ROOT = \
+    $$JAGUARCORE_PACKAGE_ROOT/$${JAGUARCORE_PACKAGE_CONFIGURATION}/$${JAGUARCORE_PACKAGE_VARIANT}
+
+jaguarcore_runtime.files = $$DESTDIR/$${TARGET}.dll
+jaguarcore_runtime.path = $$JAGUARCORE_PACKAGE_CONFIG_ROOT/Bin
+jaguarcore_runtime.CONFIG += no_check_exist
+
+jaguarcore_import_library.files = $$DESTDIR/$${TARGET}.lib
+jaguarcore_import_library.path = $$JAGUARCORE_PACKAGE_CONFIG_ROOT/Lib
+jaguarcore_import_library.CONFIG += no_check_exist
+
+jaguarcore_public_headers.files = $$PWD/Include/JaguarCore
+jaguarcore_public_headers.path = $$JAGUARCORE_PACKAGE_ROOT/Include
+
+jaguarcore_package_readme.files = $$PWD/Package/README.md
+jaguarcore_package_readme.path = $$JAGUARCORE_PACKAGE_ROOT
+
+jaguarcore_package_verifier.files = $$PWD/Package/VerifyPackage.ps1
+jaguarcore_package_verifier.path = $$JAGUARCORE_PACKAGE_ROOT
+
+jaguarcore_deployment_guide.files = $$PWD/../docs/deployment.md
+jaguarcore_deployment_guide.path = $$JAGUARCORE_PACKAGE_ROOT/Docs
+
+INSTALLS += \
+    jaguarcore_runtime \
+    jaguarcore_import_library \
+    jaguarcore_public_headers \
+    jaguarcore_package_readme \
+    jaguarcore_package_verifier \
+    jaguarcore_deployment_guide

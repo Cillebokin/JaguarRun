@@ -1,7 +1,7 @@
 #pragma once
 
-#include "JaguarCore/entities/layout.h"
-#include "JaguarCore/export.h"
+#include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Export.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -23,17 +23,17 @@ struct Bin
 class BPInstance
 {
 public:
-    static JAGUARCORE_API Result<BPInstance> create(
+    static JAGUARCORE_API Result<BPInstance> Create(
         std::vector<Item> items,
         std::vector<std::size_t> demands,
         std::vector<Bin> bins);
 
-    JAGUARCORE_API std::size_t itemCount() const noexcept;
-    JAGUARCORE_API const Item& item(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t itemDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t binCount() const noexcept;
-    JAGUARCORE_API const Bin& bin(std::size_t index) const noexcept;
-    JAGUARCORE_API std::size_t totalDemand() const noexcept;
+    JAGUARCORE_API std::size_t ItemCount() const noexcept;
+    JAGUARCORE_API const Item& GetItem(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t ItemDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t BinCount() const noexcept;
+    JAGUARCORE_API const Bin& GetBin(std::size_t index) const noexcept;
+    JAGUARCORE_API std::size_t TotalDemand() const noexcept;
 
 private:
     BPInstance(std::vector<std::shared_ptr<const Item>> items,
@@ -57,7 +57,7 @@ struct BPPlacement
     std::size_t layoutIndex = 0;
     std::size_t binIndex = 0;
     ItemIndex itemIndex = 0;
-    Transform2d transform = Transform2d::identity();
+    Transform2d transform = Transform2d::Identity();
 };
 
 struct BPPlacedHandle
@@ -77,33 +77,33 @@ struct BPSolution
 {
     std::vector<BPLayoutSnapshot> layouts;
 
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API std::uint64_t cost(const BPInstance& instance) const;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API std::uint64_t Cost(const BPInstance& instance) const;
 };
 
 class BPProblem
 {
 public:
-    static JAGUARCORE_API Result<BPProblem> create(BPInstance instance);
+    static JAGUARCORE_API Result<BPProblem> Create(BPInstance instance);
 
     BPProblem(const BPProblem&) = delete;
     BPProblem& operator=(const BPProblem&) = delete;
     BPProblem(BPProblem&&) noexcept = default;
     BPProblem& operator=(BPProblem&&) noexcept = default;
 
-    JAGUARCORE_API Result<BPPlacedHandle> placeItem(
+    JAGUARCORE_API Result<BPPlacedHandle> PlaceItem(
         const BPPlacement& placement);
-    JAGUARCORE_API Result<BPPlacement> removeItem(const BPPlacedHandle& handle);
-    JAGUARCORE_API BPSolution save() const;
-    JAGUARCORE_API Result<void> restore(const BPSolution& solution);
+    JAGUARCORE_API Result<BPPlacement> RemoveItem(const BPPlacedHandle& handle);
+    JAGUARCORE_API BPSolution Save() const;
+    JAGUARCORE_API Result<void> Restore(const BPSolution& solution);
 
-    JAGUARCORE_API std::size_t remainingDemand(ItemIndex index) const noexcept;
-    JAGUARCORE_API std::size_t remainingBinStock(std::size_t index) const noexcept;
-    JAGUARCORE_API std::size_t placedItemCount() const noexcept;
-    JAGUARCORE_API std::size_t openLayoutCount() const noexcept;
-    JAGUARCORE_API double density() const;
-    JAGUARCORE_API std::uint64_t binCost() const noexcept;
-    JAGUARCORE_API const BPInstance& instance() const noexcept;
+    JAGUARCORE_API std::size_t RemainingDemand(ItemIndex index) const noexcept;
+    JAGUARCORE_API std::size_t RemainingBinStock(std::size_t index) const noexcept;
+    JAGUARCORE_API std::size_t PlacedItemCount() const noexcept;
+    JAGUARCORE_API std::size_t OpenLayoutCount() const noexcept;
+    JAGUARCORE_API double Density() const;
+    JAGUARCORE_API std::uint64_t BinCost() const noexcept;
+    JAGUARCORE_API const BPInstance& Instance() const noexcept;
 
 private:
     struct LayoutSlot
@@ -115,9 +115,9 @@ private:
     BPProblem(BPInstance instance,
               std::vector<std::size_t> remainingDemand,
               std::vector<std::size_t> remainingBinStock);
-    Result<std::size_t> openLayout(std::size_t binIndex);
-    LayoutSlot* getLayout(std::size_t layoutIndex) noexcept;
-    const LayoutSlot* getLayout(std::size_t layoutIndex) const noexcept;
+    Result<std::size_t> OpenLayout(std::size_t binIndex);
+    LayoutSlot* GetLayout(std::size_t layoutIndex) noexcept;
+    const LayoutSlot* GetLayout(std::size_t layoutIndex) const noexcept;
 
     BPInstance m_Instance;
     std::vector<LayoutSlot> m_Layouts;

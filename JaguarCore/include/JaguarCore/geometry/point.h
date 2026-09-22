@@ -9,9 +9,12 @@ struct Point2d
     double x = 0.0;
     double y = 0.0;
 
-    bool isFinite() const noexcept { return std::isfinite(x) && std::isfinite(y); }
+    inline bool IsFinite() const noexcept
+    {
+        return std::isfinite(x) && std::isfinite(y);
+    }
 
-    double squaredDistanceTo(const Point2d& other) const noexcept
+    inline double SquaredDistanceTo(const Point2d& other) const noexcept
     {
         const double dx = x - other.x;
         const double dy = y - other.y;

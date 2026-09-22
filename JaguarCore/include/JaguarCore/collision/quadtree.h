@@ -1,9 +1,9 @@
 #pragma once
 
-#include "JaguarCore/collision/hazard.h"
-#include "JaguarCore/export.h"
-#include "JaguarCore/geometry/edge.h"
-#include "JaguarCore/geometry/rect.h"
+#include "JaguarCore/Collision/Hazard.h"
+#include "JaguarCore/Export.h"
+#include "JaguarCore/Geometry/Edge.h"
+#include "JaguarCore/Geometry/Rect.h"
 
 #include <array>
 #include <cstddef>
@@ -27,27 +27,27 @@ public:
                             std::uint8_t maxDepth,
                             std::uint8_t edgeThreshold);
 
-    JAGUARCORE_API void registerHazard(HazardHandle handle, const Hazard& hazard);
-    JAGUARCORE_API void registerHazard(
+    JAGUARCORE_API void RegisterHazard(HazardHandle handle, const Hazard& hazard);
+    JAGUARCORE_API void RegisterHazard(
         HazardHandle handle, const HazardEntity& entity,
         std::shared_ptr<const SimplePolygon> shape, bool dynamic);
 
     // Kept for callers that only have a conservative bounding box. Such entries
     // are always indexed as Partial because no polygon semantics are available.
-    JAGUARCORE_API void registerHazard(HazardHandle handle,
+    JAGUARCORE_API void RegisterHazard(HazardHandle handle,
                                        const Rect2d& hazardBounds);
-    JAGUARCORE_API void deregisterHazard(HazardHandle handle);
+    JAGUARCORE_API void DeregisterHazard(HazardHandle handle);
 
-    JAGUARCORE_API std::vector<HazardHandle> query(const Rect2d& queryBounds) const;
-    JAGUARCORE_API std::vector<HazardHandle> query(const Edge2d& queryEdge) const;
-    JAGUARCORE_API std::vector<HazardHandle> queryVirtualRoot(
+    JAGUARCORE_API std::vector<HazardHandle> Query(const Rect2d& queryBounds) const;
+    JAGUARCORE_API std::vector<HazardHandle> Query(const Edge2d& queryEdge) const;
+    JAGUARCORE_API std::vector<HazardHandle> QueryVirtualRoot(
         const Rect2d& queryBounds) const;
 
-    JAGUARCORE_API HazardPresence presenceAt(
+    JAGUARCORE_API HazardPresence PresenceAt(
         HazardHandle handle, const Rect2d& nodeBounds) const noexcept;
-    JAGUARCORE_API std::size_t nodeCount() const noexcept;
-    JAGUARCORE_API Rect2d virtualRootBounds(const Rect2d& queryBounds) const noexcept;
-    JAGUARCORE_API const Rect2d& bounds() const noexcept;
+    JAGUARCORE_API std::size_t NodeCount() const noexcept;
+    JAGUARCORE_API Rect2d VirtualRootBounds(const Rect2d& queryBounds) const noexcept;
+    JAGUARCORE_API const Rect2d& Bounds() const noexcept;
 
 private:
     struct RegisteredHazard
@@ -79,27 +79,27 @@ private:
         std::size_t edgeCount = 0;
     };
 
-    static bool polygonIntersectsRect(const SimplePolygon& polygon,
+    static bool PolygonIntersectsRect(const SimplePolygon& polygon,
                                       const Rect2d& rect) noexcept;
-    static bool rectInsidePolygon(const SimplePolygon& polygon,
+    static bool RectInsidePolygon(const SimplePolygon& polygon,
                                   const Rect2d& rect) noexcept;
-    static PresenceInfo classify(const RegisteredHazard& hazard,
+    static PresenceInfo Classify(const RegisteredHazard& hazard,
                                  const Rect2d& nodeBounds) noexcept;
-    static void buildNode(Node& node,
+    static void BuildNode(Node& node,
                           const std::vector<RegisteredHazard>& hazards,
                           std::uint8_t maxDepth,
                           std::uint8_t edgeThreshold);
-    static void queryNode(const Node& node,
+    static void QueryNode(const Node& node,
                           const Rect2d& queryBounds,
                           const std::vector<RegisteredHazard>& hazards,
                           std::vector<HazardHandle>& result);
-    const Node& virtualRoot(const Rect2d& queryBounds) const noexcept;
-    static void sortUnique(std::vector<HazardHandle>& result);
-    static std::size_t countNodes(const Node& node) noexcept;
+    const Node& VirtualRoot(const Rect2d& queryBounds) const noexcept;
+    static void SortUnique(std::vector<HazardHandle>& result);
+    static std::size_t CountNodes(const Node& node) noexcept;
 
-    const RegisteredHazard* find(HazardHandle handle) const noexcept;
-    void setRegistered(RegisteredHazard hazard);
-    void rebuild();
+    const RegisteredHazard* Find(HazardHandle handle) const noexcept;
+    void SetRegistered(RegisteredHazard hazard);
+    void Rebuild();
 
     Node m_Root;
     std::uint8_t m_MaxDepth = 0;

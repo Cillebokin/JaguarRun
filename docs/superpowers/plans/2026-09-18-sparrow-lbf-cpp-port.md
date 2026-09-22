@@ -783,11 +783,11 @@ BPP 搜索顺序：
 5. 空 Layout 按 JaguarCore BPProblem 语义关闭并返还库存；
 6. 最终输出 layouts、cost、density、remaining demand 和 remaining stock。
 
-- [ ] 测试 Open Layout 复用优先于新 Bin。
-- [ ] 测试库存耗尽、成本、空 Bin、多个 item type。
-- [ ] 测试 Hole/quality filter 和旋转策略。
-- [ ] 测试固定 seed metrics 和 JSON round-trip。
-- [ ] 测试 BPP 输出不包含空 Bin Layout。
+- [x] 测试 Open Layout 复用优先于新 Bin。
+- [x] 测试库存耗尽、成本、空 Bin、多个 item type。
+- [x] 测试 Hole/quality filter 和旋转策略。
+- [x] 测试固定 seed metrics 和 JSON round-trip。
+- [x] 测试 BPP 输出不包含空 Bin Layout。
 
 ### Task 11: 实现 Sparrow 风格 LBFBuilder 兼容层
 

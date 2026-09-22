@@ -1,11 +1,11 @@
 #pragma once
 
-#include "JaguarCore/entities/container.h"
-#include "JaguarCore/entities/item.h"
-#include "JaguarCore/io/external_repr.h"
-#include "JaguarCore/problems/bpp.h"
-#include "JaguarCore/problems/mspp.h"
-#include "JaguarCore/problems/spp.h"
+#include "JaguarCore/Entities/Container.h"
+#include "JaguarCore/Entities/Item.h"
+#include "JaguarCore/IO/ExternalRepr.h"
+#include "JaguarCore/Problems/Bpp.h"
+#include "JaguarCore/Problems/MSpp.h"
+#include "JaguarCore/Problems/Spp.h"
 
 #include <string>
 
@@ -23,50 +23,50 @@ class Importer
 public:
     explicit JAGUARCORE_API Importer(ImporterConfig config = {});
 
-    JAGUARCORE_API Result<Item> importItem(const ExternalItem& external,
+    JAGUARCORE_API Result<Item> ImportItem(const ExternalItem& external,
                                             ItemIndex internalIndex) const;
-    JAGUARCORE_API Result<Container> importContainer(
+    JAGUARCORE_API Result<Container> ImportContainer(
         const ExternalContainer& external) const;
 
-    JAGUARCORE_API Result<Item> importItemJson(const std::string& json,
+    JAGUARCORE_API Result<Item> ImportItemJson(const std::string& json,
                                                ItemIndex internalIndex) const;
-    JAGUARCORE_API Result<Container> importContainerJson(
+    JAGUARCORE_API Result<Container> ImportContainerJson(
         const std::string& json) const;
 
-    JAGUARCORE_API Result<SPInstance> importSPInstance(
+    JAGUARCORE_API Result<SPInstance> ImportSPInstance(
         const ExternalSPInstance& external) const;
-    JAGUARCORE_API Result<SPSolution> importSPSolution(
+    JAGUARCORE_API Result<SPSolution> ImportSPSolution(
         const SPInstance& instance, const ExternalSPSolution& external) const;
-    JAGUARCORE_API Result<SPInstance> importSPInstanceJson(
+    JAGUARCORE_API Result<SPInstance> ImportSPInstanceJson(
         const std::string& json) const;
-    JAGUARCORE_API Result<SPSolution> importSPSolutionJson(
+    JAGUARCORE_API Result<SPSolution> ImportSPSolutionJson(
         const SPInstance& instance, const std::string& json) const;
 
-    JAGUARCORE_API Result<BPInstance> importBPInstance(
+    JAGUARCORE_API Result<BPInstance> ImportBPInstance(
         const ExternalBPInstance& external) const;
-    JAGUARCORE_API Result<BPSolution> importBPSolution(
+    JAGUARCORE_API Result<BPSolution> ImportBPSolution(
         const BPInstance& instance, const ExternalBPSolution& external) const;
-    JAGUARCORE_API Result<BPInstance> importBPInstanceJson(
+    JAGUARCORE_API Result<BPInstance> ImportBPInstanceJson(
         const std::string& json) const;
-    JAGUARCORE_API Result<BPSolution> importBPSolutionJson(
+    JAGUARCORE_API Result<BPSolution> ImportBPSolutionJson(
         const BPInstance& instance, const std::string& json) const;
 
-    JAGUARCORE_API Result<MSPInstance> importMSPInstance(
+    JAGUARCORE_API Result<MSPInstance> ImportMSPInstance(
         const ExternalMSPInstance& external) const;
-    JAGUARCORE_API Result<MSPSolution> importMSPSolution(
+    JAGUARCORE_API Result<MSPSolution> ImportMSPSolution(
         const MSPInstance& instance, const ExternalMSPSolution& external) const;
-    JAGUARCORE_API Result<MSPInstance> importMSPInstanceJson(
+    JAGUARCORE_API Result<MSPInstance> ImportMSPInstanceJson(
         const std::string& json) const;
-    JAGUARCORE_API Result<MSPSolution> importMSPSolutionJson(
+    JAGUARCORE_API Result<MSPSolution> ImportMSPSolutionJson(
         const MSPInstance& instance, const std::string& json) const;
 
 private:
-    Result<SimplePolygon> importItemShape(const ExternalShape& shape) const;
-    Result<SimplePolygon> importContainerOuter(const ExternalShape& shape) const;
-    Result<SimplePolygon> importZoneShape(const ExternalShape& shape) const;
-    Result<RotationRange> importRotation(const RotationPolicy& rotation) const;
-    Result<SimplePolygon> importSimplePolygon(const std::vector<Point2d>& points) const;
-    ShapeModifyConfig shapeConfig() const;
+    Result<SimplePolygon> ImportItemShape(const ExternalShape& shape) const;
+    Result<SimplePolygon> ImportContainerOuter(const ExternalShape& shape) const;
+    Result<SimplePolygon> ImportZoneShape(const ExternalShape& shape) const;
+    Result<RotationRange> ImportRotation(const RotationPolicy& rotation) const;
+    Result<SimplePolygon> ImportSimplePolygon(const std::vector<Point2d>& points) const;
+    ShapeModifyConfig ShapeConfig() const;
 
     ImporterConfig m_Config;
 };

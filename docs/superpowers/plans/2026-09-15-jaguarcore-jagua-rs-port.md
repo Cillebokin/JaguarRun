@@ -926,12 +926,21 @@ Clone 原始 Exp_Entity
 - Create: `docs/deployment.md`
 - Modify: `JaguarCore/JaguarCore.pro`
 
-- [ ] 定义 Debug/Release 目录结构。
-- [ ] 定义头文件、DLL、LIB 和运行时依赖的发布目录。
-- [ ] 运行时检查 DLL 版本、架构和导出符号。
-- [ ] 验证 MSVC2019 x64 下的调用者与 DLL CRT 配置一致。
-- [ ] 不跨 DLL 释放由不同模块分配的内存。
-- [ ] 不把内部 STL 容器所有权暴露为需要调用方释放的裸指针。
+- [x] 定义 Debug/Release 目录结构。
+- [x] 定义头文件、DLL、LIB 和运行时依赖的发布目录。
+- [x] 运行时检查 DLL 版本、架构和导出符号。
+- [x] 验证 MSVC2019 x64 下的调用者与 DLL CRT 配置一致。
+- [x] 不跨 DLL 释放由不同模块分配的内存。
+- [x] 不把内部 STL 容器所有权暴露为需要调用方释放的裸指针。
+
+**Task 21 checkpoint (2026-09-20):**
+
+- Debug/Release × AVX2/scalar 四套 JaguarCore 和完整测试均构建、运行通过。
+- 统一包包含 31 个公共头文件、四套 DLL/LIB、Debug/Release 检查器、部署文档和 `VerifyPackage.ps1`。
+- 包级自动验收四套产物均输出 `runtime_check,result,pass`，最终输出 `package_check,result,pass`。
+- 检查器直接解析目标 DLL 的 PE 导入表，强制核对 x64、`0.1.0.0` 文件版本、`0.1.0-dev` 公共版本、`JaguarCoreVersion` 精确导出和 Debug/Release 动态 CRT。
+- qmake 实测拒绝非 x64 和非 MSVC2019 工具链标签；`dumpbin` 复核四套 DLL 无 Qt/Rust 依赖。
+- `CollisionEnginePtr` 通过 DLL 导出的 `CollisionEngineDeleter` 在 JaguarCore 内释放 DLL 创建的引擎。
 
 ## 6. 重点测试矩阵
 
@@ -979,9 +988,16 @@ Clone 原始 Exp_Entity
 - [x] Layout 快照保存/恢复通过随机序列测试。
 - [x] SPP/BPP/MSPP 的 demand、stock、layout 和 solution 一致。
 - [x] Rust fixtures 的几何和布局属性差分通过。
-- [ ] 运行时 DLL 加载检查通过。
+- [x] 运行时 DLL 加载检查通过。
 
 ### 生产前置验收
+
+**JaguarCore-only 验收检查点（2026-09-21）：**
+
+- JaguarCoreTests 已重新执行并通过 Debug/Release × AVX2/scalar 四种配置。
+- 已安装交付包 `VerifyPackage.ps1` 已重新执行并通过四套 DLL 的架构、版本、导出符号和动态 CRT 检查。
+- 已盘点 `Dxf00`/`Dxf01` 真实样例：`Dxf00` 为闭合点列形式的 `LWPOLYLINE`，`Dxf01` 还包含 ARC、CIRCLE、ELLIPSE、SPLINE、INSERT 等实体。
+- 当前 JaguarCore 没有 DXF 读取器，也没有 `Exp_Entity` 适配层；以下涉及 DXF 转换、结果回写、NestLab、GUI 和机床的条目因此保持未完成，不能用核心 JSON/几何测试替代。
 
 - [ ] `Dxf00` 样例转换和几何验证通过。
 - [ ] `Dxf01` 多类型样例转换通过。

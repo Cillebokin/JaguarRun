@@ -1,9 +1,9 @@
 #pragma once
 
-#include "JaguarCore/collision/collision_engine.h"
-#include "JaguarCore/export.h"
-#include "JaguarCore/geometry/original_shape.h"
-#include "JaguarCore/result.h"
+#include "JaguarCore/Collision/CollisionEngine.h"
+#include "JaguarCore/Export.h"
+#include "JaguarCore/Geometry/OriginalShape.h"
+#include "JaguarCore/Result.h"
 
 #include <cstdint>
 #include <memory>
@@ -22,7 +22,7 @@ struct QualityZone
 class Container
 {
 public:
-    static JAGUARCORE_API Result<Container> create(
+    static JAGUARCORE_API Result<Container> Create(
         ContainerId id,
         OriginalShape originalOuter,
         std::vector<QualityZone> qualityZones,
@@ -35,13 +35,13 @@ public:
     Container& operator=(Container&&) noexcept = default;
     ~Container() = default;
 
-    JAGUARCORE_API ContainerId id() const noexcept;
-    JAGUARCORE_API double area() const noexcept;
-    JAGUARCORE_API const OriginalShape& originalShape() const noexcept;
-    JAGUARCORE_API const SimplePolygon& collisionShape() const noexcept;
-    JAGUARCORE_API const Rect2d& bounds() const noexcept;
-    JAGUARCORE_API bool sameBase(const Container& other) const noexcept;
-    JAGUARCORE_API std::unique_ptr<CollisionEngine> createCollisionEngine() const;
+    JAGUARCORE_API ContainerId Id() const noexcept;
+    JAGUARCORE_API double Area() const noexcept;
+    JAGUARCORE_API const OriginalShape& GetOriginalShape() const noexcept;
+    JAGUARCORE_API const SimplePolygon& CollisionShape() const noexcept;
+    JAGUARCORE_API const Rect2d& Bounds() const noexcept;
+    JAGUARCORE_API bool SameBase(const Container& other) const noexcept;
+    JAGUARCORE_API CollisionEnginePtr CreateCollisionEngine() const;
 
 private:
     struct Data;

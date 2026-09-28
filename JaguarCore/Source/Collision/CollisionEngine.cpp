@@ -494,9 +494,15 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
         {
             const Hazard* hazard = Get(handle);
             if (hazard && hazard->shape &&
-                !filter.IsIrrelevant(handle, hazard->entity) &&
-                CircleCollidesWithHazard(transformedPole, *hazard))
-                 return Result<bool>::FromValue(true);
+                !filter.IsIrrelevant(handle, hazard->entity))
+            {
+                if (hazard->entity.kind == HazardKind::Exterior &&
+                    m_QuadTree.HasEntirePresenceForCircleAtDepth(
+                        handle, transformedPole, m_Config.quadtreeDepth))
+                    return Result<bool>::FromValue(true);
+                if (CircleCollidesWithHazard(transformedPole, *hazard))
+                    return Result<bool>::FromValue(true);
+            }
         }
     }
 
@@ -512,9 +518,15 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
         {
             const Hazard* hazard = Get(handle);
             if (hazard && hazard->shape &&
-                !filter.IsIrrelevant(handle, hazard->entity) &&
-                EdgeCollidesWithHazard(transformed.Value(), *hazard))
-                return Result<bool>::FromValue(true);
+                !filter.IsIrrelevant(handle, hazard->entity))
+            {
+                if (hazard->entity.kind == HazardKind::Exterior &&
+                    m_QuadTree.HasEntirePresenceForEdgeAtDepth(
+                        handle, transformed.Value(), m_Config.quadtreeDepth))
+                    return Result<bool>::FromValue(true);
+                if (EdgeCollidesWithHazard(transformed.Value(), *hazard))
+                    return Result<bool>::FromValue(true);
+            }
         }
     }
     return Result<bool>::FromValue(false);
@@ -554,7 +566,12 @@ JAGUARCORE_API Result<bool> CollisionEngine::CollectSurrogateCollisionsUntil(
                 filter.IsIrrelevant(handle, hazard->entity) || collector.Contains(handle))
                 continue;
 
-            if (CircleCollidesWithHazard(transformedPole, *hazard) &&
+            const bool collidesWithBoundary =
+                CircleCollidesWithHazard(transformedPole, *hazard);
+            const bool collidesWithEntirePresence =
+                hazard->entity.kind == HazardKind::Exterior &&
+                m_QuadTree.HasEntirePresenceForCircle(handle, transformedPole);
+            if ((collidesWithBoundary || collidesWithEntirePresence) &&
                 report(handle, hazard->entity))
                 return Result<bool>::FromValue(true);
         }

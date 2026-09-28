@@ -563,6 +563,85 @@ void runCollisionTests()
     assert(notchCollision.HasValue());
     assert(!notchCollision.Value());
 
+    jaguar::CDEConfig notchHighThresholdConfig{};
+    notchHighThresholdConfig.quadtreeDepth = 4;
+    notchHighThresholdConfig.cdThreshold = 8;
+    jaguar::CollisionEngine notchHighThresholdEngine(
+        root.Value(), notchHighThresholdConfig);
+    assert(notchHighThresholdEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior},
+               std::make_shared<const jaguar::SimplePolygon>(notchContainer.Value()),
+               false})
+               .HasValue());
+    const auto notchHighThresholdDetect =
+        notchHighThresholdEngine.DetectSurrogateCollision(
+            notchSurrogate.Value(), notchTransform, jaguar::NoFilter{});
+    assert(notchHighThresholdDetect.HasValue());
+    assert(notchHighThresholdDetect.Value());
+    jaguar::HazardCollector notchHighThresholdCollector;
+    const auto notchHighThresholdCollect =
+        notchHighThresholdEngine.CollectSurrogateCollisionsUntil(
+            notchSurrogate.Value(), notchTransform, notchHighThresholdCollector,
+            jaguar::NoFilter{}, [](const jaguar::HazardEntity&) { return false; });
+    assert(notchHighThresholdCollect.HasValue());
+    assert(!notchHighThresholdCollect.Value());
+    assert(notchHighThresholdCollector.Empty());
+
+    jaguar::CDEConfig notchLowThresholdConfig{};
+    notchLowThresholdConfig.quadtreeDepth = 4;
+    notchLowThresholdConfig.cdThreshold = 0;
+    jaguar::CollisionEngine notchLowThresholdEngine(
+        root.Value(), notchLowThresholdConfig);
+    assert(notchLowThresholdEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior},
+               std::make_shared<const jaguar::SimplePolygon>(notchContainer.Value()),
+               false})
+               .HasValue());
+    const auto notchLowThresholdDetect =
+        notchLowThresholdEngine.DetectSurrogateCollision(
+            notchSurrogate.Value(), notchTransform, jaguar::NoFilter{});
+    assert(notchLowThresholdDetect.HasValue());
+    assert(notchLowThresholdDetect.Value());
+    jaguar::HazardCollector notchLowThresholdCollector;
+    const auto notchLowThresholdCollect =
+        notchLowThresholdEngine.CollectSurrogateCollisionsUntil(
+            notchSurrogate.Value(), notchTransform, notchLowThresholdCollector,
+            jaguar::NoFilter{}, [](const jaguar::HazardEntity&) { return false; });
+    assert(notchLowThresholdCollect.HasValue());
+    assert(!notchLowThresholdCollect.Value());
+    assert(notchLowThresholdCollector.Size() == 1);
+    assert(notchLowThresholdCollector.Entries().front().second.kind ==
+           jaguar::HazardKind::Exterior);
+
+    jaguar::SurrogateConfig notchPierOnlyConfig{};
+    notchPierOnlyConfig.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+    notchPierOnlyConfig.failFastPiers = 1;
+    const auto notchPierOnlySurrogate =
+        jaguar::Surrogate::Create(notchContainer.Value(), notchPierOnlyConfig);
+    assert(notchPierOnlySurrogate.HasValue());
+    assert(notchPierOnlySurrogate.Value().FailFastPoleCount() == 0);
+    assert(notchPierOnlySurrogate.Value().Piers().size() == 1);
+    const auto largeRoot = jaguar::Rect2d::Create(0.0, 0.0, 40.0, 40.0);
+    assert(largeRoot.HasValue());
+    const auto largeNotchContainer = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {40.0, 0.0}, {40.0, 40.0}, {30.0, 40.0},
+        {30.0, 10.0}, {10.0, 10.0}, {10.0, 40.0}, {0.0, 40.0}});
+    assert(largeNotchContainer.HasValue());
+    jaguar::CollisionEngine largeNotchEngine(largeRoot.Value(), notchHighThresholdConfig);
+    assert(largeNotchEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior},
+               std::make_shared<const jaguar::SimplePolygon>(
+                   largeNotchContainer.Value()),
+               false})
+               .HasValue());
+    const auto notchPierOnlyCollision =
+        largeNotchEngine.DetectSurrogateCollision(
+            notchPierOnlySurrogate.Value(),
+            jaguar::Transform2d::FromRotationTranslation(0.0, {15.0, 15.0}),
+            jaguar::NoFilter{});
+    assert(notchPierOnlyCollision.HasValue());
+    assert(notchPierOnlyCollision.Value());
+
     const auto boundaryPoleTransform =
         jaguar::Transform2d::FromRotationTranslation(
             0.0,

@@ -13,6 +13,8 @@
 
 namespace jaguar
 {
+struct Circle2d;
+
 // 障碍物相对节点的覆盖状态
 enum class HazardPresence
 {
@@ -63,6 +65,8 @@ public:
     JAGUARCORE_API const Rect2d& Bounds() const noexcept;
 
 private:
+    friend class CollisionEngine;
+
     struct RegisteredHazard
     {
         HazardHandle handle{};    // 障碍物句柄
@@ -111,6 +115,16 @@ private:
     static std::size_t CountNodes(const Node& node) noexcept;
 
     const RegisteredHazard* Find(HazardHandle handle) const noexcept;
+    bool HasEntirePresenceForCircle(
+        HazardHandle handle, const Circle2d& circle) const noexcept;
+    bool HasEntirePresenceForCircleAtDepth(
+        HazardHandle handle,
+        const Circle2d& circle,
+        std::uint8_t maxDepth) const noexcept;
+    bool HasEntirePresenceForEdgeAtDepth(
+        HazardHandle handle,
+        const Edge2d& edge,
+        std::uint8_t maxDepth) const noexcept;
     void SetRegistered(RegisteredHazard hazard);
     void Rebuild();
 

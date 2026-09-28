@@ -1,4 +1,5 @@
 #include "JaguarCore/Collision/Quadtree.h"
+#include "JaguarCore/Geometry/Circle.h"
 
 #include <algorithm>
 #include <array>
@@ -109,6 +110,91 @@ HazardPresence QuadTree::PresenceAt(HazardHandle handle,
     if (!hazard)
         return HazardPresence::None;
     return Classify(*hazard, nodeBounds).presence;
+}
+
+bool QuadTree::HasEntirePresenceForCircle(
+    HazardHandle handle, const Circle2d& circle) const noexcept
+{
+    const RegisteredHazard* hazard = Find(handle);
+    if (!hazard)
+        return false;
+
+    const auto hasEntirePresence = [&](const auto& self, const Node& node) noexcept -> bool {
+        bool hasChildren = false;
+        for (const auto& child : node.children)
+        {
+            if (!child)
+                continue;
+            hasChildren = true;
+            if (circle.IntersectsRustF32(child->bounds) &&
+                self(self, *child))
+                return true;
+        }
+        return !hasChildren &&
+               Classify(*hazard, node.bounds).presence == HazardPresence::Entire;
+    };
+
+    return hasEntirePresence(hasEntirePresence, m_Root);
+}
+
+bool QuadTree::HasEntirePresenceForCircleAtDepth(
+    HazardHandle handle,
+    const Circle2d& circle,
+    std::uint8_t maxDepth) const noexcept
+{
+    const RegisteredHazard* hazard = Find(handle);
+    if (!hazard)
+        return false;
+
+    const auto hasEntirePresence = [&](const auto& self,
+                                       const Rect2d& nodeBounds,
+                                       std::uint8_t depth) noexcept -> bool {
+        const HazardPresence presence = Classify(*hazard, nodeBounds).presence;
+        if (presence == HazardPresence::Entire)
+            return true;
+        if (presence == HazardPresence::None || depth >= maxDepth)
+            return false;
+
+        for (const Rect2d& quadrant : nodeBounds.QuadrantsRustF32())
+        {
+            if (circle.IntersectsRustF32(quadrant) &&
+                self(self, quadrant, static_cast<std::uint8_t>(depth + 1U)))
+                return true;
+        }
+        return false;
+    };
+
+    return hasEntirePresence(hasEntirePresence, m_Root.bounds, 0);
+}
+
+bool QuadTree::HasEntirePresenceForEdgeAtDepth(
+    HazardHandle handle,
+    const Edge2d& edge,
+    std::uint8_t maxDepth) const noexcept
+{
+    const RegisteredHazard* hazard = Find(handle);
+    if (!hazard)
+        return false;
+
+    const auto hasEntirePresence = [&](const auto& self,
+                                       const Rect2d& nodeBounds,
+                                       std::uint8_t depth) noexcept -> bool {
+        const HazardPresence presence = Classify(*hazard, nodeBounds).presence;
+        if (presence == HazardPresence::Entire)
+            return true;
+        if (presence == HazardPresence::None || depth >= maxDepth)
+            return false;
+
+        for (const Rect2d& quadrant : nodeBounds.QuadrantsRustF32())
+        {
+            if (edge.IntersectsRustF32(quadrant) &&
+                self(self, quadrant, static_cast<std::uint8_t>(depth + 1U)))
+                return true;
+        }
+        return false;
+    };
+
+    return hasEntirePresence(hasEntirePresence, m_Root.bounds, 0);
 }
 
 std::size_t QuadTree::NodeCount() const noexcept

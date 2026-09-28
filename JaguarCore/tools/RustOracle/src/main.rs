@@ -106,7 +106,115 @@ fn print_buffer_components(name: &str, points: &[(f32, f32)], distance: f64) {
     }
 }
 
+fn run_collision_parity_oracle() {
+    let mut surrogate_shape = polygon(&[(4.95, 7.95), (5.05, 7.95), (5.05, 8.05), (4.95, 8.05)]);
+    surrogate_shape
+        .generate_surrogate(SPSurrogateConfig {
+            n_pole_limits: [(1, 0.0), (0, 0.0), (0, 0.0)],
+            ff_pole_area_ratio: 1.0,
+            n_ff_piers: 0,
+        })
+        .unwrap();
+    let notch_container = Arc::new(polygon(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (6.0, 10.0),
+        (6.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ]));
+
+    for (threshold_name, cd_threshold) in [("high", 8), ("low", 0)] {
+        let engine = CDEngine::new(
+            Rect::try_new(0.0, 0.0, 10.0, 10.0).unwrap(),
+            vec![Hazard::new(
+                HazardEntity::Exterior,
+                Arc::clone(&notch_container),
+                false,
+            )],
+            CDEConfig {
+                quadtree_depth: 4,
+                cd_threshold,
+                item_surrogate_config: SPSurrogateConfig::none(),
+            },
+        );
+        let detect = engine.detect_surrogate_collision(
+            surrogate_shape.surrogate(),
+            &jagua_rs::geometry::Transformation::empty(),
+            &NoFilter,
+        );
+        println!("collision.notch.detect.{threshold_name}={detect}");
+
+        let mut collector = BasicHazardCollector::new();
+        let stopped =
+            engine.collect_surrogate_collisions_until(&surrogate_shape, &mut collector, |_| false);
+        println!(
+            "collision.notch.collect.{threshold_name}=stopped:{stopped},count:{}",
+            collector.len()
+        );
+    }
+
+    let mut pier_only_shape = polygon(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (6.0, 10.0),
+        (6.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ]);
+    pier_only_shape
+        .generate_surrogate(SPSurrogateConfig {
+            n_pole_limits: [(1, 0.0), (0, 0.0), (0, 0.0)],
+            ff_pole_area_ratio: 0.0,
+            n_ff_piers: 1,
+        })
+        .unwrap();
+    println!(
+        "collision.notch.pier_only_count={}",
+        pier_only_shape.surrogate().ff_piers().len()
+    );
+
+    let large_notch_container = Arc::new(polygon(&[
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 40.0),
+        (30.0, 40.0),
+        (30.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 40.0),
+        (0.0, 40.0),
+    ]));
+    let large_notch_engine = CDEngine::new(
+        Rect::try_new(0.0, 0.0, 40.0, 40.0).unwrap(),
+        vec![Hazard::new(
+            HazardEntity::Exterior,
+            large_notch_container,
+            false,
+        )],
+        CDEConfig {
+            quadtree_depth: 4,
+            cd_threshold: 8,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+    );
+    let pier_only_detect = large_notch_engine.detect_surrogate_collision(
+        pier_only_shape.surrogate(),
+        &jagua_rs::geometry::Transformation::from_translation((15.0, 15.0)),
+        &NoFilter,
+    );
+    println!("collision.notch.detect_pier_only={pier_only_detect}");
+}
+
 fn main() {
+    if std::env::args().any(|arg| arg == "--collision-parity-only") {
+        run_collision_parity_oracle();
+        return;
+    }
+
     let tied_x_hull = convex_hull_from_points(vec![
         Point(0.0, 1.0),
         Point(1.0, 0.0),

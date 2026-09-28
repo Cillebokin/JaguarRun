@@ -1,7 +1,9 @@
 # 29. BPP 逐文件逻辑比对（Bin / BPInstance / BPProblem / BPSolution）
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/probs/bpp/entities/{bin,instance,problem,solution}.rs`（37 / 68 / 286 / 44 行）
 **C++**: `JaguarCore/Include/JaguarCore/Problems/Bpp.h`（202 行）+ `JaguarCore/Source/Problems/BPP/{BppBin,BppInstance,BppProblem,BppSolution}.cpp`（2 / 116 / 517 / 62 行）
-**判定**: 基本等价（布局槽位/代数/LIFO 复用、需求与库存记账、restore 保留键策略一致；LayKey 编码不同；LayoutTargetKind 注释与实现相反；item_placed_qtys/bin_used_qtys 未暴露；BPSolution 无 time_stamp；place 失败回滚为 C++ 额外；PlaceItem 需求耗尽 debug-only 双侧确认）
+**判定**: 常规放置与布局状态逻辑基本等价；超需求 Debug 的部分状态尚不等价；Restore 防御层、公开聚合 API、time_stamp 与键表示仍有差异
+
+**2026-09-28 oracle 补充：** `--model-boundary-parity-only` 显示需求 0 的 BPP 放置在 Rust Debug 先开箱并插入条目，再于需求下溢时 panic；捕获 panic 后为 `remaining=0, placed=1, stock=0`。JaguarCore Debug 在放置前返回 `Infeasible`，不改变布局/库存；Release 两侧都成功放置并将需求回绕为 `usize::MAX`。该 Debug 部分状态差异需要按本轮待确认的 panic→Result 口径处理，不能只比较失败类型。
 
 ## 函数逐条比对
 
@@ -40,7 +42,7 @@
 
 #### `place_item`（Rust problem.rs:48-66）
 - C++ 对应：`BPProblem::PlaceItem`（BppProblem.cpp:166-221）。
-- 判定：基本等价（eef0830 后确认：需求耗尽校验 debug-only；C++ 有失败回滚）。
+- 判定：Release 状态行为一致；Debug 下 C++ `Infeasible` 发生在开箱/放置前，Rust 下溢 panic 发生在布局更新后，状态不等价。
 - 逐步对照：
   1. 布局选择：Rust `BPLayoutType::Open(lkey)` 直用 / `Closed{bin_id}` 时 `Layout::new(bin.container)` + `register_layout`（rs:49-57）↔ C++ `targetKind == Closed` 时 `OpenLayout(binIndex)`（cpp:184-191 → cpp:146-164：bin 越界/库存耗尽校验 → 新建 Layout → AllocateLayoutSlot → `--m_RemainingBinStock`）。判定：一致（注意 **LayoutTargetKind 命名/注释与 Rust 语义相反**：Rust `Open(lkey)`=已有布局、`Closed{bin_id}`=新开箱；C++ `LayoutTargetKind::Open` 注释"放入新布局"、`Closed` 注释"放入已有布局"（Bpp.h:71-77），而实现中 `Closed` 分支走 OpenLayout 开新布局（cpp:184-191）、RemoveItem 返回 `Open` 表示"放入已有布局"（cpp:245-255 闭空布局时改回 Closed）。**即 C++ 的枚举值语义与 Rust 完全对齐（Closed=开新箱），仅头文件注释写反**——文档错误，非行为差异。）
   2. 需求耗尽校验：C++ `#ifndef NDEBUG` 包裹（cpp:174-180，"BPP item demand is exhausted" → Infeasible）；**Rust 无校验**（`item_demand_qtys[item_idx] -= 1` 直接执行，rs:63/register_included_item rs:234-236）。判定：差异（同记录 27 差异 4；Release 双侧均不拦截）。
@@ -115,7 +117,7 @@
 |---|---|---|---|---|
 | 1 | LayKey 表示：Rust slotmap 不透明键 vs C++ `generation<<32\|slotIndex` 编码 + LayoutSlot/代数/LIFO 空闲栈手工复刻 | 差异（表示法） | 行为等价；键不按位兼容 | rs(problem):11-14；BppProblem.cpp:14-38, 89-144 |
 | 2 | 布局键编码中 C++ 槽 0 哨兵（generation=0 恒空，Restore 拒绝槽 0） | C++ 额外 | 与 slotmap 无显式对应的防御位 | BppProblem.cpp:74, 334 |
-| 3 | PlaceItem 需求耗尽校验：C++ `#ifndef NDEBUG`（debug-only），Rust 无校验 | 差异 | Release 双侧不拦截（eef0830 确认） | BppProblem.cpp:174-180 vs rs(problem):48-66 |
+| 3 | PlaceItem 需求耗尽：C++ Debug 预检返回 Infeasible，Rust Debug 在开箱并放置后下溢 panic；Release 双侧放置并回绕 | Debug 状态差异 | Rust panic 后 `remaining=0, placed=1, stock=0`；C++ 错误前状态不变 | BppProblem.cpp:174-180 vs rs(problem):48-66；`--model-boundary-parity-only` |
 | 4 | PlaceItem 失败回滚（open 后 GetLayout 失败 / layout->PlaceItem 失败 → 库存与槽位回滚） | C++ 额外 | Rust layout.place_item 无失败路径，无需回滚 | BppProblem.cpp:193-215 |
 | 5 | BPSolution 无 time_stamp | C++ 缺失 | 同记录 27 差异 1 | rs(solution):15；Bpp.h:115-124 |
 | 6 | item_placed_qtys() / bin_used_qtys() 迭代器未暴露 | C++ 缺失 | 可由 RemainingDemand/RemainingBinStock 逐项表达；bin_cost 已按等价方式实现 | rs(problem):187-199；BppProblem.cpp:456-465, 501-510 |
@@ -127,4 +129,4 @@
 | 12 | C++ Create/PlaceItem 等全链路 Result 化（bin 越界、库存耗尽等） | 差异（形态） | 合法输入行为一致 | BppProblem.cpp:146-164, 169-173 |
 
 ## 结论
-BPP 的动态语义（开箱/闭箱、需求与库存记账、保留键的增量 restore、原地恢复优先）双侧一致，C++ 用 32/32 位键编码 + 奇偶代数 + LIFO 空闲栈忠实复刻了 slotmap+SecondaryMap 行为，并在 Restore/Density 处显式按槽序排序对齐 Rust 的迭代顺序。主要差异为防御层（PlaceItem 回滚、Restore 预验证与原子提交、需求耗尽 debug-only 校验）、未暴露的 placed/used 迭代器与 time_stamp，以及 LayoutTargetKind 注释写反（纯文档问题）。
+BPP 的常规动态语义、Release 超需求回绕和键复用顺序一致；但 Debug 超需求调用的可观察状态不同：Rust 已开箱并放入条目后 panic，C++ 在放置前返回错误。Restore 预验证/原子提交、C++ 失败回滚、未暴露的 placed/used 迭代器与 time_stamp 仍属差异或接口缺口；不可据全套测试通过宣称完全等价。

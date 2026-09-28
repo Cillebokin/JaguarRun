@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/io/import.rs`（311 行）
 **C++**: `JaguarCore/Include/JaguarCore/io/importer.h`（102 行）+ `JaguarCore/Source/IO/Importer.cpp`（714 行）
-**判定**: 基本等价（转换语义一致；缺"非连续重复顶点"检查；`assert!`/`unimplemented!`→`Result` 错误；C++ 额外含 probs 层导入与 JSON 入口——probs 部分在记录 37）
+**判定**: 基本等价（转换语义一致；非连续重复顶点的显式检查位置和诊断不同，但两侧都会拒绝；`assert!`/`unimplemented!`→`Result` 错误；C++ 额外含 probs 层导入与 JSON 入口——probs 部分在记录 37）
 
 > 范围说明：本记录覆盖 Rust `io/import.rs` 全文（entities 层导入：`Importer::new`/`with_min_item_separation`/`import_item`/`import_container` + 自由函数 `import_rotation`/`import_simple_polygon`/`centering_transformation`/`ext_to_int_transformation`/`eliminate_degenerate_vertices`）。C++ `Importer.cpp` 中 `ImportSPInstance`/`ImportBPInstance`/`ImportMSPInstance`/各 solution 导入及助手 `importPositiveItems`/`withSeparation`/`externalToInternal` 的 solution 用法属于 probs 层，在记录 37 比对。
 
@@ -57,12 +57,12 @@
 
 ### `import_simple_polygon`（Rust 247-260 行）
 - C++ 对应：`Importer::ImportSimplePolygon`（Importer.cpp:238-266）。
-- 判定：差异（缺"非连续重复顶点"检查）。
+- 判定：输入接受边界一致；显式检查位置和错误诊断不同。
 - 证据：共同的步骤：
   1. 首尾相同去尾点：`points.len() > 1 && points[0] == points[len-1]` → pop（import.rs:250-252）↔ `points.size() > 1 && points.front() == points.back()` → pop_back（cpp:247-248）。
   2. 连续重复顶点消除：`eliminate_degenerate_vertices(&mut points)`（import.rs:254）↔ cpp:250-263 内联同算法（rustFpaEqual 判等、倒序删除）。
   3. `SPolygon::new(points)` ↔ `SimplePolygon::Create(std::move(points))`（cpp:265）。
-  - **缺失步骤**：Rust 在第 2 步后检查非连续重复：`if points.len() != points.iter().unique().count() { bail!("Simple polygon has non-consecutive duplicate vertices"); }`（import.rs:256-258）。C++ 无对应检查——非连续重复顶点（如 [A,B,A,C]）会被静默交给 `SimplePolygon::Create`（其内部是否拒绝取决于多边形校验，见记录 05：`SimplePolygon::Create` 校验自交/顶点数，但"非连续重复顶点"不等价于自交必然失败，某些 A…A 重复可构造出非法但通过校验的多边形）。行为差异：Rust 报错，C++ 可能接受。
+  - Rust 在第 2 步后用 `unique()` 显式拒绝非连续重复，并返回 `Simple polygon has non-consecutive duplicate vertices`（import.rs:256-258）。C++ 没有同一层检查，但随后 `SimplePolygon::Create` 会在自交检查前逐对比较所有顶点（SimplePolygon.cpp:217-223），所以同一重复顶点也会被拒绝。对 `[A,B,A,C]` 等输入，两侧都是失败；差异是失败位置和诊断（Rust `anyhow` 文案 vs C++ `InvalidPolygon` / `simple polygon contains duplicate points`），不是接受边界。Rust oracle 与 C++ `ImportItem` 回归用例确认这一点。
   - 另：C++ 入口先把每个坐标 `double→float→double` 收窄（cpp:242-246），模拟 Rust f32 输入域；Rust 天然 f32。一致。
 
 ### `centering_transformation`（Rust 262-267 行）
@@ -71,7 +71,7 @@
 
 ### `ext_to_int_transformation`（Rust 269-285 行）
 - C++ 对应：`externalToInternal`（Importer.cpp:131-151，匿名命名空间）。
-- 判定：一致（公式相同：先撤销 pre-transform 再施加外部变换）。
+- 判定：公式相同；非有限输入两侧均失败，失败通道不同。
 - 证据：Rust：
 ```rust
 Transformation::empty()
@@ -79,7 +79,7 @@ Transformation::empty()
     .transform_from_decomposed(ext_transf)
     .decompose()
 ```
-（import.rs:281-285，注释"1. undo pre-transform, 2. do the absolute transformation"）↔ C++ `original.preTransform.InverseRustF32().FollowedByRustF32(externalTransform)`（cpp:150）。矩阵语义：`T_ext ∘ T_pre⁻¹`（先逆预变换再外部变换），双侧一致。C++ 额外做输入有限性校验（cpp:137-143，返回 `SnapshotMismatch`）并在度→弧度上用 `radiansRustF32` 同式（cpp:144-148）。Rust 无校验（可能产生 NaN 变换静默传播）。
+（import.rs:281-285，注释"1. undo pre-transform, 2. do the absolute transformation"）↔ C++ `original.preTransform.InverseRustF32().FollowedByRustF32(externalTransform)`（cpp:150）。矩阵语义：`T_ext ∘ T_pre⁻¹`（先逆预变换再施加外部变换），双侧一致。C++ 检查非有限输入并返回 `SnapshotMismatch`（cpp:137-143）；Rust 不做同层校验，但 `DTransformation` 的 `NotNan` 构造或后续矩阵运算会 panic。定向 oracle 对 NaN/Infinity 变换在 Rust Debug 和 Release 均观察到 panic；因此两侧都不产生成功结果，差异是 C++ `Result` 错误通道与 Rust panic 通道。
 
 ### `eliminate_degenerate_vertices`（Rust 287-311 行）
 - C++ 对应：`Importer::ImportSimplePolygon` 内联段（Importer.cpp:250-263）。
@@ -90,12 +90,12 @@ Transformation::empty()
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | 非连续重复顶点检查 | C++ 缺失 | Rust 拒绝 `bail!("Simple polygon has non-consecutive duplicate vertices")`；C++ 静默交给 `SimplePolygon::Create`，可能接受非法多边形 | import.rs:256-258 vs Importer.cpp:250-265 |
+| 1 | 非连续重复顶点检查 | 接受边界一致，诊断不同 | 两侧均拒绝；Rust 在 importer 层给出专用错误，C++ 由 `SimplePolygon::Create` 返回 `InvalidPolygon` | import.rs:256-258 vs Importer.cpp:250-265 + SimplePolygon.cpp:217-223 |
 | 2 | `assert!`（zone 质量上限）→ `Result` 错误 | 基本等价 | C++ 所有构建下返回 `InvalidInput`；Rust 仅 debug 构建中止。`N_QUALITIES=10` ↔ `MAX_QUALITIES=10` 值一致但常量来源不同 | import.rs:108-111 vs Importer.cpp:19,457-461 |
 | 3 | `unimplemented!`（zone Polygon/MultiPolygon、container MultiPolygon）→ `UnsupportedShape` 错误 | 基本等价 | panic 通道改 Result 通道；消息文案不同 | import.rs:145,165,168 vs Importer.cpp:315,320-325 |
 | 4 | `with_min_item_separation` 形态：链式 builder vs 入口 scoped 导入器 | 一致 | 校验（有限非负）与 offset=separation/2 公式双侧一致；C++ `ShapeConfig()` 在 separation==0 时保留调用方 offset，Rust 总是置 None（C++ 额外自由度） | import.rs:45-54 vs Importer.cpp:114-122,230-236 |
 | 5 | Container 外部 id | C++ 额外 | Rust `Container::new` 无 id；C++ `Container::Create(external.id, ...)` 保留（供 BPP 导出用） | import.rs:196 vs Importer.cpp:495-496 |
-| 6 | `ext_to_int_transformation` 输入校验 | C++ 额外 | C++ 拒绝非有限变换（`SnapshotMismatch`）；Rust 无校验，NaN 静默传播 | import.rs:274-285 vs Importer.cpp:137-143 |
+| 6 | `ext_to_int_transformation` 非有限变换 | 失败边界一致，失败通道不同 | C++ 返回 `SnapshotMismatch`；Rust `DTransformation` / 矩阵中的 `NotNan` 运算会 panic。NaN/Infinity 没有静默成为成功解 | import.rs:274-285 + d_transformation.rs:20-26 + transformation.rs:146-153 vs Importer.cpp:131-151；Debug/Release oracle |
 | 7 | `import_rotation` 全流程（65536 上限、stepped 展开、[0.0]→None、rem_euclid 归一化、f32 弧度换算） | 一致 | 错误消息文案逐一相同；`rem_euclid(360)%360` ↔ `fmod+fmod` 三步等价 | import.rs:200-245 vs Importer.cpp:327-397 |
 | 8 | item/container 形状四分支 + Inflate/Deflate + 中心化 pre_transform | 一致 | Rectangle f32 域校验、holes 拒绝（item）/忽略（container outer）、MultiPolygon 拒绝均一致 | import.rs:60-133 vs Importer.cpp:268-316 |
 | 9 | holes→quality 0 合并 | 一致 | `shapes_inferior_qzones[0].extend(holes)` ↔ `grouped[0].push_back` | import.rs:175-176 vs Importer.cpp:468-469 |
@@ -105,4 +105,4 @@ Transformation::empty()
 
 ## 结论
 
-导入管线的转换语义（形状四分支、Inflate/Deflate 修改模式、中心化预变换、旋转展开与 65536 上限、stepped 容差判定、`[0.0]→None` 归一、连续重复顶点消除、holes 合并 quality 0、preTransform 逆变换合成公式）双侧一致，错误文案大量逐字对应。主要缺口是 C++ 未移植"非连续重复顶点"拒绝检查；其余差异为错误通道（assert/unimplemented→Result）、C++ 保留容器外部 id 与更积极的输入校验，属记录系列一贯的 panic→Result 约定。
+导入管线的转换语义（形状四分支、Inflate/Deflate 修改模式、中心化预变换、旋转展开与 65536 上限、stepped 容差判定、`[0.0]→None` 归一、连续重复顶点消除、holes 合并 quality 0、preTransform 逆变换合成公式）双侧一致。此前把"非连续重复顶点"列为接受边界缺口不准确：C++ 下游 `SimplePolygon::Create` 已拒绝该输入；两侧只在错误诊断上不同。非有限多边形/变换输入的定向 oracle 在 Rust Debug 与 Release 都失败（panic），C++ 对应入口返回 `Result` 错误，符合保留 C++ `Result` 的约定。其余差异为错误通道、C++ 保留容器外部 id 和额外 API 能力。

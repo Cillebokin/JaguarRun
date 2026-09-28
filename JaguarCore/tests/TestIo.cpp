@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 
 namespace
@@ -226,4 +227,61 @@ void runIoTests()
     assert(importedF32Duplicate.HasValue());
     assert(importedF32Duplicate.Value().GetOriginalShape().shape.VertexCount() == 4);
     assert(std::abs(importedF32Duplicate.Value().Area() - 8.0) < 1.0e-6);
+
+    jaguar::ExternalItem nonconsecutiveDuplicate = itemInput;
+    nonconsecutiveDuplicate.shape = jaguar::ExternalShape::SimplePolygon({
+        {0.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {0.0, 0.0}, {0.0, 2.0}});
+    const auto rejectedNonconsecutiveDuplicate =
+        makeImporter().ImportItem(nonconsecutiveDuplicate, 15);
+    assert(!rejectedNonconsecutiveDuplicate.HasValue());
+    assert(rejectedNonconsecutiveDuplicate.GetError().code ==
+           jaguar::ErrorCode::InvalidPolygon);
+
+    jaguar::ExternalItem signedZeroClosure = itemInput;
+    signedZeroClosure.shape = jaguar::ExternalShape::SimplePolygon({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}, {-0.0, 0.0}});
+    const auto importedSignedZeroClosure =
+        makeImporter().ImportItem(signedZeroClosure, 16);
+    assert(importedSignedZeroClosure.HasValue());
+    assert(importedSignedZeroClosure.Value()
+               .GetOriginalShape().shape.VertexCount() == 4);
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    jaguar::ExternalItem nanCoordinate = itemInput;
+    nanCoordinate.shape = jaguar::ExternalShape::SimplePolygon({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {nan, 2.0}});
+    const auto rejectedNanCoordinate = makeImporter().ImportItem(nanCoordinate, 17);
+    assert(!rejectedNanCoordinate.HasValue());
+    assert(rejectedNanCoordinate.GetError().code == jaguar::ErrorCode::InvalidInput);
+
+    const double infinity = std::numeric_limits<double>::infinity();
+    jaguar::ExternalItem infiniteCoordinate = itemInput;
+    infiniteCoordinate.shape = jaguar::ExternalShape::SimplePolygon({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {infinity, 2.0}});
+    const auto rejectedInfiniteCoordinate =
+        makeImporter().ImportItem(infiniteCoordinate, 18);
+    assert(!rejectedInfiniteCoordinate.HasValue());
+    assert(rejectedInfiniteCoordinate.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+
+    jaguar::ExternalSPInstance solutionInstanceInput{};
+    solutionInstanceInput.name = "non-finite-solution-transform";
+    solutionInstanceInput.items.push_back({itemInput, 1});
+    solutionInstanceInput.stripHeight = 10.0;
+    const auto solutionInstance =
+        makeImporter().ImportSPInstance(solutionInstanceInput);
+    assert(solutionInstance.HasValue());
+
+    jaguar::ExternalSPSolution nonFiniteTransformSolution{};
+    nonFiniteTransformSolution.stripWidth = 10.0;
+    jaguar::ExternalPlacedItem placedItem{};
+    placedItem.itemId = itemInput.id;
+    placedItem.transformation.translation.x = infinity;
+    placedItem.transformation.translation.y = 2.0;
+    nonFiniteTransformSolution.layout.placedItems.push_back(placedItem);
+    const auto rejectedNonFiniteTransform = makeImporter().ImportSPSolution(
+        solutionInstance.Value(), nonFiniteTransformSolution);
+    assert(!rejectedNonFiniteTransform.HasValue());
+    assert(rejectedNonFiniteTransform.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
 }

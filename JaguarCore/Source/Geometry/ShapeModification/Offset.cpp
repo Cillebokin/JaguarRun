@@ -266,7 +266,8 @@ JAGUARCORE_API Result<SimplePolygon> OffsetShape(const SimplePolygon& shape,
     if (!std::isfinite(offset.distance))
     {
         return Result<SimplePolygon>::FromError(
-            {ErrorCode::InvalidInput, "invalid offset distance"});
+            {ErrorCode::OffsetFailed,
+             "Offset resulted in an empty polygon"});
     }
     if (offset.distance == 0.0)
         return reimportOffsetPolygon(shape);
@@ -278,7 +279,8 @@ JAGUARCORE_API Result<SimplePolygon> OffsetShape(const SimplePolygon& shape,
         if (skeletonOffsets.Value().empty())
         {
             return Result<SimplePolygon>::FromError(
-                {ErrorCode::OffsetFailed, "offset resulted in an empty polygon"});
+                {ErrorCode::OffsetFailed,
+                 "Offset resulted in an empty polygon"});
         }
         return reimportOffsetPolygon(skeletonOffsets.Value().front());
     }
@@ -293,7 +295,8 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
     if (!std::isfinite(offset.distance))
     {
         return Result<std::vector<SimplePolygon>>::FromError(
-            {ErrorCode::InvalidInput, "invalid offset distance"});
+            {ErrorCode::OffsetFailed,
+             "Offset resulted in an empty polygon"});
     }
     if (offset.distance == 0.0)
         return Result<std::vector<SimplePolygon>>::FromValue({shape});

@@ -1,7 +1,9 @@
 # 31. MSPP 逐文件逻辑比对（Strip / MSPInstance / MSPProblem / MSPSolution + util/assertions.rs）
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/probs/mspp/entities/{strip,instance,problem,solution}.rs`（61 / 64 / 263 / 44 行）+ `CodeResource/jagua-rs/jagua-rs/src/probs/mspp/util/assertions.rs`（36 行）
 **C++**: `JaguarCore/Include/JaguarCore/Problems/MSpp.h`（212 行）+ `JaguarCore/Source/Problems/MSPP/{MspStrip,MspInstance,MspProblem,MspSolution}.cpp`（65 / 150 / 545 / 59 行）
-**判定**: 基本等价（条带宽度上限、布局增删改、restore 保留键策略、密度两种口径一致；all_layouts() 未暴露；条带配置一致性校验已按 eef0830 删除、快照值直接生效；Restore 的 C++ 纯量校验仍保留）
+**判定**: 常规条带/布局逻辑基本等价；超需求 Debug 状态与 Restore 的不一致宽度接受边界仍不等价；C++ 保留额外快照校验和接口差异
+
+**2026-09-28 oracle 补充：** `--model-boundary-parity-only` 显示需求 0 的 MSPP 放置在 Rust Debug 先插入条目，再于需求下溢时 panic；捕获 panic 后为 `remaining=0, placed=1`。JaguarCore Debug 在放置前返回 `Infeasible`、布局不变；Release 两侧都成功放置并将需求回绕为 `usize::MAX`。此 Debug 部分状态差异需按待确认的 panic→Result 口径处理。
 
 ## 函数逐条比对
 
@@ -56,7 +58,7 @@
 
 #### `place_item`（Rust problem.rs:78-88）
 - C++ 对应：`MSPProblem::PlaceItem`（MspProblem.cpp:207-236）。
-- 判定：基本等价（eef0830 后确认：需求耗尽校验 debug-only）。
+- 判定：Release 状态行为一致；Debug 下 C++ 在放置前返回 Infeasible，Rust 放置后需求下溢 panic，状态不等价。
 - 证据：itemIndex 越界（cpp:210-214）、`#ifndef NDEBUG` 需求耗尽（cpp:215-221，"MSPP item demand is exhausted"；Rust 无校验）、layoutIndex 无效（cpp:222-227，Rust 索引 panic）、放置成功后 `--m_RemainingDemand`（cpp:232 ↔ rs:85）。debug 断言：Rust 无 ↔ C++ cpp:233 DebugAssertMSPSolution（debug-only）。
 
 #### `remove_item`（Rust problem.rs:92-101）
@@ -70,6 +72,7 @@
 #### `restore`（Rust problem.rs:119-176）
 - C++ 对应：`MSPProblem::Restore`（MspProblem.cpp:326-469）。
 - 判定：基本等价（保留键策略同 BPP；**eef0830 后确认：C++ 已无条带配置一致性校验**——快照 strip 直接生效；仍保留纯量合法性校验）。
+- `--restore-boundary-parity-only` 证实：strip.width 与 layout snapshot 宽度不一致时，Rust Release 接受并保留不一致状态，Debug 则在状态已更新后触发一致性断言；当前 C++ 两配置均由 `sameStripContainer` 原子拒绝。当前结论应限定为“合法且相互一致的快照行为对齐”，该接受边界尚未对齐。
 - 逐步对照：
   1. 预验证（C++ 额外，cpp:341-364）：键合法（槽非 0、代数奇、无重复键/槽）、strip 纯量校验（`isfinite` 且 maxWidth/fixedHeight/width > 0，cpp:353-358）、`sameStripContainer`（快照容器矩形与 strip 宽高逐顶点 f32 匹配，cpp:67-88）、独立重建 Layout 并 Restore（cpp:365-368）、placement 不超需求且 sameItemDefinition（cpp:369-381）。
   2. **条带配置一致性**：当前代码 MspProblem.cpp 中 Restore 对 strip 仅做上述纯量校验，**没有**与 base_strip 或任何全局配置的比对，保留槽直接 `preserved.strip = layout.strip`（cpp:453）、新槽直接 `LayoutSlot{..., layout.strip, ...}`（cpp:460-461）——即快照 strip 值直接生效。这与 Rust 行为一致（Rust rs:132 `self.strips[lk] = solution.strips[lk]` 同样直接赋值，仅 layout.restore 失败才替换布局；Rust 的配置一致性仅在 debug 断言 `prob_strip == sol_strip`（mspp assertions.rs:19-25）里覆盖，release 不查）。判定：一致（eef0830 删除了旧版"条带配置一致性校验"使 C++ 与 Rust 对齐；当前两侧 Release 均接受任意合法纯量的快照 strip）。
@@ -155,7 +158,7 @@ assert!(mspp.layouts.iter().all(|(p_lk, l)| {
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | LayKey 表示：slotmap 不透明键 vs `generation<<32\|slotIndex` + LayoutSlot/代数/LIFO/槽 0 哨兵（与 BPP 同构） | 差异（表示法） | 行为等价；键不按位兼容 | rs(problem):11-14；MspProblem.cpp:16-40, 94-98, 109-164 |
-| 2 | PlaceItem 需求耗尽校验：C++ `#ifndef NDEBUG`（debug-only），Rust 无校验 | 差异 | Release 双侧不拦截（eef0830 确认） | MspProblem.cpp:215-221 vs rs(problem):78-88 |
+| 2 | PlaceItem 需求耗尽：C++ Debug 预检返回 Infeasible，Rust Debug 在布局放置后下溢 panic；Release 双侧放置并回绕 | Debug 状态差异 | Rust panic 后 `remaining=0, placed=1`；C++ 错误前布局不变 | MspProblem.cpp:215-221 vs rs(problem):78-88；`--model-boundary-parity-only` |
 | 3 | MSPSolution 无 time_stamp | C++ 缺失 | 同记录 27/29 | rs(solution):16；MSpp.h:120-129 |
 | 4 | `all_layouts()` 迭代器未暴露 | C++ 缺失 | 典型用途由聚合 API（Density/PlacedItemCount/ExtendableStrips 等）覆盖 | rs(problem):229-231；MSpp.h 公开 API 无对应 |
 | 5 | Restore 条带配置一致性校验已删除，快照 strip 直接生效（eef0830 确认） | 一致（已对齐） | 双侧 Release 均接受任意合法纯量 strip；Rust 仅 debug 断言覆盖 strip 相等 | MspProblem.cpp:442-461 vs rs(problem):119-155；mspp assertions.rs:19-25 |
@@ -169,4 +172,4 @@ assert!(mspp.layouts.iter().all(|(p_lk, l)| {
 | 13 | 校验断言（problem_matches_solution）：C++ 附加独立重建 + 物品对账 + 需求对账；密度比较被结构覆盖；strip 相等用容差 | 差异（同记录 28 模式） | debug 构建行为一致；C++ Validate 为公共 API | Assertions.cpp:321-376；mspp assertions.rs:7-28 |
 
 ## 结论
-MSPP 与 BPP 共享同一套布局槽位/代数/保留键 restore 骨架，双侧语义一致；eef0830 后条带配置一致性校验确认已删除（快照 strip 直接生效，与 Rust release 行为对齐），需求耗尽校验确认为 C++ debug-only。差异集中在 C++ 的防御层（Restore 预验证/原子提交、纯量校验）、未暴露项（all_layouts、time_stamp）与对齐性排序；密度两种口径（问题层 container.area、解层 fixed_height*width）双侧逐式保真。
+MSPP 与 BPP 的常规布局槽位/需求记账及 Release 超需求回绕一致；Debug 超需求放置的 panic 后状态不同。条带配置变化本身双侧可接受，但 strip.width 与布局快照容器不一致时，Rust Release 接受、Debug 在状态变更后断言失败，C++ Debug/Release 均预检拒绝。Restore 的纯量/键/需求校验、`all_layouts` 与 `time_stamp` 等仍需区分记录；不能将快照配置对齐误扩大为 Restore 输入边界已对齐。

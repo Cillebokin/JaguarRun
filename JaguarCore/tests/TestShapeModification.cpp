@@ -149,6 +149,36 @@ void runShapeModificationTests()
     assert(!collapsed.HasValue());
     assert(collapsed.GetError().code == jaguar::ErrorCode::OffsetFailed);
 
+    const auto nanOffset = jaguar::OffsetShape(
+        source.Value(), jaguar::ShapeModifyMode::Inflate,
+        std::numeric_limits<double>::quiet_NaN());
+    assert(!nanOffset.HasValue());
+    assert(nanOffset.GetError().code == jaguar::ErrorCode::OffsetFailed);
+    assert(nanOffset.GetError().message ==
+           "Offset resulted in an empty polygon");
+    const auto infiniteOffset = jaguar::OffsetShape(
+        source.Value(), jaguar::ShapeModifyMode::Inflate,
+        std::numeric_limits<double>::infinity());
+    assert(!infiniteOffset.HasValue());
+    assert(infiniteOffset.GetError().code == jaguar::ErrorCode::OffsetFailed);
+    assert(infiniteOffset.GetError().message ==
+           "Offset resulted in an empty polygon");
+    const auto negativeInfiniteOffset = jaguar::OffsetShape(
+        source.Value(), jaguar::ShapeModifyMode::Inflate,
+        -std::numeric_limits<double>::infinity());
+    assert(!negativeInfiniteOffset.HasValue());
+    assert(negativeInfiniteOffset.GetError().code == jaguar::ErrorCode::OffsetFailed);
+    assert(negativeInfiniteOffset.GetError().message ==
+           "Offset resulted in an empty polygon");
+
+    const auto nonFiniteOffsets = jaguar::OffsetShapes(
+        source.Value(), jaguar::ShapeModifyMode::Inflate,
+        std::numeric_limits<double>::infinity());
+    assert(!nonFiniteOffsets.HasValue());
+    assert(nonFiniteOffsets.GetError().code == jaguar::ErrorCode::OffsetFailed);
+    assert(nonFiniteOffsets.GetError().message ==
+           "Offset resulted in an empty polygon");
+
     constexpr float epsilonBoundarySide =
         0.00200000009499490261078F;
     constexpr float epsilonBoundaryDistance =

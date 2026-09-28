@@ -164,7 +164,12 @@ void runJsonCodecTests()
     const auto serializedSpp = jaguar::SerializeExternalSPInstanceJson(
         parsedSpp.Value());
     assert(serializedSpp.HasValue());
-    assert(jaguar::ParseExternalSPInstanceJson(serializedSpp.Value()).HasValue());
+    assert(serializedSpp.Value().find("\"min_item_separation\"") !=
+           std::string::npos);
+    const auto reparsedZeroSeparationSpp =
+        jaguar::ParseExternalSPInstanceJson(serializedSpp.Value());
+    assert(reparsedZeroSeparationSpp.HasValue());
+    assert(reparsedZeroSeparationSpp.Value().minItemSeparation == 0.0);
 
     const auto parsedBpp = jaguar::ParseExternalBPInstanceJson(R"json({
         "name": "small-bpp",
@@ -186,6 +191,17 @@ void runJsonCodecTests()
     assert(parsedBpp.Value().bins.size() == 1);
     assert(parsedBpp.Value().bins.front().stock == 2);
     assert(parsedBpp.Value().bins.front().cost == 11);
+    auto zeroSeparationBpp = parsedBpp.Value();
+    zeroSeparationBpp.minItemSeparation = 0.0;
+    const auto serializedZeroSeparationBpp =
+        jaguar::SerializeExternalBPInstanceJson(zeroSeparationBpp);
+    assert(serializedZeroSeparationBpp.HasValue());
+    assert(serializedZeroSeparationBpp.Value().find("\"min_item_separation\"") !=
+           std::string::npos);
+    const auto reparsedZeroSeparationBpp =
+        jaguar::ParseExternalBPInstanceJson(serializedZeroSeparationBpp.Value());
+    assert(reparsedZeroSeparationBpp.HasValue());
+    assert(reparsedZeroSeparationBpp.Value().minItemSeparation == 0.0);
 
     const auto parsedMspp = jaguar::ParseExternalMSPInstanceJson(R"json({
         "name": "small-mspp",
@@ -200,6 +216,16 @@ void runJsonCodecTests()
     assert(parsedMspp.HasValue());
     assert(parsedMspp.Value().strips.height == 20.0);
     assert(parsedMspp.Value().strips.maxWidth == 30.0);
+    const auto serializedZeroSeparationMspp =
+        jaguar::SerializeExternalMSPInstanceJson(parsedMspp.Value());
+    assert(serializedZeroSeparationMspp.HasValue());
+    assert(serializedZeroSeparationMspp.Value().find("\"min_item_separation\"") !=
+           std::string::npos);
+    const auto reparsedZeroSeparationMspp =
+        jaguar::ParseExternalMSPInstanceJson(
+            serializedZeroSeparationMspp.Value());
+    assert(reparsedZeroSeparationMspp.HasValue());
+    assert(reparsedZeroSeparationMspp.Value().minItemSeparation == 0.0);
 
     jaguar::Importer importer;
     const auto importedSpp = importer.ImportSPInstanceJson(

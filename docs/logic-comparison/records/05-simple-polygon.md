@@ -12,7 +12,7 @@
 - 证据与说明：
   1. **顶点数下限**：simple_polygon.rs:42-44 `< 3` bail ↔ SimplePolygon.cpp:199-201 `< 3` → InvalidPolygon。一致。
   2. **重复点判定**：Rust simple_polygon.rs:45 `points.iter().unique().count() != points.len()`——itertools `unique` 依赖 `PartialEq`（f32 `==`：+0.0 == -0.0 视为相等 → 会被去重拒绝；NaN != NaN → 两个 NaN 互不相等，**不会被去重**，即"两个 NaN 顶点"可通过查重）。C++ SimplePolygon.cpp:219 `if (points[i] == points[j])` 用 Point2d operator==（point.h:42，逐分量 `==`）：+0.0 与 -0.0 相等 → 拒绝（**与 Rust unique 一致**）；NaN==NaN false → 不拒绝（**与 Rust 一致**）。核对背景候选"Rust Hash to_bits vs C++ =="：Rust `unique()` 实际用的是 `Vec` + `contains`（PartialEq 路径，非 Hash），因此 ±0.0/NaN 语义两侧**均一致**——背景候选中的"判定相反"在当前源码版本不成立（若 Rust 侧曾用 HashSet/Hash 路径则相反，现存实现不是）。判定：【一致】（就重复点查重而言）。
-  3. **非有限值前置校验**：C++ SimplePolygon.cpp:203-208 + 210-213（f32 范围溢出检测）为【C++额外】（Rust 侧 f32 天然无需）。
+  3. **非有限值校验位置**：C++ SimplePolygon.cpp:203-213 在入口直接返回 `Result` 错误；Rust 没有同层 finite 检查，但 NaN 会在直径计算的 `NotNan::new(...).unwrap()` 失败，无效/退化 bbox 会在 `Rect::try_new(...).unwrap()` 失败。输入的接受边界同为失败，通道是 C++ `Result` vs Rust panic。超出 f32 范围的 C++ double 输入收窄为 infinity 后也失败；Rust 外部几何类型本身就是 f32。
   4. **面积零判定**：Rust simple_polygon.rs:52-53 `match ... { 0.0 => bail!(...) }`——**严格 == 0.0**（极小非零面积通过）；C++ SimplePolygon.cpp:233 `if (std::abs(rawArea) <= policy.areaTolerance)`——默认 areaTolerance = 0.0（NumericPolicy.h:19-20）时与 `== 0.0`（对绝对值）等价；但 policy 可配非零容差 → 允许被 Rust 拒绝的退化多边形。判【差异】（可配置容差放宽了 Rust 的严格判定；默认值下等价）。
   5. **负面积反转**：simple_polygon.rs:54-58 `area < 0.0 → points.reverse(); -area` ↔ SimplePolygon.cpp:237-240 `rawArea < 0.0F → std::reverse; area = abs(rawArea)`。一致（-area 与 abs 对负数同值）。
   6. **直径/包围盒/POI 的计算次序**：Rust 先 diameter（含凸包）→ bbox → poi（simple_polygon.rs:62-64）；C++ bbox → centroid → diameter → poi（SimplePolygon.cpp:241-256）——计算次序无相互依赖，结果相同。
@@ -109,7 +109,7 @@
 | 5 | TransformableFrom::transform_from | C++缺失 | 同前各记录 | simple_polygon.rs:250-277 |
 | 6 | surrogate() 空时 panic vs GetSurrogate 返回 nullptr | 差异（形态） | 失败通道不同 | simple_polygon.rs:111 vs SimplePolygon.cpp:392 |
 | 7 | Edges() 静默丢弃退化边（Edge2d::Create 失败跳过） | 差异（不可达） | 上游查重已排除退化，实际不可触发 | SimplePolygon.cpp:301-304 vs simple_polygon.rs:91-98 |
-| 8 | 非有限值/超 f32 范围前置校验 | C++额外 | 防御层，Rust 天然 f32 无需 | SimplePolygon.cpp:203-213 |
+| 8 | 非有限值/超 f32 范围检查位置 | 失败边界一致，通道不同 | C++ 在入口返回 `InvalidInput`；Rust 在后续 `NotNan`/bbox 构造处 panic；Rust 输入类型天然为 f32 | SimplePolygon.cpp:203-213 vs simple_polygon.rs:120-141,124 + 定向 oracle |
 | 9 | Contains(point, tolerance)（PnPN 容差版）与 Intersects(Edge, tolerance) | C++额外 | 与 Rust 不同的算法族，含边界带语义 | SimplePolygon.cpp:395-428, 476-487 |
 | 10 | 重复点查重的 ±0.0/NaN 语义 | 一致（核对后） | Rust unique 走 PartialEq 而非 Hash，与 C++ == 同语义；背景候选"判定相反"不成立 | simple_polygon.rs:45（itertools unique/PartialEq）vs SimplePolygon.cpp:219 + point.h:40-43 |
 

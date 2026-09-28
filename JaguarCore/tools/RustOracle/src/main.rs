@@ -24,8 +24,12 @@ use jagua_rs::io::ext_repr::{
 use jagua_rs::io::import::{Importer, import_simple_polygon};
 use jagua_rs::io::svg::{SvgDrawOptions, layout_to_svg};
 use jagua_rs::probs::bpp::entities::{BPInstance, BPLayoutType, BPPlacement, BPProblem, Bin};
+use jagua_rs::probs::bpp::io::ext_repr::ExtBPInstance;
 use jagua_rs::probs::mspp::entities::{MSPInstance, MSPPlacement, MSPProblem, Strip};
+use jagua_rs::probs::mspp::io::ext_repr::{ExtMSPInstance, ExtMSPStrip};
 use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem, Strip as SPStrip};
+use jagua_rs::probs::spp::io::ext_repr::{ExtSPInstance, ExtSPSolution};
+use jagua_rs::probs::spp::io::import_solution as import_spp_solution;
 use std::sync::Arc;
 
 fn polygon(points: &[(f32, f32)]) -> SPolygon {
@@ -209,7 +213,368 @@ fn run_collision_parity_oracle() {
     println!("collision.notch.detect_pier_only={pier_only_detect}");
 }
 
+fn run_model_boundary_parity_oracle() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    std::panic::set_hook(Box::new(|_| {}));
+    let cde_config = CDEConfig {
+        quadtree_depth: 1,
+        cd_threshold: 8,
+        item_surrogate_config: SPSurrogateConfig::none(),
+    };
+    let shape_config = ShapeModifyConfig::default();
+    let transform = DTransformation::new(0.0, (1.0, 1.0));
+
+    let overflowing_spp = SPInstance::new(
+        vec![(square_item(0, 1.0), usize::MAX), (square_item(1, 1.0), 1)],
+        SPStrip::new(10.0, cde_config, shape_config, 10.0).unwrap(),
+    );
+    let total_demand = catch_unwind(|| overflowing_spp.total_item_qty());
+    match total_demand {
+        Ok(total) => println!("demand.total_overflow={total}"),
+        Err(_) => println!("demand.total_overflow=panic"),
+    }
+
+    let mut spp = SPProblem::new(SPInstance::new(
+        vec![(square_item(0, 1.0), 0)],
+        SPStrip::new(10.0, cde_config, shape_config, 10.0).unwrap(),
+    ));
+    let spp_result = catch_unwind(AssertUnwindSafe(|| {
+        spp.place_item(SPPlacement {
+            item_idx: 0,
+            d_transf: transform,
+        })
+    }));
+    println!(
+        "demand.spp.overplace={};remaining:{};placed:{}",
+        if spp_result.is_err() { "panic" } else { "ok" },
+        spp.item_demand_qtys[0],
+        spp.layout.placed_items.len()
+    );
+
+    let make_container = || {
+        Container::new(
+            OriginalShape {
+                shape: polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Deflate,
+                modify_config: shape_config,
+            },
+            vec![],
+            cde_config,
+        )
+        .unwrap()
+    };
+    let mut bpp = BPProblem::new(BPInstance::new(
+        vec![(square_item(0, 1.0), 0)],
+        vec![Bin::new(0, 5000, make_container(), 1, 1)],
+    ));
+    let bpp_result = catch_unwind(AssertUnwindSafe(|| {
+        bpp.place_item(BPPlacement {
+            item_idx: 0,
+            d_transf: transform,
+            layout_id: BPLayoutType::Closed { bin_id: 0 },
+        })
+    }));
+    println!(
+        "demand.bpp.overplace={};remaining:{};placed:{};stock:{}",
+        if bpp_result.is_err() { "panic" } else { "ok" },
+        bpp.item_demand_qtys[0],
+        bpp.n_placed_items(),
+        bpp.bin_stock_qtys[0]
+    );
+
+    let mut mspp = MSPProblem::new(MSPInstance::new(
+        vec![(square_item(0, 1.0), 0)],
+        Strip::new(10.0, 10.0, cde_config, shape_config, 10.0).unwrap(),
+    ));
+    let layout = mspp.add_layout_from_strip(mspp.instance.base_strip);
+    let mspp_result = catch_unwind(AssertUnwindSafe(|| {
+        mspp.place_item(MSPPlacement {
+            lk: layout,
+            item_idx: 0,
+            d_transf: transform,
+        })
+    }));
+    println!(
+        "demand.mspp.overplace={};remaining:{};placed:{};layouts:{}",
+        if mspp_result.is_err() { "panic" } else { "ok" },
+        mspp.item_demand_qtys[0],
+        mspp.n_placed_items(),
+        mspp.layouts.len()
+    );
+}
+
+fn run_restore_boundary_parity_oracle() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    std::panic::set_hook(Box::new(|_| {}));
+    let cde_config = CDEConfig {
+        quadtree_depth: 1,
+        cd_threshold: 8,
+        item_surrogate_config: SPSurrogateConfig::none(),
+    };
+    let shape_config = ShapeModifyConfig::default();
+    let mut spp = SPProblem::new(SPInstance::new(
+        vec![(square_item(0, 1.0), 1)],
+        SPStrip::new(10.0, cde_config, shape_config, 10.0).unwrap(),
+    ));
+    spp.place_item(SPPlacement {
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+    });
+    let saved_spp = spp.save();
+
+    let mut spp_config = saved_spp.clone();
+    spp_config.strip.cde_config.cd_threshold = 1;
+    let spp_config_result = catch_unwind(AssertUnwindSafe(|| spp.restore(&spp_config)));
+    println!(
+        "restore.spp.config={};threshold:{};placed:{}",
+        if spp_config_result.is_err() {
+            "panic"
+        } else {
+            "ok"
+        },
+        spp.strip.cde_config.cd_threshold,
+        spp.layout.placed_items.len()
+    );
+
+    let mut spp_width = saved_spp;
+    spp_width.strip.width *= 0.5;
+    let spp_width_result = catch_unwind(AssertUnwindSafe(|| spp.restore(&spp_width)));
+    println!(
+        "restore.spp.width={};strip_width:{};layout_width:{};placed:{}",
+        if spp_width_result.is_err() {
+            "panic"
+        } else {
+            "ok"
+        },
+        spp.strip.width,
+        spp.layout.container.outer_orig.bbox().x_max,
+        spp.layout.placed_items.len()
+    );
+
+    let mut mspp = MSPProblem::new(MSPInstance::new(
+        vec![(square_item(0, 1.0), 1)],
+        Strip::new(10.0, 10.0, cde_config, shape_config, 10.0).unwrap(),
+    ));
+    let layout = mspp.add_layout_from_strip(mspp.instance.base_strip);
+    mspp.place_item(MSPPlacement {
+        lk: layout,
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+    });
+    let saved_mspp = mspp.save();
+
+    let mut mspp_config = saved_mspp.clone();
+    mspp_config.strips[layout].cde_config.cd_threshold = 1;
+    let mspp_config_result = catch_unwind(AssertUnwindSafe(|| mspp.restore(&mspp_config)));
+    println!(
+        "restore.mspp.config={};threshold:{};placed:{}",
+        if mspp_config_result.is_err() {
+            "panic"
+        } else {
+            "ok"
+        },
+        mspp.strips[layout].cde_config.cd_threshold,
+        mspp.n_placed_items()
+    );
+
+    let mut mspp_width = saved_mspp;
+    mspp_width.strips[layout].width *= 0.5;
+    let mspp_width_result = catch_unwind(AssertUnwindSafe(|| mspp.restore(&mspp_width)));
+    println!(
+        "restore.mspp.width={};strip_width:{};layout_width:{};placed:{}",
+        if mspp_width_result.is_err() {
+            "panic"
+        } else {
+            "ok"
+        },
+        mspp.strips[layout].width,
+        mspp.layouts[layout].container.outer_orig.bbox().x_max,
+        mspp.n_placed_items()
+    );
+}
+
+fn run_zero_min_item_separation_oracle() {
+    let spp = ExtSPInstance {
+        name: "zero-spp".to_owned(),
+        min_item_separation: 0.0,
+        items: vec![],
+        strip_height: 1.0,
+    };
+    let bpp = ExtBPInstance {
+        name: "zero-bpp".to_owned(),
+        min_item_separation: 0.0,
+        items: vec![],
+        bins: vec![],
+    };
+    let mspp = ExtMSPInstance {
+        name: "zero-mspp".to_owned(),
+        min_item_separation: 0.0,
+        items: vec![],
+        strips: ExtMSPStrip {
+            height: 1.0,
+            max_width: 1.0,
+        },
+    };
+
+    for (name, serialized) in [
+        ("spp", serde_json::to_value(spp).unwrap()),
+        ("bpp", serde_json::to_value(bpp).unwrap()),
+        ("mspp", serde_json::to_value(mspp).unwrap()),
+    ] {
+        println!(
+            "wire.{name}.has_min_item_separation={}",
+            serialized.get("min_item_separation").is_some()
+        );
+        println!(
+            "wire.{name}.min_item_separation={}",
+            serialized["min_item_separation"]
+        );
+    }
+}
+
+fn run_import_boundary_oracle() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let cases = [
+        (
+            "nonconsecutive_duplicate",
+            vec![(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 0.0), (0.0, 2.0)],
+        ),
+        (
+            "signed_zero_closure",
+            vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (-0.0, 0.0)],
+        ),
+        (
+            "nan_coordinate",
+            vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (f32::NAN, 2.0)],
+        ),
+        (
+            "infinite_coordinate",
+            vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (f32::INFINITY, 2.0)],
+        ),
+    ];
+
+    for (name, points) in cases {
+        match catch_unwind(AssertUnwindSafe(|| {
+            import_simple_polygon(&ExtSPolygon(points))
+        })) {
+            Ok(Ok(shape)) => println!("import.boundary.{name}=ok:{}", shape.n_vertices()),
+            Ok(Err(error)) => println!("import.boundary.{name}=err:{error}"),
+            Err(_) => println!("import.boundary.{name}=panic"),
+        }
+    }
+
+    let endpoint_edge = Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap();
+    let touching_edge = Edge::try_new(Point(2.0, 0.0), Point(2.0, 1.0)).unwrap();
+    println!(
+        "import.boundary.endpoint_touch_collides={}",
+        endpoint_edge.collides_at(&touching_edge).is_some()
+    );
+
+    let cde_config = CDEConfig {
+        quadtree_depth: 1,
+        cd_threshold: 8,
+        item_surrogate_config: SPSurrogateConfig::none(),
+    };
+    let instance = SPInstance::new(
+        vec![(square_item(0, 1.0), 1)],
+        SPStrip::new(10.0, cde_config, ShapeModifyConfig::default(), 10.0).unwrap(),
+    );
+    for (name, transformation) in [
+        (
+            "nan_rotation",
+            ExtTransformation {
+                rotation: f32::NAN,
+                translation: (2.0, 2.0),
+            },
+        ),
+        (
+            "infinite_rotation",
+            ExtTransformation {
+                rotation: f32::INFINITY,
+                translation: (2.0, 2.0),
+            },
+        ),
+        (
+            "infinite_translation",
+            ExtTransformation {
+                rotation: 0.0,
+                translation: (f32::INFINITY, 2.0),
+            },
+        ),
+    ] {
+        let solution = ExtSPSolution {
+            strip_width: 10.0,
+            layout: ExtLayout {
+                container_id: 0,
+                placed_items: vec![ExtPlacedItem {
+                    item_id: 1000,
+                    transformation,
+                }],
+                density: 0.0,
+            },
+            density: 0.0,
+            run_time_sec: 0,
+        };
+        match catch_unwind(AssertUnwindSafe(|| {
+            import_spp_solution(&instance, &solution)
+        })) {
+            Ok(Ok(_)) => println!("import.boundary.solution.{name}=ok"),
+            Ok(Err(error)) => println!("import.boundary.solution.{name}=err:{error}"),
+            Err(_) => println!("import.boundary.solution.{name}=panic"),
+        }
+    }
+}
+
+fn run_offset_boundary_oracle() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let square = polygon(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
+    for (name, distance) in [
+        ("nan", f32::NAN),
+        ("positive_infinity", f32::INFINITY),
+        ("negative_infinity", f32::NEG_INFINITY),
+    ] {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            offset_shape(&square, ShapeModifyMode::Inflate, distance)
+        }));
+        match result {
+            Ok(Ok(shape)) => print_polygon(&format!("offset.boundary.{name}"), &shape),
+            Ok(Err(error)) => println!("offset.boundary.{name}=error:{error}"),
+            Err(_) => println!("offset.boundary.{name}=panic"),
+        }
+    }
+
+    match offset_shape(&square, ShapeModifyMode::Deflate, 2.0) {
+        Ok(shape) => print_polygon("offset.boundary.collapse", &shape),
+        Err(error) => println!("offset.boundary.collapse=error:{error}"),
+    }
+}
+
 fn main() {
+    if std::env::args().any(|arg| arg == "--restore-boundary-parity-only") {
+        run_restore_boundary_parity_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--model-boundary-parity-only") {
+        run_model_boundary_parity_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--offset-boundary-parity-only") {
+        run_offset_boundary_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--import-boundary-parity-only") {
+        run_import_boundary_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--zero-separation-parity-only") {
+        run_zero_min_item_separation_oracle();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--collision-parity-only") {
         run_collision_parity_oracle();
         return;
@@ -2132,7 +2497,7 @@ fn main() {
             (6.0, 12.0),
             (0.0, 12.0),
         ],
-        -2.1,
+        f64::from(-2.1_f32),
     );
 
     let notch = polygon(&[

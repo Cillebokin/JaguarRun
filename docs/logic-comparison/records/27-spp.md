@@ -1,7 +1,9 @@
 # 27. SPP 逐文件逻辑比对（Strip / SPInstance / SPProblem / SPSolution）
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/probs/spp/entities/{strip,instance,problem,solution}.rs`（55 / 62 / 146 / 24 行）
 **C++**: `JaguarCore/Include/JaguarCore/Problems/Spp.h`（157 行）+ `JaguarCore/Source/Problems/SPP/{Strip,Instance,Problem,Solution}.cpp`（53 / 177 / 282 / 19 行）
-**判定**: 基本等价（需求记账、快照/恢复、fit_strip 数值一致；C++ 新增多种输入校验；SPSolution 无 time_stamp；fit_strip 空布局 panic vs Result；PlaceItem 需求耗尽校验 debug-only 双侧确认）
+**判定**: 普通合法输入基本等价；超需求 Debug 错误形态、TotalDemand 溢出构建模式及 Restore 输入接受边界仍有差异；C++ 另有 time_stamp 缺口与额外校验
+
+**2026-09-28 oracle 补充：** `--model-boundary-parity-only` 的 Rust Debug/Release 实测确认：需求 0 时 Rust SPP 先递减需求，因此 Debug 在放置前 panic、状态保持 `remaining=0, placed=0`；Release 放置成功且需求回绕为 `usize::MAX`。JaguarCore Debug 在放置前返回 `Infeasible`、状态相同，Release 状态相同。另 `[usize::MAX, 1]` 的 `total_item_qty()` 在 Rust Debug panic、Release 回绕为 0；C++ `TotalDemand()` 的无符号累加在 Debug/Release 均回绕为 0，故该查询仍有 Debug 差异。
 
 ## 函数逐条比对
 
@@ -72,7 +74,7 @@ debug_assert_eq!(feasible_before, self.layout.is_feasible());
 
 #### `place_item`（Rust problem.rs:61-66）
 - C++ 对应：`SPProblem::PlaceItem`（Problem.cpp:111-134）。
-- 判定：基本等价（eef0830 后确认：需求耗尽校验为 debug-only）。
+- 判定：Release 状态行为一致；Debug 由 C++ `Infeasible` 适配 Rust 下溢 panic，SPP 的失败前状态相同。
 - 逐步对照：
   1. Rust `register_included_item`（rs:62，先扣需求）↔ C++ **先校验后放置再扣需求**（cpp:127-131 `PlaceItem` 成功后 `--m_RemainingDemand`）。顺序差异仅在失败路径上有意义（Rust 先扣后放、layout.place_item 无失败；C++ 放失败不扣）。判定：一致（结果等价）。
   2. 需求耗尽校验：C++ `#ifndef NDEBUG` 包裹（cpp:119-125，"SPP item demand is exhausted" → `Infeasible`）；**Rust 无任何耗尽校验**（既非 assert 也非 debug_assert，`item_demand_qtys[item_idx] -= 1` 直接下溢 panic 或回绕）。判定：差异（C++ debug-only 额外校验；Release 下双侧均不拦截——Rust usize 下溢 panic 于 debug、release 回绕；C++ release 时 `--` 到 0 下溢为 size_t 回绕。行为对齐于"不拦截"，但失败形态不同）。
@@ -93,6 +95,7 @@ debug_assert_eq!(feasible_before, self.layout.is_feasible());
 #### `restore`（Rust problem.rs:94-114）
 - C++ 对应：`SPProblem::Restore`（Problem.cpp:199-255）。
 - 判定：基本等价（重建逻辑对应；C++ 增加多重快照校验）。
+- `--restore-boundary-parity-only` 额外确认：Rust Debug/Release 均接受只修改解中 `strip.cde_config.cd_threshold` 的快照，以及 strip.width=5 但 layout snapshot 容器宽度仍为 10 的快照。当前 C++ `Restore` 对两者均返回 `SnapshotMismatch`。这是已批准的输入边界范围内仍未修复的差异；MSPP 对应宽度情形见记录 31。
 - 逐步对照：
   1. 容器不一致回退：Rust `if self.layout.restore(&ls).is_err() { self.layout = Layout::from_snapshot(&ls); }`（rs:96-98）↔ C++ cpp:242-249（先在快照容器上重建验证 restored.Restore，再尝试原地 m_Layout.Restore，失败则整体替换）——C++ 多一步"预验证"（预构建的 restored 若 Restore 失败直接报错误而不回退，cpp:244-245），随后原地失败才替换。判定：一致（含回退路径）。
   2. strip 赋值：rs:99 ↔ cpp:251（校验后）。
@@ -125,7 +128,8 @@ debug_assert_eq!(feasible_before, self.layout.is_feasible());
 | 1 | SPSolution 无 time_stamp 字段 | C++ 缺失 | Rust 公开 `time_stamp: Instant`（求解侧可比时间）；C++ 解无时间信息 | rs(solution):10-11；Spp.h:94-105 |
 | 2 | fit_strip 空布局：Rust unwrap panic vs C++ Infeasible Result | 差异（panic→Result） | 空条带调用时 C++ 优雅报错；Rust panic | rs(problem):44-51；Problem.cpp:175-180 |
 | 3 | fit_strip 前后 is_feasible debug_assert_eq（Rust rs:41,57） | C++ 缺失 | Rust debug-only 自检"缩条不破坏可行性"；C++ 无对应校验 | Problem.cpp:173-192 无相应断言 |
-| 4 | PlaceItem 需求耗尽校验：C++ `#ifndef NDEBUG` 包裹（debug-only 错误），Rust 无校验 | 差异 | Release 下双侧均不拦截（eef0830 确认）；Debug 下 C++ 报 Infeasible、Rust 仍继续（usize 下溢 debug panic） | Problem.cpp:119-125 vs rs(problem):61-66 |
+| 4 | PlaceItem 需求耗尽：C++ Debug 返回 Infeasible，Rust Debug 下溢 panic；Release 两侧均放置并回绕 | 适配差异 | SPP Debug 失败前状态相同；C++ 错误可恢复，Rust panic 可捕获 | Problem.cpp:119-125 vs rs(problem):61-66；`--model-boundary-parity-only` |
+| 11 | TotalDemand 的 usize/size_t 溢出 | Debug 差异 | `[MAX,1]` Rust Debug panic、Release 回绕为 0；C++ 两配置均回绕为 0 | instance.rs `total_item_qty`; Instance.cpp `TotalDemand`; `--model-boundary-parity-only` |
 | 5 | SPInstance::Create(height) 重载的附加校验（items 非空、正需求、面积有限为正）与自动条宽 `totalArea/fixedHeight` | C++ 额外 | Rust 由 io 层保证；C++ 在库层拦截空实例 | Instance.cpp:25-30, 66-78 |
 | 6 | Restore 的解合法性校验（strip 配置一致、容器-条带匹配、placement 不超需求、物品一致性）Release 生效 | C++ 额外 | Rust 仅 debug 断言（assertions.rs:14-16）覆盖，release 接受任意 strip | Problem.cpp:201-240 |
 | 7 | From<Strip> for Container 的 unwrap vs Result | 差异（panic→Result） | 合法输入无差异 | rs(strip):52 ↔ Strip.cpp:40-51 |
@@ -134,4 +138,4 @@ debug_assert_eq!(feasible_before, self.layout.is_feasible());
 | 10 | Rust `item_idx` 注释声称过滤 zero-demand，实现不过滤（双侧实现一致均不过滤） | 差异（文档） | 无行为影响 | rs(instance):53-60 |
 
 ## 结论
-SPP 四个实体的核心数值路径（矩形容器构建、需求记账、fit_strip 的 1.00001 容差公式、密度口径）双侧一致；eef0830 后需求耗尽校验确认为 C++ debug-only、Rust 无校验，Release 行为对齐。主要差异为防御层级：C++ 在 Instance/Create 与 Restore 上叠加了 Release 生效的输入校验，并把空布局 fit_strip、Container 构造等 panic 点转为 Result；SPSolution 缺 time_stamp、fit_strip 的可行性自检断言未移植。
+SPP 的常规放置、移除和数值路径一致；已由 oracle 证实 Release 超需求回绕行为一致，Debug 的 `Result` 适配保持与 Rust panic 前相同状态。仍未对齐的边界包括 TotalDemand 溢出的 Debug 行为，以及 Rust 接受而 C++ Restore 拒绝的配置/宽度不一致快照。C++ 额外校验、panic→Result 形态与缺失的 time_stamp 仍需按范围逐项记录。

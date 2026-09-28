@@ -162,3 +162,11 @@ Pole 使用 Rust FIFO BFS 与四象限顺序；Pier 网格内部使用 Rust 的 
 Debug 与 Release 分别对应 Rust 的低/高分辨率搜索参数。
 
 越界 Surrogate Pole 同样遵守 `HazardFilter`；忽略 Exterior 时不会误报越界碰撞。
+
+## 核心逻辑等价验收状态（2026-09-28）
+
+当前不能宣称 JaguarCore 与 `jagua-rs/jagua-rs` 核心 crate 已完全等价。碰撞差分、零值 `min_item_separation` 序列化和已列出的 Importer/几何输入边界已有 Debug/Release 对照；Offset 的固定 fixture 通过，但私有 straight-skeleton、fallback 与保模校验仍未覆盖到足以证明全输入等价。
+
+模型边界复核仍发现未闭合项：SPP `total_item_qty()` 溢出在 Rust Debug panic、Release 回绕，而 C++ 两配置均回绕；SPP Restore 接受 Rust 接受的配置/宽度不一致快照但当前 C++ 拒绝；MSPP 宽度不一致快照在 Rust Release 接受、Debug 在变更状态后 panic，而当前 C++ 两配置均拒绝；BPP/MSPP Debug 超需求放置的 Rust panic 状态与 C++ 原子 `Infeasible` 不同。可重复证据与具体输出见 [parity closure plan](superpowers/plans/2026-09-28-jaguarcore-parity-closure.md) 和 [Differential README](../JaguarCore/Tests/Differential/README.md)。
+
+合并后的 Debug 与 Release `JaguarCoreTests.exe` 全套退出码均为 0；这只能证明已有断言通过，不能关闭上面的未覆盖差异。等价结论需等差异逐项修复/明确约定并完成同一清单的双侧复验后再更新。

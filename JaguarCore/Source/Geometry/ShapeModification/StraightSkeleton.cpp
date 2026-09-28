@@ -541,6 +541,9 @@ public:
     std::vector<std::vector<Point2d>> loops(double offsetDistance) const
     {
         VertexQueue queue = m_InitialQueue;
+        // Rounded joins follow polygon winding, independently of offset sign.
+        const bool polygonOrientation =
+            m_Vertices[0].leftRay.orientation(m_Vertices[0].ray().point(1.0)) == 1;
         for (const Event& event : m_Events)
         {
             if (gt(event.time, offsetDistance))
@@ -571,7 +574,7 @@ public:
 
             Ray leftNormal;
             Ray rightNormal;
-            if (m_Inward)
+            if (polygonOrientation)
             {
                 leftNormal = {axis.origin, {-left.angle.y, left.angle.x}};
                 rightNormal = {axis.origin, {right.angle.y, -right.angle.x}};
@@ -586,11 +589,12 @@ public:
             while (true)
             {
                 result.back().push_back(leftNormal.point(remaining));
-                leftNormal = leftNormal.rotate(m_Inward ? ROUNDED_STEP
-                                                         : -ROUNDED_STEP);
-                const int orientation = leftNormal.orientation(rightNormal.point(1.0));
-                if ((m_Inward && orientation == -1) ||
-                    (!m_Inward && orientation == 1))
+                leftNormal = leftNormal.rotate(polygonOrientation ? ROUNDED_STEP
+                                                                  : -ROUNDED_STEP);
+                const int sideOrientation =
+                    leftNormal.orientation(rightNormal.point(1.0));
+                if ((polygonOrientation && sideOrientation == -1) ||
+                    (!polygonOrientation && sideOrientation == 1))
                     break;
             }
             result.back().push_back(rightNormal.point(remaining));
@@ -808,6 +812,8 @@ private:
             const auto children = m_Queue.splitAndSet(
                 timeline.anchorVertex, candidate.split,
                 Index::real(firstTree), Index::real(secondTree));
+            // geo-buffer cleans the split queue before generating child events.
+            m_Queue.cleanup();
             const Event event{Timeline::Kind::Split, timeline.time,
                               0, 0, timeline.anchorVertex.value,
                               candidate.split.value, firstTree, secondTree};

@@ -34,11 +34,13 @@ match geo_poly_offsets.len() {
     _ => { warn!("Offset resulted in multiple polygons, taking the first one."); &geo_poly_offsets[0] }
 }
 ```
-- C++ `OffsetShape`（cpp:274-283）：`OffsetShapes` 成功且非空 → 取 `.front()`（取第一个，一致）；空 → 返回 `OffsetFailed "offset resulted in an empty polygon"`（错误消息与 Rust bail 文本一致）。
+- C++ `OffsetShape`（cpp:274-283）：`OffsetShapes` 成功且非空 → 取 `.front()`（取第一个，一致）；空 → 返回 `OffsetFailed "Offset resulted in an empty polygon"`，与 Rust 的失败语义和文本一致（C++ 保留 `Result` 错误传递）。
 - 判定：取首组件逻辑一致；**差异**在于：
   1. Rust 的 `warn!` 多分支仅日志不同，行为与单轮廓相同（都是取 [0]）；C++ 无日志。
-  2. C++ `OffsetShapes`（cpp:332-341）对每个骨架轮廓做 `preservesModificationMode` 校验（见下），任一不保模即整体报错——Rust 无任何此类校验，直接取首组件。
+  2. Rust `offset_shape` 在导入前就选首组件；C++ `OffsetShape` 经 `OffsetShapes` 选首个有效 `SimplePolygon`。C++ 的 `OffsetShapes` 是额外 API，逐轮廓校验/过滤只影响该额外 API；需验证其首组件仍与 Rust 结果相同。
   3. C++ `OffsetShape` 在骨架结果为空时**不再直接报错**，而是落入 `fallbackOffsetShape`（cpp:286）——但注意 `OffsetShape` 路径中 `OffsetShapes` 已在内部先行处理空结果（可能返回空 vector、fallback 单元素或错误，见下），到 cpp:278 的空判断时实际值取决于 `OffsetShapes` 的内部分支。
+
+**多组件 oracle 边界：** `print_buffer_components` 直接探测 geo-buffer 的原始多组件结果，并将距离先按 JaguarCore/Rust 核心 API 的 `f32` 输入量化。它不能直接当作 Rust `offset_shape` 的公开返回值：Rust 只选第一个组件后导入；C++ `OffsetShapes` 则只暴露可构造成 `SimplePolygon` 的组件。梳形 `Deflate 2.1` fixture 的首组件在两侧一致；原始列表中的第二环不属于 Rust 核心 API 返回值，不能据此判定 `OffsetShape` 分叉。
 
 **回转内部表示**（Rust 370-378：取 exterior 点集 → `ExtSPolygon` → `import::import_simple_polygon`）
 - C++：`reimportOffsetPolygon`（Offset.cpp:38-41）→ `createRustImportedOffsetPolygon`（StraightSkeleton.cpp:875-886）——先去退化点再 `SimplePolygon::Create`（即 Rust import 的多边形构造校验：简单性、定向、最小顶点数等，见记录 34/05）。
@@ -51,7 +53,7 @@ match geo_poly_offsets.len() {
 
 ### `fallbackOffsetShape`（C++ Offset.cpp:180-257）—— Rust 无对应
 - 判定：C++ 额外。
-- 内容：逐顶点法线平移 + 交点/圆角连接（`appendRoundedJoin` 步长 0.1 弧度，cpp:87；deflate 时法线取反，cpp:219）+ `preservesModificationMode` 校验失败报错（cpp:250-255）。仅在骨架路径失败/为空的分支被调用（Offset.cpp:286、317-323）。
+- 内容：逐顶点法线平移 + 交点/圆角连接（`appendRoundedJoin` 步长 0.1 弧度，cpp:87；deflate 时法线取反，cpp:219）+ `preservesModificationMode` 校验失败报错（cpp:250-255）。仅在骨架路径失败/为空的分支被调用（Offset.cpp:286、317-323）。已有 L 形 deflate fixture 的状态、组件数、面积和边界框与 Rust oracle 一致；其他 fallback 输入仍需对照。
 - 调用点分析（OffsetShapes cpp:309-330）：骨架为空时——若 Deflate 且 `distance >= shape.PointOfInaccessibility().radius`（收缩到 POI 半径及以内），返回空 vector（**有意接受"收缩到消失"**）；否则尝试 fallback；fallback 也失败时 Inflate 报错、Deflate 返回骨架的空结果。
 - **Deflate 收缩到消失的半径判定**：Rust 侧 geo-buffer 对过度 deflate 的表现由 crate 内部决定（通常空结果），Rust `offset_shape` 对空结果一律 `bail!`（358-359）。C++ 用 `PointOfInaccessibility().radius` 作为阈值把"合理消失"与"异常失败"区分开——**与 Rust 失败边界不同**：Rust 会报错的输入（deflate 超过 POI 半径）在 C++ `OffsetShapes` 返回空成功、`OffsetShape` 报 "empty polygon" 错误，而**未超阈值**的空结果 Rust 报错、C++ 走 fallback 可能成功返回。
 
@@ -74,15 +76,16 @@ match geo_poly_offsets.len() {
 |---|---|---|---|---|
 | 1 | 算法本体：geo-buffer 0.2.0 crate → 私有 straight-skeleton 重实现 | 差异 | 顶点级输出可不同（拓扑同构）；tie-break/epsilon 细节不可逐位对齐 | Rust 356 vs StraightSkeleton.cpp:1-9, 516-599, 736-818 |
 | 2 | `offset_shape` 单 API vs `OffsetShape`+`OffsetShapes` 双 API | C++ 额外 | 接口面差异；OffsetShape 取 `.front()` 与 Rust 取 `[0]` 一致 | Rust 340-379 vs ShapeModification.h:39-46, Offset.cpp:261-342 |
-| 3 | 多轮廓：Rust warn+取首 / C++ 静默取首但逐轮廓强校验 | 差异 | C++ 可因保模校验失败而报错，Rust 总是成功（只要首组件存在） | Rust 361-366 vs Offset.cpp:332-341 |
-| 4 | `preservesModificationMode`（面积+双向顶点包含，容差 1e-8） | C++ 额外 | Rust 无校验；C++ 把浮点级违反当硬错误 | Offset.cpp:148-178 |
-| 5 | `fallbackOffsetShape`（法线平移+圆角连接的简易后备） | C++ 额外 | 骨架失败时 C++ 可能仍成功；Rust 直接 bail | Offset.cpp:180-257, 286, 317-323 |
-| 6 | Deflate 收缩到消失：`distance >= POI.radius` → 接受空结果 | 差异 | 失败边界不同：Rust 空=报错；C++ 按阈值区分"合理消失/异常" | Rust 358-359 vs Offset.cpp:311-314 |
-| 7 | 空结果错误消息 | 一致 | 文本对齐 "offset resulted in an empty polygon" | Rust 359 vs Offset.cpp:281 |
+| 3 | 多轮廓：Rust 核心 API 取首 / C++ 额外 `OffsetShapes` 暴露有效组件 | 接口面额外 | Rust `OffsetShape` 与 C++ `OffsetShape` 都取首个公开结果；原始 raw 组件数不等于 C++ 可构造的有效 `SimplePolygon` 数 | Rust 361-366 vs Offset.cpp:274-342；comb fixture |
+| 4 | `preservesModificationMode`（面积+双向顶点包含，容差 1e-8） | C++ 额外，潜在分叉未复现 | 目前覆盖 fixture 未发现其改变核心 `OffsetShape` 的成功/失败边界；仍需专门覆盖校验失败路径 | Offset.cpp:148-178 |
+| 5 | `fallbackOffsetShape`（法线平移+圆角连接的简易后备） | C++ 额外，潜在分叉未复现 | L 形 deflate fixture 与 Rust 结果一致；其他 fallback 失败边界仍待 fixture | Offset.cpp:180-257, 286, 317-323 |
+| 6 | Deflate 收缩到消失：`OffsetShapes` 可返回空 vector | 额外 API 差异 | Rust 核心 `offset_shape` 把空结果报错；C++ `OffsetShape` 也映射为空多边形错误，只有额外 `OffsetShapes` 暴露空 vector | Rust 358-359 vs Offset.cpp:274-281, 311-314 |
+| 7 | 空结果错误消息 | 一致 | 错误类别映射为 `OffsetFailed`，消息与 Rust 对齐为 "Offset resulted in an empty polygon" | Rust 359 vs Offset.cpp:281 |
 | 8 | 回转内部表示（exterior→导入校验） | 一致 | 语义对齐（去退化点+Create 校验） | Rust 370-378 vs StraightSkeleton.cpp:875-886 |
 | 9 | 距离 f32 化（normalizeOffsetRustF32）+ mode 归一 | 一致（模拟）/ C++ 额外（负距离重判） | Rust 参数即 f32；负距离路径 C++ 更宽容 | Rust 340-344 vs Offset.cpp:26-36 |
-| 10 | 非有限距离守卫 | C++ 额外 | Rust 传 NaN 给 geo-buffer 行为未定义；C++ 报 InvalidInput | Offset.cpp:266-269, 293-296 |
-| 11 | ROUNDED_STEP 0.1 / EPSILON 1e-9 / ULP≤4 等内部常量 | 无法逐位验证 | 闭源重实现，仅注释声明对齐 0.2.0 | StraightSkeleton.cpp:27-28, 39-54 |
+| 10 | 非有限距离（NaN、±Infinity） | 行为边界一致 | Rust Debug/Release oracle 均返回空多边形错误；C++ `OffsetShape`/`OffsetShapes` 映射为 `OffsetFailed` 和相同消息，保留约定的 `Result` 传递 | Rust oracle `--offset-boundary-parity-only`；Offset.cpp:266-270, 294-298；TestShapeModification |
+| 11 | 圆角采样方向 | 已对齐 | C++ 现按首个骨架顶点复现 Rust `get_orientation()`；不再把 offset 的 inward/outward 标志误当作环方向 | Rust `get_orientation` vs StraightSkeleton.cpp:541-600 |
+| 12 | ROUNDED_STEP 0.1 / EPSILON 1e-9 / ULP≤4 等内部常量 | 源码可核对，浮点输出仍需 fixture | geo-buffer 0.2.0 源码与 C++ 实现可直接对照；数值容差与 tie-break 仍通过 Rust oracle 验收 | geo-buffer 0.2.0 source vs StraightSkeleton.cpp:27-28, 39-54 |
 
 ## 结论
-这是全部比对组中唯一的**算法本体替换**：Rust 一行调用 geo-buffer 0.2.0（Cargo.lock 已确认版本），C++ 用 910 行私有 straight-skeleton 事件模型重实现（shrink/split 时间线 + 0.1 弧度圆角步进 + f32 近似去重）。结构语义对应，但浮点细节与 tie-break 不可能逐位一致，相同输入可得到顶点不同（拓扑同构）的偏移结果。C++ 在此之上叠加了 Rust 没有的机制：`preservesModificationMode` 强校验（Rust 只 warn 取首组件）、`fallbackOffsetShape` 后备路径、Deflate 按 POI 半径接受"收缩到消失"、`OffsetShapes` 全轮廓 API 与非有限距离守卫。这些使 C++ 的失败边界与 Rust 不同：某些 Rust 报错的输入 C++ 成功（fallback、合理消失），某些 Rust 成功的输入 C++ 报错（保模校验）。判定为不等价，属正确性风险项。
+这是全部比对组中唯一的**算法本体替换**：Rust 调用 geo-buffer 0.2.0，C++ 用 straight-skeleton 事件模型重实现。已覆盖 fixture 的核心结果在 Debug/Release 对照中一致；圆角采样方向按 Rust `get_orientation()` 修正，非有限距离边界也已对齐。C++ 的保模校验、fallback 和 `OffsetShapes` 属额外实现；L 形 fallback 已有匹配 fixture，其余分支仍未完整验收。由于 Offset 仍缺少对这些分支的完整差分证据，本项暂不宣称等价。

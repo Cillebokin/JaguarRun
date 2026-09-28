@@ -27,10 +27,10 @@
 - 已修改：`JaguarCore/tests/TestCollision.cpp`
 - 已修改：`JaguarCore/tools/RustOracle/src/main.rs`
 
-- [ ] 运行 Rust 定向 oracle：`cargo run --offline --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --collision-parity-only`；确认 notch 的 high/low threshold 检测均为 true，collector 数量分别为 0 和 1，pier-only 检测为 true。
-- [ ] 运行 `.style-build-debug-tests\debug\JaguarCoreTests.exe` 和 `.style-build-debug-tests\release\JaguarCoreTests.exe`；两者均须退出码为 0。
-- [ ] 保留 `cd_threshold` 改变 collect 结果、但不改变 Rust `detect` 结果的用例；保留 U-notch 及 pier-only 用例。
-- [ ] 若 oracle 与 C++ 任一输出不同，只修改上述碰撞路径和对应测试，直到输出逐项一致。
+- [x] 运行 Rust 定向 oracle：`cargo run --offline --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --collision-parity-only`；确认 notch 的 high/low threshold 检测均为 true，collector 数量分别为 0 和 1，pier-only 检测为 true。
+- [x] 运行当前 checkout 对应的 MSVC2019 x64 Debug 与 Release `JaguarCoreTests.exe` 全套；两者均退出码为 0。
+- [x] 保留 `cd_threshold` 改变 collect 结果、但不改变 Rust `detect` 结果的用例；保留 U-notch 及 pier-only 用例。
+- [x] Oracle 与 C++ 对照输出逐项一致。
 
 **验收：** 定向 Rust oracle、C++ Debug 和 Release 测试通过；本项碰撞语义差异关闭。
 
@@ -41,10 +41,10 @@
 - 测试：`JaguarCore/Tests/TestJsonCodec.cpp`
 - 参考：Rust external representation 序列化实现及 Rust oracle 输出
 
-- [ ] 为 SPP、BPP、MSPP 各构造 `min_item_separation` 为零的最小 external representation，并记录 Rust JSON 中该字段是否存在及其值。
-- [ ] 在 C++ JSON 编码测试中断言相同字段存在性和值；保持对象键顺序不作为验收条件。
-- [ ] 只调整字段省略条件，使零值输出遵循 Rust；非零和缺省解码行为保持现有契约。
-- [ ] 运行 `JaguarCoreTests.exe` 的 Debug 和 Release 配置。
+- [x] 为 SPP、BPP、MSPP 各构造 `min_item_separation` 为零的最小 external representation；Rust JSON 均包含字段，值均为 `0.0`。
+- [x] 在 C++ JSON 编码测试中断言相同字段存在性和值；保持对象键顺序不作为验收条件。
+- [x] 只调整字段省略条件，使零值输出遵循 Rust；非零和缺省解码行为保持现有契约。
+- [x] 运行当前 checkout 的 Debug 和 Release `JaguarCoreTests.exe`；两者均退出码为 0。
 
 **验收：** 三类 problem 的零值字段行为与 Rust 相同，JSON round-trip 和现有 fixture 回归通过。
 
@@ -55,10 +55,10 @@
 - 测试：`JaguarCore/Tests/TestIo.cpp`、`JaguarCore/Tests/TestPolygon.cpp`、`JaguarCore/Tests/TestBoundary.cpp`
 - 对照：`JaguarCore/tools/RustOracle/src/main.rs` 与 `JaguarCore/Tests/Fixtures/RustReference/`
 
-- [ ] 用 Rust oracle 固定非相邻重复顶点、首尾重复点、`+0.0/-0.0`、NaN/Infinity 和边界接触输入的接受/拒绝结果及错误类别。
-- [ ] 为每个已确认分叉写一个最小 C++ 回归，比较是否成功、几何结果/碰撞布尔值及状态是否变化。
-- [ ] 只修复 Rust 与 C++ 结果不同的输入边界；保留 JaguarCore 的 `Result` 错误表达。
-- [ ] 分别运行 Debug、Release 测试，确认 `debug_assert` 类行为没有被错误地当作 Release 保证。
+- [x] Rust oracle Debug/Release 已固定非连续重复、`-0.0` 闭合点、NaN/Infinity 多边形及解变换、端点接触：两侧均拒绝/失败或均接受；Rust 非有限路径 panic，C++ 映射为 `Result` 错误。
+- [x] C++ 回归覆盖相同输入：`ImportItem` 的成功/错误码和顶点数、SP 解导入错误码、端点接触交点；相关几何/导入测试纳入全套运行。
+- [x] 复核确认这些项没有接受边界分叉；不添加重复的生产校验，保留 JaguarCore 的 `Result` 错误表达，并更正逻辑比较记录中的非连续重复顶点误判。
+- [x] MSVC2019 x64 Debug 与 Release 全套测试均通过；Rust oracle 的 Debug/Release 非有限输入结果一致。
 
 **验收：** 上述输入的成功/失败边界和可观察结果逐项与 Rust 对照一致；没有新增与本差异无关的校验规则。
 
@@ -69,10 +69,15 @@
 - 测试：`JaguarCore/Tests/TestShapeModification.cpp`、`JaguarCore/Tests/Differential/CompareGeometry.cpp`
 - 对照：`JaguarCore/tools/RustOracle/src/main.rs` 和 RustReference fixtures
 
-- [ ] 使用同一组简单多边形和距离运行 Rust `geo-buffer` 路径与 C++ `OffsetShape`/`OffsetShapes`，覆盖凸形、凹形、内缩分裂、组件消失、多个外轮廓及已有 fallback 拓扑。
-- [ ] 对每个 case 比较成功/错误、空结果、组件数量、首组件选择、顶点数、面积和边界框；坐标容差按 Rust `f32` 与 C++ 计算精度明确记录。
-- [ ] 先固定失败 fixture，再针对导致分叉的事件/回退分支做最小修正；不以“面积接近”替代组件拓扑和 API 返回语义。
-- [ ] 保持 Rust 不进入 JaguarCore 运行时依赖；运行 Debug/Release 几何与差分测试。
+**已完成子项：**
+- [x] 非有限距离边界：Rust Debug/Release oracle 对 NaN、+Infinity、-Infinity 均返回 `Offset resulted in an empty polygon`；C++ `OffsetShape`/`OffsetShapes` 统一映射为 `OffsetFailed` 与相同消息。C++ Debug/Release 全量测试通过。
+- [x] 圆角方向：C++ 改为按 Rust `Skeleton::get_orientation()` 从首个骨架顶点判定环方向；梳形 deflate 的 raw loop 顶点数、面积与边界和 Rust raw oracle 一致。Rust 核心只选择首组件，因此该 fixture 的额外第二组件不作为核心 API 返回值验收。
+- [x] 分裂事件回放：在 split 后、生成两个新环的 shrink 事件前补上 Rust `VertexQueue::cleanup()`。
+
+- [x] 使用同一组简单多边形和距离运行 Rust `geo-buffer` 路径与 C++ `OffsetShape`/`OffsetShapes`，覆盖凸形、凹形、内缩分裂、组件消失、多个外轮廓及已有 fallback 拓扑；多组件 raw probe 按核心 API 的 `f32` 距离输入量化。
+- [x] 对固定 fixture 比较成功/错误、空结果、首组件选择、顶点数、面积和边界框；`TestShapeModification.cpp` 中的阈值、凹形分裂、梳形、L 形 fallback、近零边和非有限距离断言均来自 Rust oracle，容差按 `f32` 输入与 C++ 计算精度设定。Rust 的原始多组件数只用于解释 Rust 取首组件，不误作 `OffsetShapes` 的 API 对照。
+- [x] 按失败 fixture 修正圆角方向判定和 split 后事件队列清理；当前固定用例无未修复分叉，不以面积接近替代拓扑及 API 结果断言。
+- [x] 保持 Rust 不进入 JaguarCore 运行时依赖；运行 Rust Debug/Release oracle 与 JaguarCore Debug/Release 全量测试。
 
 **验收：** 已发现的 Offset 分叉均有可复现 Rust fixture；fixture 的拓扑和数值断言在 Debug/Release 通过。未覆盖的输入不宣称已证明等价。
 
@@ -82,9 +87,18 @@
 - 测试：`JaguarCore/Tests/TestSpp.cpp`、`JaguarCore/Tests/TestBpp.cpp`、`JaguarCore/Tests/TestMspp.cpp`、`JaguarCore/Tests/TestProblemRandom.cpp`、`JaguarCore/Tests/TestJsonCodec.cpp`
 - Rust 对照：`JaguarCore/tools/RustOracle/src/main.rs` 与现有 RustReference fixtures
 
-- [ ] 将已报告修复的 SPP 需求溢出、超需求放置 Debug/Release 行为、MSPP snapshot restore、MSPP 导出 ID 和 `quality_zones` 输出列入逐项回归表。
-- [ ] 对照 Rust 行为运行相关现有测试；仅在某项缺少 Rust 参考或回归失败时补 fixture/测试或修复实现。
-- [ ] 在记录中区分 Debug-only 断言、Release 状态变化和 JSON 可观察输出，不用单一 Debug 结果代替双配置验收。
+**本轮复核证据（2026-09-28）：** 新增 `--model-boundary-parity-only` Rust oracle，并分别运行 Debug/Release。Rust Debug 对 `[usize::MAX, 1]` 的 `total_item_qty()` 求和 panic；Release 返回 `0`。需求为 0 时，SPP Debug panic 前状态为 `remaining=0, placed=0`；BPP/MSPP 则先放入布局再 panic，状态为 `remaining=0, placed=1`（BPP 还已消耗一个 bin）。Release 三个模型均成功放置、需求回绕为 `usize::MAX`。JaguarCore Release 行为已有回归覆盖；Debug 侧目前把需求耗尽映射为 `Infeasible`。因此本项不能只以错误码作为对照，Rust panic 后状态是否属于验收契约仍待确定。
+
+MSPP restore 的宽度不一致快照也需单列：现有 C++ `sameStripContainer` 预检会拒绝 strip.width 与 layout snapshot 容器不一致的解；Rust restore 直接复制快照 strip，Release 接受该不一致状态，Debug 的一致性断言可能在状态已变更后 panic。已有 C++ 用例锁定拒绝行为，不能将其误标成已对齐。
+
+新增 `--restore-boundary-parity-only` oracle 后，Debug/Release 结果为：SPP 的 CDE 配置变化和 strip/layout 宽度不一致均返回成功（宽度 case 的 strip=5、layout 宽度=10）；MSPP 的 CDE 配置变化均成功，宽度不一致在 Debug panic（状态已变为 strip=5、layout 宽度=10）而 Release 成功。当前 C++ SPP 对配置/宽度变化均返回错误，MSPP 对配置变化接受但对宽度变化在两配置均返回错误。Debug panic 的状态口径仍待确认；Release 输入接受边界属于已批准的等价修复范围。
+
+- [x] 复核现有 C++ 用例已覆盖 SPP 需求和超需求 Release、BPP/MSPP 超需求 Release、MSPP snapshot restore 配置/宽度、稀疏 MSPP 导出 ID 与 `quality_zones` SVG 输出。
+- [x] 新增 `--model-boundary-parity-only` 和 `--restore-boundary-parity-only` Rust oracle；Debug/Release 均已运行并把需求、放置数、库存、strip 与 layout 宽度状态写入本计划及对应逻辑记录。
+- [ ] 按用户选择的 panic→Result 状态口径补齐 C++ Debug 对照，尤其是 BPP/MSPP 超需求下溢后的部分状态。
+- [ ] 修正并双配置验收 Rust 已接受而 C++ Restore 拒绝的快照边界；现有相关 C++ 测试仍锁定旧的拒绝行为。
+- [x] 已把 SPP `TotalDemand` Debug 溢出与超需求放置结论写入记录 27/29/31；MSPP 导出 ID 有记录 35 与 `TestJsonCodec.cpp` 稀疏槽位用例，`quality_zones` 有记录 36 与 `TestSvgExport.cpp` 图层/填充/碰撞几何断言。
+- [x] 本轮合并后 checkout 的 MSVC2019 x64 Debug 与 Release `JaguarCoreTests.exe` 全量运行均退出码 0；这只验证现有断言，不关闭上述未对齐边界。
 
 **验收：** 以上已修复项目都有可重复的 Rust 对照或明确的 Rust 行为来源，Debug/Release 结果符合该来源；不产生重复重写。
 

@@ -11,6 +11,7 @@ The files under `../Fixtures/RustReference/` use the jagua-rs external JSON sche
 - `CompareMatrix.cpp`: shared edge intersection and containment tables. The matrix explicitly preserves jagua-rs's non-collision rule for collinear segments and collision rule for non-collinear endpoint/T-junction contact.
 - `CompareTrajectory.cpp`: the same xorshift64* seed and 256-step operation grammar run in Rust and C++, including placement/removal/restore counts, active count, checksum, and final PRNG state.
 - `CompareOptimizer.cpp`: consumes a Rust LBF solution fixture generated with seed `42`; JaguarCore validates external placements, feasibility, item count, density, and strip width. It does not claim to reproduce LBF/Sparrow's search path.
+- `RustOracle --model-boundary-parity-only` and `--restore-boundary-parity-only`: probe Debug/Release demand underflow and snapshot restore state directly against jagua-rs. These probes report partial state after caught Rust panics; compare them with JaguarCore's `Result` outcome and state, rather than treating `panic` and `Infeasible` as interchangeable by default.
 
 The expected scalar values are derived from the corresponding jagua-rs import rules (`f32` geometry, centering transform, normalized rotation list, and total-area/fixed-height width). They are intentionally compared with explicit tolerances instead of comparing textual JSON; rotation values use a wider tolerance because JaguarCore stores `double` while jagua-rs stores `f32`.
 
@@ -44,3 +45,16 @@ cargo +1.90.0 run --offline --manifest-path jagua-rs/lbf/Cargo.toml -- `
 The recorded Rust result is approximately `strip_width = 4.398323`, `density = 0.53050524`, with three placed items. These values are acceptance bounds for the external result, not a promise that another optimizer or floating-point implementation will produce identical coordinates.
 
 The oracle is not a claim that Sparrow or any optimizer must produce identical placements. It checks the shared geometry and problem-model contract.
+
+## Debug/Release state probes
+
+Run the Rust oracle in both profiles from the repository root:
+
+```powershell
+cargo run --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+cargo run --offline --release --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+cargo run --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+cargo run --offline --release --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+```
+
+The model probe covers `total_item_qty()` overflow plus over-demand placement in SPP/BPP/MSPP, recording remaining demand, placed count, and BPP stock. The restore probe records the saved strip fields alongside the layout container width, making intentionally inconsistent snapshots visible. Its current Rust output documents unresolved JaguarCore acceptance/state differences; passing JaguarCore's ordinary Debug/Release suite alone does not close those differences.

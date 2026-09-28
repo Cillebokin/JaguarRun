@@ -1428,8 +1428,7 @@ JsonValue commonInstanceJson(const std::string& name,
 {
     JsonValue::Object object;
     object.emplace("name", JsonValue(name));
-    if (separation != 0.0)
-        object.emplace("min_item_separation", JsonValue(separation));
+    object.emplace("min_item_separation", JsonValue(separation));
     object.emplace("items", demandItemsJson(items));
     return JsonValue(std::move(object));
 }

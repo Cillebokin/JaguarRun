@@ -45,47 +45,6 @@ bool near(double first, double second) noexcept
            NumericPolicy::DefaultEqualityTolerance();
 }
 
-bool sameSurrogateConfig(const SurrogateConfig& first,
-                         const SurrogateConfig& second) noexcept
-{
-    return first == second;
-}
-
-bool sameCdeConfig(const CDEConfig& first,
-                   const CDEConfig& second) noexcept
-{
-    return first.quadtreeDepth == second.quadtreeDepth &&
-           first.cdThreshold == second.cdThreshold &&
-           sameSurrogateConfig(first.itemSurrogateConfig,
-                               second.itemSurrogateConfig);
-}
-
-bool sameOptionalDouble(const std::optional<double>& first,
-                        const std::optional<double>& second) noexcept
-{
-    if (first.has_value() != second.has_value())
-        return false;
-    return !first.has_value() || near(*first, *second);
-}
-
-bool sameShapeModifyConfig(const ShapeModifyConfig& first,
-                           const ShapeModifyConfig& second) noexcept
-{
-    if (!sameOptionalDouble(first.simplifyTolerance,
-                            second.simplifyTolerance) ||
-        !sameOptionalDouble(first.offset, second.offset))
-        return false;
-    if (first.narrowConcavityCutoff.has_value() !=
-        second.narrowConcavityCutoff.has_value())
-        return false;
-    if (!first.narrowConcavityCutoff.has_value())
-        return true;
-    return near(first.narrowConcavityCutoff->first,
-                second.narrowConcavityCutoff->first) &&
-           near(first.narrowConcavityCutoff->second,
-                second.narrowConcavityCutoff->second);
-}
-
 bool sameItemDefinition(const Item& expected,
                         const PlacedItem& actual) noexcept
 {
@@ -253,11 +212,13 @@ JAGUARCORE_API Result<MSPPlacedHandle> MSPProblem::PlaceItem(
         return Result<MSPPlacedHandle>::FromError(
             {ErrorCode::InvalidInput, "MSPP placement item index is invalid"});
     }
+#ifndef NDEBUG
     if (m_RemainingDemand[placement.itemIndex] == 0)
     {
         return Result<MSPPlacedHandle>::FromError(
             {ErrorCode::Infeasible, "MSPP item demand is exhausted"});
     }
+#endif
     LayoutSlot* slot = GetLayout(placement.layoutIndex);
     if (!slot)
     {
@@ -395,13 +356,6 @@ JAGUARCORE_API Result<bool> MSPProblem::Restore(const MSPSolution& solution)
             snapshot.strip.maxWidth <= 0.0 ||
             snapshot.strip.fixedHeight <= 0.0 ||
             snapshot.strip.width <= 0.0 ||
-            !near(snapshot.strip.maxWidth, m_Instance.BaseStrip().maxWidth) ||
-            !near(snapshot.strip.fixedHeight,
-                  m_Instance.BaseStrip().fixedHeight) ||
-            !sameCdeConfig(snapshot.strip.cdeConfig,
-                           m_Instance.BaseStrip().cdeConfig) ||
-            !sameShapeModifyConfig(snapshot.strip.shapeModifyConfig,
-                                   m_Instance.BaseStrip().shapeModifyConfig) ||
             !sameStripContainer(snapshot.layoutSnapshot.container,
                                 snapshot.strip))
         {

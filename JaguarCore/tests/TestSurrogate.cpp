@@ -25,6 +25,17 @@ void runSurrogateTests()
     assert(surrogate.Value().Piers().size() == 1);
     assert(std::abs(surrogate.Value().ConvexHullArea() - 40.0) < 1.0e-9);
 
+    const auto offsetSquare = jaguar::SimplePolygon::Create({
+        {100.0, 100.0}, {101.0, 100.0}, {101.0, 101.0}, {100.0, 101.0}});
+    assert(offsetSquare.HasValue());
+    jaguar::SurrogateConfig missingPierConfig{};
+    missingPierConfig.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+    missingPierConfig.failFastPiers = 1;
+    const auto missingPierSurrogate = jaguar::Surrogate::Create(
+        offsetSquare.Value(), missingPierConfig);
+    assert(!missingPierSurrogate.HasValue());
+    assert(missingPierSurrogate.GetError().code == jaguar::ErrorCode::Infeasible);
+
     const float tinySide = std::numeric_limits<float>::epsilon() * 0.5F;
     const auto tinySquare = jaguar::SimplePolygon::Create({
         {0.0, 0.0}, {tinySide, 0.0}, {tinySide, tinySide}, {0.0, tinySide}});

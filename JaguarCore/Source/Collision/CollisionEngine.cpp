@@ -58,18 +58,6 @@ bool pointNearSegment(const Point2d& point, const Edge2d& edge, double radius) n
     return squaredDistance <= radiusF32 * radiusF32;
 }
 
-bool circleInsideContainer(const Circle2d& circle,
-                           const SimplePolygon& container) noexcept
-{
-    if (!container.ContainsRustF32(circle.center))
-        return false;
-    for (const Edge2d& edge : container.Edges())
-    {
-        if (pointNearSegment(circle.center, edge, circle.radius))
-            return false;
-    }
-    return true;
-}
 }
 
 JAGUARCORE_API CollisionEngine::CollisionEngine(Rect2d bounds, CDEConfig config)
@@ -283,13 +271,9 @@ bool CollisionEngine::EdgeCollidesWithHazard(const Edge2d& edge,
     if (hazard.entity.kind != HazardKind::Exterior)
         return hazard.shape->IntersectsRustF32(edge);
 
-    const SimplePolygon& container = *hazard.shape;
-    if (!container.ContainsRustF32(edge.start)
-        || !container.ContainsRustF32(edge.end))
-        return true;
-    for (const Edge2d& containerEdge : container.Edges())
+    for (const Edge2d& boundaryEdge : hazard.shape->Edges())
     {
-        if (edge.IntersectsRustF32(containerEdge))
+        if (edge.IntersectsRustF32(boundaryEdge))
             return true;
     }
     return false;
@@ -300,7 +284,13 @@ bool CollisionEngine::CircleCollidesWithHazard(const Circle2d& circle,
 {
     if (hazard.entity.kind != HazardKind::Exterior)
         return CircleCollides(circle, *hazard.shape);
-    return !circleInsideContainer(circle, *hazard.shape);
+
+    for (const Edge2d& boundaryEdge : hazard.shape->Edges())
+    {
+        if (pointNearSegment(circle.center, boundaryEdge, circle.radius))
+            return true;
+    }
+    return false;
 }
 
 bool CollisionEngine::CircleCollides(const Circle2d& circle,
@@ -494,43 +484,10 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
             {ErrorCode::InvalidInput, "transform contains a non-finite value"});
     }
 
-    const HazardHandle implicitExteriorHandle{
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<std::uint32_t>::max()};
-    const HazardEntity exteriorEntity{HazardKind::Exterior, 0, 0, 0};
-    std::optional<HazardHandle> registeredExterior;
-    for (std::size_t slotIndex = 0; slotIndex < m_Slots.size(); ++slotIndex)
-    {
-        if (m_Slots[slotIndex].hazard.has_value() &&
-            m_Slots[slotIndex].hazard->entity.kind == HazardKind::Exterior)
-        {
-            registeredExterior =
-                HazardHandle{slotIndex, m_Slots[slotIndex].generation};
-            break;
-        }
-    }
-
-    const auto exteriorIsRelevant = [&]() {
-        const HazardHandle handle = registeredExterior.value_or(implicitExteriorHandle);
-        const HazardEntity& entity = registeredExterior.has_value()
-                                         ? Get(*registeredExterior)->entity
-                                         : exteriorEntity;
-        return !filter.IsIrrelevant(handle, entity);
-    };
-
     for (std::size_t i = 0; i < surrogate.FailFastPoleCount(); ++i)
     {
         Circle2d transformedPole = surrogate.Poles()[i];
         transformedPole.center = transform.ApplyRustF32(transformedPole.center);
-        if (!m_Bounds.Contains(transformedPole.center) ||
-            transformedPole.center.x - transformedPole.radius < m_Bounds.xMin ||
-            transformedPole.center.x + transformedPole.radius > m_Bounds.xMax ||
-            transformedPole.center.y - transformedPole.radius < m_Bounds.yMin ||
-            transformedPole.center.y + transformedPole.radius > m_Bounds.yMax)
-        {
-            if (exteriorIsRelevant())
-                return Result<bool>::FromValue(true);
-        }
 
         for (const HazardHandle handle :
              m_QuadTree.QueryVirtualRoot(transformedPole.BoundingBox()))
@@ -550,9 +507,6 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
         const auto transformed = Edge2d::Create(transformedStart, transformedEnd);
         if (!transformed.HasValue())
             continue;
-        if (isOutside(m_Bounds, transformed.Value().BoundingBox()) &&
-            exteriorIsRelevant())
-            return Result<bool>::FromValue(true);
         for (const HazardHandle handle :
              m_QuadTree.QueryVirtualRoot(transformed.Value().BoundingBox()))
         {
@@ -579,22 +533,6 @@ JAGUARCORE_API Result<bool> CollisionEngine::CollectSurrogateCollisionsUntil(
             {ErrorCode::InvalidInput, "transform contains a non-finite value"});
     }
 
-    const HazardHandle exteriorHandle{
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<std::uint32_t>::max()};
-    const HazardEntity exteriorEntity{HazardKind::Exterior, 0, 0, 0};
-    std::optional<HazardHandle> registeredExterior;
-    for (std::size_t slotIndex = 0; slotIndex < m_Slots.size(); ++slotIndex)
-    {
-        if (m_Slots[slotIndex].hazard.has_value() &&
-            m_Slots[slotIndex].hazard->entity.kind == HazardKind::Exterior)
-        {
-            registeredExterior =
-                HazardHandle{slotIndex, m_Slots[slotIndex].generation};
-            break;
-        }
-    }
-
     const auto report = [&](HazardHandle handle,
                             const HazardEntity& entity) {
         if (filter.IsIrrelevant(handle, entity) || collector.Contains(handle))
@@ -607,25 +545,6 @@ JAGUARCORE_API Result<bool> CollisionEngine::CollectSurrogateCollisionsUntil(
     {
         Circle2d transformedPole = surrogate.Poles()[i];
         transformedPole.center = transform.ApplyRustF32(transformedPole.center);
-
-        if (!m_Bounds.Contains(transformedPole.center) ||
-            transformedPole.center.x - transformedPole.radius < m_Bounds.xMin ||
-            transformedPole.center.x + transformedPole.radius > m_Bounds.xMax ||
-            transformedPole.center.y - transformedPole.radius < m_Bounds.yMin ||
-            transformedPole.center.y + transformedPole.radius > m_Bounds.yMax)
-        {
-            if (registeredExterior.has_value())
-            {
-                const Hazard* hazard = Get(*registeredExterior);
-                if (hazard && report(*registeredExterior, hazard->entity))
-                    return Result<bool>::FromValue(true);
-            }
-            else if (report(exteriorHandle, exteriorEntity))
-            {
-                return Result<bool>::FromValue(true);
-            }
-            continue;
-        }
 
         for (const HazardHandle handle :
              m_QuadTree.QueryVirtualRoot(transformedPole.BoundingBox()))

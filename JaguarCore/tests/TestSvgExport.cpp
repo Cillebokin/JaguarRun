@@ -118,6 +118,14 @@ void runSvgExportTests()
     assert(qualityPlaced.HasValue());
     const auto qualitySvg = jaguar::ExportLayoutSvg(qualityLayout);
     assert(qualitySvg.HasValue());
+    assert(qualitySvg.Value().find("id=\"quality_zones\"") !=
+           std::string::npos);
+    assert(qualitySvg.Value().find(
+               "class=\"quality-zone\" data-quality=\"1\"") !=
+           std::string::npos);
+    assert(qualitySvg.Value().find(
+               "fill=\"#FF0000\" fill-opacity=\"0.5\"") !=
+           std::string::npos);
     assert(qualitySvg.Value().find("d=\"M 72 70 L 70 70\"") !=
                std::string::npos ||
            qualitySvg.Value().find("d=\"M 70 70 L 72 70\"") !=

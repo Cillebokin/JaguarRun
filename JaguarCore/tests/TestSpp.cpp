@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -146,8 +147,16 @@ void runSppTests()
     assert(problem.Value().RemainingDemand(0) == 0);
     const auto overDemand = problem.Value().PlaceItem({
         0, jaguar::Transform2d::FromRotationTranslation(0.0, {6.0, 1.0})});
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(overDemand.HasValue());
+    assert(problem.Value().RemainingDemand(0) ==
+           std::numeric_limits<std::size_t>::max());
+    assert(problem.Value().RemoveItem(overDemand.Value()).HasValue());
+    assert(problem.Value().RemainingDemand(0) == 0);
+#else
     assert(!overDemand.HasValue());
     assert(overDemand.GetError().code == jaguar::ErrorCode::Infeasible);
+#endif
 
     const auto changedWidth = problem.Value().ChangeStripWidth(10.0);
     assert(changedWidth.HasValue());

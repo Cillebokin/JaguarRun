@@ -226,8 +226,14 @@ void runBppTests()
     const auto overDemand = problem.Value().PlaceItem({
         jaguar::LayoutTargetKind::Open, first.Value().layoutIndex, 0, 0,
         jaguar::Transform2d::Identity()});
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(overDemand.HasValue());
+    assert(problem.Value().RemainingDemand(0) ==
+           std::numeric_limits<std::size_t>::max());
+#else
     assert(!overDemand.HasValue());
     assert(overDemand.GetError().code == jaguar::ErrorCode::Infeasible);
+#endif
 
     assert(problem.Value().RemoveLayout(first.Value().layoutIndex).HasValue());
     assert(problem.Value().RemainingDemand(0) == 2);

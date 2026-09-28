@@ -217,6 +217,21 @@ void runJsonCodecTests()
     assert(importedSpp.Value().ItemCount() == 1);
     assert(!importedSpp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
 
+    const auto overflowingDemandSpp = importer.ImportSPInstanceJson(
+        R"json({
+            "name": "overflowing-demand-spp",
+            "items": [
+                {"id": 701, "demand": 18446744073709551615,
+                 "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+                 "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 1, "height": 1}}},
+                {"id": 702, "demand": 1,
+                 "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+                 "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 1, "height": 1}}}
+            ],
+            "strip_height": 1
+        })json");
+    assert(overflowingDemandSpp.HasValue());
+
     const auto wideRotationInstance = importer.ImportSPInstanceJson(
         R"json({"name":"wide-rotation","items":[{"id":6206,"demand":1,"orientation":{"rotation":{"mode":"continuous"}},"shape":{"type":"rectangle","data":{"x_min":0,"y_min":0,"width":1,"height":1}}}],"strip_height":10})json");
     assert(wideRotationInstance.HasValue());
@@ -373,8 +388,13 @@ void runJsonCodecTests()
     const auto overDemandSpp = importer.ImportSPSolutionJson(
         importedSpp.Value(),
         R"json({"strip_width": 4, "layout": {"container_id": 0, "placed_items": [{"item_id": 201, "transformation": {"rotation": 0, "translation": [1, 1]}}, {"item_id": 201, "transformation": {"rotation": 0, "translation": [3, 1]}}], "density": 0}, "density": 0, "run_time_sec": 0})json");
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(overDemandSpp.HasValue());
+    assert(overDemandSpp.Value().layoutSnapshot.placements.size() == 2);
+#else
     assert(!overDemandSpp.HasValue());
     assert(overDemandSpp.GetError().code == jaguar::ErrorCode::Infeasible);
+#endif
 
     const auto importedBpp = importer.ImportBPInstanceJson(
         R"json({
@@ -426,6 +446,24 @@ void runJsonCodecTests()
         })json");
     assert(importedMspp.HasValue());
     assert(!importedMspp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
+
+    auto sparseMsppProblem = jaguar::MSPProblem::Create(importedMspp.Value());
+    assert(sparseMsppProblem.HasValue());
+    const auto removedMsppLayout = sparseMsppProblem.Value().AddLayout(
+        importedMspp.Value().BaseStrip());
+    const auto activeMsppLayout = sparseMsppProblem.Value().AddLayout(
+        importedMspp.Value().BaseStrip());
+    assert(removedMsppLayout.HasValue() && activeMsppLayout.HasValue());
+    assert(sparseMsppProblem.Value()
+               .RemoveLayout(removedMsppLayout.Value())
+               .HasValue());
+    const auto sparseMsppExport = jaguar::ExternalMSPSolutionFromSolution(
+        importedMspp.Value(), sparseMsppProblem.Value().Save());
+    assert(sparseMsppExport.HasValue());
+    assert(sparseMsppExport.Value().layouts.size() == 1);
+    assert(sparseMsppExport.Value().containers.size() == 1);
+    assert(sparseMsppExport.Value().layouts.front().containerId == 0);
+    assert(sparseMsppExport.Value().containers.front().id == 0);
 
     const auto separatedSpp = importer.ImportSPInstanceJson(
         R"json({

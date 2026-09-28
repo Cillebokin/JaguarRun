@@ -437,16 +437,20 @@ float pierLoss(const Edge2d& candidate,
     return loss;
 }
 
-std::vector<Edge2d> generatePiers(const SimplePolygon& shape,
-                                  std::size_t count,
-                                  const std::vector<Circle2d>& poles)
+Result<std::vector<Edge2d>> generatePiers(
+    const SimplePolygon& shape,
+    std::size_t count,
+    const std::vector<Circle2d>& poles)
 {
     if (count == 0)
-        return {};
+        return Result<std::vector<Edge2d>>::FromValue({});
 
     const std::vector<Edge2d> candidates = generateCandidatePiers(shape);
     if (candidates.empty())
-        return {};
+    {
+        return Result<std::vector<Edge2d>>::FromError(
+            {ErrorCode::Infeasible, "no ray found"});
+    }
 
     const Rect2d box = shape.BoundingBox();
     const float boxWidth = static_cast<float>(box.Width());
@@ -482,7 +486,7 @@ std::vector<Edge2d> generatePiers(const SimplePolygon& shape,
         }
         selected.push_back(*best);
     }
-    return selected;
+    return Result<std::vector<Edge2d>>::FromValue(std::move(selected));
 }
 
 float hullCrossRustF32(const Point2d& origin,
@@ -603,8 +607,11 @@ JAGUARCORE_API Result<Surrogate> Surrogate::Create(const SimplePolygon& shape,
 
     const std::vector<Circle2d> polesForPiers(
         poles.begin(), poles.begin() + failFastCount);
-    const std::vector<Edge2d> piers = generatePiers(
+    auto piersResult = generatePiers(
         shape, config.failFastPiers, polesForPiers);
+    if (!piersResult.HasValue())
+        return Result<Surrogate>::FromError(piersResult.GetError());
+    std::vector<Edge2d> piers = std::move(piersResult).Value();
     const std::vector<Point2d> hull = convexHullRustF32(shape.Vertices());
     std::vector<std::size_t> hullIndices;
     hullIndices.reserve(hull.size());
@@ -629,7 +636,7 @@ JAGUARCORE_API Result<Surrogate> Surrogate::Create(const SimplePolygon& shape,
     const double hullArea = static_cast<double>(polygonAreaRustF32(hull));
 
     return Result<Surrogate>::FromValue(
-        Surrogate{poles, piers, failFastCount, std::move(hullIndices),
+        Surrogate{poles, std::move(piers), failFastCount, std::move(hullIndices),
                   hullArea, rustConfig});
 }
 

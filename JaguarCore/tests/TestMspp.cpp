@@ -133,13 +133,16 @@ void runMsppTests()
 
     auto mismatchedStripSpec = snapshot;
     mismatchedStripSpec.layouts.front().strip.maxWidth = 20.0;
-    assert(!problem.Value().Restore(mismatchedStripSpec).HasValue());
+    assert(problem.Value().Restore(mismatchedStripSpec).HasValue());
+    assert(problem.Value().Save().layouts.front().strip.maxWidth == 20.0);
     assert(problem.Value().LayoutCount() == 2);
     assert(problem.Value().PlacedItemCount() == 3);
 
     auto mismatchedStripConfig = snapshot;
     mismatchedStripConfig.layouts.front().strip.cdeConfig.cdThreshold = 1;
-    assert(!problem.Value().Restore(mismatchedStripConfig).HasValue());
+    assert(problem.Value().Restore(mismatchedStripConfig).HasValue());
+    assert(problem.Value().Save().layouts.front().strip.cdeConfig.cdThreshold ==
+           1);
     assert(problem.Value().LayoutCount() == 2);
     assert(problem.Value().PlacedItemCount() == 3);
 
@@ -345,6 +348,25 @@ void runMsppTests()
     assert(std::abs(fitProblem.Value().StripWidth(fitLayout.Value()) -
                     static_cast<double>(3.350032329559326F)) < 1.0e-12);
 
+    const auto customStripInstance = jaguar::MSPInstance::Create(
+        {item0}, {1}, 10.0, 5.0, cdeConfig, shapeConfig);
+    assert(customStripInstance.HasValue());
+    auto customStripProblem =
+        jaguar::MSPProblem::Create(customStripInstance.Value());
+    assert(customStripProblem.HasValue());
+    const auto customStripLayout = customStripProblem.Value().AddLayout(
+        {20.0, 5.0, 4.0, cdeConfig, shapeConfig});
+    assert(customStripLayout.HasValue());
+    const auto customStripSolution = customStripProblem.Value().Save();
+    auto customStripRestoredProblem =
+        jaguar::MSPProblem::Create(customStripInstance.Value());
+    assert(customStripRestoredProblem.HasValue());
+    assert(customStripRestoredProblem.Value().Restore(customStripSolution)
+               .HasValue());
+    const auto customStripRestored = customStripRestoredProblem.Value().Save();
+    assert(customStripRestored.layouts.size() == 1);
+    assert(customStripRestored.layouts.front().strip.maxWidth == 20.0);
+
     const auto emptyInstance = jaguar::MSPInstance::Create(
         {}, {}, 10.0, 5.0, cdeConfig, shapeConfig);
     assert(emptyInstance.HasValue());
@@ -364,4 +386,26 @@ void runMsppTests()
     assert(zeroDemandProblem.HasValue());
     assert(zeroDemandProblem.Value().RemainingDemand(0) == 0);
     assert(std::isnan(zeroDemandProblem.Value().Density()));
+
+#ifdef JAGUARCORE_TEST_RELEASE
+    const auto overDemandInstance = jaguar::MSPInstance::Create(
+        {makeItem(0, 2.0, 2.0)}, {1}, 10.0, 5.0, cdeConfig, shapeConfig);
+    assert(overDemandInstance.HasValue());
+    auto overDemandProblem = jaguar::MSPProblem::Create(overDemandInstance.Value());
+    assert(overDemandProblem.HasValue());
+    const auto overDemandLayout = overDemandProblem.Value().AddLayout(
+        {10.0, 5.0, 10.0, cdeConfig, shapeConfig});
+    assert(overDemandLayout.HasValue());
+    assert(overDemandProblem.Value().PlaceItem({
+        overDemandLayout.Value(), 0,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0})})
+               .HasValue());
+    const auto overDemandPlacement = overDemandProblem.Value().PlaceItem({
+        overDemandLayout.Value(), 0,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {4.0, 1.0})});
+    assert(overDemandPlacement.HasValue());
+    assert(overDemandProblem.Value().RemainingDemand(0) ==
+           std::numeric_limits<std::size_t>::max());
+    assert(overDemandProblem.Value().PlacedItemCount() == 2);
+#endif
 }

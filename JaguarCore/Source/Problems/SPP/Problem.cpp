@@ -116,11 +116,13 @@ JAGUARCORE_API Result<PlacedItemHandle> SPProblem::PlaceItem(
         return Result<PlacedItemHandle>::FromError(
             {ErrorCode::InvalidInput, "SPP placement item index is invalid"});
     }
+#ifndef NDEBUG
     if (m_RemainingDemand[placement.itemIndex] == 0)
     {
         return Result<PlacedItemHandle>::FromError(
             {ErrorCode::Infeasible, "SPP item demand is exhausted"});
     }
+#endif
 
     const auto placed = m_Layout.PlaceItem(
         m_Instance.GetItem(placement.itemIndex), placement.transform);

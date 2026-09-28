@@ -510,6 +510,59 @@ void runCollisionTests()
     };
     assert(surrogate.Value().FailFastPoleCount() > 0);
     const jaguar::Circle2d& boundaryPole = surrogate.Value().Poles().front();
+
+    jaguar::CollisionEngine depthZeroSurrogateEngine(
+        root.Value(), depthZeroConfig);
+    assert(depthZeroSurrogateEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior}, Rectangle(4.0, 4.0, 6.0, 6.0), false})
+               .HasValue());
+    const auto rootCrossingTransform =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {boundaryPole.radius * 0.5 - boundaryPole.center.x,
+             boundaryPole.radius * 0.5 - boundaryPole.center.y});
+    const auto rootCrossingCollision =
+        depthZeroSurrogateEngine.DetectSurrogateCollision(
+            surrogate.Value(), rootCrossingTransform, jaguar::NoFilter{});
+    assert(rootCrossingCollision.HasValue());
+    assert(!rootCrossingCollision.Value());
+    jaguar::HazardCollector rootCrossingCollector;
+    const auto rootCrossingCollected =
+        depthZeroSurrogateEngine.CollectSurrogateCollisionsUntil(
+            surrogate.Value(), rootCrossingTransform, rootCrossingCollector,
+            jaguar::NoFilter{}, [](const jaguar::HazardEntity&) { return false; });
+    assert(rootCrossingCollected.HasValue());
+    assert(!rootCrossingCollected.Value());
+    assert(rootCrossingCollector.Empty());
+
+    const auto notchContainer = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {6.0, 10.0},
+        {6.0, 4.0}, {4.0, 4.0}, {4.0, 10.0}, {0.0, 10.0}});
+    assert(notchContainer.HasValue());
+    const auto smallSurrogateShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {0.1, 0.0}, {0.1, 0.1}, {0.0, 0.1}});
+    assert(smallSurrogateShape.HasValue());
+    jaguar::SurrogateConfig notchSurrogateConfig{};
+    notchSurrogateConfig.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+    notchSurrogateConfig.failFastPoleAreaRatio = 1.0;
+    const auto notchSurrogate = jaguar::Surrogate::Create(
+        smallSurrogateShape.Value(), notchSurrogateConfig);
+    assert(notchSurrogate.HasValue());
+    assert(notchSurrogate.Value().FailFastPoleCount() > 0);
+    jaguar::CollisionEngine notchSurrogateEngine(root.Value(), depthZeroConfig);
+    assert(notchSurrogateEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior},
+               std::make_shared<const jaguar::SimplePolygon>(notchContainer.Value()),
+               false})
+               .HasValue());
+    const jaguar::Circle2d& notchPole = notchSurrogate.Value().Poles().front();
+    const auto notchTransform = jaguar::Transform2d::FromRotationTranslation(
+        0.0, {5.0 - notchPole.center.x, 8.0 - notchPole.center.y});
+    const auto notchCollision = notchSurrogateEngine.DetectSurrogateCollision(
+        notchSurrogate.Value(), notchTransform, jaguar::NoFilter{});
+    assert(notchCollision.HasValue());
+    assert(!notchCollision.Value());
+
     const auto boundaryPoleTransform =
         jaguar::Transform2d::FromRotationTranslation(
             0.0,

@@ -1867,10 +1867,10 @@ JAGUARCORE_API Result<ExternalMSPSolution> ExternalMSPSolutionFromSolution(
     external.runTimeSec = runTimeSec;
     external.layouts.reserve(solution.layouts.size());
     external.containers.reserve(solution.layouts.size());
-    for (const MSPLayoutSnapshot& snapshot : solution.layouts)
+    for (std::size_t index = 0; index < solution.layouts.size(); ++index)
     {
-        const ContainerId containerId = static_cast<ContainerId>(
-            snapshot.layoutIndex);
+        const MSPLayoutSnapshot& snapshot = solution.layouts[index];
+        const ContainerId containerId = static_cast<ContainerId>(index);
         const auto layout = ExternalLayoutFromSnapshot(
             snapshot.layoutSnapshot, containerId);
         if (!layout.HasValue())

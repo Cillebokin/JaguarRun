@@ -31,6 +31,14 @@ std::string color(const SvgColor& value)
     return stream.str();
 }
 
+SvgColor halfBrightness(const SvgColor& value) noexcept
+{
+    return {
+        static_cast<std::uint8_t>(static_cast<float>(value.red) * 0.5F),
+        static_cast<std::uint8_t>(static_cast<float>(value.green) * 0.5F),
+        static_cast<std::uint8_t>(static_cast<float>(value.blue) * 0.5F)};
+}
+
 std::string xmlEscape(const std::string& value)
 {
     std::string escaped;
@@ -225,6 +233,38 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         }
         svg << "    </g>\n";
     }
+
+    svg << "    <g id=\"quality_zones\">\n";
+    for (std::size_t quality = options.theme.qualityZoneFills.size();
+         quality-- > 0;)
+    {
+        const auto zone = std::find_if(
+            container.QualityZones().begin(), container.QualityZones().end(),
+            [quality](const QualityZone& candidate) {
+                return candidate.quality == quality;
+            });
+        if (zone == container.QualityZones().end())
+            continue;
+
+        const SvgColor fill = options.theme.qualityZoneFills[quality];
+        const SvgColor stroke = halfBrightness(fill);
+        for (const SimplePolygon& shape : zone->shapes)
+        {
+            svg << "      <path class=\"quality-zone\" data-quality=\""
+                << quality << "\" d=\"" << polygonPath(shape)
+                << "\" fill=\"" << color(fill)
+                << "\" fill-opacity=\"0.5\" stroke=\"" << color(stroke)
+                << "\" stroke-width=\"" << number(strokeWidth * 2.0)
+                << "\" stroke-opacity=\""
+                << number(options.theme.qualityZoneStrokeOpacity)
+                << "\" stroke-dasharray=\"" << number(strokeWidth * 5.0)
+                << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n"
+                << "        <title>quality zone, q: " << quality
+                << "</title>\n"
+                << "      </path>\n";
+        }
+    }
+    svg << "    </g>\n";
 
     if (options.highlightCollisions)
     {

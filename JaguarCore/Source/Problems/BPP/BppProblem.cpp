@@ -171,11 +171,13 @@ JAGUARCORE_API Result<BPPlacedHandle> BPProblem::PlaceItem(
         return Result<BPPlacedHandle>::FromError(
             {ErrorCode::InvalidInput, "BPP placement item index is invalid"});
     }
+#ifndef NDEBUG
     if (m_RemainingDemand[placement.itemIndex] == 0)
     {
         return Result<BPPlacedHandle>::FromError(
             {ErrorCode::Infeasible, "BPP item demand is exhausted"});
     }
+#endif
 
     std::size_t layoutIndex = placement.layoutIndex;
     bool opened = false;

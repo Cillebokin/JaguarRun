@@ -1,7 +1,6 @@
 #include "JaguarCore/Problems/Spp.h"
 
 #include <cmath>
-#include <limits>
 #include <memory>
 #include <utility>
 
@@ -31,7 +30,7 @@ JAGUARCORE_API Result<SPInstance> SPInstance::Create(
     }
 
     float totalArea = 0.0F;
-    std::size_t totalDemand = 0;
+    bool hasPositiveDemand = false;
     std::vector<std::shared_ptr<const Item>> itemPointers;
     itemPointers.reserve(items.size());
     for (std::size_t i = 0; i < items.size(); ++i)
@@ -49,11 +48,6 @@ JAGUARCORE_API Result<SPInstance> SPInstance::Create(
                     {ErrorCode::InvalidInput, "SPP item external IDs must be unique"});
             }
         }
-        if (demands[i] > std::numeric_limits<std::size_t>::max() - totalDemand)
-        {
-            return Result<SPInstance>::FromError(
-                {ErrorCode::InvalidInput, "SPP demand total overflows"});
-        }
         const float itemArea = static_cast<float>(items[i].Area());
         const float demandArea =
             itemArea * static_cast<float>(demands[i]);
@@ -65,11 +59,11 @@ JAGUARCORE_API Result<SPInstance> SPInstance::Create(
                 {ErrorCode::InvalidInput, "SPP item area is non-finite"});
         }
         totalArea = nextTotalArea;
-        totalDemand += demands[i];
+        hasPositiveDemand = hasPositiveDemand || demands[i] > 0;
         itemPointers.push_back(std::make_shared<const Item>(items[i]));
     }
 
-    if (totalDemand == 0 || !std::isfinite(totalArea) || totalArea <= 0.0F)
+    if (!hasPositiveDemand || !std::isfinite(totalArea) || totalArea <= 0.0F)
     {
         return Result<SPInstance>::FromError(
             {ErrorCode::InvalidInput, "SPP instance must have positive demand"});

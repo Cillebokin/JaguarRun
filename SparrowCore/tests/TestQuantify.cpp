@@ -7,6 +7,7 @@
 #include "JaguarCore/Problems/Spp.h"
 
 #include <cmath>
+#include <limits>
 #include <ostream>
 #include <optional>
 #include <utility>
@@ -55,7 +56,14 @@ jaguar::Result<jaguar::SPInstance> MakeInstance()
 
 bool TestPairMatrix(std::ostream& output)
 {
-    sparrow::PairMatrix matrix(3U);
+    const auto matrixResult = sparrow::PairMatrix::Create(3U);
+    if (!Expect(matrixResult.HasValue(),
+                output,
+                "pair matrix creation must accept a small size"))
+    {
+        return false;
+    }
+    sparrow::PairMatrix matrix = matrixResult.Value();
     matrix.At(0U, 2U).loss = 2.0F;
     matrix.At(0U, 2U).weight = 3.0F;
     if (!Expect(matrix.Contains(2U, 0U)
@@ -69,6 +77,16 @@ bool TestPairMatrix(std::ostream& output)
                       && matrix.TotalWeightedLoss() == 6.0F,
                   output,
                   "pair matrix totals must count each pair once");
+}
+
+bool TestPairMatrixRejectsOverflow(std::ostream& output)
+{
+    const auto result = sparrow::PairMatrix::Create(
+        std::numeric_limits<std::size_t>::max());
+    return Expect(!result.HasValue()
+                      && result.GetError().code == jaguar::ErrorCode::InvalidInput,
+                  output,
+                  "pair matrix must reject overflowing storage sizes");
 }
 
 bool TestOverlapProxy(std::ostream& output)
@@ -95,6 +113,24 @@ bool TestOverlapProxy(std::ostream& output)
         jaguar::Transform2d::Identity(),
         *secondSurrogate,
         jaguar::Transform2d::FromRotationTranslation(0.0, {20.0, 0.0}));
+    const float epsilon = static_cast<float>(std::max(
+        first.CollisionShape().Diameter(), second.CollisionShape().Diameter()))
+        * 0.01F;
+    const float referenceProxy = sparrow::CalculateOverlapProxy(
+        *firstSurrogate,
+        jaguar::Transform2d::Identity(),
+        *secondSurrogate,
+        jaguar::Transform2d::Identity(),
+        epsilon);
+    const double shapePenalty = std::sqrt(
+        std::sqrt(firstSurrogate->ConvexHullArea())
+        * std::sqrt(secondSurrogate->ConvexHullArea()));
+    const float expectedPairLoss = static_cast<float>(
+        std::sqrt(static_cast<double>(referenceProxy)
+                  + static_cast<double>(epsilon) * epsilon)
+        * shapePenalty);
+    const float pairLoss = sparrow::CalculatePolygonCollisionLoss(
+        first.CollisionShape(), second.CollisionShape());
     const auto shape = first.CollisionShape().Transformed(
         jaguar::Transform2d::FromRotationTranslation(0.0, {-1.0, 0.0}));
     if (!Expect(shape.HasValue(), output, "proxy shape transform failed"))
@@ -102,12 +138,31 @@ bool TestOverlapProxy(std::ostream& output)
         return false;
     }
     const auto bounds = jaguar::Rect2d::Create(0.0, 0.0, 4.0, 4.0);
-    return Expect(std::isfinite(overlap) && overlap > separated
-                      && std::isfinite(separated)
-                      && sparrow::CalculateContainerPenalty(
-                             shape.Value(), bounds.Value()) > 0.0F,
+    if (!Expect(std::isfinite(overlap) && overlap > separated
+                    && std::isfinite(separated)
+                    && std::isfinite(pairLoss)
+                    && std::abs(pairLoss - expectedPairLoss) < 1.0e-5F,
+                output,
+                "overlap proxy must apply Sparrow epsilon and shape penalty"))
+    {
+        return false;
+    }
+
+    const jaguar::Rect2d shapeBounds = shape.Value().BoundingBox();
+    const auto intersection = shapeBounds.Intersection(bounds.Value());
+    const double shapeArea = shapeBounds.Area();
+    const double overlapArea = (shapeArea - intersection->Area())
+        + 0.0001 * shapeArea;
+    const double expectedContainerLoss = 2.0 * std::sqrt(overlapArea)
+        * std::sqrt(shape.Value().GetSurrogate()->ConvexHullArea());
+    const float containerLoss = sparrow::CalculateContainerPenalty(
+        shape.Value(), bounds.Value());
+    return Expect(std::isfinite(containerLoss)
+                      && std::abs(containerLoss
+                                   - static_cast<float>(expectedContainerLoss))
+                             < 1.0e-5F,
                   output,
-                  "overlap proxy must be finite and detect separation/container overflow");
+                  "container loss must match Sparrow's bounding-box formula");
 }
 
 bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
@@ -129,8 +184,8 @@ bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
     {
         return false;
     }
-    const auto firstHandle = problem.PlaceItem({0U, {0.0, {0.0, 0.0}}});
-    const auto secondHandle = problem.PlaceItem({1U, {0.0, {0.0, 0.0}}});
+    const auto firstHandle = problem.PlaceItem({0U, {0.0, {1.0, 1.0}}});
+    const auto secondHandle = problem.PlaceItem({1U, {0.0, {1.0, 1.0}}});
     if (!Expect(firstHandle.HasValue() && secondHandle.HasValue(),
                 output,
                 "tracker overlapping placement setup failed"))
@@ -168,6 +223,25 @@ bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
         return false;
     }
 
+    sparrow::CollisionTrackerSnapshot invalidSnapshot = snapshot;
+    invalidSnapshot.isSeparated = !tracker.IsSeparated();
+    if (!Expect(!tracker.Restore(invalidSnapshot, layout).HasValue(),
+                output,
+                "collision tracker must reject a stale feasibility flag"))
+    {
+        return false;
+    }
+
+    invalidSnapshot = snapshot;
+    invalidSnapshot.pairMatrix.At(0U, 1U).loss =
+        std::numeric_limits<float>::quiet_NaN();
+    if (!Expect(!tracker.Restore(invalidSnapshot, layout).HasValue(),
+                output,
+                "collision tracker must reject non-finite snapshot loss"))
+    {
+        return false;
+    }
+
     sparrow::SeparationEvaluator evaluator(
         layout,
         instanceResult.Value().GetItem(1U),
@@ -178,17 +252,126 @@ bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
     const sparrow::SampleEval clear = evaluator.Evaluate(
         jaguar::Transform2d::FromRotationTranslation(0.0, {4.0, 1.0}),
         std::nullopt);
-    return Expect(collision.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
-                      && std::isfinite(collision.loss) && collision.loss > 0.0F
-                      && clear.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR,
+    if (!Expect(collision.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                    && std::isfinite(collision.loss) && collision.loss > 0.0F
+                    && clear.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                    && evaluator.SurrogateRejectCount()
+                           <= evaluator.EvaluationCount()
+                    && evaluator.ExactCollisionCount() > 0U,
+                output,
+                "separation evaluator must distinguish colliding and clear moves and count checks"))
+    {
+        return false;
+    }
+
+    const auto removed = problem.RemoveItem(secondHandle.Value());
+    if (!Expect(removed.HasValue(), output, "tracker incremental remove failed"))
+    {
+        return false;
+    }
+    const auto moved = problem.PlaceItem({
+        removed.Value().itemIndex,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {4.0, 1.0})});
+    if (!Expect(moved.HasValue(), output, "tracker incremental placement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution movedSolution = problem.Save();
+    jaguar::Layout movedLayout(movedSolution.layoutSnapshot.container);
+    if (!Expect(movedLayout.Restore(movedSolution.layoutSnapshot).HasValue(),
+                output,
+                "tracker incremental layout restore failed"))
+    {
+        return false;
+    }
+    if (!Expect(tracker.UpdateMovedItem(
+                    movedLayout, secondHandle.Value(), moved.Value())
+                    .HasValue(),
+                output,
+                "tracker must update one moved item without a full rebuild"))
+    {
+        return false;
+    }
+    const bool oldHandleTracked =
+        tracker.IndexForHandle(secondHandle.Value()).has_value();
+    const bool newHandleTracked = tracker.IndexForHandle(moved.Value()).has_value();
+    return Expect(!oldHandleTracked && newHandleTracked && tracker.IsSeparated()
+                      && tracker.PairLoss(0U, 1U) == 0.0F
+                      && tracker.TotalLoss() == 0.0F,
                   output,
-                  "separation evaluator must distinguish colliding and clear moves");
+                  "incremental tracker update must replace the moved handle and clear separated losses");
+}
+
+bool TestSeparationEvaluatorIgnoresItsCurrentHazard(std::ostream& output)
+{
+    const auto instanceResult = MakeInstance();
+    if (!Expect(instanceResult.HasValue(),
+                output,
+                "self-hazard instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instanceResult.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "self-hazard problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "self-hazard strip resize failed"))
+    {
+        return false;
+    }
+    const auto first = problem.PlaceItem({0U, {0.0, {1.0, 1.0}}});
+    const auto moving = problem.PlaceItem({1U, {0.0, {5.0, 1.0}}});
+    if (!Expect(first.HasValue() && moving.HasValue(),
+                output,
+                "self-hazard placements failed"))
+    {
+        return false;
+    }
+
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                output,
+                "self-hazard layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(),
+                output,
+                "self-hazard tracker creation failed"))
+    {
+        return false;
+    }
+
+    sparrow::SeparationEvaluator evaluator(
+        layout,
+        instanceResult.Value().GetItem(1U),
+        moving.Value(),
+        trackerResult.Value());
+    const auto current = evaluator.Evaluate(
+        jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 1.0}),
+        std::nullopt);
+    return Expect(current.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                      && current.loss == 0.0F
+                      && evaluator.SurrogateRejectCount() == 0U
+                      && evaluator.ExactCollisionCount() == 0U,
+                  output,
+                  "separation evaluation must ignore the moving item's actual CDE hazard handle");
 }
 }
 
 bool RunQuantifyTests(std::ostream& output)
 {
     return TestPairMatrix(output)
+        && TestPairMatrixRejectsOverflow(output)
         && TestOverlapProxy(output)
-        && TestCollisionTrackerAndSeparationEvaluator(output);
+        && TestCollisionTrackerAndSeparationEvaluator(output)
+        && TestSeparationEvaluatorIgnoresItsCurrentHazard(output);
 }

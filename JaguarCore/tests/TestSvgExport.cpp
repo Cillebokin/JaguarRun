@@ -67,6 +67,76 @@ void runSvgExportTests()
     svgFile.close();
     assert(jaguar::ValidateLayoutSnapshot(layout, before).HasValue());
 
+    jaguar::Layout collisionLayout(container.Value());
+    const auto collisionFirst = collisionLayout.PlaceItem(
+        item.Value(), jaguar::Transform2d::FromRotationTranslation(
+                          0.0, {45.0, 50.0}));
+    const auto collisionSecond = collisionLayout.PlaceItem(
+        item.Value(), jaguar::Transform2d::FromRotationTranslation(
+                          0.0, {53.0, 50.0}));
+    assert(collisionFirst.HasValue());
+    assert(collisionSecond.HasValue());
+    assert(!collisionLayout.IsFeasible());
+
+    const auto collisionSvg = jaguar::ExportLayoutSvg(collisionLayout);
+    assert(collisionSvg.HasValue());
+    assert(collisionSvg.Value().find("class=\"collision-highlight\"") !=
+           std::string::npos);
+    const bool collisionLineForward =
+        collisionSvg.Value().find("d=\"M 45 50 L 53 50\"") !=
+        std::string::npos;
+    const bool collisionLineReverse =
+        collisionSvg.Value().find("d=\"M 53 50 L 45 50\"") !=
+        std::string::npos;
+    assert(collisionLineForward || collisionLineReverse);
+
+    jaguar::SvgExportOptions noCollisionHighlights{};
+    noCollisionHighlights.highlightCollisions = false;
+    const auto noCollisionHighlightSvg =
+        jaguar::ExportLayoutSvg(collisionLayout, noCollisionHighlights);
+    assert(noCollisionHighlightSvg.HasValue());
+    assert(noCollisionHighlightSvg.Value().find(
+               "class=\"collision-highlight\"") == std::string::npos);
+
+    jaguar::ExternalContainer qualityContainerInput{};
+    qualityContainerInput.id = 9200;
+    qualityContainerInput.shape = jaguar::ExternalShape::Rectangle(
+        0.0, 0.0, 100.0, 100.0);
+    qualityContainerInput.zones.push_back(
+        {1, jaguar::ExternalShape::Rectangle(60.0, 60.0, 20.0, 20.0)});
+    const auto qualityContainer = importer.ImportContainer(qualityContainerInput);
+    assert(qualityContainer.HasValue());
+
+    jaguar::ExternalItem qualityItemInput = itemInput;
+    qualityItemInput.minQuality = 2;
+    const auto qualityItem = importer.ImportItem(qualityItemInput, 1);
+    assert(qualityItem.HasValue());
+    jaguar::Layout qualityLayout(qualityContainer.Value());
+    const auto qualityPlaced = qualityLayout.PlaceItem(
+        qualityItem.Value(), jaguar::Transform2d::FromRotationTranslation(
+                                 0.0, {72.0, 70.0}));
+    assert(qualityPlaced.HasValue());
+    const auto qualitySvg = jaguar::ExportLayoutSvg(qualityLayout);
+    assert(qualitySvg.HasValue());
+    assert(qualitySvg.Value().find("d=\"M 72 70 L 70 70\"") !=
+               std::string::npos ||
+           qualitySvg.Value().find("d=\"M 70 70 L 72 70\"") !=
+               std::string::npos);
+
+    qualityItemInput.minQuality = 1;
+    const auto acceptedQualityItem = importer.ImportItem(qualityItemInput, 2);
+    assert(acceptedQualityItem.HasValue());
+    jaguar::Layout acceptedQualityLayout(qualityContainer.Value());
+    const auto acceptedQualityPlaced = acceptedQualityLayout.PlaceItem(
+        acceptedQualityItem.Value(),
+        jaguar::Transform2d::FromRotationTranslation(0.0, {72.0, 70.0}));
+    assert(acceptedQualityPlaced.HasValue());
+    const auto acceptedQualitySvg =
+        jaguar::ExportLayoutSvg(acceptedQualityLayout);
+    assert(acceptedQualitySvg.HasValue());
+    assert(acceptedQualitySvg.Value().find(
+               "class=\"collision-highlight\"") == std::string::npos);
+
     jaguar::SvgExportOptions invalidOptions{};
     invalidOptions.theme.strokeWidthMultiplier = std::numeric_limits<double>::quiet_NaN();
     const auto invalid = jaguar::ExportLayoutSvg(layout, invalidOptions);

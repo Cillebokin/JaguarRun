@@ -5,24 +5,14 @@
 #include "JaguarCore/Assertions.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <limits>
 #include <utility>
+#include <vector>
 
 namespace
 {
-sparrow::Result<sparrow::CollisionTracker> BuildTracker(
-    const jaguar::SPSolution& solution)
-{
-    jaguar::Layout layout(solution.layoutSnapshot.container);
-    const auto restored = layout.Restore(solution.layoutSnapshot);
-    if (!restored.HasValue())
-    {
-        return sparrow::Result<sparrow::CollisionTracker>::FromError(
-            restored.GetError());
-    }
-    return sparrow::CollisionTracker::Create(layout);
-}
-
 sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     const jaguar::SPInstance& instance,
     const jaguar::SPSolution& solution,
@@ -41,6 +31,13 @@ sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
         return sparrow::Result<sparrow::LbfMetrics>::FromError(
             restored.GetError());
     }
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    const auto layoutRestored = layout.Restore(solution.layoutSnapshot);
+    if (!layoutRestored.HasValue())
+    {
+        return sparrow::Result<sparrow::LbfMetrics>::FromError(
+            layoutRestored.GetError());
+    }
     sparrow::LbfMetrics metrics;
     metrics.seed = seed;
     metrics.placedItemCount = problem.PlacedItemCount();
@@ -51,44 +48,82 @@ sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     metrics.stripWidth = solution.StripWidth();
     metrics.density = solution.Density();
     metrics.feasible = metrics.remainingDemand == 0U
-        && jaguar::ValidateSPSolution(problem, solution).HasValue();
+        && jaguar::ValidateSPSolution(problem, solution).HasValue()
+        && layout.IsFeasible();
     return sparrow::Result<sparrow::LbfMetrics>::FromValue(metrics);
 }
 
-sparrow::Result<sparrow::SeparatorResult> TrySeparate(
+double CalculateMinimumStripWidth(
     const jaguar::SPInstance& instance,
-    const jaguar::SPSolution& baseSolution,
-    double width,
-    const sparrow::SeparatorConfig& separatorConfig,
-    std::uint64_t seed,
-    sparrow::OptimizationTerminator& terminator)
+    const jaguar::SPSolution& solution) noexcept
 {
-    auto problemResult = jaguar::SPProblem::Create(instance);
-    if (!problemResult.HasValue())
+    constexpr double relativeTolerance = 1.0e-6;
+    const jaguar::Rect2d containerBounds =
+        solution.layoutSnapshot.container.CollisionShape().BoundingBox();
+    if (!std::isfinite(containerBounds.Width())
+        || !std::isfinite(containerBounds.Height())
+        || containerBounds.Width() <= 0.0
+        || containerBounds.Height() <= 0.0)
     {
-        return sparrow::Result<sparrow::SeparatorResult>::FromError(
-            problemResult.GetError());
+        return 0.0;
     }
-    jaguar::SPProblem problem = std::move(problemResult.Value());
-    const auto restored = problem.Restore(baseSolution);
-    if (!restored.HasValue())
+
+    double totalArea = 0.0;
+    for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
-        return sparrow::Result<sparrow::SeparatorResult>::FromError(
-            restored.GetError());
+        totalArea += instance.GetItem(index).CollisionShape().Area()
+            * static_cast<double>(instance.ItemDemand(index));
     }
-    const auto changed = problem.ChangeStripWidth(width);
-    if (!changed.HasValue())
+    double minimumWidth = totalArea / containerBounds.Height()
+        * (1.0 - relativeTolerance);
+    for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
-        return sparrow::Result<sparrow::SeparatorResult>::FromError(
-            changed.GetError());
+        const jaguar::Item& item = instance.GetItem(index);
+        const auto& rotation = item.AllowedRotation();
+        if (rotation.mode == jaguar::RotationMode::Continuous)
+        {
+            continue;
+        }
+        std::vector<double> rotations;
+        if (rotation.mode == jaguar::RotationMode::None)
+        {
+            rotations.push_back(0.0);
+        }
+        else
+        {
+            rotations = rotation.radians;
+        }
+        const double tolerance = item.CollisionShape().Diameter()
+            * relativeTolerance;
+        double itemWidth = std::numeric_limits<double>::infinity();
+        for (const double angle : rotations)
+        {
+            if (!std::isfinite(angle))
+            {
+                continue;
+            }
+            const auto transformed = item.CollisionShape().TransformedRustF32(
+                jaguar::Transform2d::FromRotationTranslation(angle, {0.0, 0.0}));
+            if (!transformed.HasValue())
+            {
+                continue;
+            }
+            const jaguar::Rect2d bounds = transformed.Value().BoundingBox();
+            if (bounds.Height() <= containerBounds.Height() + tolerance)
+            {
+                itemWidth = std::min(
+                    itemWidth,
+                    std::max(0.0, bounds.Width() - tolerance));
+            }
+        }
+        if (std::isfinite(itemWidth))
+        {
+            minimumWidth = std::max(minimumWidth, itemWidth);
+        }
     }
-    auto separator = sparrow::Separator::Create(std::move(problem), seed);
-    if (!separator.HasValue())
-    {
-        return sparrow::Result<sparrow::SeparatorResult>::FromError(
-            separator.GetError());
-    }
-    return separator.Value().Run(separatorConfig, terminator);
+    const double result = minimumWidth
+        + solution.StripWidth() - containerBounds.Width();
+    return std::isfinite(result) && result > 0.0 ? result : 0.0;
 }
 
 sparrow::OptimizationProgress MakeProgress(
@@ -110,15 +145,14 @@ namespace sparrow
 {
 Result<void> CompressionConfig::Validate() const
 {
-    if (maxIterations == 0U || maxConsecutiveFailures == 0U
-        || !std::isfinite(shrinkMin) || !std::isfinite(shrinkMax)
+    if (!std::isfinite(shrinkMin) || !std::isfinite(shrinkMax)
         || shrinkMin <= 0.0 || shrinkMax < shrinkMin || shrinkMax >= 1.0
         || !std::isfinite(failureDecay) || failureDecay <= 0.0
-        || failureDecay >= 1.0)
+        || failureDecay >= 1.0 || timeLimit.count() < 0)
     {
         return Result<void>::FromError(
             {jaguar::ErrorCode::InvalidInput,
-             "compression limits or shrink range are invalid"});
+             "compression limits, shrink range, or phase time limit is invalid"});
     }
     return separator.Validate();
 }
@@ -141,96 +175,169 @@ Result<CompressionResult> Compress(
     {
         return Result<CompressionResult>::FromError(initialMetrics.GetError());
     }
+
+    auto problemResult = jaguar::SPProblem::Create(instance);
+    if (!problemResult.HasValue())
+    {
+        return Result<CompressionResult>::FromError(problemResult.GetError());
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto restored = problem.Restore(initialSolution);
+    if (!restored.HasValue())
+    {
+        return Result<CompressionResult>::FromError(restored.GetError());
+    }
+    auto separatorResult = Separator::Create(std::move(problem), seed);
+    if (!separatorResult.HasValue())
+    {
+        return Result<CompressionResult>::FromError(
+            separatorResult.GetError());
+    }
+    Separator separator = std::move(separatorResult.Value());
+
     jaguar::SPSolution bestSolution = initialSolution;
     LbfMetrics bestMetrics = initialMetrics.Value();
+    const double minimumWidth = CalculateMinimumStripWidth(
+        instance, initialSolution);
     std::size_t failures = 0U;
-    double currentStep = config.shrinkMax;
-    for (std::size_t iteration = 0U;
-         iteration < config.maxIterations
-             && failures < config.maxConsecutiveFailures
-             && !terminator.ShouldTerminate(iteration);
-         ++iteration)
+    std::size_t iteration = 0U;
+    const auto start = std::chrono::steady_clock::now();
+    std::size_t totalSurrogateRejectCount =
+        bestMetrics.surrogateRejectCount;
+    std::size_t totalExactCollisionCount = bestMetrics.exactCollisionCount;
+    OptimizationHistory history;
+
+    while (!terminator.ShouldTerminate(iteration)
+           && (config.maxIterations == 0U
+               || iteration < config.maxIterations))
     {
-        if (config.decayStrategy == ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED)
+        double step = config.shrinkMax;
+        if (config.decayStrategy
+            == ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED)
         {
-            const double progress = config.maxIterations <= 1U
-                ? 1.0
-                : static_cast<double>(iteration)
-                    / static_cast<double>(config.maxIterations - 1U);
-            currentStep = config.shrinkMax
-                + (config.shrinkMin - config.shrinkMax) * progress;
+            double ratio = 0.0;
+            if (config.timeLimit.count() > 0)
+            {
+                const auto elapsed = std::chrono::duration_cast<
+                    std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start);
+                ratio = static_cast<double>(elapsed.count())
+                    / static_cast<double>(config.timeLimit.count());
+            }
+            step = config.shrinkMax
+                + ratio * (config.shrinkMin - config.shrinkMax);
         }
-        currentStep = std::clamp(currentStep, config.shrinkMin, config.shrinkMax);
-        const double targetWidth = bestSolution.StripWidth()
-            * (1.0 - currentStep);
-        if (!std::isfinite(targetWidth) || targetWidth <= 0.0
-            || targetWidth >= bestSolution.StripWidth())
+        else
+        {
+            step = config.shrinkMax * std::pow(
+                config.failureDecay, static_cast<double>(failures));
+        }
+        if (!std::isfinite(step) || step < config.shrinkMin)
         {
             break;
         }
 
-        const auto candidate = TrySeparate(
-            instance,
-            bestSolution,
-            targetWidth,
+        const double width = bestSolution.StripWidth();
+        const double nextWidth = width * (1.0 - step);
+        if (!std::isfinite(nextWidth) || nextWidth <= 0.0
+            || nextWidth >= width
+            || (minimumWidth > 0.0 && nextWidth < minimumWidth))
+        {
+            break;
+        }
+        if (listener != nullptr)
+            listener->OnCompressionProgress(step);
+        if (listener != nullptr)
+        {
+            listener->OnProgress(MakeProgress(
+                OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION,
+                iteration,
+                bestMetrics,
+                0.0F));
+        }
+
+        const auto rolledBack = separator.Rollback(bestSolution);
+        if (!rolledBack.HasValue())
+        {
+            return Result<CompressionResult>::FromError(
+                rolledBack.GetError());
+        }
+        const double split = separator.Random().Uniform01F32() * width;
+        const auto changed = separator.ChangeStripWidth(nextWidth, split);
+        if (!changed.HasValue())
+        {
+            return Result<CompressionResult>::FromError(changed.GetError());
+        }
+        const auto separated = separator.Run(
             config.separator,
-            seed + iteration + 1U,
-            terminator);
-        if (!candidate.HasValue())
+            terminator,
+            listener,
+            &history,
+            OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION);
+        if (!separated.HasValue())
         {
-            return Result<CompressionResult>::FromError(candidate.GetError());
+            return Result<CompressionResult>::FromError(
+                separated.GetError());
         }
-        const auto candidateMetrics = CalculateMetrics(
-            instance, candidate.Value().solution, seed);
-        if (!candidateMetrics.HasValue())
+
+        const float loss = separator.Tracker().TotalLoss();
+        const auto metricsResult = CalculateMetrics(
+            instance, separated.Value().solution, seed);
+        if (!metricsResult.HasValue())
         {
-            return Result<CompressionResult>::FromError(candidateMetrics.GetError());
+            return Result<CompressionResult>::FromError(
+                metricsResult.GetError());
         }
-        const auto tracker = BuildTracker(candidate.Value().solution);
-        if (!tracker.HasValue())
-        {
-            return Result<CompressionResult>::FromError(tracker.GetError());
-        }
+        LbfMetrics metrics = metricsResult.Value();
+        metrics.surrogateRejectCount = separated.Value().surrogateRejectCount;
+        metrics.exactCollisionCount = separated.Value().exactCollisionCount;
+        totalSurrogateRejectCount += metrics.surrogateRejectCount;
+        totalExactCollisionCount += metrics.exactCollisionCount;
         const OptimizationProgress progress = MakeProgress(
             OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION,
             iteration,
-            candidateMetrics.Value(),
-            tracker.Value().TotalLoss());
+            metrics,
+            loss);
         if (listener != nullptr)
         {
             listener->OnProgress(progress);
         }
-        if (candidateMetrics.Value().feasible
-            && tracker.Value().IsSeparated()
-            && candidate.Value().solution.StripWidth() < bestSolution.StripWidth())
+
+        if (loss == 0.0F && metrics.feasible)
         {
-            bestSolution = candidate.Value().solution;
-            bestMetrics = candidateMetrics.Value();
-            failures = 0U;
-            if (config.decayStrategy
-                == ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED)
-            {
-                currentStep = std::min(
-                    config.shrinkMax,
-                    currentStep / config.failureDecay);
-            }
+            bestSolution = separated.Value().solution;
+            bestMetrics = metrics;
             if (listener != nullptr)
             {
                 listener->OnImprovement(progress);
             }
+            PublishSolutionReport(
+                history,
+                listener,
+                MakeSolutionReport(
+                    OptimizationReportType::OPTIMIZATION_REPORT_COMPRESSION_FEASIBLE,
+                    OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION,
+                    iteration,
+                    bestSolution,
+                    loss,
+                    true));
         }
         else
         {
             ++failures;
-            if (config.decayStrategy
-                == ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED)
+            if (config.maxConsecutiveFailures > 0U
+                && failures >= config.maxConsecutiveFailures)
             {
-                currentStep = std::max(
-                    config.shrinkMin,
-                    currentStep * config.failureDecay);
+                break;
             }
         }
+        ++iteration;
     }
-    return Result<CompressionResult>::FromValue({bestSolution, bestMetrics});
+
+    bestMetrics.seed = seed;
+    bestMetrics.surrogateRejectCount = totalSurrogateRejectCount;
+    bestMetrics.exactCollisionCount = totalExactCollisionCount;
+    return Result<CompressionResult>::FromValue(
+        {bestSolution, bestMetrics, std::move(history)});
 }
 }

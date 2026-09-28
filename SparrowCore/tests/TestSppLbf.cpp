@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <limits>
 #include <ostream>
@@ -18,6 +19,9 @@
 
 namespace
 {
+constexpr double SPARROW_RUST_LBF_WIDTH_TOLERANCE = 4.0e-3;
+constexpr double SPARROW_RUST_LBF_DENSITY_TOLERANCE = 1.0e-3;
+
 bool Expect(bool condition, std::ostream& output, const char* message)
 {
     if (condition)
@@ -144,6 +148,18 @@ bool TestSmallSppFixture(std::ostream& output)
                 output,
                 "fixed seed SPP metrics must match the C++ reference fixture"))
     {
+        const auto& metrics = result.Value().metrics;
+        output << std::setprecision(17)
+               << "SPP C++ reference expected: samples=" << referenceSamples
+               << " placed=" << referencePlaced
+               << " remaining=" << referenceRemaining
+               << " width=" << referenceWidth
+               << " density=" << referenceDensity << '\n'
+               << "SPP C++ actual: samples=" << metrics.sampleCount
+               << " placed=" << metrics.placedItemCount
+               << " remaining=" << metrics.remainingDemand
+               << " width=" << metrics.stripWidth
+               << " density=" << metrics.density << '\n';
         return false;
     }
     if (!Expect(result.Value().metrics.placedItemCount == 2U
@@ -314,6 +330,227 @@ bool TestSparrowBuilderSmallInstance(std::ostream& output)
                   output,
                   "Sparrow builder must conserve demand and report feasibility");
 }
+
+bool TestLegacyLbfMetricsReferenceFixture(std::ostream& output)
+{
+    std::ifstream metricsFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/LbfMetricsReference.tsv",
+             "../SparrowCore/Tests/Fixtures/LbfMetricsReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfMetricsReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\LbfMetricsReference.tsv"})
+    {
+        metricsFile.open(path);
+        if (metricsFile.is_open())
+        {
+            break;
+        }
+        metricsFile.clear();
+    }
+    if (!Expect(metricsFile.is_open(),
+                output,
+                "legacy jagua-rs LBF metrics reference must be readable"))
+    {
+        return false;
+    }
+
+    bool provenanceFound = false;
+    bool schemaFound = false;
+    bool sppFound = false;
+    bool bppFound = false;
+    std::string line;
+    while (std::getline(metricsFile, line))
+    {
+        if (line.empty())
+        {
+            continue;
+        }
+        if (line.front() == '#')
+        {
+            provenanceFound = provenanceFound
+                || line.find("jagua-rs/lbf") != std::string::npos;
+            schemaFound = schemaFound
+                || line.find("fixture problem seed samples placed remaining width density cost feasible")
+                       != std::string::npos;
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string fixture;
+        std::string problem;
+        std::uint64_t seed = 0U;
+        std::size_t samples = 0U;
+        std::size_t placed = 0U;
+        std::size_t remaining = 0U;
+        double width = 0.0;
+        double density = 0.0;
+        double cost = 0.0;
+        bool feasible = false;
+        if (!(row >> fixture >> problem >> seed >> samples >> placed
+                  >> remaining >> width >> density >> cost
+                  >> std::boolalpha >> feasible))
+        {
+            return Expect(false,
+                          output,
+                          "legacy LBF metrics reference row must match its schema");
+        }
+
+        if (fixture == "lbf_spp_small")
+        {
+            sppFound = problem == "spp" && seed == 42U && samples == 128U
+                && placed == 2U && remaining == 0U
+                && std::abs(width - 4.276253) < 1.0e-6
+                && std::abs(density - 0.46769914) < 1.0e-8
+                && cost == 0.0 && feasible;
+        }
+        else if (fixture == "lbf_bpp_small")
+        {
+            bppFound = problem == "bpp" && seed == 42U && samples == 64U
+                && placed == 1U && remaining == 0U && width == 0.0
+                && std::abs(density - 0.11111111) < 1.0e-8
+                && cost == 10.0 && feasible;
+        }
+    }
+
+    return Expect(provenanceFound && schemaFound && sppFound && bppFound,
+                  output,
+                  "legacy jagua-rs LBF metrics provenance, schema, and values must be valid");
+}
+
+bool TestSparrowRustReferenceMetrics(std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppSingleItem.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "shared Sparrow Rust/C++ SPP input fixture must be readable"))
+    {
+        return false;
+    }
+
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer;
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "shared Sparrow Rust/C++ SPP input must import successfully"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 64U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto result =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    if (!Expect(result.HasValue(),
+                output,
+                "SparrowCore must construct the shared Rust reference instance"))
+    {
+        return false;
+    }
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "live Sparrow Rust reference metrics fixture must be readable"))
+    {
+        return false;
+    }
+
+    bool referenceFound = false;
+    std::uint64_t referenceSeed = 0U;
+    std::size_t referencePlaced = 0U;
+    std::size_t referenceRemaining = 0U;
+    double referenceWidth = 0.0;
+    double referenceDensity = 0.0;
+    bool referenceFeasible = false;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string fixture;
+        if (row >> fixture >> referenceSeed >> referencePlaced
+                >> referenceRemaining >> referenceWidth >> referenceDensity
+                >> std::boolalpha >> referenceFeasible
+            && fixture == "rust_spp_single_item")
+        {
+            referenceFound = true;
+            break;
+        }
+    }
+    if (!Expect(referenceFound,
+                output,
+                "Sparrow Rust reference must contain the shared SPP fixture"))
+    {
+        return false;
+    }
+
+    const sparrow::LbfMetrics& metrics = result.Value().metrics;
+    const bool matches = referenceSeed == config.seed
+        && referencePlaced == metrics.placedItemCount
+        && referenceRemaining == metrics.remainingDemand
+        && referenceFeasible == metrics.feasible
+        // Both implementations stop final coordinate descent below 0.001 of
+        // the item's minimum dimension; allow two terminal steps for the
+        // independently rounded Rust/C++ geometry results.
+        && std::abs(referenceWidth - metrics.stripWidth)
+               < SPARROW_RUST_LBF_WIDTH_TOLERANCE
+        && std::abs(referenceDensity - metrics.density)
+               < SPARROW_RUST_LBF_DENSITY_TOLERANCE;
+    if (!matches)
+    {
+        output << std::setprecision(17)
+               << "Sparrow Rust reference: seed=" << referenceSeed
+               << " placed=" << referencePlaced
+               << " remaining=" << referenceRemaining
+               << " width=" << referenceWidth
+               << " density=" << referenceDensity
+               << " feasible=" << referenceFeasible << '\n'
+               << "SparrowCore result: seed=" << metrics.seed
+               << " placed=" << metrics.placedItemCount
+               << " remaining=" << metrics.remainingDemand
+               << " width=" << metrics.stripWidth
+               << " density=" << metrics.density
+               << " feasible=" << metrics.feasible << '\n';
+    }
+    return Expect(matches,
+                  output,
+                  "SparrowCore initial metrics must match live Sparrow Rust output");
+}
 }
 
 bool RunSppLbfTests(std::ostream& output)
@@ -321,5 +558,7 @@ bool RunSppLbfTests(std::ostream& output)
     return TestSmallSppFixture(output)
         && TestSppDemandAndInvalidInputs(output)
         && TestSppJsonRoundTrip(output)
-        && TestSparrowBuilderSmallInstance(output);
+        && TestSparrowBuilderSmallInstance(output)
+        && TestLegacyLbfMetricsReferenceFixture(output)
+        && TestSparrowRustReferenceMetrics(output);
 }

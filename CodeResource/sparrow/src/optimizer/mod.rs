@@ -6,20 +6,20 @@ use crate::optimizer::lbf::{ConstructionError, LBFBuilder};
 use crate::optimizer::separator::Separator;
 use crate::util::listener::{OptimizationPhase, ReportType, SolutionListener};
 use crate::util::terminator::Terminator;
+use jagua_rs::geometry::Transformation;
 use jagua_rs::geometry::geo_enums::RotationRange;
 use jagua_rs::geometry::geo_traits::TransformableFrom;
-use jagua_rs::geometry::Transformation;
 use jagua_rs::probs::spp::entities::{SPInstance, SPProblem, SPSolution};
 use log::info;
+use rand::rngs::Xoshiro256PlusPlus;
 use rand::{Rng, SeedableRng};
 use std::time::Duration;
-use rand::rngs::Xoshiro256PlusPlus;
 
+pub mod compress;
+pub mod explore;
 pub mod lbf;
 pub mod separator;
 mod worker;
-pub mod explore;
-pub mod compress;
 
 /// Algorithm 11 from https://doi.org/10.48550/arXiv.2509.13329
 ///
@@ -32,10 +32,10 @@ pub fn optimize(
     terminator: &mut impl Terminator,
     expl_config: &ExplorationConfig,
     cmpr_config: &CompressionConfig,
-    initial_solution: Option<&SPSolution>
+    initial_solution: Option<&SPSolution>,
 ) -> Result<SPSolution, ConstructionError> {
     let mut next_rng = || Xoshiro256PlusPlus::seed_from_u64(rng.next_u64());
-    
+
     // First build an initial solution if none is provided
     let start_prob = match initial_solution {
         None => {
@@ -44,7 +44,8 @@ pub fn optimize(
         }
         Some(init_sol) => {
             info!("[OPT] warm starting from provided initial solution");
-            let mut prob = jagua_rs::probs::spp::entities::SPProblem::new(instance);
+            let mut prob = jagua_rs::probs::spp::entities::SPProblem::new(instance)
+                .expect("validated Sparrow instance must produce its base strip container");
             prob.restore(init_sol);
             prob
         }
@@ -54,18 +55,17 @@ pub fn optimize(
     sol_listener.report_phase(OptimizationPhase::Exploration);
     terminator.new_timeout(expl_config.time_limit);
     let mut expl_separator = Separator::new(start_prob, next_rng(), expl_config.separator_config);
-    let solutions = exploration_phase(
-        &mut expl_separator,
-        sol_listener,
-        terminator,
-        expl_config,
-    );
+    let solutions = exploration_phase(&mut expl_separator, sol_listener, terminator, expl_config);
     let final_explore_sol = solutions.into_iter().last().unwrap();
 
     // Start the compression phase from the final solution from the exploration phase
     sol_listener.report_phase(OptimizationPhase::Compression);
     terminator.new_timeout(cmpr_config.time_limit);
-    let mut cmpr_separator = Separator::new(expl_separator.prob, next_rng(), cmpr_config.separator_config);
+    let mut cmpr_separator = Separator::new(
+        expl_separator.prob,
+        next_rng(),
+        cmpr_config.separator_config,
+    );
     let cmpr_sol = compression_phase(
         &mut cmpr_separator,
         &final_explore_sol,
@@ -86,7 +86,10 @@ fn minimum_strip_width(prob: &SPProblem) -> f32 {
     const REL_TOL: f32 = 1e-6;
     let container = prob.layout.container.outer_cd.bbox;
     let width_inset = prob.strip_width() - container.width();
-    let area: f64 = prob.instance.items.iter()
+    let area: f64 = prob
+        .instance
+        .items
+        .iter()
         .map(|(item, qty)| f64::from(item.shape_cd.area) * *qty as f64)
         .sum();
     let mut min_width = (area / f64::from(container.height())) as f32 * (1.0 - REL_TOL);
@@ -100,9 +103,15 @@ fn minimum_strip_width(prob: &SPProblem) -> f32 {
         };
         let tolerance = item.shape_cd.diameter * REL_TOL;
         let mut shape = item.shape_cd.as_ref().clone();
-        let item_width = rotations.iter()
+        let item_width = rotations
+            .iter()
             .filter_map(|&rotation| {
-                let bbox = shape.transform_from(item.shape_cd.as_ref(), &Transformation::from_rotation(rotation)).bbox;
+                let bbox = shape
+                    .transform_from(
+                        item.shape_cd.as_ref(),
+                        &Transformation::from_rotation(rotation),
+                    )
+                    .bbox;
                 (bbox.height() <= container.height() + tolerance)
                     .then_some((bbox.width() - tolerance).max(0.0))
             })

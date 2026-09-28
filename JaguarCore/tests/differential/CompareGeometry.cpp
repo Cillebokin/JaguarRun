@@ -95,9 +95,7 @@ void runGeometryDifferentialTests()
     const auto imported = importer.ImportItemJson(fixture, 4);
     assert(imported.HasValue());
 
-    // Expected values come from the Rust f32 import semantics. The rotation
-    // comparison uses a wider cross-language tolerance because JaguarCore
-    // stores angles as double while jagua-rs stores them as f32.
+    // Expected values come from the Rust f32 import and rotation semantics.
     const jaguar::Item& item = imported.Value();
     assert(item.ExternalId() == 101);
     assert(item.Index() == 4);
@@ -123,8 +121,9 @@ void runGeometryDifferentialTests()
     assert(boundaryImport.HasValue());
     assert(boundaryImport.Value().AllowedRotation().radians.size() == 2);
     assert(std::abs(boundaryImport.Value().AllowedRotation().radians[0]) < 1.0e-12);
-    assert(std::abs(boundaryImport.Value().AllowedRotation().radians[1] -
-                    1.5 * std::acos(-1.0)) < 1.0e-12);
+    const double rustStoredRotation = static_cast<double>(
+        static_cast<float>(1.5 * std::acos(-1.0)));
+    assert(boundaryImport.Value().AllowedRotation().radians[1] == rustStoredRotation);
 
     jaguar::ExternalItem steppedItem = boundaryItem;
     steppedItem.rotation = jaguar::RotationPolicy::Stepped(120.0);
@@ -295,9 +294,9 @@ void runCollisionDifferentialTests()
     assert(inferiorLayout.PlaceItem(
         importedQualityItem.Value(),
         jaguar::Transform2d::FromRotationTranslation(0.0, {1.5, 1.5})).HasValue());
-    // Match jagua-rs HazKeyFilter::from_irrelevant_qzones: quality values
-    // below min_quality are filtered from collision queries.
-    assert(inferiorLayout.IsFeasible());
+    // jagua-rs Layout::is_feasible filters the item's own hazard only, so an
+    // inferior-quality zone remains a collision for this placed item.
+    assert(!inferiorLayout.IsFeasible());
 
     jaguar::Layout acceptableLayout(container.Value());
     assert(acceptableLayout.PlaceItem(

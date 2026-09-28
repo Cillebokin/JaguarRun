@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -14,6 +15,14 @@ namespace jaguar
 {
 namespace
 {
+Rect2d normalizeBoundsRustF32(const Rect2d& bounds) noexcept
+{
+    return Rect2d{static_cast<double>(static_cast<float>(bounds.xMin)),
+                  static_cast<double>(static_cast<float>(bounds.yMin)),
+                  static_cast<double>(static_cast<float>(bounds.xMax)),
+                  static_cast<double>(static_cast<float>(bounds.yMax))};
+}
+
 bool isOutside(const Rect2d& bounds, const Rect2d& shapeBounds) noexcept
 {
     return bounds.RelationTo(shapeBounds) == RectRelation::Disjoint ||
@@ -21,17 +30,12 @@ bool isOutside(const Rect2d& bounds, const Rect2d& shapeBounds) noexcept
            bounds.RelationTo(shapeBounds) == RectRelation::Enclosed;
 }
 
-bool pointNearSegment(const Point2d& point, const Edge2d& edge, double radius) noexcept
-{
-    return edge.ClosestPoint(point).SquaredDistanceTo(point) <= radius * radius;
-}
-
 bool polygonInsideContainer(const SimplePolygon& polygon,
                             const SimplePolygon& container) noexcept
 {
     for (const Point2d& point : polygon.Vertices())
     {
-        if (!container.Contains(point))
+        if (!container.ContainsRustF32(point))
             return false;
     }
 
@@ -39,17 +43,25 @@ bool polygonInsideContainer(const SimplePolygon& polygon,
     {
         for (const Edge2d& containerEdge : container.Edges())
         {
-            if (polygonEdge.Intersects(containerEdge))
+            if (polygonEdge.IntersectsRustF32(containerEdge))
                 return false;
         }
     }
     return true;
 }
 
+bool pointNearSegment(const Point2d& point, const Edge2d& edge, double radius) noexcept
+{
+    const float squaredDistance = static_cast<float>(
+        edge.SquaredDistanceToRustF32(point));
+    const float radiusF32 = static_cast<float>(radius);
+    return squaredDistance <= radiusF32 * radiusF32;
+}
+
 bool circleInsideContainer(const Circle2d& circle,
                            const SimplePolygon& container) noexcept
 {
-    if (!container.Contains(circle.center))
+    if (!container.ContainsRustF32(circle.center))
         return false;
     for (const Edge2d& edge : container.Edges())
     {
@@ -61,10 +73,12 @@ bool circleInsideContainer(const Circle2d& circle,
 }
 
 JAGUARCORE_API CollisionEngine::CollisionEngine(Rect2d bounds, CDEConfig config)
-    : m_Bounds(bounds),
+    : m_Bounds(normalizeBoundsRustF32(bounds)),
       m_Config(config),
-      m_QuadTree(bounds, config.quadtreeDepth, config.cdThreshold)
+      m_QuadTree(m_Bounds, config.quadtreeDepth, config.cdThreshold),
+      m_Slots(1)
 {
+    m_Slots.front().generation = 0;
 }
 
 JAGUARCORE_API CollisionEngine::~CollisionEngine() = default;
@@ -81,11 +95,16 @@ JAGUARCORE_API Result<HazardHandle> CollisionEngine::RegisterHazard(Hazard hazar
         return Result<HazardHandle>::FromError(
              {ErrorCode::InvalidInput, "hazard shape is null"});
     }
-    if (hazard.dynamic && hazard.entity.kind != HazardKind::PlacedItem)
+    const auto duplicateEntity = std::find_if(
+        m_Slots.begin(), m_Slots.end(), [&hazard](const Slot& slot) {
+            return slot.hazard.has_value() &&
+                   slot.hazard->entity == hazard.entity;
+        });
+    if (duplicateEntity != m_Slots.end())
     {
         return Result<HazardHandle>::FromError(
             {ErrorCode::InvalidInput,
-             "only placed item hazards may be dynamic"});
+             "hazard entity is already registered"});
     }
 
     const HazardHandle handle = AllocateHandle();
@@ -98,13 +117,13 @@ JAGUARCORE_API Result<HazardHandle> CollisionEngine::RegisterHazard(Hazard hazar
 
 HazardHandle CollisionEngine::AllocateHandle()
 {
-    for (std::size_t i = 0; i < m_Slots.size(); ++i)
+    if (!m_FreeSlotIndices.empty())
     {
-        if (!m_Slots[i].hazard.has_value())
-        {
-            ++m_Slots[i].generation;
-            return HazardHandle{i, m_Slots[i].generation};
-        }
+        const std::size_t slotIndex = m_FreeSlotIndices.back();
+        m_FreeSlotIndices.pop_back();
+        Slot& slot = m_Slots[slotIndex];
+        slot.generation |= 1U;
+        return HazardHandle{slotIndex, slot.generation};
     }
     m_Slots.push_back(Slot{});
     return HazardHandle{m_Slots.size() - 1, m_Slots.back().generation};
@@ -128,6 +147,18 @@ Hazard* CollisionEngine::Get(HazardHandle handle) noexcept
     if (slot.generation != handle.generation || !slot.hazard.has_value())
         return nullptr;
     return &slot.hazard.value();
+}
+
+std::optional<HazardHandle> CollisionEngine::FindHazardHandle(
+    const HazardEntity& entity) const noexcept
+{
+    for (std::size_t slotIndex = 0; slotIndex < m_Slots.size(); ++slotIndex)
+    {
+        const Slot& slot = m_Slots[slotIndex];
+        if (slot.hazard.has_value() && slot.hazard->entity == entity)
+            return HazardHandle{slotIndex, slot.generation};
+    }
+    return std::nullopt;
 }
 
 const PolygonSoA* CollisionEngine::GetShapeCache(HazardHandle handle) const noexcept
@@ -154,26 +185,35 @@ JAGUARCORE_API Result<Hazard> CollisionEngine::DeregisterHazard(HazardHandle han
     m_Slots[handle.index].hazard.reset();
     m_Slots[handle.index].shapeCache.reset();
     ++m_Slots[handle.index].generation;
+    m_FreeSlotIndices.push_back(handle.index);
     return Result<Hazard>::FromValue(std::move(result));
 }
 
 bool CollisionEngine::ShapesCollide(const SimplePolygon& first,
                                     const SimplePolygon& second) const noexcept
 {
-    if (!first.BoundingBox().Intersects(second.BoundingBox()))
+    if (first.BoundingBox().RelationToRustF32(second.BoundingBox())
+        == RectRelation::Disjoint)
         return false;
 
     for (const Edge2d& firstEdge : first.Edges())
     {
         for (const Edge2d& secondEdge : second.Edges())
         {
-            if (firstEdge.Intersects(secondEdge))
+            if (firstEdge.IntersectsRustF32(secondEdge))
                 return true;
         }
     }
 
-    return first.Contains(second.Vertices().front()) ||
-           second.Contains(first.Vertices().front());
+    const RectRelation relation = first.BoundingBox().AlmostRelationToRustF32(
+        second.BoundingBox());
+    if (relation == RectRelation::Surrounding)
+        return first.ContainsRustF32(
+            second.PointOfInaccessibility().center);
+    if (relation == RectRelation::Enclosed)
+        return second.ContainsRustF32(
+            first.PointOfInaccessibility().center);
+    return false;
 }
 
 bool CollisionEngine::ShapesCollide(const PolygonSoA& first,
@@ -186,7 +226,27 @@ bool CollisionEngine::HazardCollides(const SimplePolygon& shape,
                                      const Hazard& hazard) const noexcept
 {
     if (hazard.entity.kind == HazardKind::Exterior)
-        return !polygonInsideContainer(shape, *hazard.shape);
+    {
+        if (m_Config.quadtreeDepth > 0U)
+            return !polygonInsideContainer(shape, *hazard.shape);
+
+        const SimplePolygon& exteriorShape = *hazard.shape;
+        const RectRelation relation =
+            exteriorShape.BoundingBox().AlmostRelationToRustF32(
+                shape.BoundingBox());
+        bool contained = false;
+        if (relation == RectRelation::Surrounding)
+        {
+            contained = exteriorShape.ContainsRustF32(
+                shape.PointOfInaccessibility().center);
+        }
+        else if (relation == RectRelation::Enclosed)
+        {
+            contained = shape.ContainsRustF32(
+                exteriorShape.PointOfInaccessibility().center);
+        }
+        return !contained;
+    }
     return ShapesCollide(shape, *hazard.shape);
 }
 
@@ -214,21 +274,22 @@ bool CollisionEngine::HazardCollides(const PolygonSoA& shape,
 bool CollisionEngine::EdgeCollides(const Edge2d& edge,
                                    const SimplePolygon& shape) const noexcept
 {
-    return shape.Intersects(edge);
+    return shape.IntersectsRustF32(edge);
 }
 
 bool CollisionEngine::EdgeCollidesWithHazard(const Edge2d& edge,
                                              const Hazard& hazard) const noexcept
 {
     if (hazard.entity.kind != HazardKind::Exterior)
-        return hazard.shape->Intersects(edge);
+        return hazard.shape->IntersectsRustF32(edge);
 
     const SimplePolygon& container = *hazard.shape;
-    if (!container.Contains(edge.start) || !container.Contains(edge.end))
+    if (!container.ContainsRustF32(edge.start)
+        || !container.ContainsRustF32(edge.end))
         return true;
     for (const Edge2d& containerEdge : container.Edges())
     {
-        if (edge.Intersects(containerEdge))
+        if (edge.IntersectsRustF32(containerEdge))
             return true;
     }
     return false;
@@ -245,7 +306,7 @@ bool CollisionEngine::CircleCollidesWithHazard(const Circle2d& circle,
 bool CollisionEngine::CircleCollides(const Circle2d& circle,
                                      const SimplePolygon& shape) const noexcept
 {
-    if (shape.Contains(circle.center))
+    if (shape.ContainsRustF32(circle.center))
         return true;
     for (const Edge2d& edge : shape.Edges())
     {
@@ -330,19 +391,19 @@ JAGUARCORE_API bool CollisionEngine::CollectPolygonCollisionsUntil(
         }
     }
 
-    const PolygonSoA queryShape(shape);
     const auto candidates = m_QuadTree.QueryVirtualRoot(shape.BoundingBox());
     for (const HazardHandle handle : candidates)
     {
         const Hazard* hazard = Get(handle);
-        const PolygonSoA* hazardShape = GetShapeCache(handle);
         if (!hazard || !hazard->shape ||
             filter.IsIrrelevant(handle, hazard->entity) || collector.Contains(handle))
             continue;
 
-        const bool collides =
-            hazardShape != nullptr ? HazardCollides(queryShape, *hazard, *hazardShape)
-                                   : HazardCollides(shape, *hazard);
+        // The AVX2 cache uses a separate double-precision representation. The
+        // Rust-compatible path must use POI containment and f32 predicates
+        // consistently, so exact collection goes through the canonical shape
+        // implementation.
+        const bool collides = HazardCollides(shape, *hazard);
         if (collides && report(handle, hazard->entity))
             return true;
     }
@@ -361,6 +422,8 @@ JAGUARCORE_API bool CollisionEngine::CollectPolygonCollisionsUntil(
 JAGUARCORE_API bool CollisionEngine::DetectPolygonCollision(const SimplePolygon& shape,
                                                            const HazardFilter& filter) const
 {
+    if (isOutside(m_Bounds, shape.BoundingBox()))
+        return true;
     return !CollectPolygonCollisions(shape, filter).empty();
 }
 
@@ -458,7 +521,7 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
     for (std::size_t i = 0; i < surrogate.FailFastPoleCount(); ++i)
     {
         Circle2d transformedPole = surrogate.Poles()[i];
-        transformedPole.center = transform.Apply(transformedPole.center);
+        transformedPole.center = transform.ApplyRustF32(transformedPole.center);
         if (!m_Bounds.Contains(transformedPole.center) ||
             transformedPole.center.x - transformedPole.radius < m_Bounds.xMin ||
             transformedPole.center.x + transformedPole.radius > m_Bounds.xMax ||
@@ -467,7 +530,6 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
         {
             if (exteriorIsRelevant())
                 return Result<bool>::FromValue(true);
-            continue;
         }
 
         for (const HazardHandle handle :
@@ -483,8 +545,8 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
 
     for (const Edge2d& basePier : surrogate.Piers())
     {
-        const auto transformedStart = transform.Apply(basePier.start);
-        const auto transformedEnd = transform.Apply(basePier.end);
+        const auto transformedStart = transform.ApplyRustF32(basePier.start);
+        const auto transformedEnd = transform.ApplyRustF32(basePier.end);
         const auto transformed = Edge2d::Create(transformedStart, transformedEnd);
         if (!transformed.HasValue())
             continue;
@@ -544,7 +606,7 @@ JAGUARCORE_API Result<bool> CollisionEngine::CollectSurrogateCollisionsUntil(
     for (std::size_t i = 0; i < surrogate.FailFastPoleCount(); ++i)
     {
         Circle2d transformedPole = surrogate.Poles()[i];
-        transformedPole.center = transform.Apply(transformedPole.center);
+        transformedPole.center = transform.ApplyRustF32(transformedPole.center);
 
         if (!m_Bounds.Contains(transformedPole.center) ||
             transformedPole.center.x - transformedPole.radius < m_Bounds.xMin ||
@@ -604,6 +666,8 @@ JAGUARCORE_API CollisionSnapshot CollisionEngine::Save() const
 
 JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& snapshot)
 {
+    std::vector<HazardEntity> snapshotEntities;
+    snapshotEntities.reserve(snapshot.dynamicHazards.size());
     for (const Hazard& hazard : snapshot.dynamicHazards)
     {
         if (!hazard.shape)
@@ -618,15 +682,59 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
                 {ErrorCode::SnapshotMismatch,
                  "snapshot contains a non-dynamic hazard"});
         }
-        if (hazard.entity.kind != HazardKind::PlacedItem)
+
+        const bool duplicatesStaticEntity = std::any_of(
+            m_Slots.begin(), m_Slots.end(), [&hazard](const Slot& slot) {
+                return slot.hazard.has_value() && !slot.hazard->dynamic &&
+                       slot.hazard->entity == hazard.entity;
+            });
+        if (duplicatesStaticEntity ||
+            std::find(snapshotEntities.begin(), snapshotEntities.end(),
+                      hazard.entity) != snapshotEntities.end())
         {
             return Result<void>::FromError(
                 {ErrorCode::SnapshotMismatch,
-                 "snapshot contains a non-placed-item dynamic hazard"});
+                 "snapshot contains duplicate hazard entities"});
         }
+        snapshotEntities.push_back(hazard.entity);
+    }
+
+    std::vector<std::size_t> unmatchedCurrentDynamic;
+    for (std::size_t currentIndex = 0; currentIndex < m_Slots.size(); ++currentIndex)
+    {
+        const Slot& current = m_Slots[currentIndex];
+        if (current.hazard.has_value() && current.hazard->dynamic)
+            unmatchedCurrentDynamic.push_back(currentIndex);
+    }
+
+    std::vector<std::optional<std::size_t>> matchedCurrentSlots(
+        snapshot.dynamicHazards.size());
+    std::vector<std::size_t> hazardsToAdd;
+    for (std::size_t snapshotIndex = 0;
+         snapshotIndex < snapshot.dynamicHazards.size(); ++snapshotIndex)
+    {
+        const Hazard& target = snapshot.dynamicHazards[snapshotIndex];
+        const auto match = std::find_if(
+            unmatchedCurrentDynamic.begin(), unmatchedCurrentDynamic.end(),
+            [this, &target](std::size_t currentIndex) {
+                const Slot& current = m_Slots[currentIndex];
+                return current.hazard.has_value() &&
+                       current.hazard->entity == target.entity;
+            });
+        if (match == unmatchedCurrentDynamic.end())
+        {
+            hazardsToAdd.push_back(snapshotIndex);
+            continue;
+        }
+
+        const std::size_t currentIndex = *match;
+        matchedCurrentSlots[snapshotIndex] = currentIndex;
+        *match = unmatchedCurrentDynamic.back();
+        unmatchedCurrentDynamic.pop_back();
     }
 
     std::vector<Slot> rebuiltSlots(m_Slots.size());
+    std::vector<std::size_t> rebuiltFreeSlotIndices = m_FreeSlotIndices;
     QuadTree rebuiltTree(m_Bounds, m_Config.quadtreeDepth, m_Config.cdThreshold);
 
     for (std::size_t i = 0; i < m_Slots.size(); ++i)
@@ -634,14 +742,8 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
         const Slot& current = m_Slots[i];
         Slot& rebuilt = rebuiltSlots[i];
         rebuilt.generation = current.generation;
-        if (!current.hazard.has_value())
+        if (!current.hazard.has_value() || current.hazard->dynamic)
             continue;
-
-        if (current.hazard->dynamic)
-        {
-            ++rebuilt.generation;
-            continue;
-        }
 
         rebuilt.hazard = *current.hazard;
         rebuilt.shapeCache = std::make_unique<PolygonSoA>(*rebuilt.hazard->shape);
@@ -649,34 +751,52 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
             HazardHandle{i, rebuilt.generation}, *rebuilt.hazard);
     }
 
-    for (const Hazard& hazard : snapshot.dynamicHazards)
+    for (std::size_t snapshotIndex = 0;
+         snapshotIndex < matchedCurrentSlots.size(); ++snapshotIndex)
     {
-        HazardHandle handle{};
-        bool foundSlot = false;
-        for (std::size_t i = 0; i < rebuiltSlots.size(); ++i)
-        {
-            if (!rebuiltSlots[i].hazard.has_value())
-            {
-                ++rebuiltSlots[i].generation;
-                handle = HazardHandle{i, rebuiltSlots[i].generation};
-                foundSlot = true;
-                break;
-            }
-        }
-        if (!foundSlot)
-        {
-            rebuiltSlots.push_back(Slot{});
-            handle = HazardHandle{rebuiltSlots.size() - 1,
-                                  rebuiltSlots.back().generation};
-        }
-
+        if (!matchedCurrentSlots[snapshotIndex].has_value())
+            continue;
+        const std::size_t currentIndex = matchedCurrentSlots[snapshotIndex].value();
+        const Slot& current = m_Slots[currentIndex];
+        const HazardHandle handle{currentIndex, current.generation};
         Slot& rebuilt = rebuiltSlots[handle.index];
-        rebuilt.hazard = hazard;
-        rebuilt.shapeCache = std::make_unique<PolygonSoA>(*hazard.shape);
+        rebuilt.hazard = current.hazard.value();
+        rebuilt.shapeCache = std::make_unique<PolygonSoA>(*rebuilt.hazard->shape);
         rebuiltTree.RegisterHazard(handle, *rebuilt.hazard);
     }
 
+    for (const std::size_t currentIndex : unmatchedCurrentDynamic)
+    {
+        rebuiltSlots[currentIndex].generation =
+            m_Slots[currentIndex].generation + 1U;
+        rebuiltFreeSlotIndices.push_back(currentIndex);
+    }
+
+    for (const std::size_t snapshotIndex : hazardsToAdd)
+    {
+        std::size_t slotIndex = 0;
+        if (!rebuiltFreeSlotIndices.empty())
+        {
+            slotIndex = rebuiltFreeSlotIndices.back();
+            rebuiltFreeSlotIndices.pop_back();
+            rebuiltSlots[slotIndex].generation |= 1U;
+        }
+        else
+        {
+            slotIndex = rebuiltSlots.size();
+            rebuiltSlots.push_back(Slot{});
+        }
+
+        Slot& rebuilt = rebuiltSlots[slotIndex];
+        const Hazard& hazard = snapshot.dynamicHazards[snapshotIndex];
+        rebuilt.hazard = hazard;
+        rebuilt.shapeCache = std::make_unique<PolygonSoA>(*hazard.shape);
+        rebuiltTree.RegisterHazard(
+            HazardHandle{slotIndex, rebuilt.generation}, *rebuilt.hazard);
+    }
+
     m_Slots = std::move(rebuiltSlots);
+    m_FreeSlotIndices = std::move(rebuiltFreeSlotIndices);
     m_QuadTree = std::move(rebuiltTree);
     return Result<void>::FromValue();
 }

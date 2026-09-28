@@ -1,7 +1,5 @@
 #include "JaguarCore/Problems/Spp.h"
 
-#include <cmath>
-
 namespace jaguar
 {
 JAGUARCORE_API Result<Strip> Strip::Create(
@@ -10,24 +8,32 @@ JAGUARCORE_API Result<Strip> Strip::Create(
     ShapeModifyConfig shapeModifyConfig,
     double width)
 {
-    if (!std::isfinite(fixedHeight) || fixedHeight <= 0.0 ||
-        !std::isfinite(width) || width <= 0.0)
+    if (!(fixedHeight > 0.0) || !(width > 0.0))
     {
         return Result<Strip>::FromError(
             {ErrorCode::InvalidInput, "strip height and width must be positive"});
     }
+    const float rustFixedHeight = static_cast<float>(fixedHeight);
+    const float rustWidth = static_cast<float>(width);
+    if (!(rustFixedHeight > 0.0F) || !(rustWidth > 0.0F))
+    {
+        return Result<Strip>::FromError(
+            {ErrorCode::InvalidInput, "strip dimensions exceed f32 range"});
+    }
     return Result<Strip>::FromValue(
-        Strip{fixedHeight, width, cdeConfig, shapeModifyConfig});
+        Strip{static_cast<double>(rustFixedHeight),
+              static_cast<double>(rustWidth), cdeConfig, shapeModifyConfig});
 }
 
 JAGUARCORE_API Result<void> Strip::SetWidth(double newWidth)
 {
-    if (!std::isfinite(newWidth) || newWidth <= 0.0)
+    const float rustWidth = static_cast<float>(newWidth);
+    if (!(rustWidth > 0.0F))
     {
         return Result<void>::FromError(
-            {ErrorCode::InvalidInput, "strip width must be positive"});
+            {ErrorCode::InvalidInput, "strip width exceeds f32 range"});
     }
-    width = newWidth;
+    width = static_cast<double>(rustWidth);
     return Result<void>::FromValue();
 }
 

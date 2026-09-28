@@ -4,14 +4,11 @@ namespace jaguar
 {
 JAGUARCORE_API double SPSolution::Density() const
 {
-    const double containerArea = layoutSnapshot.container.Area();
-    if (containerArea <= 0.0)
-        return 0.0;
+    const float containerArea =
+        static_cast<float>(layoutSnapshot.container.Area());
 
-    double area = 0.0;
-    for (const LayoutPlacementSnapshot& placement : layoutSnapshot.placements)
-        area += placement.placedItem.Area();
-    return area / containerArea;
+    const float area = layoutSnapshot.PlacedItemArea();
+    return static_cast<double>(area / containerArea);
 }
 
 JAGUARCORE_API double SPSolution::StripWidth() const noexcept

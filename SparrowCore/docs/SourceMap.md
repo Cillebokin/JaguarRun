@@ -39,7 +39,7 @@ SparrowCore 核心仍以 static library 作为 C++ 集成产物；CLI、WASM C A
 
 ### jagua-rs/lbf 的已知差异
 
-- Rust LBF 参考实现使用 `SmallRng`；SparrowCore 不把 `SmallRng` 的内部序列当作跨语言 API，采用独立、文档化的 `SparrowRng` 并比较 raw primitive/metrics。
+- Rust 当前优化入口使用 `Xoshiro256PlusPlus`；SparrowCore 对应使用独立、文档化的 `SparrowRng`，并比较 raw primitive/metrics，而不是把随机数内部序列当成几何等价的充分证明。
 - Rust reference 的 `f32` 几何进入 JaguarCore 时转为 `double`；比较时记录转换点并使用明确容差。
 - Rust `SPProblem`/`BPProblem` 的内部 private 状态不进入 SparrowCore；使用 JaguarCore public value types 重建结果。
 - Rust BPP 空 Layout 由问题模型关闭；MSPP 空 Layout 是合法 solution state，须保留其 JSON round-trip 语义。
@@ -60,15 +60,15 @@ SparrowCore 核心仍以 static library 作为 C++ 集成产物；CLI、WASM C A
 | `src/quantify/tracker.rs` | `Source/Quantify/CollisionTracker.cpp` | pair/container loss, weights and snapshots |
 | `src/eval/sep_evaluator.rs` | `Source/Eval/SeparationEvaluator.cpp` | surrogate/exact separation candidate evaluation |
 | `src/Optimizer/separator.rs` + `worker.rs` | `Source/Optimizer/Separator.cpp` + `SeparatorWorker.cpp` | move, rollback, strike and no-improvement limits |
-| `src/Optimizer/explore.rs` | `Source/Optimizer/Exploration.cpp` | repeated strip shrink and best-feasible retention |
+| `src/Optimizer/explore.rs` | `Source/Optimizer/Exploration.cpp` | repeated strip shrink, bounded infeasible pool, disruption and contained relocation |
 | `src/Optimizer/compress.rs` | `Source/Optimizer/Compression.cpp` | time/failure based shrink decay |
 
 ## 5. 当前边界
 
-Task 2～7 已补齐 SparrowCore 本体的构造、量化、分离、探索、压缩、顶层 Optimize、CLI、WASM C ABI、Demo 和 Bench。当前仍明确不包含：
+Task 2～7 已补齐 SparrowCore 本体的构造、量化、分离、探索、压缩、顶层 Optimize、CLI、WASM C ABI、Demo 和 Bench；顶层 API 还支持外部 `OptimizationTerminator` 和完整可行解 warm start。当前仍明确不包含：
 
 - NestLab 适配、生产排料替换和上层业务协议；
-- Emscripten 生成的最终 glue、宿主内存管理和 CDN 发布；
+- 当前机器未安装 Emscripten，因此 Emscripten 生成的最终 glue、宿主内存管理和 CDN 发布仍需在 WASM 工具链环境执行；
 - Rust/C++ 全规模逐样本 bit-exact differential oracle；当前保留固定 seed fixture、行为不变量和 JaguarCore 最终验证。
 
 ## 6. Fixture 资产

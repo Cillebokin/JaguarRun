@@ -1,7 +1,9 @@
 #include "SparrowCore/Optimizer/LbfSearch.h"
+#include "LbfSearchTrace.h"
 
 #include "SparrowCore/Eval/LbfEvaluator.h"
-#include "SparrowCore/Sampling/LocalSearchSampler.h"
+#include "SparrowCore/Sampling/BestSamples.h"
+#include "SparrowCore/Sampling/CoordinateDescent.h"
 #include "SparrowCore/Sampling/UniformRectSampler.h"
 
 #include <algorithm>
@@ -26,36 +28,104 @@ bool IsFiniteTransform(const jaguar::Transform2d& transform) noexcept
         && std::isfinite(transform.translation.y);
 }
 
-std::size_t CalculateLocalBudget(const sparrow::LbfConfig& config) noexcept
+sparrow::CoordinateDescentConfig MakeRefinementConfig(
+    const jaguar::Item& item, bool finalRefinement)
 {
-    const double value = static_cast<double>(config.samplesPerItem)
-        * config.localSearchFraction;
-    if (!std::isfinite(value) || value <= 0.0)
+    const jaguar::Rect2d bounds = item.CollisionShape().BoundingBox();
+    const float minimumDimension = static_cast<float>(
+        std::min(bounds.Width(), bounds.Height()));
+    sparrow::CoordinateDescentConfig result;
+    if (!std::isfinite(minimumDimension) || minimumDimension <= 0.0F)
     {
-        return 0U;
+        return result;
     }
-    const double floored = std::floor(value);
-    if (floored >= static_cast<double>(config.samplesPerItem))
+    if (finalRefinement)
     {
-        return config.samplesPerItem;
+        result.translationStepInit = minimumDimension * 0.01F;
+        result.translationStepLimit = minimumDimension * 0.001F;
+        result.rotationStepInit = 0.5F
+            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepLimit = 0.05F
+            * 3.14159265358979323846F / 180.0F;
     }
-    return static_cast<std::size_t>(floored);
+    else
+    {
+        result.translationStepInit = minimumDimension * 0.25F;
+        result.translationStepLimit = minimumDimension * 0.02F;
+        result.rotationStepInit = 5.0F
+            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepLimit = 1.0F
+            * 3.14159265358979323846F / 180.0F;
+    }
+    result.rotationWiggle =
+        item.AllowedRotation().mode == jaguar::RotationMode::Continuous;
+    return result;
 }
 
 sparrow::LbfLoss LossFromShape(const jaguar::SimplePolygon& shape)
 {
     return sparrow::LbfLoss::FromBoundingBox(shape.BoundingBox());
 }
+
+class TracingEvaluator final : public sparrow::SampleEvaluator
+{
+public:
+    TracingEvaluator(const jaguar::Layout& layout,
+                     const jaguar::Item& item,
+                     const jaguar::HazardFilter& filter,
+                     const sparrow::LbfSearchTraceCallback* callback)
+        : m_Delegate(layout, item, filter),
+          m_Callback(callback)
+    {
+    }
+
+    void SetPhase(sparrow::LbfSearchTracePhase phase) noexcept
+    {
+        m_Phase = phase;
+    }
+
+    sparrow::SampleEval Evaluate(
+        const jaguar::Transform2d& transform,
+        const std::optional<sparrow::SampleEval>& upperBound) override
+    {
+        const sparrow::SampleEval evaluation =
+            m_Delegate.Evaluate(transform, upperBound);
+        if (m_Callback != nullptr)
+        {
+            sparrow::LbfSearchTraceEvent event;
+            event.type = sparrow::LbfSearchTraceEvent::Type::Evaluation;
+            event.phase = m_Phase;
+            event.transform = transform;
+            event.evaluation = evaluation;
+            (*m_Callback)(event);
+        }
+        return evaluation;
+    }
+
+    std::size_t EvaluationCount() const noexcept override
+    {
+        return m_Delegate.EvaluationCount();
+    }
+
+private:
+    sparrow::LbfEvaluator m_Delegate;
+    const sparrow::LbfSearchTraceCallback* m_Callback = nullptr;
+    sparrow::LbfSearchTracePhase m_Phase =
+        sparrow::LbfSearchTracePhase::ContainerSample;
+};
 }
 
 namespace sparrow
 {
-Result<std::optional<SearchResult>> SearchLbf(
+namespace
+{
+Result<std::optional<SearchResult>> SearchLbfImpl(
     const jaguar::Layout& layout,
     const jaguar::Item& item,
     const LbfConfig& config,
     SparrowRng& rng,
-    const jaguar::HazardFilter& filter)
+    const jaguar::HazardFilter& filter,
+    const LbfSearchTraceCallback* callback)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -66,14 +136,8 @@ Result<std::optional<SearchResult>> SearchLbf(
     {
         return InvalidSearch("LBF item has no cached surrogate");
     }
-    if (!std::isfinite(config.localSearchFraction))
-    {
-        return InvalidSearch("LBF local-search fraction is not finite");
-    }
-
-    const std::size_t lsSamples = CalculateLocalBudget(config);
-    const std::size_t uniformSamples = config.samplesPerItem - lsSamples;
-    const jaguar::Rect2d containerBounds = layout.GetContainer().Bounds();
+    const jaguar::Rect2d containerBounds =
+        layout.GetContainer().CollisionShape().BoundingBox();
     if (!std::isfinite(containerBounds.xMin)
         || !std::isfinite(containerBounds.yMin)
         || !std::isfinite(containerBounds.xMax)
@@ -84,98 +148,149 @@ Result<std::optional<SearchResult>> SearchLbf(
         return InvalidSearch("LBF container bounds are invalid");
     }
 
-    LbfEvaluator evaluator(layout, item, filter);
-    auto samplerResult = UniformRectSampler::Create(containerBounds, item);
+    TracingEvaluator evaluator(layout, item, filter, callback);
+    const auto samplerResult = UniformRectSampler::Create(
+        containerBounds, item, containerBounds);
     if (!samplerResult.HasValue())
     {
-        return Result<std::optional<SearchResult>>::FromError(
-            samplerResult.GetError());
+        // UniformBBoxSampler::new returns None when no legal rotation can fit
+        // the current container; the SPP builder interprets that as a width
+        // growth opportunity rather than as malformed input.
+        return Result<std::optional<SearchResult>>::FromValue(std::nullopt);
     }
-    UniformRectSampler sampler = std::move(samplerResult.Value());
-
-    std::optional<SearchResult> best;
-    for (std::size_t index = 0; index < uniformSamples; ++index)
+    const UniformRectSampler sampler = samplerResult.Value();
+    const jaguar::Rect2d itemBounds = item.CollisionShape().BoundingBox();
+    const float itemMinimumDimension = static_cast<float>(std::min(
+        itemBounds.Width(), itemBounds.Height()));
+    if (!std::isfinite(itemMinimumDimension) || itemMinimumDimension <= 0.0F)
     {
-        const jaguar::Transform2d candidate = sampler.Sample(rng);
-        const auto transformedResult = item.CollisionShape().Transformed(candidate);
-        if (!transformedResult.HasValue())
-        {
-            continue;
-        }
-        const jaguar::SimplePolygon transformed = transformedResult.Value();
-        const LbfLoss cost = LossFromShape(transformed);
-        if (best.has_value() && !(cost < best->loss))
-        {
-            continue;
-        }
+        return InvalidSearch("LBF item minimum dimension is invalid");
+    }
 
-        // LbfLoss is the reference-search objective. It is deliberately
-        // different from Sparrow's evaluator loss, so the exact evaluator is
-        // called without an incompatible upper bound.
-        const SampleEval evaluation = evaluator.Evaluate(candidate, std::nullopt);
+    BestSamples best(
+        std::max<std::size_t>(1U, config.nCoordinateDescents),
+        itemMinimumDimension * 0.05F);
+    std::vector<LbfLoss> tighteningHistory;
+    std::optional<LbfLoss> bestLoss;
+    LbfSearchTracePhase evaluatorPhase = LbfSearchTracePhase::ContainerSample;
+    const auto recordTightening = [&](const jaguar::Transform2d& candidate,
+                                      const SampleEval& evaluation) {
         if (evaluation.kind != SampleKind::SAMPLE_KIND_CLEAR)
         {
-            continue;
+            return;
         }
-        if (!best.has_value())
+        const auto transformed = item.CollisionShape().TransformedRustF32(candidate);
+        if (!transformed.HasValue())
         {
-            best = SearchResult{candidate, cost, index + 1U, {}};
+            return;
         }
-        else
+        const LbfLoss loss = LossFromShape(transformed.Value());
+        if (!bestLoss.has_value() || loss < *bestLoss)
         {
-            best->transform = candidate;
-            best->loss = cost;
-            best->samples = index + 1U;
+            bestLoss = loss;
+            tighteningHistory.push_back(loss);
         }
-        best->tighteningHistory.push_back(cost);
-        const jaguar::Rect2d tightened = cost.TightenSampleBBox(sampler.BoundingBox());
-        const auto tightenedSampler = UniformRectSampler::Create(tightened, item);
-        if (tightenedSampler.HasValue())
+    };
+    const auto report = [&](const jaguar::Transform2d& candidate,
+                            const SampleEval& evaluation) {
+        const bool accepted = best.Report(candidate, evaluation);
+        if (callback != nullptr)
         {
-            sampler = std::move(tightenedSampler.Value());
+            LbfSearchTraceEvent event;
+            event.type = LbfSearchTraceEvent::Type::Report;
+            event.phase = evaluatorPhase;
+            event.transform = candidate;
+            event.evaluation = evaluation;
+            event.accepted = accepted;
+            event.retained = best.Samples();
+            (*callback)(event);
+        }
+        if (!accepted)
+        {
+            return;
+        }
+        recordTightening(candidate, evaluation);
+    };
+
+    // With no reference placement this is the container-wide phase of the
+    // Rust search. The public localSearchFraction remains source-compatible,
+    // but is not used as a Gaussian replacement for focused bbox sampling.
+    for (std::size_t index = 0U; index < config.samplesPerItem; ++index)
+    {
+        const jaguar::Transform2d candidate = sampler.Sample(rng);
+        report(candidate, evaluator.Evaluate(candidate, best.UpperBound()));
+    }
+
+    const auto starts = best.Samples();
+    const CoordinateDescentConfig preConfig = MakeRefinementConfig(item, false);
+    evaluatorPhase = LbfSearchTracePhase::PreRefine;
+    evaluator.SetPhase(evaluatorPhase);
+    for (const auto& start : starts)
+    {
+        const auto refined = RefineCoordinateDescent(
+            start, evaluator, preConfig, rng);
+        if (refined.HasValue())
+        {
+            report(refined.Value().first, refined.Value().second);
         }
     }
 
-    if (!best.has_value())
+    const auto bestSample = best.Best();
+    if (!bestSample.has_value())
     {
         return Result<std::optional<SearchResult>>::FromValue(std::nullopt);
     }
-
-    const auto localSamplerResult = LocalSearchSampler::Create(
-        item, best->transform, config, containerBounds);
-    if (!localSamplerResult.HasValue())
+    const CoordinateDescentConfig finalConfig = MakeRefinementConfig(item, true);
+    evaluatorPhase = LbfSearchTracePhase::FinalRefine;
+    evaluator.SetPhase(evaluatorPhase);
+    const auto final = RefineCoordinateDescent(
+        *bestSample, evaluator, finalConfig, rng);
+    const auto finalSample = final.HasValue() ? final.Value() : *bestSample;
+    recordTightening(finalSample.first, finalSample.second);
+    const auto transformed = item.CollisionShape().TransformedRustF32(
+        finalSample.first);
+    if (!transformed.HasValue())
     {
-        return Result<std::optional<SearchResult>>::FromError(
-            localSamplerResult.GetError());
+        return Result<std::optional<SearchResult>>::FromValue(std::nullopt);
     }
-    LocalSearchSampler localSampler = std::move(localSamplerResult.Value());
-    for (std::size_t index = 0; index < lsSamples; ++index)
+    SearchResult result;
+    result.transform = finalSample.first;
+    result.loss = LossFromShape(transformed.Value());
+    result.samples = evaluator.EvaluationCount();
+    result.tighteningHistory = std::move(tighteningHistory);
+    if (callback != nullptr)
     {
-        const jaguar::Transform2d candidate = localSampler.Sample(rng);
-        const auto transformedResult = item.CollisionShape().Transformed(candidate);
-        if (!transformedResult.HasValue())
-        {
-            continue;
-        }
-        const jaguar::SimplePolygon transformed = transformedResult.Value();
-        const LbfLoss cost = LossFromShape(transformed);
-        if (cost < best->loss)
-        {
-            const SampleEval evaluation = evaluator.Evaluate(candidate, std::nullopt);
-            if (evaluation.kind == SampleKind::SAMPLE_KIND_CLEAR)
-            {
-                best->transform = candidate;
-                best->loss = cost;
-                localSampler.ShiftMean(candidate);
-            }
-        }
-        localSampler.DecayStddev(
-            lsSamples == 0U
-                ? 1.0F
-                : static_cast<float>(index) / static_cast<float>(lsSamples));
+        LbfSearchTraceEvent event;
+        event.type = LbfSearchTraceEvent::Type::Result;
+        event.phase = LbfSearchTracePhase::FinalRefine;
+        event.transform = finalSample.first;
+        event.evaluation = finalSample.second;
+        event.evaluationCount = result.samples;
+        (*callback)(event);
     }
+    return Result<std::optional<SearchResult>>::FromValue(
+        std::optional<SearchResult>{std::move(result)});
+}
+}
 
-    best->samples = uniformSamples + lsSamples;
-    return Result<std::optional<SearchResult>>::FromValue(std::move(best));
+Result<std::optional<SearchResult>> SearchLbf(
+    const jaguar::Layout& layout,
+    const jaguar::Item& item,
+    const LbfConfig& config,
+    SparrowRng& rng,
+    const jaguar::HazardFilter& filter)
+{
+    return SearchLbfImpl(layout, item, config, rng, filter, nullptr);
+}
+
+Result<std::optional<SearchResult>> SearchLbfWithTrace(
+    const jaguar::Layout& layout,
+    const jaguar::Item& item,
+    const LbfConfig& config,
+    SparrowRng& rng,
+    const jaguar::HazardFilter& filter,
+    const LbfSearchTraceCallback& callback)
+{
+    return SearchLbfImpl(layout, item, config, rng, filter, &callback);
 }
 }

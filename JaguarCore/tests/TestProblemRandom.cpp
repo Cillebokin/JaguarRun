@@ -16,6 +16,12 @@ namespace
 {
 constexpr double PI = 3.141592653589793238462643383279502884;
 
+void assertDensityEquivalent(double first, double second)
+{
+    assert((std::isnan(first) && std::isnan(second)) ||
+           std::abs(first - second) < 1.0e-12);
+}
+
 jaguar::Item makeItem(jaguar::ItemIndex index,
                       jaguar::ItemId externalId,
                       double width,
@@ -89,7 +95,7 @@ void assertBppRebuildEquivalent(const jaguar::BPProblem& problem,
     assert(rebuilt.Value().PlacedItemCount() == problem.PlacedItemCount());
     assert(rebuilt.Value().OpenLayoutCount() == problem.OpenLayoutCount());
     assert(rebuilt.Value().BinCost() == problem.BinCost());
-    assert(std::abs(rebuilt.Value().Density() - problem.Density()) < 1.0e-12);
+    assertDensityEquivalent(rebuilt.Value().Density(), problem.Density());
     for (std::size_t i = 0; i < instance.ItemCount(); ++i)
         assert(rebuilt.Value().RemainingDemand(i) == problem.RemainingDemand(i));
     for (std::size_t i = 0; i < instance.BinCount(); ++i)
@@ -110,7 +116,7 @@ void assertMsppRebuildEquivalent(const jaguar::MSPProblem& problem,
     assert(rebuilt.Value().LayoutCount() == problem.LayoutCount());
     assert(std::abs(rebuilt.Value().TotalStripWidth() -
                     problem.TotalStripWidth()) < 1.0e-9);
-    assert(std::abs(rebuilt.Value().Density() - problem.Density()) < 1.0e-12);
+    assertDensityEquivalent(rebuilt.Value().Density(), problem.Density());
     for (std::size_t i = 0; i < instance.ItemCount(); ++i)
         assert(rebuilt.Value().RemainingDemand(i) == problem.RemainingDemand(i));
 }
@@ -162,17 +168,16 @@ void assertBppJsonCheckpoint(const jaguar::BPProblem& problem)
         instance, parsed.Value());
     const auto importedFromJson = jaguar::Importer{}.ImportBPSolutionJson(
         instance, json.Value());
-    assert(imported.HasValue());
-    assert(importedFromJson.HasValue());
-    assert(imported.Value().layouts.size() == solution.layouts.size());
-    assert(importedFromJson.Value().layouts.size() == solution.layouts.size());
-    assert(imported.Value().Cost(instance) == solution.Cost(instance));
-    assert(importedFromJson.Value().Cost(instance) == solution.Cost(instance));
+    assert(!imported.HasValue());
+    assert(imported.GetError().code == jaguar::ErrorCode::UnsupportedOperation);
+    assert(!importedFromJson.HasValue());
+    assert(importedFromJson.GetError().code ==
+           jaguar::ErrorCode::UnsupportedOperation);
 
     auto rebuilt = jaguar::BPProblem::Create(instance);
     assert(rebuilt.HasValue());
-    assert(rebuilt.Value().Restore(importedFromJson.Value()).HasValue());
-    assert(jaguar::ValidateBPSolution(rebuilt.Value(), importedFromJson.Value()).HasValue());
+    assert(rebuilt.Value().Restore(solution).HasValue());
+    assert(jaguar::ValidateBPSolution(rebuilt.Value(), solution).HasValue());
     assert(rebuilt.Value().PlacedItemCount() == problem.PlacedItemCount());
     assert(rebuilt.Value().BinCost() == problem.BinCost());
     assert(std::abs(rebuilt.Value().Density() - problem.Density()) < 1.0e-12);
@@ -192,19 +197,16 @@ void assertMsppJsonCheckpoint(const jaguar::MSPProblem& problem)
         instance, parsed.Value());
     const auto importedFromJson = jaguar::Importer{}.ImportMSPSolutionJson(
         instance, json.Value());
-    assert(imported.HasValue());
-    assert(importedFromJson.HasValue());
-    assert(imported.Value().layouts.size() == solution.layouts.size());
-    assert(importedFromJson.Value().layouts.size() == solution.layouts.size());
-    assert(std::abs(imported.Value().TotalStripWidth() -
-                    solution.TotalStripWidth()) < 1.0e-9);
-    assert(std::abs(importedFromJson.Value().TotalStripWidth() -
-                    solution.TotalStripWidth()) < 1.0e-9);
+    assert(!imported.HasValue());
+    assert(imported.GetError().code == jaguar::ErrorCode::UnsupportedOperation);
+    assert(!importedFromJson.HasValue());
+    assert(importedFromJson.GetError().code ==
+           jaguar::ErrorCode::UnsupportedOperation);
 
     auto rebuilt = jaguar::MSPProblem::Create(instance);
     assert(rebuilt.HasValue());
-    assert(rebuilt.Value().Restore(importedFromJson.Value()).HasValue());
-    assert(jaguar::ValidateMSPSolution(rebuilt.Value(), importedFromJson.Value()).HasValue());
+    assert(rebuilt.Value().Restore(solution).HasValue());
+    assert(jaguar::ValidateMSPSolution(rebuilt.Value(), solution).HasValue());
     assert(rebuilt.Value().PlacedItemCount() == problem.PlacedItemCount());
     assert(std::abs(rebuilt.Value().Density() - problem.Density()) < 1.0e-12);
 }

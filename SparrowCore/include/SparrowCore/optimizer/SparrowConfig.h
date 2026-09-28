@@ -5,8 +5,12 @@
 #include "SparrowCore/Optimizer/SeparatorWorker.h"
 #include "SparrowCore/ResultAlias.h"
 
+#include "JaguarCore/Problems/Spp.h"
+
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace sparrow
 {
@@ -19,23 +23,42 @@ enum class ShrinkDecayStrategy
 struct ExplorationConfig
 {
     SeparatorConfig separator;
-    std::size_t maxIterations = 50U;
-    std::size_t maxConsecutiveFailures = 8U;
-    double shrinkStep = 0.02;
+    // Zero means unlimited, matching the Rust phase loop which is bounded by
+    // its terminator rather than a second iteration counter.
+    std::size_t maxIterations = 0U;
+    std::size_t maxConsecutiveFailures = 0U;
+    double shrinkStep = 0.001;
+    // Zero keeps the complete failed-solution pool, as in sparrow.
+    std::size_t infeasiblePoolSize = 0U;
+    std::size_t disruptionCount = 1U;
+    std::size_t containedRelocationCount = 1U;
+    double solutionPoolDistributionStddev = 0.25;
+    double largeItemChAreaCutoffPercentile = 0.75;
+    std::chrono::milliseconds timeLimit{std::chrono::minutes{9}};
 
     Result<void> Validate() const;
 };
 
 struct CompressionConfig
 {
-    SeparatorConfig separator;
+    SeparatorConfig separator = [] {
+        SeparatorConfig value;
+        value.strikeLimit = 5U;
+        value.noImprovementLimit = 100U;
+        value.nContainerSamples = 50U;
+        value.nFocussedSamples = 25U;
+        value.nCoordinateDescents = 3U;
+        value.nWorkers = 3U;
+        return value;
+    }();
     ShrinkDecayStrategy decayStrategy =
         ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED;
-    std::size_t maxIterations = 100U;
-    std::size_t maxConsecutiveFailures = 8U;
-    double shrinkMin = 0.001;
-    double shrinkMax = 0.02;
-    double failureDecay = 0.5;
+    std::size_t maxIterations = 0U;
+    std::size_t maxConsecutiveFailures = 0U;
+    double shrinkMin = 0.00001;
+    double shrinkMax = 0.0005;
+    double failureDecay = 0.9;
+    std::chrono::milliseconds timeLimit{std::chrono::seconds{60}};
 
     Result<void> Validate() const;
 };
@@ -43,6 +66,7 @@ struct CompressionConfig
 struct SparrowConfig
 {
     std::uint64_t seed = 0U;
+    std::optional<jaguar::SPSolution> warmStart;
     SparrowConstructorConfig constructor;
     ExplorationConfig exploration;
     CompressionConfig compression;

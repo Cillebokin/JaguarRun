@@ -16,13 +16,18 @@ PlacedItem::PlacedItem(std::shared_ptr<const Item> item,
 JAGUARCORE_API Result<PlacedItem> PlacedItem::Create(const Item& item,
                                                      Transform2d transform)
 {
-    const auto collisionShape = item.CollisionShape().Transformed(transform);
+    const Transform2d rustTransform{
+        static_cast<double>(static_cast<float>(transform.rotationRad)),
+        {static_cast<double>(static_cast<float>(transform.translation.x)),
+         static_cast<double>(static_cast<float>(transform.translation.y))}};
+    const auto collisionShape =
+        item.CollisionShape().TransformedRustF32(rustTransform);
     if (!collisionShape.HasValue())
         return Result<PlacedItem>::FromError(collisionShape.GetError());
 
     auto itemCopy = std::make_shared<const Item>(item);
     return Result<PlacedItem>::FromValue(PlacedItem{
-        std::move(itemCopy), transform, std::move(collisionShape.Value())});
+        std::move(itemCopy), rustTransform, std::move(collisionShape.Value())});
 }
 
 JAGUARCORE_API const Item& PlacedItem::GetItem() const noexcept

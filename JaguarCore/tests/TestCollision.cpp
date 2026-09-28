@@ -24,6 +24,13 @@ std::shared_ptr<const jaguar::SimplePolygon> Rectangle(double xMin,
 
 void runCollisionTests()
 {
+    const double rawRoundedBoundsMax = 1.00000006;
+    jaguar::CollisionEngine roundedBoundsEngine(
+        jaguar::Rect2d{0.0, 0.0, rawRoundedBoundsMax, 1.0},
+        jaguar::CDEConfig{});
+    assert(roundedBoundsEngine.Bounds().xMax ==
+           static_cast<double>(static_cast<float>(rawRoundedBoundsMax)));
+
     const auto root = jaguar::Rect2d::Create(0.0, 0.0, 10.0, 10.0);
     assert(root.HasValue());
 
@@ -71,25 +78,55 @@ void runCollisionTests()
         {jaguar::HazardKind::PlacedItem, 99, 0, 0}));
     assert(collector.Empty());
 
-    collector.Insert({50, 1}, {jaguar::HazardKind::PlacedItem, 77, 0, 0});
-    collector.Insert({51, 1}, {jaguar::HazardKind::PlacedItem, 77, 0, 0});
+    const jaguar::HazardEntity firstDuplicateEntity{
+        jaguar::HazardKind::PlacedItem, 77, 0, 0, {50, 1},
+        jaguar::Transform2d::Identity()};
+    const jaguar::HazardEntity secondDuplicateEntity{
+        jaguar::HazardKind::PlacedItem, 77, 0, 0, {51, 1},
+        jaguar::Transform2d::Identity()};
+    collector.Insert({50, 1}, firstDuplicateEntity);
+    collector.Insert({51, 1}, secondDuplicateEntity);
     assert(collector.Size() == 2);
 
     jaguar::CollisionEngine duplicateEntityEngine(
         root.Value(), jaguar::CDEConfig{});
     assert(duplicateEntityEngine.RegisterHazard({
-               {jaguar::HazardKind::PlacedItem, 77, 0, 0},
+               firstDuplicateEntity,
                Rectangle(1.0, 1.0, 2.0, 2.0), true})
                .HasValue());
     assert(duplicateEntityEngine.RegisterHazard({
-               {jaguar::HazardKind::PlacedItem, 77, 0, 0},
+               secondDuplicateEntity,
                Rectangle(3.0, 1.0, 4.0, 2.0), true})
                .HasValue());
     const auto duplicateQuery = jaguar::SimplePolygon::Create({
         {0.0, 0.0}, {5.0, 0.0}, {5.0, 3.0}, {0.0, 3.0}});
     assert(duplicateQuery.HasValue());
-    assert(duplicateEntityEngine.CollectPolygonCollisions(
-                duplicateQuery.Value()).size() == 2);
+    const auto duplicateEntityCollisions = duplicateEntityEngine.CollectPolygonCollisions(
+        duplicateQuery.Value());
+    assert(duplicateEntityCollisions.size() == 2);
+    assert(!(duplicateEntityCollisions[0] == duplicateEntityCollisions[1]));
+
+    const auto outerHazardShape = Rectangle(0.0, 0.0, 10.0, 10.0);
+    jaguar::CollisionEngine dynamicHoleEngine(root.Value(), jaguar::CDEConfig{});
+    assert(dynamicHoleEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior}, outerHazardShape, false})
+               .HasValue());
+    const jaguar::Hazard dynamicHole{
+        {jaguar::HazardKind::Hole, 0, 0, 88},
+        Rectangle(1.0, 1.0, 2.0, 2.0), true};
+    assert(dynamicHoleEngine.RegisterHazard(dynamicHole).HasValue());
+    const auto dynamicHoleSnapshot = dynamicHoleEngine.Save();
+    jaguar::CollisionEngine restoredDynamicHoleEngine(
+        root.Value(), jaguar::CDEConfig{});
+    assert(restoredDynamicHoleEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior}, outerHazardShape, false})
+               .HasValue());
+    assert(restoredDynamicHoleEngine.Restore(dynamicHoleSnapshot).HasValue());
+    const auto restoredDynamicHoleSnapshot =
+        restoredDynamicHoleEngine.Save();
+    assert(restoredDynamicHoleSnapshot.dynamicHazards.size() == 1);
+    assert(restoredDynamicHoleSnapshot.dynamicHazards.front().entity.kind ==
+           jaguar::HazardKind::Hole);
 
     jaguar::CollisionEngine handleReuseEngine(root.Value(), jaguar::CDEConfig{});
     const auto firstHandle = handleReuseEngine.RegisterHazard({
@@ -115,6 +152,81 @@ void runCollisionTests()
         firstQuery.Value(), jaguar::NoFilter{}));
     assert(handleReuseEngine.DetectPolygonCollision(
         replacementQuery.Value(), jaguar::NoFilter{}));
+
+    jaguar::CollisionEngine slotMapHazardEngine(root.Value(),
+                                               jaguar::CDEConfig{});
+    const auto slotMapExterior = slotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::Exterior}, Rectangle(0.0, 0.0, 10.0, 10.0), false});
+    const auto firstSlotMapHazard = slotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 601, 0, 0, {11, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(1.0, 1.0, 2.0, 2.0), true});
+    const auto secondSlotMapHazard = slotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 602, 0, 0, {12, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(3.0, 1.0, 4.0, 2.0), true});
+    assert(slotMapExterior.HasValue() && firstSlotMapHazard.HasValue() &&
+           secondSlotMapHazard.HasValue());
+    assert(slotMapExterior.Value().index == 1 &&
+           slotMapExterior.Value().generation == 1);
+    assert(firstSlotMapHazard.Value().index == 2 &&
+           firstSlotMapHazard.Value().generation == 1);
+    assert(secondSlotMapHazard.Value().index == 3 &&
+           secondSlotMapHazard.Value().generation == 1);
+    assert(slotMapHazardEngine.DeregisterHazard(
+               firstSlotMapHazard.Value()).HasValue());
+    assert(slotMapHazardEngine.DeregisterHazard(
+               secondSlotMapHazard.Value()).HasValue());
+    const auto reusedSlotMapHazard = slotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 603, 0, 0, {13, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(5.0, 1.0, 6.0, 2.0), true});
+    assert(reusedSlotMapHazard.HasValue());
+    assert(reusedSlotMapHazard.Value().index ==
+           secondSlotMapHazard.Value().index);
+    assert(reusedSlotMapHazard.Value().generation ==
+           secondSlotMapHazard.Value().generation + 2);
+
+    jaguar::CollisionEngine restoreSlotMapHazardEngine(
+        root.Value(), jaguar::CDEConfig{});
+    assert(restoreSlotMapHazardEngine.RegisterHazard({
+               {jaguar::HazardKind::Exterior},
+               Rectangle(0.0, 0.0, 10.0, 10.0), false})
+               .HasValue());
+    const auto restoreHazardA = restoreSlotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 611, 0, 0, {21, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(1.0, 1.0, 2.0, 2.0), true});
+    const auto restoreHazardB = restoreSlotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 612, 0, 0, {22, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(3.0, 1.0, 4.0, 2.0), true});
+    assert(restoreHazardA.HasValue() && restoreHazardB.HasValue());
+    const jaguar::CollisionSnapshot restoreHazardSnapshot =
+        restoreSlotMapHazardEngine.Save();
+    assert(restoreSlotMapHazardEngine.DeregisterHazard(
+               restoreHazardA.Value()).HasValue());
+    assert(restoreSlotMapHazardEngine.DeregisterHazard(
+               restoreHazardB.Value()).HasValue());
+    assert(restoreSlotMapHazardEngine.RegisterHazard({
+               {jaguar::HazardKind::PlacedItem, 613, 0, 0, {23, 1},
+                jaguar::Transform2d::Identity()},
+               Rectangle(5.0, 1.0, 6.0, 2.0), true})
+               .HasValue());
+    assert(restoreSlotMapHazardEngine.Restore(restoreHazardSnapshot).HasValue());
+    const auto restoredHazardA =
+        restoreSlotMapHazardEngine.DeregisterHazard({3, 5});
+    const auto restoredHazardB =
+        restoreSlotMapHazardEngine.DeregisterHazard({2, 3});
+    assert(restoredHazardA.HasValue() && restoredHazardA.Value().entity.itemIndex == 611);
+    assert(restoredHazardB.HasValue() && restoredHazardB.Value().entity.itemIndex == 612);
+    const auto restoredHazardReuse = restoreSlotMapHazardEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 614, 0, 0, {24, 1},
+         jaguar::Transform2d::Identity()},
+        Rectangle(7.0, 1.0, 8.0, 2.0), true});
+    assert(restoredHazardReuse.HasValue());
+    assert(restoredHazardReuse.Value().index == 2 &&
+           restoredHazardReuse.Value().generation == 5);
 
     jaguar::QuadTree handleReuseTree(root.Value(), 4, 1);
     handleReuseTree.RegisterHazard(
@@ -199,11 +311,6 @@ void runCollisionTests()
     config.cdThreshold = 8;
 
     jaguar::CollisionEngine engine(root.Value(), config);
-    const auto invalidDynamicExterior = engine.RegisterHazard({
-        {jaguar::HazardKind::Exterior, 0, 0, 0},
-        Rectangle(0.0, 0.0, 10.0, 10.0), true});
-    assert(!invalidDynamicExterior.HasValue());
-    assert(invalidDynamicExterior.GetError().code == jaguar::ErrorCode::InvalidInput);
 
     const auto hazard = engine.RegisterHazard({
         {jaguar::HazardKind::PlacedItem, 7, 0, 0}, Rectangle(4.0, 4.0, 6.0, 6.0), true});
@@ -368,6 +475,20 @@ void runCollisionTests()
         });
     assert(enclosingHasExterior);
 
+    jaguar::CDEConfig depthZeroConfig{};
+    depthZeroConfig.quadtreeDepth = 0;
+    depthZeroConfig.cdThreshold = 8;
+    jaguar::CollisionEngine containmentEngine(root.Value(), depthZeroConfig);
+    const auto registeredInnerExterior = containmentEngine.RegisterHazard({
+        {jaguar::HazardKind::Exterior, 0, 0, 0},
+        Rectangle(2.0, 2.0, 8.0, 8.0), false});
+    assert(registeredInnerExterior.HasValue());
+    const auto queryContainingExterior = jaguar::SimplePolygon::Create({
+        {1.0, 1.0}, {9.0, 1.0}, {9.0, 9.0}, {1.0, 9.0}});
+    assert(queryContainingExterior.HasValue());
+    assert(!containmentEngine.DetectPolygonCollision(
+        queryContainingExterior.Value(), jaguar::NoFilter{}));
+
     const auto surrogateShape = jaguar::SimplePolygon::Create({
         {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}});
     assert(surrogateShape.HasValue());
@@ -376,6 +497,29 @@ void runCollisionTests()
     surrogateConfig.failFastPoleAreaRatio = 1.0;
     const auto surrogate = jaguar::Surrogate::Create(surrogateShape.Value(), surrogateConfig);
     assert(surrogate.HasValue());
+
+    jaguar::CollisionEngine boundaryOverlapEngine(root.Value(),
+                                                   jaguar::CDEConfig{});
+    const auto boundaryOverlapHazard = boundaryOverlapEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 77, 0, 0},
+        Rectangle(0.0, 0.4, 0.25, 0.6), true});
+    assert(boundaryOverlapHazard.HasValue());
+    jaguar::HazardFilter ignoreExterior{};
+    ignoreExterior.irrelevant = [](const jaguar::HazardEntity& entity) {
+        return entity.kind == jaguar::HazardKind::Exterior;
+    };
+    assert(surrogate.Value().FailFastPoleCount() > 0);
+    const jaguar::Circle2d& boundaryPole = surrogate.Value().Poles().front();
+    const auto boundaryPoleTransform =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {-boundaryPole.center.x - boundaryPole.radius * 0.5,
+             0.5 - boundaryPole.center.y});
+    const auto boundaryOverlap = boundaryOverlapEngine.DetectSurrogateCollision(
+        surrogate.Value(), boundaryPoleTransform, ignoreExterior);
+    assert(boundaryOverlap.HasValue());
+    assert(boundaryOverlap.Value());
+
     const auto invalidSurrogateCollision = engine.DetectSurrogateCollision(
         surrogate.Value(),
         jaguar::Transform2d::FromRotationTranslation(
@@ -410,11 +554,11 @@ void runCollisionTests()
     jaguar::CollisionEngine duplicateSnapshotEngine(
         root.Value(), jaguar::CDEConfig{});
     assert(duplicateSnapshotEngine.RegisterHazard({
-               {jaguar::HazardKind::PlacedItem, 77, 0, 0},
+               firstDuplicateEntity,
                Rectangle(1.0, 1.0, 2.0, 2.0), true})
                .HasValue());
     assert(duplicateSnapshotEngine.RegisterHazard({
-               {jaguar::HazardKind::PlacedItem, 77, 0, 0},
+               secondDuplicateEntity,
                Rectangle(3.0, 1.0, 4.0, 2.0), true})
                .HasValue());
     const auto duplicateSnapshot = duplicateSnapshotEngine.Save();
@@ -422,6 +566,16 @@ void runCollisionTests()
     assert(duplicateSnapshotEngine.Restore(duplicateSnapshot).HasValue());
     assert(duplicateSnapshotEngine.CollectPolygonCollisions(
                 duplicateQuery.Value()).size() == 2);
+
+    jaguar::CollisionEngine stableHandleEngine(
+        root.Value(), jaguar::CDEConfig{});
+    const auto stableHandle = stableHandleEngine.RegisterHazard({
+        {jaguar::HazardKind::PlacedItem, 78, 0, 0},
+        Rectangle(1.0, 1.0, 2.0, 2.0), true});
+    assert(stableHandle.HasValue());
+    const auto unchangedHazardSnapshot = stableHandleEngine.Save();
+    assert(stableHandleEngine.Restore(unchangedHazardSnapshot).HasValue());
+    assert(stableHandleEngine.DeregisterHazard(stableHandle.Value()).HasValue());
 
     const auto snapshot = engine.Save();
     const auto snapshotBeforeFailedRestore = engine.Save();

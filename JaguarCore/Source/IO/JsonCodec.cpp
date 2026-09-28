@@ -3,6 +3,7 @@
 #include "JaguarCore/Assertions.h"
 
 #include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Geometry/RustF32.h"
 #include "JaguarCore/Problems/Bpp.h"
 #include "JaguarCore/Problems/MSpp.h"
 #include "JaguarCore/Problems/Spp.h"
@@ -15,6 +16,7 @@
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -48,7 +50,13 @@ ExternalContainer externalRectangleContainer(const Container& container,
 struct JsonValue
 {
     using Array = std::vector<JsonValue>;
-    using Object = std::map<std::string, JsonValue>;
+    struct Object : std::map<std::string, JsonValue>
+    {
+        using Base = std::map<std::string, JsonValue>;
+        using Base::Base;
+
+        std::set<std::string> duplicateKeys;
+    };
     using Storage = std::variant<std::nullptr_t,
                                  bool,
                                  double,
@@ -245,8 +253,8 @@ private:
             JsonValue member;
             if (!parseValue(member))
                 return false;
-            if (!object.emplace(std::move(key), std::move(member)).second)
-                return fail("duplicate object key");
+            if (!object.emplace(key, std::move(member)).second)
+                object.duplicateKeys.emplace(std::move(key));
             skipWhitespace();
             if (m_Position >= m_Input.size())
                 return fail("unterminated object");
@@ -688,6 +696,23 @@ const JsonValue* requiredMember(const JsonValue::Object& object,
     return &found->second;
 }
 
+bool rejectDuplicateFields(const JsonValue& value,
+                           std::initializer_list<const char*> knownFields,
+                           std::string& error)
+{
+    const auto* object = std::get_if<JsonValue::Object>(&value.value);
+    if (!object)
+        return false;
+    for (const char* field : knownFields)
+    {
+        if (object->duplicateKeys.find(field) == object->duplicateKeys.end())
+            continue;
+        error = std::string("duplicate field '") + field + "'";
+        return true;
+    }
+    return false;
+}
+
 bool numberValue(const JsonValue& value,
                  double& result,
                  const char* name,
@@ -700,12 +725,17 @@ bool numberValue(const JsonValue& value,
             error = std::string(name) + " must be finite";
             return false;
         }
-        result = *number;
+        result = static_cast<double>(static_cast<float>(*number));
+        if (!std::isfinite(result))
+        {
+            error = std::string(name) + " must be finite";
+            return false;
+        }
         return true;
     }
     if (const auto* integer = std::get_if<std::uint64_t>(&value.value))
     {
-        result = static_cast<double>(*integer);
+        result = static_cast<double>(static_cast<float>(*integer));
         if (!std::isfinite(result))
         {
             error = std::string(name) + " must be finite";
@@ -727,18 +757,8 @@ bool unsignedValue(const JsonValue& value,
         result = *integer;
         return true;
     }
-    double number = 0.0;
-    if (!numberValue(value, number, name, error))
-        return false;
-    if (number < 0.0 || std::floor(number) != number ||
-        static_cast<long double>(number) >
-            static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
-    {
-        error = std::string(name) + " must be a nonnegative integer";
-        return false;
-    }
-    result = static_cast<std::uint64_t>(number);
-    return true;
+    error = std::string(name) + " must be a nonnegative integer";
+    return false;
 }
 
 bool stringValue(const JsonValue& value,
@@ -820,6 +840,8 @@ bool parsePolygonData(const JsonValue& value,
                       ExternalPolygon& polygon,
                       std::string& error)
 {
+    if (rejectDuplicateFields(value, {"outer", "inner"}, error))
+        return false;
     const auto* object = objectValue(value, "polygon data", error);
     if (!object)
         return false;
@@ -852,6 +874,8 @@ bool parseShapeValue(const JsonValue& value,
                      ExternalShape& shape,
                      std::string& error)
 {
+    if (rejectDuplicateFields(value, {"type", "data"}, error))
+        return false;
     const auto* object = objectValue(value, "shape", error);
     if (!object)
         return false;
@@ -865,6 +889,9 @@ bool parseShapeValue(const JsonValue& value,
 
     if (type == "rectangle")
     {
+        if (rejectDuplicateFields(*dataValue,
+                                  {"x_min", "y_min", "width", "height"}, error))
+            return false;
         const auto* data = objectValue(*dataValue, "rectangle data", error);
         if (!data)
             return false;
@@ -981,6 +1008,8 @@ bool parseRotationValue(const JsonValue& value,
                         RotationPolicy& rotation,
                         std::string& error)
 {
+    if (rejectDuplicateFields(value, {"rotation"}, error))
+        return false;
     const auto* object = objectValue(value, "orientation", error);
     if (!object)
         return false;
@@ -992,6 +1021,8 @@ bool parseRotationValue(const JsonValue& value,
     const auto* rotationObject = objectValue(object->at("rotation"),
                                              "orientation.rotation", error);
     if (!rotationObject)
+        return false;
+    if (rejectDuplicateFields(object->at("rotation"), {"mode"}, error))
         return false;
     const JsonValue* modeValue = requiredMember(*rotationObject, "mode", error);
     if (!modeValue)
@@ -1012,6 +1043,8 @@ bool parseRotationValue(const JsonValue& value,
     }
     if (mode == "discrete")
     {
+        if (rejectDuplicateFields(object->at("rotation"), {"mode", "angles"}, error))
+            return false;
         if (rotationObject->size() != 2)
         {
             error = "discrete rotation requires only the angles field";
@@ -1037,6 +1070,8 @@ bool parseRotationValue(const JsonValue& value,
     }
     if (mode == "stepped")
     {
+        if (rejectDuplicateFields(object->at("rotation"), {"mode", "step"}, error))
+            return false;
         if (rotationObject->size() != 2)
         {
             error = "stepped rotation requires only the step field";
@@ -1092,6 +1127,11 @@ bool parseItemValue(const JsonValue& value,
                     ExternalItem& item,
                     std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"id", "orientation", "shape", "min_quality",
+                               "allowed_orientations", "allowed_rotations",
+                               "allowed_reflection_axes"}, error))
+        return false;
     const auto* object = objectValue(value, "item", error);
     if (!object)
         return false;
@@ -1157,6 +1197,8 @@ bool parseQualityZones(const JsonValue& value,
     zones.reserve(array->size());
     for (std::size_t i = 0; i < array->size(); ++i)
     {
+        if (rejectDuplicateFields((*array)[i], {"quality", "shape"}, error))
+            return false;
         const auto* object = objectValue((*array)[i], "quality zone", error);
         if (!object)
             return false;
@@ -1199,6 +1241,8 @@ bool parseContainerValue(const JsonValue& value,
                          ExternalContainer& container,
                          std::string& error)
 {
+    if (rejectDuplicateFields(value, {"id", "shape", "zones"}, error))
+        return false;
     const auto* object = objectValue(value, "container", error);
     if (!object)
         return false;
@@ -1227,6 +1271,8 @@ bool parseTransformationValue(const JsonValue& value,
                               ExternalTransformation& transformation,
                               std::string& error)
 {
+    if (rejectDuplicateFields(value, {"rotation", "translation"}, error))
+        return false;
     const auto* object = objectValue(value, "transformation", error);
     if (!object)
         return false;
@@ -1253,6 +1299,8 @@ bool parseLayoutValue(const JsonValue& value,
                       ExternalLayout& layout,
                       std::string& error)
 {
+    if (rejectDuplicateFields(value, {"container_id", "placed_items", "density"}, error))
+        return false;
     const auto* object = objectValue(value, "layout", error);
     if (!object)
         return false;
@@ -1271,6 +1319,8 @@ bool parseLayoutValue(const JsonValue& value,
     layout.placedItems.reserve(array->size());
     for (std::size_t i = 0; i < array->size(); ++i)
     {
+        if (rejectDuplicateFields((*array)[i], {"item_id", "transformation"}, error))
+            return false;
         const auto* placed = objectValue((*array)[i], "placed item", error);
         if (!placed)
             return false;
@@ -1303,6 +1353,8 @@ bool demandItemValue(const JsonValue& value,
                      ExternalDemandItem& demandItem,
                      std::string& error)
 {
+    if (rejectDuplicateFields(value, {"demand"}, error))
+        return false;
     if (!parseItemValue(value, demandItem.item, error))
         return false;
     const auto* object = objectValue(value, "item", error);
@@ -1386,6 +1438,10 @@ bool parseSPInstanceValue(const JsonValue& value,
                           ExternalSPInstance& instance,
                           std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"name", "min_item_separation", "items", "strip_height"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "SP instance", error);
     if (!object || !commonInstanceFields(*object, instance.name,
                                          instance.minItemSeparation,
@@ -1408,6 +1464,10 @@ bool parseSPSolutionValue(const JsonValue& value,
                           ExternalSPSolution& solution,
                           std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"strip_width", "layout", "density", "run_time_sec"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "SP solution", error);
     if (!object)
         return false;
@@ -1436,6 +1496,8 @@ bool parseBinValue(const JsonValue& value,
                    ExternalBin& bin,
                    std::string& error)
 {
+    if (rejectDuplicateFields(value, {"stock", "cost"}, error))
+        return false;
     if (!parseContainerValue(value, bin.container, error))
         return false;
     const auto* object = objectValue(value, "bin", error);
@@ -1489,6 +1551,10 @@ bool parseBPInstanceValue(const JsonValue& value,
                           ExternalBPInstance& instance,
                           std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"name", "min_item_separation", "items", "bins"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "BP instance", error);
     if (!object || !commonInstanceFields(*object, instance.name,
                                          instance.minItemSeparation,
@@ -1539,6 +1605,10 @@ bool parseBPSolutionValue(const JsonValue& value,
                           ExternalBPSolution& solution,
                           std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"cost", "layouts", "density", "run_time_sec"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "BP solution", error);
     if (!object)
         return false;
@@ -1567,6 +1637,8 @@ bool parseMSPStripValue(const JsonValue& value,
                         ExternalMSPStrip& strip,
                         std::string& error)
 {
+    if (rejectDuplicateFields(value, {"height", "max_width"}, error))
+        return false;
     const auto* object = objectValue(value, "strips", error);
     if (!object)
         return false;
@@ -1589,6 +1661,10 @@ bool parseMSPInstanceValue(const JsonValue& value,
                            ExternalMSPInstance& instance,
                            std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"name", "min_item_separation", "items", "strips"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "MSP instance", error);
     if (!object || !commonInstanceFields(*object, instance.name,
                                          instance.minItemSeparation,
@@ -1639,6 +1715,10 @@ bool parseMSPSolutionValue(const JsonValue& value,
                            ExternalMSPSolution& solution,
                            std::string& error)
 {
+    if (rejectDuplicateFields(value,
+                              {"layouts", "containers", "density", "run_time_sec"},
+                              error))
+        return false;
     const auto* object = objectValue(value, "MSP solution", error);
     if (!object)
         return false;
@@ -1677,7 +1757,7 @@ JAGUARCORE_API Result<ExternalLayout> ExternalLayoutFromLayout(
     {
         const PlacedItem& placedItem = placement.placedItem;
         const Transform2d transform =
-            placedItem.GetItem().GetOriginalShape().preTransform.FollowedBy(
+        placedItem.GetItem().GetOriginalShape().preTransform.FollowedByRustF32(
                 placedItem.Transform());
         if (!std::isfinite(transform.rotationRad) ||
             !transform.translation.IsFinite())
@@ -1686,9 +1766,11 @@ JAGUARCORE_API Result<ExternalLayout> ExternalLayoutFromLayout(
                 {ErrorCode::SerializationFailure,
                  "layout contains a non-finite placement transformation"});
         }
+        const float rotationDegrees =
+            detail::ToDegreesRustF32(transform.rotationRad);
         external.placedItems.push_back(
             {placedItem.GetItem().ExternalId(),
-             {transform.rotationRad * 180.0 / 3.141592653589793238462643383279502884,
+             {static_cast<double>(rotationDegrees),
               transform.translation}});
     }
     return Result<ExternalLayout>::FromValue(std::move(external));

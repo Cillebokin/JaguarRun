@@ -28,6 +28,25 @@ jaguar::SimplePolygon Rectangle(double xMin,
 
 void runBoundaryDifferentialTests()
 {
+    const auto rootBounds = jaguar::Rect2d::Create(0.0, 0.0, 10.0, 10.0);
+    assert(rootBounds.HasValue());
+    jaguar::CollisionEngine rootBoundedEngine(rootBounds.Value(), jaguar::CDEConfig{});
+    const auto rootExterior = rootBoundedEngine.RegisterHazard({
+        {jaguar::HazardKind::Exterior, 0, 0, 0},
+        rectangleShape(0.0, 0.0, 10.0, 10.0), false});
+    assert(rootExterior.HasValue());
+    const auto partiallyOutOfBounds = jaguar::SimplePolygon::Create({
+        {-1.0, 1.0}, {1.0, 1.0}, {1.0, 2.0}, {-1.0, 2.0}});
+    assert(partiallyOutOfBounds.HasValue());
+    jaguar::HazardFilter ignoreExterior{};
+    ignoreExterior.irrelevant = [](const jaguar::HazardEntity& entity) {
+        return entity.kind == jaguar::HazardKind::Exterior;
+    };
+    // Rust returns collision immediately when a polygon extends beyond the CDE root,
+    // before consulting the hazard filter.
+    assert(rootBoundedEngine.DetectPolygonCollision(
+        partiallyOutOfBounds.Value(), ignoreExterior));
+
     const auto proper = jaguar::Edge2d::Create({0.0, 0.0}, {4.0, 4.0});
     const auto tangent = jaguar::Edge2d::Create({0.0, 4.0}, {4.0, 0.0});
     assert(proper.HasValue() && tangent.HasValue());
@@ -66,7 +85,8 @@ void runBoundaryDifferentialTests()
     const auto largePolygonGap = Rectangle(6.0 + 5.0e-7, 6.0,
                                             8.0 + 5.0e-7, 8.0);
     assert(engine.DetectPolygonCollision(cornerTouch, jaguar::NoFilter{}));
-    assert(!engine.DetectPolygonCollision(smallPolygonGap, jaguar::NoFilter{}));
+    // The 5e-10 gap rounds to the hazard boundary in Rust's f32 geometry.
+    assert(engine.DetectPolygonCollision(smallPolygonGap, jaguar::NoFilter{}));
     assert(!engine.DetectPolygonCollision(largePolygonGap, jaguar::NoFilter{}));
 
     const auto interior = Rectangle(4.0 + 5.0e-10, 4.0 + 5.0e-10,

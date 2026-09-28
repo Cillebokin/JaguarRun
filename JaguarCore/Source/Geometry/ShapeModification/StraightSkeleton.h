@@ -7,6 +7,9 @@
 
 namespace jaguar::detail
 {
+Result<SimplePolygon> createRustImportedOffsetPolygon(
+    std::vector<Point2d> points);
+
 Result<std::vector<SimplePolygon>> roundedStraightSkeletonOffsets(
     const SimplePolygon& shape, double signedDistance);
 }

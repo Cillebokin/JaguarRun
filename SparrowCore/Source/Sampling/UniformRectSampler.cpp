@@ -11,8 +11,15 @@ sparrow::Result<sparrow::UniformRectSampler> InvalidSampler(const char* message)
         {jaguar::ErrorCode::InvalidInput, message});
 }
 
+constexpr float TWO_PI = 6.28318530717958647692F;
+constexpr std::size_t ROT_N_SAMPLES = 16U;
+
 float SampleAxis(float minValue, float maxValue, sparrow::SparrowRng& rng) noexcept
 {
+    if (minValue == maxValue)
+    {
+        return minValue;
+    }
     const float value = minValue + (maxValue - minValue) * rng.Uniform01F32();
     if (value >= maxValue)
     {
@@ -25,63 +32,129 @@ float SampleAxis(float minValue, float maxValue, sparrow::SparrowRng& rng) noexc
 namespace sparrow
 {
 UniformRectSampler::UniformRectSampler(jaguar::Rect2d bbox,
-                                       RotationDistribution rotationDistribution,
-                                       float xMin,
-                                       float xMax,
-                                       float yMin,
-                                       float yMax)
+                                       std::vector<RotationEntry> entries)
     : m_Bbox(bbox),
-      m_RotationDistribution(std::move(rotationDistribution)),
-      m_XMin(xMin),
-      m_XMax(xMax),
-      m_YMin(yMin),
-      m_YMax(yMax)
+      m_Entries(std::move(entries))
 {
 }
 
 Result<UniformRectSampler> UniformRectSampler::Create(
     jaguar::Rect2d bbox, const jaguar::Item& item)
 {
-    if (!std::isfinite(bbox.xMin) || !std::isfinite(bbox.yMin)
-        || !std::isfinite(bbox.xMax) || !std::isfinite(bbox.yMax)
-        || bbox.xMin >= bbox.xMax || bbox.yMin >= bbox.yMax)
+    return Create(bbox, item, bbox);
+}
+
+Result<UniformRectSampler> UniformRectSampler::Create(
+    jaguar::Rect2d sampleBbox,
+    const jaguar::Item& item,
+    jaguar::Rect2d containerBbox)
+{
+    const auto validRect = [](const jaguar::Rect2d& rect) {
+        return std::isfinite(rect.xMin) && std::isfinite(rect.yMin)
+            && std::isfinite(rect.xMax) && std::isfinite(rect.yMax)
+            && rect.xMin < rect.xMax && rect.yMin < rect.yMax;
+    };
+    if (!validRect(sampleBbox) || !validRect(containerBbox))
     {
         return InvalidSampler("uniform sampler bbox must be finite and non-degenerate");
     }
 
-    const float xMin = static_cast<float>(bbox.xMin);
-    const float xMax = static_cast<float>(bbox.xMax);
-    const float yMin = static_cast<float>(bbox.yMin);
-    const float yMax = static_cast<float>(bbox.yMax);
-    if (!std::isfinite(xMin) || !std::isfinite(xMax)
-        || !std::isfinite(yMin) || !std::isfinite(yMax)
-        || xMin >= xMax || yMin >= yMax)
+    const float sampleXMin = static_cast<float>(sampleBbox.xMin);
+    const float sampleXMax = static_cast<float>(sampleBbox.xMax);
+    const float sampleYMin = static_cast<float>(sampleBbox.yMin);
+    const float sampleYMax = static_cast<float>(sampleBbox.yMax);
+    const float containerXMin = static_cast<float>(containerBbox.xMin);
+    const float containerXMax = static_cast<float>(containerBbox.xMax);
+    const float containerYMin = static_cast<float>(containerBbox.yMin);
+    const float containerYMax = static_cast<float>(containerBbox.yMax);
+    if (!std::isfinite(sampleXMin) || !std::isfinite(sampleXMax)
+        || !std::isfinite(sampleYMin) || !std::isfinite(sampleYMax)
+        || !std::isfinite(containerXMin) || !std::isfinite(containerXMax)
+        || !std::isfinite(containerYMin) || !std::isfinite(containerYMax))
     {
-        return InvalidSampler("uniform sampler bbox is not representable as float");
+        return InvalidSampler("uniform sampler bounds are not representable as float");
     }
 
-    auto rotationDistribution = RotationDistribution::FromItem(item);
-    if (!rotationDistribution.HasValue())
+    std::vector<float> rotations;
+    switch (item.AllowedRotation().mode)
     {
-        return Result<UniformRectSampler>::FromError(rotationDistribution.GetError());
+    case jaguar::RotationMode::None:
+        rotations.push_back(0.0F);
+        break;
+    case jaguar::RotationMode::Discrete:
+        for (const double angle : item.AllowedRotation().radians)
+        {
+            const float value = static_cast<float>(angle);
+            if (!std::isfinite(angle) || !std::isfinite(value))
+            {
+                return InvalidSampler("uniform sampler rotation is not finite");
+            }
+            rotations.push_back(value);
+        }
+        break;
+    case jaguar::RotationMode::Continuous:
+        rotations.reserve(ROT_N_SAMPLES);
+        for (std::size_t index = 0U; index < ROT_N_SAMPLES; ++index)
+        {
+            rotations.push_back(TWO_PI
+                               * static_cast<float>(index)
+                               / static_cast<float>(ROT_N_SAMPLES));
+        }
+        break;
+    }
+    if (rotations.empty())
+    {
+        return InvalidSampler("uniform sampler has no legal rotations");
+    }
+
+    std::vector<RotationEntry> entries;
+    entries.reserve(rotations.size());
+    for (const float rotation : rotations)
+    {
+        const auto rotated = item.CollisionShape().TransformedRustF32(
+            jaguar::Transform2d::FromRotationTranslation(
+                static_cast<double>(rotation), {0.0, 0.0}));
+        if (!rotated.HasValue())
+        {
+            continue;
+        }
+        const jaguar::Rect2d rotatedBounds = rotated.Value().BoundingBox();
+        const float feasibleXMin = containerXMin
+            - static_cast<float>(rotatedBounds.xMin);
+        const float feasibleXMax = containerXMax
+            - static_cast<float>(rotatedBounds.xMax);
+        const float feasibleYMin = containerYMin
+            - static_cast<float>(rotatedBounds.yMin);
+        const float feasibleYMax = containerYMax
+            - static_cast<float>(rotatedBounds.yMax);
+        const float xMin = std::max(feasibleXMin, sampleXMin);
+        const float xMax = std::min(feasibleXMax, sampleXMax);
+        const float yMin = std::max(feasibleYMin, sampleYMin);
+        const float yMax = std::min(feasibleYMax, sampleYMax);
+        if (std::isfinite(xMin) && std::isfinite(xMax)
+            && std::isfinite(yMin) && std::isfinite(yMax)
+            && xMin <= xMax && yMin <= yMax)
+        {
+            entries.push_back({rotation, xMin, xMax, yMin, yMax});
+        }
+    }
+    if (entries.empty())
+    {
+        return InvalidSampler("uniform sampler has no feasible rotation entry");
     }
 
     return Result<UniformRectSampler>::FromValue(
-        UniformRectSampler{bbox,
-                           std::move(rotationDistribution.Value()),
-                           xMin,
-                           xMax,
-                           yMin,
-                           yMax});
+        UniformRectSampler{sampleBbox, std::move(entries)});
 }
 
 jaguar::Transform2d UniformRectSampler::Sample(SparrowRng& rng) const noexcept
 {
-    const float rotation = m_RotationDistribution.Sample(rng);
-    const float x = SampleAxis(m_XMin, m_XMax, rng);
-    const float y = SampleAxis(m_YMin, m_YMax, rng);
+    const RotationEntry& entry =
+        m_Entries[rng.UniformIndex(static_cast<std::uint32_t>(m_Entries.size()))];
+    const float x = SampleAxis(entry.xMin, entry.xMax, rng);
+    const float y = SampleAxis(entry.yMin, entry.yMax, rng);
     return jaguar::Transform2d::FromRotationTranslation(
-        static_cast<double>(rotation),
+        static_cast<double>(entry.rotation),
         {static_cast<double>(x), static_cast<double>(y)});
 }
 

@@ -16,6 +16,7 @@ struct ExplorationResult
 {
     jaguar::SPSolution solution;
     LbfMetrics metrics;
+    OptimizationHistory history;
 };
 
 SPARROWCORE_API Result<ExplorationResult> Explore(

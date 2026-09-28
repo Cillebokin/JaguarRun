@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 namespace
 {
@@ -64,7 +65,8 @@ SeparationEvaluator::SeparationEvaluator(
     const jaguar::Item& item,
     jaguar::PlacedItemHandle movingHandle,
     const CollisionTracker& tracker)
-    : m_Item(&item),
+    : m_Layout(&layout),
+      m_Item(&item),
       m_Tracker(&tracker),
       m_MovingIndex(tracker.IndexForHandle(movingHandle))
 {
@@ -72,15 +74,39 @@ SeparationEvaluator::SeparationEvaluator(
     m_Engine = snapshot.container.CreateCollisionEngine();
     if (m_Engine)
     {
-        if (!m_Engine->Restore(snapshot.cdeSnapshot).HasValue())
+        for (const jaguar::LayoutPlacementSnapshot& placement : snapshot.placements)
+        {
+            const jaguar::Hazard hazard{
+                {jaguar::HazardKind::PlacedItem,
+                 placement.placedItem.GetItemIndex(),
+                 0,
+                 0},
+                std::make_shared<const jaguar::SimplePolygon>(
+                    placement.placedItem.CollisionShape()),
+                true};
+            const auto registered = m_Engine->RegisterHazard(hazard);
+            if (!registered.HasValue())
+            {
+                m_Engine.reset();
+                break;
+            }
+            if (placement.handle == movingHandle)
+            {
+                m_MovingHazardHandle = registered.Value();
+            }
+        }
+        if (!m_MovingHazardHandle.has_value())
         {
             m_Engine.reset();
         }
     }
-    m_Filter.irrelevantHandle = [movingHandle](
-                                    jaguar::PlacedItemHandle handle,
+    const std::optional<jaguar::HazardHandle> movingHazardHandle =
+        m_MovingHazardHandle;
+    m_Filter.irrelevantHandle = [movingHazardHandle](
+                                    jaguar::HazardHandle handle,
                                     const jaguar::HazardEntity&) {
-        return handle == movingHandle;
+        return movingHazardHandle.has_value()
+            && handle == *movingHazardHandle;
     };
     m_Filter.irrelevant = [](const jaguar::HazardEntity& entity) {
         return entity.kind == jaguar::HazardKind::Hole;
@@ -108,30 +134,53 @@ SampleEval SeparationEvaluator::Evaluate(
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
 
-    const auto surrogateCollision = m_Engine->DetectSurrogateCollision(
-        *surrogate, *legalTransform, m_Filter);
+    jaguar::HazardCollector collisions;
+    const auto surrogateCollision = m_Engine->CollectSurrogateCollisionsUntil(
+        *surrogate,
+        *legalTransform,
+        collisions,
+        m_Filter,
+        [](const jaguar::HazardEntity&) { return false; });
     if (!surrogateCollision.HasValue())
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
-    const auto transformed = m_Item->CollisionShape().Transformed(*legalTransform);
+    const bool surrogateHit = !collisions.Empty();
+    const auto transformed = m_Item->CollisionShape().TransformedRustF32(*legalTransform);
     if (!transformed.HasValue())
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
-    if (!surrogateCollision.Value()
-        && !m_Engine->DetectPolygonCollision(transformed.Value(), m_Filter))
+    if (surrogateHit)
+    {
+        ++m_SurrogateRejectCount;
+    }
+    jaguar::HazardCollector exactCollisions;
+    m_Engine->CollectPolygonCollisionsUntil(
+        transformed.Value(),
+        exactCollisions,
+        m_Filter,
+        [](const jaguar::HazardEntity&) { return false; });
+    if (!exactCollisions.Empty())
+    {
+        ++m_ExactCollisionCount;
+    }
+    for (const auto& entry : exactCollisions.Entries())
+    {
+        collisions.Insert(entry.first, entry.second);
+    }
+    if (collisions.Empty())
     {
         return {SampleKind::SAMPLE_KIND_CLEAR, 0.0F};
     }
-    if (surrogateCollision.Value()
-        && !m_Engine->DetectPolygonCollision(transformed.Value(), m_Filter))
+    if (upperBound.has_value()
+        && upperBound->kind == SampleKind::SAMPLE_KIND_CLEAR)
     {
-        return {SampleKind::SAMPLE_KIND_CLEAR, 0.0F};
+        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
 
     const auto loss = m_Tracker->EvaluateCandidateLoss(
-        *m_Item, *legalTransform, *m_MovingIndex);
+        *m_Layout, *m_Item, *legalTransform, *m_MovingIndex);
     if (!loss.HasValue() || !std::isfinite(loss.Value()))
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
@@ -139,7 +188,7 @@ SampleEval SeparationEvaluator::Evaluate(
     if (upperBound.has_value()
         && upperBound->kind == SampleKind::SAMPLE_KIND_COLLISION
         && std::isfinite(upperBound->loss)
-        && loss.Value() >= upperBound->loss)
+        && loss.Value() > upperBound->loss)
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
@@ -149,5 +198,15 @@ SampleEval SeparationEvaluator::Evaluate(
 std::size_t SeparationEvaluator::EvaluationCount() const noexcept
 {
     return m_EvaluationCount;
+}
+
+std::size_t SeparationEvaluator::SurrogateRejectCount() const noexcept
+{
+    return m_SurrogateRejectCount;
+}
+
+std::size_t SeparationEvaluator::ExactCollisionCount() const noexcept
+{
+    return m_ExactCollisionCount;
 }
 }

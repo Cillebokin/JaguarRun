@@ -129,7 +129,7 @@ const QuadTree::Node& QuadTree::VirtualRoot(const Rect2d& queryBounds) const noe
         const Node* surroundingChild = nullptr;
         for (const auto& child : current->children)
         {
-            if (child && child->bounds.RelationTo(queryBounds) ==
+            if (child && child->bounds.RelationToRustF32(queryBounds) ==
                              RectRelation::Surrounding)
             {
                 surroundingChild = child.get();
@@ -161,7 +161,7 @@ const Rect2d& QuadTree::Bounds() const noexcept
 bool QuadTree::PolygonIntersectsRect(const SimplePolygon& polygon,
                                      const Rect2d& rect) noexcept
 {
-    if (!polygon.BoundingBox().Intersects(rect))
+    if (!polygon.BoundingBox().IntersectsRustF32(rect))
         return false;
 
     const auto rectEdges = rectangleEdges(rect);
@@ -169,19 +169,19 @@ bool QuadTree::PolygonIntersectsRect(const SimplePolygon& polygon,
     {
         for (const Edge2d& rectEdge : rectEdges)
         {
-            if (polygonEdge.Intersects(rectEdge))
+            if (polygonEdge.IntersectsRustF32(rectEdge))
                 return true;
         }
     }
 
     for (const Point2d& point : polygon.Vertices())
     {
-        if (rect.Contains(point))
+        if (rect.ContainsRustF32(point))
             return true;
     }
     for (const Point2d& point : rectangleCorners(rect))
     {
-        if (polygon.Contains(point))
+        if (polygon.ContainsRustF32(point))
             return true;
     }
     return false;
@@ -192,7 +192,7 @@ bool QuadTree::RectInsidePolygon(const SimplePolygon& polygon,
 {
     for (const Point2d& point : rectangleCorners(rect))
     {
-        if (!polygon.Contains(point))
+        if (!polygon.ContainsRustF32(point))
             return false;
     }
 
@@ -201,7 +201,7 @@ bool QuadTree::RectInsidePolygon(const SimplePolygon& polygon,
     {
         for (const Edge2d& rectEdge : rectEdges)
         {
-            if (polygonEdge.Intersects(rectEdge))
+            if (polygonEdge.IntersectsRustF32(rectEdge))
                 return false;
         }
     }
@@ -212,10 +212,10 @@ QuadTree::PresenceInfo QuadTree::Classify(const RegisteredHazard& hazard,
                                           const Rect2d& nodeBounds) noexcept
 {
     if (hazard.hazard.entity.kind == HazardKind::Exterior &&
-        !nodeBounds.Intersects(hazard.bounds))
+        !nodeBounds.IntersectsRustF32(hazard.bounds))
         return PresenceInfo{HazardPresence::Entire, 0};
     if (hazard.hazard.entity.kind != HazardKind::Exterior &&
-        !nodeBounds.Intersects(hazard.bounds))
+        !nodeBounds.IntersectsRustF32(hazard.bounds))
         return {};
 
     if (!hazard.hasGeometry || !hazard.hazard.shape)
@@ -264,7 +264,7 @@ void QuadTree::BuildNode(Node& node,
     if (node.depth >= maxDepth || activePartialEdges <= edgeThreshold)
         return;
 
-    const auto quadrants = node.bounds.Quadrants();
+    const auto quadrants = node.bounds.QuadrantsRustF32();
     for (std::size_t i = 0; i < quadrants.size(); ++i)
     {
         node.children[i] = std::make_unique<Node>(
@@ -278,7 +278,7 @@ void QuadTree::QueryNode(const Node& node,
                          const std::vector<RegisteredHazard>& hazards,
                          std::vector<HazardHandle>& result)
 {
-    if (!node.bounds.Intersects(queryBounds))
+    if (!node.bounds.IntersectsRustF32(queryBounds))
         return;
 
     for (const Entry& entry : node.entries)

@@ -168,24 +168,47 @@ bool TestSmallBppFixture(std::ostream& output)
     {
         return false;
     }
-    if (!Expect(result.Value().solution.layouts.size() == 1U
-                    && result.Value().solution.layouts.front().layoutSnapshot
-                           .placements.size() == 1U
-                    && result.Value().solution.Cost(instance.Value()) == 10U
-                    && result.Value().metrics.seed == referenceSeed
-                    && result.Value().metrics.sampleCount == referenceSamples
-                    && result.Value().metrics.placedItemCount == 1U
-                    && result.Value().metrics.placedItemCount == referencePlaced
-                    && result.Value().metrics.remainingDemand == 0U
-                    && result.Value().metrics.remainingDemand == referenceRemaining
-                    && result.Value().metrics.stripWidth == referenceWidth
-                    && std::abs(result.Value().metrics.density - referenceDensity)
-                           < 1.0e-9
-                    && result.Value().solution.Cost(instance.Value()) == referenceCost
-                    && result.Value().metrics.feasible == referenceFeasible
-                    && result.Value().metrics.feasible
-                    && std::isfinite(result.Value().metrics.density)
-                    && result.Value().metrics.density > 0.0,
+    const bool expectedSmallSolution = result.Value().solution.layouts.size() == 1U
+        && result.Value().solution.layouts.front().layoutSnapshot.placements.size() == 1U
+        && result.Value().solution.Cost(instance.Value()) == 10U
+        && result.Value().metrics.seed == referenceSeed
+        && result.Value().metrics.sampleCount == referenceSamples
+        && result.Value().metrics.placedItemCount == 1U
+        && result.Value().metrics.placedItemCount == referencePlaced
+        && result.Value().metrics.remainingDemand == 0U
+        && result.Value().metrics.remainingDemand == referenceRemaining
+        && result.Value().metrics.stripWidth == referenceWidth
+        && std::abs(result.Value().metrics.density - referenceDensity) < 1.0e-9
+        && result.Value().solution.Cost(instance.Value()) == referenceCost
+        && result.Value().metrics.feasible == referenceFeasible
+        && result.Value().metrics.feasible
+        && std::isfinite(result.Value().metrics.density)
+        && result.Value().metrics.density > 0.0;
+    if (!expectedSmallSolution)
+    {
+        output << "BPP actual: layouts=" << result.Value().solution.layouts.size()
+               << " placements="
+               << (result.Value().solution.layouts.empty()
+                       ? 0U
+                       : result.Value().solution.layouts.front().layoutSnapshot
+                             .placements.size())
+               << " cost=" << result.Value().solution.Cost(instance.Value())
+               << " samples=" << result.Value().metrics.sampleCount
+               << " placed=" << result.Value().metrics.placedItemCount
+               << " remaining=" << result.Value().metrics.remainingDemand
+               << " width=" << result.Value().metrics.stripWidth
+               << " density=" << result.Value().metrics.density
+               << " feasible=" << result.Value().metrics.feasible << '\n'
+               << "BPP expected: seed=" << referenceSeed
+               << " samples=" << referenceSamples
+               << " placed=" << referencePlaced
+               << " remaining=" << referenceRemaining
+               << " width=" << referenceWidth
+               << " density=" << referenceDensity
+               << " cost=" << referenceCost
+               << " feasible=" << referenceFeasible << '\n';
+    }
+    if (!Expect(expectedSmallSolution,
                 output,
                 "small BPP LBF must place one item in one non-empty bin"))
     {

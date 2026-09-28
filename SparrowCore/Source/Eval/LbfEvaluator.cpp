@@ -88,12 +88,12 @@ std::optional<jaguar::Transform2d> LegalizeTransform(
 
 std::optional<float> CalculateLbfLoss(const jaguar::SimplePolygon& shape)
 {
-    const jaguar::Point2d centroid = shape.Centroid();
+    const jaguar::Point2d poi = shape.PointOfInaccessibility().center;
     const jaguar::Rect2d bbox = shape.BoundingBox();
-    const float poiX = static_cast<float>(centroid.x);
-    const float poiY = static_cast<float>(centroid.y);
-    const float bboxX = static_cast<float>(bbox.xMin);
-    const float bboxY = static_cast<float>(bbox.yMin);
+    const float poiX = static_cast<float>(poi.x);
+    const float poiY = static_cast<float>(poi.y);
+    const float bboxX = static_cast<float>(bbox.xMax);
+    const float bboxY = static_cast<float>(bbox.yMax);
     if (!std::isfinite(poiX) || !std::isfinite(poiY)
         || !std::isfinite(bboxX) || !std::isfinite(bboxY))
     {
@@ -157,7 +157,7 @@ LbfEvaluator::LbfEvaluator(const jaguar::Layout& layout,
 
 SampleEval LbfEvaluator::Evaluate(
     const jaguar::Transform2d& transform,
-    const std::optional<SampleEval>& upperBound)
+    const std::optional<SampleEval>&)
 {
     ++m_EvaluationCount;
     if (m_Item == nullptr || !m_Engine)
@@ -187,7 +187,7 @@ SampleEval LbfEvaluator::Evaluate(
     }
 
     const auto transformedResult =
-        m_Item->CollisionShape().Transformed(*legalTransform);
+        m_Item->CollisionShape().TransformedRustF32(*legalTransform);
     if (!transformedResult.HasValue())
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
@@ -195,15 +195,6 @@ SampleEval LbfEvaluator::Evaluate(
     const jaguar::SimplePolygon transformed = transformedResult.Value();
     const auto loss = CalculateLbfLoss(transformed);
     if (!loss.has_value())
-    {
-        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
-    }
-
-    if (upperBound.has_value()
-        && (upperBound->kind == SampleKind::SAMPLE_KIND_CLEAR
-            || upperBound->kind == SampleKind::SAMPLE_KIND_COLLISION)
-        && std::isfinite(upperBound->loss)
-        && *loss >= upperBound->loss)
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }

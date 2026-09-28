@@ -47,6 +47,7 @@ ctrlc = "3.5"
 live_svg = []
 only_final_svg = []
 simd = []
+oracle-trace = []
 tui = ["dep:crossterm", "dep:ratatui"]
 
 [profile.dev]

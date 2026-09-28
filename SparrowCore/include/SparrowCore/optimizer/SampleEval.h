@@ -6,6 +6,9 @@
 
 #include <cstddef>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 #include <optional>
 
 namespace sparrow
@@ -37,6 +40,35 @@ inline int SampleKindRank(SampleKind kind) noexcept
     return 2;
 }
 
+inline bool RustApproxEqualF32(float left, float right) noexcept
+{
+    if (left == right)
+    {
+        return true;
+    }
+
+    if (std::abs(left - right) <= std::numeric_limits<float>::epsilon())
+    {
+        return true;
+    }
+
+    std::uint32_t leftBits = 0U;
+    std::uint32_t rightBits = 0U;
+    std::memcpy(&leftBits, &left, sizeof(leftBits));
+    std::memcpy(&rightBits, &right, sizeof(rightBits));
+    constexpr std::uint32_t signBit = 1U << 31U;
+    const std::uint32_t leftOrdered = (leftBits & signBit) != 0U
+        ? ~leftBits
+        : leftBits ^ signBit;
+    const std::uint32_t rightOrdered = (rightBits & signBit) != 0U
+        ? ~rightBits
+        : rightBits ^ signBit;
+    const std::uint64_t ulpDistance = leftOrdered >= rightOrdered
+        ? static_cast<std::uint64_t>(leftOrdered - rightOrdered)
+        : static_cast<std::uint64_t>(rightOrdered - leftOrdered);
+    return ulpDistance <= 4U;
+}
+
 inline bool IsBetterSample(const SampleEval& left, const SampleEval& right) noexcept
 {
     const int leftRank = SampleKindRank(left.kind);
@@ -57,7 +89,8 @@ inline bool IsBetterSample(const SampleEval& left, const SampleEval& right) noex
     {
         return true;
     }
-    return left.loss < right.loss;
+    return !RustApproxEqualF32(left.loss, right.loss)
+        && left.loss < right.loss;
 }
 
 inline bool operator<(const SampleEval& left, const SampleEval& right) noexcept

@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <string>
 
 namespace
@@ -20,6 +22,14 @@ jaguar::Importer makeImporter(double separation = 0.0)
     jaguar::ImporterConfig config{};
     config.minItemSeparation = separation;
     return jaguar::Importer(config);
+}
+
+std::uint32_t floatBits(double value)
+{
+    const float normalized = static_cast<float>(value);
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &normalized, sizeof(bits));
+    return bits;
 }
 }
 
@@ -46,6 +56,40 @@ void runIoTests()
     const auto steppedItem = makeImporter().ImportItem(stepped, 4);
     assert(steppedItem.HasValue());
     assert(steppedItem.Value().AllowedRotation().radians.size() == 4);
+
+    jaguar::ExternalItem roundedDiscrete = itemInput;
+    roundedDiscrete.rotation = jaguar::RotationPolicy::Discrete({360.00000001});
+    const auto roundedDiscreteItem = makeImporter().ImportItem(roundedDiscrete, 15);
+    assert(roundedDiscreteItem.HasValue());
+    assert(roundedDiscreteItem.Value().AllowedRotation().mode ==
+           jaguar::RotationMode::None);
+    assert(roundedDiscreteItem.Value().AllowedRotation().radians.empty());
+
+    jaguar::ExternalItem roundedStepped = itemInput;
+    roundedStepped.rotation = jaguar::RotationPolicy::Stepped(360.00000001);
+    const auto roundedSteppedItem = makeImporter().ImportItem(roundedStepped, 16);
+    assert(roundedSteppedItem.HasValue());
+    assert(roundedSteppedItem.Value().AllowedRotation().mode ==
+           jaguar::RotationMode::None);
+    assert(roundedSteppedItem.Value().AllowedRotation().radians.empty());
+
+    jaguar::ExternalItem nonIntegerRotation = itemInput;
+    nonIntegerRotation.rotation =
+        jaguar::RotationPolicy::Discrete({123.456789});
+    const auto nonIntegerRotationItem =
+        makeImporter().ImportItem(nonIntegerRotation, 17);
+    assert(nonIntegerRotationItem.HasValue());
+    assert(floatBits(
+               nonIntegerRotationItem.Value().AllowedRotation().radians[0]) ==
+           0x4009e70eU);
+
+    jaguar::ExternalItem collapsedRectangle = itemInput;
+    collapsedRectangle.shape = Rectangle(16777216.5, 0.0, 0.6, 2.0);
+    const auto collapsedRectangleItem =
+        makeImporter().ImportItem(collapsedRectangle, 18);
+    assert(!collapsedRectangleItem.HasValue());
+    assert(collapsedRectangleItem.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
 
     jaguar::ExternalItem continuous = itemInput;
     continuous.rotation = jaguar::RotationPolicy::Continuous();
@@ -80,9 +124,24 @@ void runIoTests()
     containerInput.shape = jaguar::ExternalShape::Polygon(
         {{0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}}, {hole});
     containerInput.zones.push_back({1, Rectangle(6.0, 0.0, 4.0, 4.0)});
+    containerInput.zones.push_back({
+        0, jaguar::ExternalShape::SimplePolygon(
+               {{7.0, 7.0}, {9.0, 7.0}, {9.0, 9.0}, {7.0, 9.0}})});
     const auto importedContainer = makeImporter().ImportContainer(containerInput);
     assert(importedContainer.HasValue());
     assert(importedContainer.Value().Id() == 8001);
+
+    jaguar::ExternalContainer polygonQualityZoneContainer{};
+    polygonQualityZoneContainer.id = 8002;
+    polygonQualityZoneContainer.shape = Rectangle(0.0, 0.0, 10.0, 10.0);
+    polygonQualityZoneContainer.zones.push_back({
+        1, jaguar::ExternalShape::Polygon(
+               {{2.0, 2.0}, {4.0, 2.0}, {4.0, 4.0}, {2.0, 4.0}})});
+    const auto unsupportedPolygonQualityZone =
+        makeImporter().ImportContainer(polygonQualityZoneContainer);
+    assert(!unsupportedPolygonQualityZone.HasValue());
+    assert(unsupportedPolygonQualityZone.GetError().code ==
+           jaguar::ErrorCode::UnsupportedShape);
 
     const auto containerEngine = importedContainer.Value().CreateCollisionEngine();
     assert(containerEngine != nullptr);
@@ -90,6 +149,15 @@ void runIoTests()
         {4.5, 4.5}, {5.5, 4.5}, {5.5, 5.5}, {4.5, 5.5}});
     assert(holeProbe.HasValue());
     assert(containerEngine->DetectPolygonCollision(holeProbe.Value(), jaguar::NoFilter{}));
+
+    const auto qualityZeroZoneProbe = jaguar::SimplePolygon::Create({
+        {7.2, 7.2}, {7.8, 7.2}, {7.8, 7.8}, {7.2, 7.8}});
+    assert(qualityZeroZoneProbe.HasValue());
+    const auto qualityZeroZoneCollisions =
+        containerEngine->CollectPolygonCollisions(qualityZeroZoneProbe.Value());
+    assert(qualityZeroZoneCollisions.size() == 1);
+    assert(qualityZeroZoneCollisions.front().kind == jaguar::HazardKind::Hole);
+    assert(qualityZeroZoneCollisions.front().zoneIndex == 0);
 
     const auto outsideOriginalHole = jaguar::SimplePolygon::Create({
         {3.2, 4.5}, {3.8, 4.5}, {3.8, 5.5}, {3.2, 5.5}});
@@ -149,4 +217,13 @@ void runIoTests()
     const auto invalidJson = makeImporter().ImportItemJson("{", 13);
     assert(!invalidJson.HasValue());
     assert(invalidJson.GetError().code == jaguar::ErrorCode::SerializationFailure);
+
+    jaguar::ExternalItem itemWithF32Duplicate = itemInput;
+    itemWithF32Duplicate.shape = jaguar::ExternalShape::SimplePolygon({
+        {0.0, 0.0}, {4.0, 0.0}, {4.0000001, 0.0}, {4.0, 2.0}, {0.0, 2.0}});
+    const auto importedF32Duplicate =
+        makeImporter().ImportItem(itemWithF32Duplicate, 14);
+    assert(importedF32Duplicate.HasValue());
+    assert(importedF32Duplicate.Value().GetOriginalShape().shape.VertexCount() == 4);
+    assert(std::abs(importedF32Duplicate.Value().Area() - 8.0) < 1.0e-6);
 }

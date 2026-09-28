@@ -14,7 +14,8 @@ nmake /nologo
 Run the CLI with an external Jaguar SPP instance:
 
 ```text
-SparrowCli --input instance.json --output solution.json --seed 42 --samples 1000
+SparrowCli --input instance.json --output solution.json --svg layout.svg \
+  --seed 42 --samples 1000 --time-ms 2000 --early-termination
 ```
 
 ## WASM
@@ -26,6 +27,11 @@ int SparrowOptimizeJson(const char* inputJson,
                         size_t inputSize,
                         char* outputJson,
                         size_t outputCapacity)
+
+int SparrowOptimizeSvg(const char* inputJson,
+                       size_t inputSize,
+                       char* outputSvg,
+                       size_t outputCapacity)
 ```
 
 Use an Emscripten toolchain and pass the built SparrowCore and JaguarCore libraries to CMake:
@@ -41,4 +47,7 @@ The return code is `0` for success, `1` for malformed input, `2` for optimizatio
 
 ## Browser demo
 
-Serve `SparrowCore/Demo` from a local HTTP server and load the Emscripten-generated bridge as `window.SparrowWasm.optimizeJson`. `Demo/Index.html` intentionally has no network dependency and can be hosted as static files.
+Serve `SparrowCore/Demo` from a local HTTP server and load the Emscripten-generated bridge as
+`window.SparrowWasm.optimizeJson` and `window.SparrowWasm.optimizeSvg`. The JSON result is
+shown as text and the SVG result is shown as the layout preview. `Demo/Index.html` intentionally
+has no network dependency and can be hosted as static files.

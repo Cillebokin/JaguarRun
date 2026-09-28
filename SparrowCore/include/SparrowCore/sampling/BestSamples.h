@@ -21,6 +21,7 @@ public:
 
     std::size_t Size() const noexcept;
     std::size_t Capacity() const noexcept;
+    const std::vector<std::pair<jaguar::Transform2d, SampleEval>>& Samples() const noexcept;
     std::optional<std::pair<jaguar::Transform2d, SampleEval>> Best() const;
     SampleEval UpperBound() const noexcept;
 

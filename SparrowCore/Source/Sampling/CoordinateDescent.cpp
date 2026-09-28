@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cmath>
-#include <limits>
 
 namespace
 {
@@ -28,21 +27,10 @@ enum class Axis
     AXIS_WIGGLE,
 };
 
-std::uint64_t BoundedIndex(sparrow::SparrowRng& rng, std::uint64_t bound) noexcept
-{
-    const std::uint64_t threshold =
-        (std::numeric_limits<std::uint64_t>::max() % bound + 1U) % bound;
-    std::uint64_t value = 0;
-    do
-    {
-        value = rng.NextU64();
-    } while (value < threshold);
-    return value % bound;
-}
-
 Axis ChooseAxis(sparrow::SparrowRng& rng, bool rotationWiggle) noexcept
 {
-    const std::uint64_t selected = BoundedIndex(rng, rotationWiggle ? 6U : 4U);
+    const std::uint32_t selected = rng.UniformIndex(
+        rotationWiggle ? 6U : 4U);
     switch (selected)
     {
     case 0U:

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <random>
+#include <vector>
 
 void runSurrogateTests()
 {
@@ -23,6 +24,23 @@ void runSurrogateTests()
     assert(surrogate.Value().FailFastPoleCount() > 0);
     assert(surrogate.Value().Piers().size() == 1);
     assert(std::abs(surrogate.Value().ConvexHullArea() - 40.0) < 1.0e-9);
+
+    const float tinySide = std::numeric_limits<float>::epsilon() * 0.5F;
+    const auto tinySquare = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {tinySide, 0.0}, {tinySide, tinySide}, {0.0, tinySide}});
+    assert(tinySquare.HasValue());
+    jaguar::SurrogateConfig tinyConfig{};
+    tinyConfig.poleLimits = {{{2, 0.0}, {2, 0.0}, {2, 0.0}}};
+    tinyConfig.failFastPiers = 1;
+    const auto tinySurrogate = jaguar::Surrogate::Create(
+        tinySquare.Value(), tinyConfig);
+    assert(tinySurrogate.HasValue());
+    assert(tinySurrogate.Value().Piers().size() == 1);
+    const auto& tinyPier = tinySurrogate.Value().Piers().front();
+    assert(std::abs(tinyPier.start.x - tinySide) < 1.0e-13);
+    assert(std::abs(tinyPier.start.y - 2.9801939e-11) < 1.0e-15);
+    assert(std::abs(tinyPier.end.x - tinySide) < 1.0e-13);
+    assert(std::abs(tinyPier.end.y - 5.9574844613e-8) < 1.0e-15);
 
     for (const auto& pier : surrogate.Value().Piers())
     {
@@ -60,6 +78,33 @@ void runSurrogateTests()
         {0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {6.0, 10.0},
         {6.0, 4.0}, {4.0, 4.0}, {4.0, 10.0}, {0.0, 10.0}});
     assert(uShape.HasValue());
+    jaguar::SurrogateConfig singleNonzeroLimitConfig{};
+    singleNonzeroLimitConfig.poleLimits = {{{8, 0.0}, {0, 0.0}, {0, 0.0}}};
+    const auto singleNonzeroLimitSurrogate = jaguar::Surrogate::Create(
+        uShape.Value(), singleNonzeroLimitConfig);
+    assert(singleNonzeroLimitSurrogate.HasValue());
+    assert(singleNonzeroLimitSurrogate.Value().Poles().size() == 2);
+
+    jaguar::SurrogateConfig roundedStateConfig{};
+    roundedStateConfig.poleLimits =
+        {{{2, 0.75000001}, {2, 0.75000001}, {2, 0.75000001}}};
+    roundedStateConfig.failFastPoleAreaRatio = 0.50000001;
+    const auto roundedStateSurrogate = jaguar::Surrogate::Create(
+        uShape.Value(), roundedStateConfig);
+    assert(roundedStateSurrogate.HasValue());
+    assert(roundedStateSurrogate.Value().Config().poleLimits[0].second == 0.75);
+    assert(roundedStateSurrogate.Value().Config().failFastPoleAreaRatio == 0.5);
+    assert(roundedStateSurrogate.Value().Config() == roundedStateConfig);
+
+    jaguar::SimplePolygon cachedConfigShape = uShape.Value();
+    assert(cachedConfigShape.GenerateSurrogate(roundedStateConfig).HasValue());
+    const jaguar::Surrogate* cachedConfig = cachedConfigShape.GetSurrogate();
+    jaguar::SurrogateConfig equivalentF32Config = roundedStateConfig;
+    equivalentF32Config.poleLimits = {{{2, 0.75}, {2, 0.75}, {2, 0.75}}};
+    equivalentF32Config.failFastPoleAreaRatio = 0.5;
+    assert(cachedConfigShape.GenerateSurrogate(equivalentF32Config).HasValue());
+    assert(cachedConfigShape.GetSurrogate() == cachedConfig);
+
     jaguar::SurrogateConfig uConfig{};
     uConfig.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
     uConfig.failFastPiers = 1;
@@ -82,6 +127,14 @@ void runSurrogateTests()
     assert(rustOracleSurrogate.Value().Piers().size() == 2);
     assert(std::abs(rustOracleSurrogate.Value().ConvexHullArea() - 100.0) <
            1.0e-9);
+    assert((rustOracleSurrogate.Value().ConvexHullIndices() ==
+            std::vector<std::size_t>{0U, 1U, 2U, 7U}));
+    const auto transformedRustSurrogate =
+        rustOracleSurrogate.Value().TransformedRustF32(
+            jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 2.0}));
+    assert(transformedRustSurrogate.HasValue());
+    assert(transformedRustSurrogate.Value().ConvexHullIndices() ==
+           rustOracleSurrogate.Value().ConvexHullIndices());
     const auto& rustPole = rustOracleSurrogate.Value().Poles().front();
     assert(std::abs(rustPole.center.x - 2.34375) < 1.0e-5);
     assert(std::abs(rustPole.center.y - 2.34375) < 1.0e-5);
@@ -110,6 +163,8 @@ void runSurrogateTests()
     assert(lSurrogate.Value().FailFastPoleCount() == 3);
     assert(lSurrogate.Value().Piers().size() == 2);
     assert(std::abs(lSurrogate.Value().ConvexHullArea() - 51.5) < 1.0e-9);
+    assert((lSurrogate.Value().ConvexHullIndices() ==
+            std::vector<std::size_t>{0U, 1U, 2U, 4U, 5U}));
     assert(std::abs(lSurrogate.Value().Poles()[0].center.x - 1.7578125) < 1.0e-6);
     assert(std::abs(lSurrogate.Value().Poles()[0].center.y - 1.7578125) < 1.0e-6);
     assert(std::abs(lSurrogate.Value().Poles()[0].radius - 1.756718397141) < 1.0e-6);
@@ -137,6 +192,8 @@ void runSurrogateTests()
     assert(cSurrogate.Value().FailFastPoleCount() == 6);
     assert(cSurrogate.Value().Piers().size() == 2);
     assert(std::abs(cSurrogate.Value().ConvexHullArea() - 100.0) < 1.0e-9);
+    assert((cSurrogate.Value().ConvexHullIndices() ==
+            std::vector<std::size_t>{0U, 1U, 6U, 7U}));
     assert(std::abs(cSurrogate.Value().Poles()[0].center.x - 1.533203125) < 1.0e-6);
     assert(std::abs(cSurrogate.Value().Poles()[0].center.y - 8.466796875) < 1.0e-6);
     assert(std::abs(cSurrogate.Value().Poles()[0].radius - 1.533203125) < 1.0e-6);

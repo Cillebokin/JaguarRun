@@ -1,10 +1,12 @@
 #include "JaguarCore/IO/SvgExport.h"
 
 #include "JaguarCore/FailFast/Surrogate.h"
+#include "JaguarCore/Geometry/RustF32.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -12,8 +14,6 @@ namespace jaguar
 {
 namespace
 {
-constexpr double PI = 3.141592653589793238462643383279502884;
-
 std::string number(double value)
 {
     std::ostringstream stream;
@@ -78,7 +78,8 @@ std::string transformAttribute(const Transform2d& transform)
 {
     return "translate(" + number(transform.translation.x) + " " +
            number(transform.translation.y) + ") rotate(" +
-           number(transform.rotationRad * 180.0 / PI) + ")";
+           number(static_cast<double>(
+               detail::ToDegreesRustF32(transform.rotationRad))) + ")";
 }
 
 std::string linePath(const Point2d& start, const Point2d& end)
@@ -168,13 +169,15 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         const PlacedItem& placedItem = placement.placedItem;
         const Item& item = placedItem.GetItem();
         const Transform2d externalTransform =
-            item.GetOriginalShape().preTransform.FollowedBy(placedItem.Transform());
+            item.GetOriginalShape().preTransform.FollowedByRustF32(
+                placedItem.Transform());
         const Transform2d internalTransform = placedItem.Transform();
 
         svg << "    <g id=\"item_" << placementIndex << "_" << item.ExternalId()
             << "\" data-item-id=\"" << item.ExternalId()
             << "\" data-rotation-degrees=\""
-            << number(externalTransform.rotationRad * 180.0 / PI)
+            << number(static_cast<double>(
+                   detail::ToDegreesRustF32(externalTransform.rotationRad)))
             << "\" data-translation-x=\"" << number(externalTransform.translation.x)
             << "\" data-translation-y=\"" << number(externalTransform.translation.y)
             << "\">\n";
@@ -219,6 +222,123 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
                     << number(strokeWidth) << "\"/>\n";
             }
             svg << "      </g>\n";
+        }
+        svg << "    </g>\n";
+    }
+
+    if (options.highlightCollisions)
+    {
+        CollisionEnginePtr collisionEngine = container.CreateCollisionEngine();
+        if (!collisionEngine)
+        {
+            return Result<std::string>::FromError(
+                {ErrorCode::CollisionEngineFailure,
+                 "could not create collision engine for SVG export"});
+        }
+        const Result<void> restored = collisionEngine->Restore(snapshot.cdeSnapshot);
+        if (!restored.HasValue())
+            return Result<std::string>::FromError(restored.GetError());
+
+        const double highlightWidth = strokeWidth * 4.0;
+        const auto appendHighlightLine = [&svg, &options, highlightWidth](
+                                            const Point2d& start,
+                                            const Point2d& end) {
+            svg << "      <path class=\"collision-highlight\" d=\""
+                << linePath(start, end) << "\" fill=\"none\" stroke=\""
+                << color(options.theme.collisionHighlight)
+                << "\" stroke-opacity=\"0.75\" stroke-width=\""
+                << number(highlightWidth) << "\" stroke-dasharray=\""
+                << number(highlightWidth) << ' '
+                << number(highlightWidth * 2.0)
+                << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+        };
+
+        svg << "    <g id=\"collision_lines\">\n";
+        for (const LayoutPlacementSnapshot& placement : snapshot.placements)
+        {
+            const SimplePolygon& placedShape =
+                placement.placedItem.CollisionShape();
+            const Point2d placedCenter =
+                placedShape.PointOfInaccessibility().center;
+            const auto collisions =
+                collisionEngine->CollectPolygonCollisions(placedShape);
+            for (const HazardEntity& collision : collisions)
+            {
+                switch (collision.kind)
+                {
+                case HazardKind::PlacedItem:
+                {
+                    if (collision.placedItemHandle == placement.handle)
+                        break;
+                    const bool currentHandleIsGreater =
+                        placement.handle.index > collision.placedItemHandle.index ||
+                        (placement.handle.index == collision.placedItemHandle.index &&
+                         placement.handle.generation >
+                             collision.placedItemHandle.generation);
+                    if (!currentHandleIsGreater)
+                        break;
+
+                    const auto other = std::find_if(
+                        snapshot.placements.begin(), snapshot.placements.end(),
+                        [&collision](const LayoutPlacementSnapshot& candidate) {
+                            return candidate.handle == collision.placedItemHandle;
+                        });
+                    if (other == snapshot.placements.end())
+                    {
+                        return Result<std::string>::FromError(
+                            {ErrorCode::SnapshotMismatch,
+                             "collision references a missing placement during SVG export"});
+                    }
+                    appendHighlightLine(
+                        placedCenter,
+                        other->placedItem.CollisionShape()
+                            .PointOfInaccessibility().center);
+                    break;
+                }
+                case HazardKind::Exterior:
+                    svg << "      <circle class=\"collision-highlight\" cx=\""
+                        << number(placedCenter.x) << "\" cy=\""
+                        << number(placedCenter.y) << "\" r=\""
+                        << number(strokeWidth * 3.0) << "\" fill=\""
+                        << color(options.theme.collisionHighlight)
+                        << "\"/>\n";
+                    break;
+                case HazardKind::Hole:
+                case HazardKind::InferiorQualityZone:
+                {
+                    const std::size_t quality = collision.kind == HazardKind::Hole
+                        ? 0U
+                        : collision.quality;
+                    const std::optional<std::size_t> requiredQuality =
+                        placement.placedItem.GetItem().MinQuality();
+                    if (collision.kind == HazardKind::InferiorQualityZone &&
+                        requiredQuality.has_value() &&
+                        quality >= *requiredQuality)
+                    {
+                        break;
+                    }
+
+                    const auto zone = std::find_if(
+                        container.QualityZones().begin(),
+                        container.QualityZones().end(),
+                        [quality](const QualityZone& candidate) {
+                            return candidate.quality == quality;
+                        });
+                    if (zone == container.QualityZones().end() ||
+                        collision.zoneIndex >= zone->shapes.size())
+                    {
+                        return Result<std::string>::FromError(
+                            {ErrorCode::SnapshotMismatch,
+                             "collision references a missing quality zone during SVG export"});
+                    }
+                    appendHighlightLine(
+                        placedCenter,
+                        zone->shapes[collision.zoneIndex]
+                            .PointOfInaccessibility().center);
+                    break;
+                }
+                }
+            }
         }
         svg << "    </g>\n";
     }

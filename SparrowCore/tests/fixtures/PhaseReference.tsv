@@ -1,0 +1,5 @@
+# C++ SparrowCore phase regression after root-RNG child-stream derivation.
+# seed phase strip_width density
+42 exploration 1.0005494356155396 0.49972543304909189
+42 compression 1.0005494356155396 0.49972543304909189
+42 optimize 1.0004585981369019 0.49977080603947238

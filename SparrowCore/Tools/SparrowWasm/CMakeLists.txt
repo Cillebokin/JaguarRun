@@ -12,7 +12,7 @@ if(EMSCRIPTEN)
         "-sMODULARIZE=1"
         "-sEXPORT_NAME=SparrowWasmModule"
         "-sALLOW_MEMORY_GROWTH=1"
-        "-sEXPORTED_FUNCTIONS=['_SparrowOptimizeJson']"
+        "-sEXPORTED_FUNCTIONS=['_SparrowOptimizeJson','_SparrowOptimizeSvg']"
         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']")
 else()
     add_library(SparrowWasm STATIC SparrowWasm.cpp)

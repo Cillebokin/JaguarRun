@@ -162,6 +162,95 @@ bool TestSeed42Reference(std::ostream& output)
     return true;
 }
 
+bool TestUniformIndexRustReference(std::ostream& output)
+{
+    std::ifstream input;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowUniformIndexRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowUniformIndexRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowUniformIndexRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowUniformIndexRustReference.tsv"})
+    {
+        input.open(path);
+        if (input.is_open())
+        {
+            break;
+        }
+        input.clear();
+    }
+    if (!Expect(input.is_open(),
+                output,
+                "Rust uniform-index reference fixture must be readable"))
+    {
+        return false;
+    }
+
+    std::uint64_t currentSeed = 0U;
+    std::uint32_t currentBound = 0U;
+    std::size_t nextOrdinal = 0U;
+    std::size_t rowCount = 0U;
+    bool groupStarted = false;
+    sparrow::SparrowRng rng(0U);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::uint64_t seed = 0U;
+        std::uint32_t bound = 0U;
+        std::size_t ordinal = 0U;
+        std::uint32_t expected = 0U;
+        if (!(row >> seed >> bound >> ordinal >> expected) || bound == 0U)
+        {
+            return Expect(false,
+                          output,
+                          "Rust uniform-index reference row is malformed");
+        }
+
+        if (!groupStarted || seed != currentSeed || bound != currentBound)
+        {
+            if (groupStarted
+                && !Expect(rowCount == 4U,
+                           output,
+                           "Rust uniform-index reference group is incomplete"))
+            {
+                return false;
+            }
+            currentSeed = seed;
+            currentBound = bound;
+            nextOrdinal = 0U;
+            rowCount = 0U;
+            rng = sparrow::SparrowRng(seed);
+            groupStarted = true;
+        }
+
+        if (!Expect(ordinal == nextOrdinal,
+                    output,
+                    "Rust uniform-index reference ordinals must be contiguous"))
+        {
+            return false;
+        }
+        const std::uint32_t actual = rng.UniformIndex(bound);
+        if (!Expect(actual == expected,
+                    output,
+                    "bounded integer output differs from Rust rand 0.10"))
+        {
+            output << "uniform index seed=" << seed << " bound=" << bound
+                   << " ordinal=" << ordinal << " expected=" << expected
+                   << " actual=" << actual << '\n';
+            return false;
+        }
+        ++nextOrdinal;
+        ++rowCount;
+    }
+    return Expect(groupStarted && rowCount == 4U,
+                  output,
+                  "Rust uniform-index reference fixture must end with a complete group");
+}
+
 bool TestStateAndIntegerDeterminism(std::ostream& output)
 {
     sparrow::SparrowRng first(42U);
@@ -355,6 +444,7 @@ bool TestMetricsValueType(std::ostream& output)
 bool RunRngTests(std::ostream& output)
 {
     return TestSeed42Reference(output)
+        && TestUniformIndexRustReference(output)
         && TestStateAndIntegerDeterminism(output)
         && TestNormalCacheAndDeterminism(output)
         && TestConfigValidation(output)

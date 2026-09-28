@@ -11,6 +11,8 @@ struct LbfMetrics
     std::size_t sampleCount = 0;
     std::size_t placedItemCount = 0;
     std::size_t remainingDemand = 0;
+    std::size_t surrogateRejectCount = 0;
+    std::size_t exactCollisionCount = 0;
     double stripWidth = 0.0;
     double density = 0.0;
     bool feasible = false;

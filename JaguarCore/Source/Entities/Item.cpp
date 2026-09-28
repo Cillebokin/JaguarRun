@@ -1,40 +1,22 @@
 #include "JaguarCore/Entities/Item.h"
 
-#include <cmath>
 #include <utility>
 
 namespace jaguar
 {
 namespace
 {
-constexpr std::size_t MAX_ROTATION_ANGLES = 65536;
-
-bool rotationRangeValid(const RotationRange& rotation) noexcept
+bool rotationRangeRepresentable(const RotationRange& rotation) noexcept
 {
-    if (rotation.radians.size() > MAX_ROTATION_ANGLES)
-        return false;
-    if (rotation.mode == RotationMode::None ||
-        rotation.mode == RotationMode::Continuous)
+    switch (rotation.mode)
     {
-        if (!rotation.radians.empty())
-            return false;
+    case RotationMode::None:
+    case RotationMode::Continuous:
+        return rotation.radians.empty();
+    case RotationMode::Discrete:
+        return true;
     }
-    else if (rotation.mode == RotationMode::Discrete)
-    {
-        if (rotation.radians.empty())
-            return false;
-    }
-    else
-    {
-        return false;
-    }
-
-    for (double angle : rotation.radians)
-    {
-        if (!std::isfinite(angle))
-            return false;
-    }
-    return true;
+    return false;
 }
 }
 
@@ -63,11 +45,13 @@ JAGUARCORE_API Result<Item> Item::Create(
     std::optional<std::size_t> minQuality,
     RotationRange allowedRotation)
 {
-    if (!rotationRangeValid(allowedRotation))
+    if (!rotationRangeRepresentable(allowedRotation))
     {
         return Result<Item>::FromError(
             {ErrorCode::InvalidInput, "item rotation range is invalid"});
     }
+    for (double& angle : allowedRotation.radians)
+        angle = static_cast<double>(static_cast<float>(angle));
 
     auto collisionShape = originalShape.ConvertToInternal();
     if (!collisionShape.HasValue())

@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-jagua-rs = { path = "../../../jagua-rs/jagua-rs" }
+jagua-rs = { path = "../../../CodeResource/jagua-rs/jagua-rs", features = ["spp", "bpp", "mspp"] }
 geo-buffer = "0.2"
 geo-types = "0.7"
+serde_json = "1.0"

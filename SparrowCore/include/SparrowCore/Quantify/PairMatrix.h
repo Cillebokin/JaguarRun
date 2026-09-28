@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SparrowCore/Export.h"
+#include "SparrowCore/ResultAlias.h"
 
 #include <cstddef>
 #include <vector>
@@ -18,7 +19,9 @@ struct SPARROWCORE_API CollisionEntry
 class SPARROWCORE_API PairMatrix
 {
 public:
-    explicit PairMatrix(std::size_t size = 0U);
+    PairMatrix() = default;
+
+    static Result<PairMatrix> Create(std::size_t size);
 
     std::size_t Size() const noexcept;
     bool Contains(std::size_t first, std::size_t second) const noexcept;
@@ -28,6 +31,8 @@ public:
     float TotalWeightedLoss() const noexcept;
 
 private:
+    PairMatrix(std::size_t size, std::size_t entryCount);
+
     std::size_t Index(std::size_t first, std::size_t second) const noexcept;
 
     std::size_t m_Size = 0U;

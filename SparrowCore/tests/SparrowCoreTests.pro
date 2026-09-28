@@ -6,6 +6,7 @@ QT -= core gui
 
 INCLUDEPATH += $$PWD/../Include
 INCLUDEPATH += $$PWD/../../JaguarCore/Include
+INCLUDEPATH += $$PWD/../Tools/SparrowWasm
 
 isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$PWD/../../build-SparrowCore-MSVC2019x64-Debug
 
@@ -32,4 +33,6 @@ SOURCES += \
     $$PWD/TestBppLbf.cpp \
     $$PWD/TestQuantify.cpp \
     $$PWD/TestSeparator.cpp \
-    $$PWD/TestExploration.cpp
+    $$PWD/TestExploration.cpp \
+    $$PWD/TestWasm.cpp \
+    $$PWD/../Tools/SparrowWasm/SparrowWasm.cpp

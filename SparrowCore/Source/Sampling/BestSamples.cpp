@@ -6,14 +6,7 @@
 
 namespace
 {
-constexpr float TWO_PI = 6.28318530717958647692F;
 constexpr float ROTATION_THRESHOLD = 0.01745329251994329577F;
-
-float NormalizeRotation(float rotation) noexcept
-{
-    const float value = std::fmod(rotation, TWO_PI);
-    return value < 0.0F ? value + TWO_PI : value;
-}
 }
 
 namespace sparrow
@@ -42,8 +35,13 @@ bool BestSamples::IsSimilar(const jaguar::Transform2d& left,
         return false;
     }
 
-    const float leftRotation = NormalizeRotation(static_cast<float>(left.rotationRad));
-    const float rightRotation = NormalizeRotation(static_cast<float>(right.rotationRad));
+    // Match Rust's `rotation % (2*pi)`: fmod preserves the sign and the
+    // comparison is intentionally not a circular shortest-distance check.
+    constexpr float TWO_PI = 6.28318530717958647692F;
+    const float leftRotation = std::fmod(
+        static_cast<float>(left.rotationRad), TWO_PI);
+    const float rightRotation = std::fmod(
+        static_cast<float>(right.rotationRad), TWO_PI);
     return std::abs(leftRotation - rightRotation) < ROTATION_THRESHOLD;
 }
 
@@ -117,6 +115,12 @@ std::size_t BestSamples::Size() const noexcept
 std::size_t BestSamples::Capacity() const noexcept
 {
     return m_Capacity;
+}
+
+const std::vector<std::pair<jaguar::Transform2d, SampleEval>>&
+BestSamples::Samples() const noexcept
+{
+    return m_Samples;
 }
 
 std::optional<std::pair<jaguar::Transform2d, SampleEval>> BestSamples::Best() const

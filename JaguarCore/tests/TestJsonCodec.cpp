@@ -1,9 +1,12 @@
 #include "JaguarCore/IO/ExternalRepr.h"
 #include "JaguarCore/IO/Importer.h"
 #include "JaguarCore/IO/JsonCodec.h"
+#include "JaguarCore/IO/SvgExport.h"
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -106,6 +109,40 @@ void runJsonCodecTests()
     assert(!unknownRotationField.HasValue());
     assert(unknownRotationField.GetError().code == jaguar::ErrorCode::SerializationFailure);
 
+    const auto floatingPointId = jaguar::ParseExternalItemJson(
+        R"json({"id": 1.0, "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(!floatingPointId.HasValue());
+    assert(floatingPointId.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto negativeZeroId = jaguar::ParseExternalItemJson(
+        R"json({"id": -0, "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(!negativeZeroId.HasValue());
+    assert(negativeZeroId.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto floatingPointMinQuality = jaguar::ParseExternalItemJson(
+        R"json({"id": 1, "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}, "min_quality": 1.0})json");
+    assert(!floatingPointMinQuality.HasValue());
+    assert(floatingPointMinQuality.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto duplicateUnknownMetadata = jaguar::ParseExternalItemJson(
+        R"json({"id": 1, "dxf": "first.dxf", "dxf": "second.dxf", "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(duplicateUnknownMetadata.HasValue());
+    const auto duplicateId = jaguar::ParseExternalItemJson(
+        R"json({"id": 1, "id": 2, "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(!duplicateId.HasValue());
+    assert(duplicateId.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto duplicateRotationMode = jaguar::ParseExternalItemJson(
+        R"json({"id": 1, "orientation": {"rotation": {"mode": "continuous", "mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(!duplicateRotationMode.HasValue());
+    assert(duplicateRotationMode.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto singlePrecisionAngle = jaguar::ParseExternalItemJson(
+        R"json({"id": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [123.456789]}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    assert(singlePrecisionAngle.HasValue());
+    assert(singlePrecisionAngle.Value().rotation.anglesDegrees.front() ==
+           123.456787109375);
+
     const char* sppJson = R"json({
         "name": "small-spp",
         "items": [{
@@ -179,6 +216,118 @@ void runJsonCodecTests()
     assert(importedSpp.HasValue());
     assert(importedSpp.Value().ItemCount() == 1);
     assert(!importedSpp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
+
+    const auto wideRotationInstance = importer.ImportSPInstanceJson(
+        R"json({"name":"wide-rotation","items":[{"id":6206,"demand":1,"orientation":{"rotation":{"mode":"continuous"}},"shape":{"type":"rectangle","data":{"x_min":0,"y_min":0,"width":1,"height":1}}}],"strip_height":10})json");
+    assert(wideRotationInstance.HasValue());
+    jaguar::ExternalSPSolution wideRotationExternal{};
+    wideRotationExternal.stripWidth = 10.0;
+    wideRotationExternal.layout.placedItems.push_back(
+        {6206, {869592.625, {5.0, 5.0}}});
+    const auto wideRotationSolution = importer.ImportSPSolution(
+        wideRotationInstance.Value(), wideRotationExternal);
+    assert(wideRotationSolution.HasValue());
+    const float wideRotation = static_cast<float>(wideRotationSolution.Value()
+                                                      .layoutSnapshot.placements.front()
+                                                      .placedItem.Transform().rotationRad);
+    std::uint32_t wideRotationBits = 0;
+    std::memcpy(&wideRotationBits, &wideRotation, sizeof(wideRotationBits));
+    assert(wideRotationBits == 0xc03afeb4U);
+    const auto exportedWideRotationSolution =
+        jaguar::ExternalSPSolutionFromSolution(
+            wideRotationInstance.Value(), wideRotationSolution.Value());
+    assert(exportedWideRotationSolution.HasValue());
+    const float exportedWideRotation = static_cast<float>(
+        exportedWideRotationSolution.Value()
+            .layout.placedItems.front().transformation.rotationDegrees);
+    std::uint32_t exportedWideRotationBits = 0;
+    std::memcpy(&exportedWideRotationBits, &exportedWideRotation,
+                sizeof(exportedWideRotationBits));
+    assert(exportedWideRotationBits == 0xc3276815U);
+
+    jaguar::ExternalSPSolution roundtripProbeExternal{};
+    roundtripProbeExternal.stripWidth = 10.0;
+    const std::uint32_t roundtripProbeInputBits = 0xc1fa7be4U;
+    float roundtripProbeInputDegrees = 0.0F;
+    std::memcpy(&roundtripProbeInputDegrees, &roundtripProbeInputBits,
+                sizeof(roundtripProbeInputDegrees));
+    roundtripProbeExternal.layout.placedItems.push_back(
+        {6206, {static_cast<double>(roundtripProbeInputDegrees), {5.0, 5.0}}});
+    const auto roundtripProbeSolution = importer.ImportSPSolution(
+        wideRotationInstance.Value(), roundtripProbeExternal);
+    assert(roundtripProbeSolution.HasValue());
+    const float roundtripProbeInternalRadians = static_cast<float>(
+        roundtripProbeSolution.Value()
+            .layoutSnapshot.placements.front()
+            .placedItem.Transform()
+            .rotationRad);
+    std::uint32_t roundtripProbeInternalBits = 0;
+    std::memcpy(&roundtripProbeInternalBits, &roundtripProbeInternalRadians,
+                sizeof(roundtripProbeInternalBits));
+    assert(roundtripProbeInternalBits == 0xbf0be589U);
+    const auto& roundtripProbePlaced = roundtripProbeSolution.Value()
+                                           .layoutSnapshot.placements.front()
+                                           .placedItem;
+    const float roundtripProbeInternalX = static_cast<float>(
+        roundtripProbePlaced.Transform().translation.x);
+    const float roundtripProbeInternalY = static_cast<float>(
+        roundtripProbePlaced.Transform().translation.y);
+    std::uint32_t roundtripProbeInternalXBits = 0;
+    std::uint32_t roundtripProbeInternalYBits = 0;
+    std::memcpy(&roundtripProbeInternalXBits, &roundtripProbeInternalX,
+                sizeof(roundtripProbeInternalXBits));
+    std::memcpy(&roundtripProbeInternalYBits, &roundtripProbeInternalY,
+                sizeof(roundtripProbeInternalYBits));
+    assert(roundtripProbeInternalXBits == 0x40b5fc10U);
+    assert(roundtripProbeInternalYBits == 0x40a55ae2U);
+    const auto exportedRoundtripProbe = jaguar::ExternalSPSolutionFromSolution(
+        wideRotationInstance.Value(), roundtripProbeSolution.Value());
+    assert(exportedRoundtripProbe.HasValue());
+    const float roundtripProbeDegrees = static_cast<float>(
+        exportedRoundtripProbe.Value()
+            .layout.placedItems.front().transformation.rotationDegrees);
+    const float roundtripProbeExternalX = static_cast<float>(
+        exportedRoundtripProbe.Value()
+            .layout.placedItems.front().transformation.translation.x);
+    const float roundtripProbeExternalY = static_cast<float>(
+        exportedRoundtripProbe.Value()
+            .layout.placedItems.front().transformation.translation.y);
+    std::uint32_t roundtripProbeBits = 0;
+    std::uint32_t roundtripProbeExternalXBits = 0;
+    std::uint32_t roundtripProbeExternalYBits = 0;
+    std::memcpy(&roundtripProbeBits, &roundtripProbeDegrees,
+                sizeof(roundtripProbeBits));
+    std::memcpy(&roundtripProbeExternalXBits, &roundtripProbeExternalX,
+                sizeof(roundtripProbeExternalXBits));
+    std::memcpy(&roundtripProbeExternalYBits, &roundtripProbeExternalY,
+                sizeof(roundtripProbeExternalYBits));
+    assert(roundtripProbeBits == 0xc1fa7be4U);
+    assert(roundtripProbeExternalXBits == 0x40a00000U);
+    assert(roundtripProbeExternalYBits == 0x40a00000U);
+
+    jaguar::Layout roundtripProbeLayout(
+        roundtripProbeSolution.Value().layoutSnapshot.container);
+    assert(roundtripProbeLayout
+               .Restore(roundtripProbeSolution.Value().layoutSnapshot)
+               .HasValue());
+    const auto roundtripProbeSvg = jaguar::ExportLayoutSvg(roundtripProbeLayout);
+    assert(roundtripProbeSvg.HasValue());
+    const std::string rotationAttribute = "data-rotation-degrees=\"";
+    const std::size_t rotationStart =
+        roundtripProbeSvg.Value().find(rotationAttribute);
+    assert(rotationStart != std::string::npos);
+    const std::size_t rotationValueStart = rotationStart + rotationAttribute.size();
+    const std::size_t rotationValueEnd =
+        roundtripProbeSvg.Value().find('"', rotationValueStart);
+    assert(rotationValueEnd != std::string::npos);
+    const float roundtripProbeSvgDegrees = std::stof(
+        roundtripProbeSvg.Value().substr(
+            rotationValueStart, rotationValueEnd - rotationValueStart));
+    std::uint32_t roundtripProbeSvgBits = 0;
+    std::memcpy(&roundtripProbeSvgBits, &roundtripProbeSvgDegrees,
+                sizeof(roundtripProbeSvgBits));
+    assert(roundtripProbeSvgBits == 0xc1fa7be4U);
+
     const auto importedSppSolution = importer.ImportSPSolutionJson(
         importedSpp.Value(),
         R"json({
@@ -255,33 +404,14 @@ void runJsonCodecTests()
             "density": 0.1,
             "run_time_sec": 0
         })json");
-    assert(importedBppSolution.HasValue());
-    assert(importedBppSolution.Value().layouts.size() == 1);
-    assert(importedBppSolution.Value().layouts.front().layoutSnapshot.placements.size() == 1);
-    const auto exportedBpp = jaguar::ExternalBPSolutionFromSolution(
-        importedBpp.Value(), importedBppSolution.Value());
-    assert(exportedBpp.HasValue());
-    assert(exportedBpp.Value().layouts.size() == 1);
-    const auto exportedBppJson = jaguar::SerializeExternalBPSolutionJson(
-        exportedBpp.Value());
-    assert(exportedBppJson.HasValue());
-    const auto reparsedBppSolution = jaguar::ParseExternalBPSolutionJson(
-        exportedBppJson.Value());
-    assert(reparsedBppSolution.HasValue());
-    const auto reimportedBppSolution = importer.ImportBPSolution(
-        importedBpp.Value(), reparsedBppSolution.Value());
-    assert(reimportedBppSolution.HasValue());
-    assert(reimportedBppSolution.Value().layouts.size() ==
-           importedBppSolution.Value().layouts.size());
-    assert(reimportedBppSolution.Value().Cost(importedBpp.Value()) ==
-           importedBppSolution.Value().Cost(importedBpp.Value()));
-    assert(std::abs(reimportedBppSolution.Value().Density() -
-                    importedBppSolution.Value().Density()) < 1.0e-12);
-    auto invalidExportedBppSolution = importedBppSolution.Value();
-    invalidExportedBppSolution.layouts.front().binIndex = 99;
-    const auto rejectedBppExport = jaguar::ExternalBPSolutionFromSolution(
-        importedBpp.Value(), invalidExportedBppSolution);
-    assert(!rejectedBppExport.HasValue());
+    assert(!importedBppSolution.HasValue());
+    assert(importedBppSolution.GetError().code ==
+           jaguar::ErrorCode::UnsupportedOperation);
+    const auto malformedBppSolution =
+        importer.ImportBPSolutionJson(importedBpp.Value(), "{");
+    assert(!malformedBppSolution.HasValue());
+    assert(malformedBppSolution.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
 
     const auto importedMspp = importer.ImportMSPInstanceJson(
         R"json({
@@ -324,126 +454,20 @@ void runJsonCodecTests()
             "density": 0.1,
             "run_time_sec": 0
         })json");
-    assert(importedMsppSolution.HasValue());
-    assert(importedMsppSolution.Value().layouts.size() == 1);
-    assert(importedMsppSolution.Value().layouts.front().layoutSnapshot.placements.size() == 1);
-
-    const auto importedMsppWithEmptyLayout = importer.ImportMSPSolutionJson(
-        importedMspp.Value(),
-        R"json({
-            "layouts": [
-                {"container_id": 0, "placed_items": [], "density": 0},
-                {"container_id": 1, "placed_items": [{
-                    "item_id": 501,
-                    "transformation": {"rotation": 0, "translation": [1, 1]}
-                }], "density": 0.1}
-            ],
-            "containers": [
-                {"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}},
-                {"id": 1, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}}
-            ],
-            "density": 0.1,
-            "run_time_sec": 0
-        })json");
-    assert(importedMsppWithEmptyLayout.HasValue());
-    assert(importedMsppWithEmptyLayout.Value().layouts.size() == 2);
-    assert(importedMsppWithEmptyLayout.Value().layouts.front().layoutSnapshot.placements.empty());
-    assert(importedMsppWithEmptyLayout.Value().layouts.back().layoutSnapshot.placements.size() == 1);
-
-    const auto mismatchedMsppHeight = importer.ImportMSPSolutionJson(
-        importedMspp.Value(),
-        R"json({
-            "layouts": [{"container_id": 0, "placed_items": [{
-                "item_id": 501,
-                "transformation": {"rotation": 0, "translation": [1, 1]}
-            }], "density": 0.1}],
-            "containers": [{"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 6}}}],
-            "density": 0.1,
-            "run_time_sec": 0
-        })json");
-    assert(!mismatchedMsppHeight.HasValue());
-    assert(mismatchedMsppHeight.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
-
-    const auto mismatchedMsppOrigin = importer.ImportMSPSolutionJson(
-        importedMspp.Value(),
-        R"json({
-            "layouts": [{"container_id": 0, "placed_items": [{
-                "item_id": 501,
-                "transformation": {"rotation": 0, "translation": [1, 1]}
-            }], "density": 0.1}],
-            "containers": [{"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 1, "y_min": 0, "width": 10, "height": 5}}}],
-            "density": 0.1,
-            "run_time_sec": 0
-        })json");
-    assert(!mismatchedMsppOrigin.HasValue());
-    assert(mismatchedMsppOrigin.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
-
-    const auto duplicateMsppContainerIds = importer.ImportMSPSolutionJson(
-        importedMspp.Value(),
-        R"json({
-            "layouts": [
-                {"container_id": 0, "placed_items": [{"item_id": 501, "transformation": {"rotation": 0, "translation": [1, 1]}}], "density": 0.1},
-                {"container_id": 0, "placed_items": [{"item_id": 501, "transformation": {"rotation": 0, "translation": [1, 1]}}], "density": 0.1}
-            ],
-            "containers": [
-                {"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}},
-                {"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}}
-            ],
-            "density": 0.1,
-            "run_time_sec": 0
-        })json");
-    assert(!duplicateMsppContainerIds.HasValue());
-    assert(duplicateMsppContainerIds.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
-
-    const auto duplicateMsppLayoutIds = importer.ImportMSPSolutionJson(
-        importedMspp.Value(),
-        R"json({
-            "layouts": [
-                {"container_id": 0, "placed_items": [{"item_id": 501, "transformation": {"rotation": 0, "translation": [1, 1]}}], "density": 0.1},
-                {"container_id": 0, "placed_items": [{"item_id": 501, "transformation": {"rotation": 0, "translation": [2, 1]}}], "density": 0.1}
-            ],
-            "containers": [
-                {"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}},
-                {"id": 1, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}}
-            ],
-            "density": 0.1,
-            "run_time_sec": 0
-        })json");
-    assert(!duplicateMsppLayoutIds.HasValue());
-    assert(duplicateMsppLayoutIds.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
-
-    const auto exportedMspp = jaguar::ExternalMSPSolutionFromSolution(
-        importedMspp.Value(), importedMsppSolution.Value());
-    assert(exportedMspp.HasValue());
-    assert(exportedMspp.Value().layouts.size() == 1);
-    assert(exportedMspp.Value().containers.size() == 1);
-    const auto exportedMsppJson = jaguar::SerializeExternalMSPSolutionJson(
-        exportedMspp.Value());
-    assert(exportedMsppJson.HasValue());
-    const auto reparsedMsppSolution = jaguar::ParseExternalMSPSolutionJson(
-        exportedMsppJson.Value());
-    assert(reparsedMsppSolution.HasValue());
-    const auto reimportedMsppSolution = importer.ImportMSPSolution(
-        importedMspp.Value(), reparsedMsppSolution.Value());
-    assert(reimportedMsppSolution.HasValue());
-    assert(reimportedMsppSolution.Value().layouts.size() ==
-           importedMsppSolution.Value().layouts.size());
-    assert(std::abs(reimportedMsppSolution.Value().TotalStripWidth() -
-                    importedMsppSolution.Value().TotalStripWidth()) < 1.0e-12);
-    assert(std::abs(reimportedMsppSolution.Value().Density() -
-                    importedMsppSolution.Value().Density()) < 1.0e-12);
-    auto invalidExportedMsppSolution = importedMsppSolution.Value();
-    invalidExportedMsppSolution.layouts.front().layoutSnapshot.placements.front()
-        .placedItem = importedBppSolution.Value().layouts.front()
-                          .layoutSnapshot.placements.front().placedItem;
-    const auto rejectedMsppExport = jaguar::ExternalMSPSolutionFromSolution(
-        importedMspp.Value(), invalidExportedMsppSolution);
-    assert(!rejectedMsppExport.HasValue());
+    assert(!importedMsppSolution.HasValue());
+    assert(importedMsppSolution.GetError().code ==
+           jaguar::ErrorCode::UnsupportedOperation);
+    const auto malformedMsppSolution =
+        importer.ImportMSPSolutionJson(importedMspp.Value(), "{");
+    assert(!malformedMsppSolution.HasValue());
+    assert(malformedMsppSolution.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
     const auto mismatchedMspp = importer.ImportMSPSolutionJson(
         importedMspp.Value(),
         R"json({"layouts": [], "containers": [{"id": 0, "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 10, "height": 5}}}], "density": 0, "run_time_sec": 0})json");
     assert(!mismatchedMspp.HasValue());
-    assert(mismatchedMspp.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
+    assert(mismatchedMspp.GetError().code ==
+           jaguar::ErrorCode::UnsupportedOperation);
 
     const std::string swimFixture = loadFixture("swim.json");
     assert(!swimFixture.empty());

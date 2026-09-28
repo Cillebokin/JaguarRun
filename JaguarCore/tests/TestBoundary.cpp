@@ -60,8 +60,19 @@ void runBoundaryValidationTests()
     assert(!invalidPolicyPolygon.HasValue());
     assert(invalidPolicyPolygon.GetError().code == jaguar::ErrorCode::InvalidInput);
 
-    const auto invalidRectangle = jaguar::Rect2d::Create(0.0, 0.0, inf, 1.0);
-    assert(!invalidRectangle.HasValue());
+    const auto infiniteRectangle = jaguar::Rect2d::Create(0.0, 0.0, inf, 1.0);
+    assert(infiniteRectangle.HasValue());
+    assert(std::isinf(infiniteRectangle.Value().Width()));
+    const auto negativeInfiniteRectangle =
+        jaguar::Rect2d::Create(-inf, -1.0, 1.0, 1.0);
+    assert(negativeInfiniteRectangle.HasValue());
+    const auto infiniteBoundarySeparation =
+        negativeInfiniteRectangle.Value().SquaredSeparationDistanceRustF32(
+            {-inf, 0.0});
+    assert(infiniteBoundarySeparation.first == jaguar::GeoPosition::Interior);
+    assert(infiniteBoundarySeparation.second == 1.0);
+    const auto nanRectangle = jaguar::Rect2d::Create(0.0, 0.0, nan, 1.0);
+    assert(!nanRectangle.HasValue());
 
     const auto overflowPolygon = jaguar::SimplePolygon::Create({
         {1.0e308, 1.0e308}, {-1.0e308, 1.0e308}, {-1.0e308, -1.0e308}});
@@ -75,31 +86,82 @@ void runBoundaryValidationTests()
     assert(!invalidRatioResult.HasValue());
     assert(invalidRatioResult.GetError().code == jaguar::ErrorCode::InvalidInput);
 
-    jaguar::SurrogateConfig invalidThreshold{};
-    invalidThreshold.poleLimits = {{{1, inf}, {0, 0.0}, {0, 0.0}}};
-    const auto invalidThresholdResult =
-        jaguar::Surrogate::Create(sourceShape, invalidThreshold);
-    assert(!invalidThresholdResult.HasValue());
-    assert(invalidThresholdResult.GetError().code == jaguar::ErrorCode::InvalidInput);
+    jaguar::SurrogateConfig infiniteThreshold{};
+    infiniteThreshold.poleLimits = {{{1, inf}, {0, 0.0}, {0, 0.0}}};
+    const auto infiniteThresholdResult =
+        jaguar::Surrogate::Create(sourceShape, infiniteThreshold);
+    assert(infiniteThresholdResult.HasValue());
+    assert(infiniteThresholdResult.Value().Poles().size() == 2);
+
+    jaguar::SurrogateConfig unusedLargePoleLimit{};
+    unusedLargePoleLimit.poleLimits = {{{1, 0.0}, {2000, 0.0}, {0, 2.0}}};
+    const auto unusedLargePoleLimitResult =
+        jaguar::Surrogate::Create(sourceShape, unusedLargePoleLimit);
+    assert(unusedLargePoleLimitResult.HasValue());
+    assert(unusedLargePoleLimitResult.Value().Poles().size() == 2);
+
+    const double subnormalRatio = static_cast<double>(
+        std::numeric_limits<float>::denorm_min());
+    jaguar::SurrogateConfig underflowingCoverageTarget{};
+    underflowingCoverageTarget.failFastPoleAreaRatio = subnormalRatio;
+    const auto underflowingCoverageResult = jaguar::Surrogate::Create(
+        Rectangle(0.5, 0.5), underflowingCoverageTarget);
+    assert(underflowingCoverageResult.HasValue());
+    assert(underflowingCoverageResult.Value().FailFastPoleCount() == 1);
+
+#ifndef JAGUARCORE_TEST_RELEASE
+    const auto pierLatticeShape = jaguar::SimplePolygon::Create({
+        {0.13, 0.27}, {4.21, 0.39}, {3.72, 3.19}, {1.46, 2.87}});
+    assert(pierLatticeShape.HasValue());
+    jaguar::SurrogateConfig pierLatticeConfig{};
+    pierLatticeConfig.poleLimits = {{{1, 0.0}, {1, 0.0}, {1, 0.0}}};
+    pierLatticeConfig.failFastPiers = 1;
+    const auto pierLatticeResult = jaguar::Surrogate::Create(
+        pierLatticeShape.Value(), pierLatticeConfig);
+    assert(pierLatticeResult.HasValue());
+    assert(pierLatticeResult.Value().Piers().size() == 1);
+    const auto& pierLatticePier = pierLatticeResult.Value().Piers().front();
+    assert(std::abs(pierLatticePier.start.x - 4.183333) < 1.0e-7);
+    assert(std::abs(pierLatticePier.start.y - 0.5367646) < 1.0e-7);
+    assert(std::abs(pierLatticePier.end.x - 1.8029052) < 1.0e-7);
+    assert(std::abs(pierLatticePier.end.y - 2.9171927) < 1.0e-7);
+#endif
 
     jaguar::SurrogateConfig zeroPiers{};
     const auto zeroPiersResult = jaguar::Surrogate::Create(sourceShape, zeroPiers);
     assert(zeroPiersResult.HasValue());
+    assert(zeroPiersResult.Value().FailFastPoleCount() == 0);
 
     jaguar::OriginalShape rotationShape{
         sourceShape, jaguar::Transform2d::Identity(),
         jaguar::ShapeModifyMode::Inflate, {}};
-    const auto invalidRotation = jaguar::Item::Create(
+    const auto nonfiniteRotation = jaguar::Item::Create(
         0, 9103, std::move(rotationShape), {}, std::nullopt,
         {jaguar::RotationMode::Discrete, {nan}});
-    assert(!invalidRotation.HasValue());
-    assert(invalidRotation.GetError().code == jaguar::ErrorCode::InvalidInput);
+    assert(nonfiniteRotation.HasValue());
+    assert(nonfiniteRotation.Value().AllowedRotation().mode ==
+           jaguar::RotationMode::Discrete);
+    assert(nonfiniteRotation.Value().AllowedRotation().radians.size() == 1);
+    assert(std::isnan(nonfiniteRotation.Value().AllowedRotation().radians.front()));
 
     const auto invalidStrip = jaguar::Strip::Create(nan, {}, {}, 10.0);
     assert(!invalidStrip.HasValue());
     assert(invalidStrip.GetError().code == jaguar::ErrorCode::InvalidInput);
-    const auto invalidMultiStrip =
+    const auto infiniteInitialSppStrip =
+        jaguar::Strip::Create(5.0, {}, {}, inf);
+    assert(infiniteInitialSppStrip.HasValue());
+    auto infiniteSppStrip = jaguar::Strip::Create(5.0, {}, {}, 10.0);
+    assert(infiniteSppStrip.HasValue());
+    assert(infiniteSppStrip.Value()
+               .SetWidth(inf)
+               .HasValue());
+    assert(std::isinf(infiniteSppStrip.Value().width));
+    const auto infiniteWidthMultiStrip =
         jaguar::MultiStrip::Create(10.0, 5.0, {}, {}, inf);
+    assert(infiniteWidthMultiStrip.HasValue());
+    assert(std::isinf(infiniteWidthMultiStrip.Value().width));
+    const auto invalidMultiStrip =
+        jaguar::MultiStrip::Create(10.0, 5.0, {}, {}, nan);
     assert(!invalidMultiStrip.HasValue());
     assert(invalidMultiStrip.GetError().code == jaguar::ErrorCode::InvalidInput);
 
@@ -112,9 +174,10 @@ void runBoundaryValidationTests()
         {item}, {1}, nan, 5.0, {}, {});
     assert(!invalidMspp.HasValue());
     assert(invalidMspp.GetError().code == jaguar::ErrorCode::InvalidInput);
-    const auto invalidBpp = jaguar::BPInstance::Create({}, {}, {});
-    assert(!invalidBpp.HasValue());
-    assert(invalidBpp.GetError().code == jaguar::ErrorCode::InvalidInput);
+    const auto emptyBpp = jaguar::BPInstance::Create({}, {}, {});
+    assert(emptyBpp.HasValue());
+    assert(emptyBpp.Value().ItemCount() == 0);
+    assert(emptyBpp.Value().BinCount() == 0);
 
     const auto root = jaguar::Rect2d::Create(0.0, 0.0, 10.0, 10.0);
     assert(root.HasValue());

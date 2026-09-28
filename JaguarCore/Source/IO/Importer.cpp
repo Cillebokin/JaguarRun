@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <utility>
@@ -16,29 +18,87 @@ namespace
 constexpr std::size_t MAX_ANGLES = 65536;
 constexpr std::size_t MAX_QUALITIES = 10;
 
+std::uint32_t orderedFloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    if ((bits & 0x80000000U) != 0U)
+        return ~bits + 1U;
+    return bits | 0x80000000U;
+}
+
+bool rustFpaEqual(float first, float second) noexcept
+{
+    if (first == second)
+        return true;
+    if (!std::isfinite(first) || !std::isfinite(second))
+        return false;
+    if (std::abs(first - second) <= std::numeric_limits<float>::epsilon())
+        return true;
+
+    const std::uint32_t firstBits = orderedFloatBits(first);
+    const std::uint32_t secondBits = orderedFloatBits(second);
+    const std::uint32_t difference = firstBits > secondBits
+        ? firstBits - secondBits
+        : secondBits - firstBits;
+    return difference <= 4U;
+}
+
+bool rustFpaEqual(const Point2d& first, const Point2d& second) noexcept
+{
+    return rustFpaEqual(static_cast<float>(first.x),
+                        static_cast<float>(second.x)) &&
+           rustFpaEqual(static_cast<float>(first.y),
+                        static_cast<float>(second.y));
+}
+
 Result<SimplePolygon> invalidShape(const char* message)
 {
     return Result<SimplePolygon>::FromError(
         {ErrorCode::UnsupportedShape, message});
 }
 
-bool finiteRectangle(const ExternalRectangle& rectangle) noexcept
+bool normalizedRectangleBounds(const ExternalRectangle& rectangle,
+                               Rect2d& bounds) noexcept
 {
-    return std::isfinite(rectangle.xMin) && std::isfinite(rectangle.yMin) &&
-           std::isfinite(rectangle.width) && std::isfinite(rectangle.height) &&
-           rectangle.width > 0.0 && rectangle.height > 0.0 &&
-           std::isfinite(rectangle.xMin + rectangle.width) &&
-           std::isfinite(rectangle.yMin + rectangle.height);
+    const float xMin = static_cast<float>(rectangle.xMin);
+    const float yMin = static_cast<float>(rectangle.yMin);
+    const float width = static_cast<float>(rectangle.width);
+    const float height = static_cast<float>(rectangle.height);
+    if (!std::isfinite(xMin) || !std::isfinite(yMin) ||
+        !std::isfinite(width) || !std::isfinite(height) ||
+        width <= 0.0F || height <= 0.0F)
+        return false;
+
+    const float xMax = xMin + width;
+    const float yMax = yMin + height;
+    if (!std::isfinite(xMax) || !std::isfinite(yMax) ||
+        !(xMin < xMax && yMin < yMax))
+        return false;
+
+    bounds = Rect2d{static_cast<double>(xMin), static_cast<double>(yMin),
+                    static_cast<double>(xMax), static_cast<double>(yMax)};
+    return true;
 }
 
-double normalizeDegrees(double degrees) noexcept
+bool finiteRectangle(const ExternalRectangle& rectangle) noexcept
 {
-    double normalized = std::fmod(degrees, 360.0);
-    if (normalized < 0.0)
-        normalized += 360.0;
-    if (normalized == 360.0)
-        normalized = 0.0;
-    return normalized;
+    Rect2d bounds{};
+    return normalizedRectangleBounds(rectangle, bounds);
+}
+
+float normalizeDegreesRustF32(float degrees) noexcept
+{
+    float normalized = std::fmod(degrees, 360.0F);
+    if (normalized < 0.0F)
+        normalized += 360.0F;
+    return std::fmod(normalized, 360.0F);
+}
+
+double radiansRustF32(float degrees) noexcept
+{
+    constexpr float pi = 3.14159265358979323846F;
+    return static_cast<double>(degrees * (pi / 180.0F));
 }
 
 Result<std::size_t> toSize(std::uint64_t value, const char* field)
@@ -71,18 +131,23 @@ ShapeModifyConfig problemShapeConfig(std::optional<double> offset)
 Result<Transform2d> externalToInternal(const ExternalTransformation& external,
                                        const OriginalShape& original)
 {
-    if (!std::isfinite(external.rotationDegrees) ||
-        !external.translation.IsFinite())
+    const float rotationDegrees = static_cast<float>(external.rotationDegrees);
+    const float translationX = static_cast<float>(external.translation.x);
+    const float translationY = static_cast<float>(external.translation.y);
+    if (!std::isfinite(rotationDegrees) || !std::isfinite(translationX) ||
+        !std::isfinite(translationY))
     {
         return Result<Transform2d>::FromError(
             {ErrorCode::SnapshotMismatch,
              "external solution contains a non-finite transformation"});
     }
-    constexpr double pi = 3.141592653589793238462643383279502884;
+    constexpr float pi = 3.14159265358979323846F;
+    const float rotationRadians = rotationDegrees * (pi / 180.0F);
     const Transform2d externalTransform = Transform2d::FromRotationTranslation(
-        external.rotationDegrees * pi / 180.0, external.translation);
+        static_cast<double>(rotationRadians),
+        {static_cast<double>(translationX), static_cast<double>(translationY)});
     return Result<Transform2d>::FromValue(
-        original.preTransform.Inverse().FollowedBy(externalTransform));
+        original.preTransform.InverseRustF32().FollowedByRustF32(externalTransform));
 }
 
 Result<std::vector<Item>> importPositiveItems(
@@ -174,41 +239,47 @@ Result<SimplePolygon> Importer::ImportSimplePolygon(
     const std::vector<Point2d>& inputPoints) const
 {
     std::vector<Point2d> points = inputPoints;
+    for (Point2d& point : points)
+    {
+        point.x = static_cast<double>(static_cast<float>(point.x));
+        point.y = static_cast<double>(static_cast<float>(point.y));
+    }
     if (points.size() > 1 && points.front() == points.back())
         points.pop_back();
 
-    std::vector<Point2d> cleaned;
-    cleaned.reserve(points.size());
-    const NumericPolicy policy{};
-    const double toleranceSquared =
-        policy.equalityTolerance * policy.equalityTolerance;
-    for (const Point2d& point : points)
+    std::vector<std::size_t> duplicateVertices;
+    duplicateVertices.reserve(points.size());
+    for (std::size_t i = 0; i < points.size(); ++i)
     {
-        if (cleaned.empty() ||
-            cleaned.back().SquaredDistanceTo(point) > toleranceSquared)
-            cleaned.push_back(point);
+        const std::size_t next = (i + 1U) % points.size();
+        if (rustFpaEqual(points[i], points[next]))
+            duplicateVertices.push_back(i);
     }
-    if (cleaned.size() > 1 && cleaned.front() == cleaned.back())
-        cleaned.pop_back();
+    std::sort(duplicateVertices.rbegin(), duplicateVertices.rend());
+    for (const std::size_t index : duplicateVertices)
+    {
+        if (index < points.size())
+            points.erase(points.begin() + static_cast<std::ptrdiff_t>(index));
+    }
 
-    return SimplePolygon::Create(std::move(cleaned));
+    return SimplePolygon::Create(std::move(points));
 }
 
 Result<SimplePolygon> Importer::ImportItemShape(const ExternalShape& shape) const
 {
     if (const auto* rectangle = std::get_if<ExternalRectangle>(&shape.value))
     {
-        if (!finiteRectangle(*rectangle))
+        Rect2d bounds{};
+        if (!normalizedRectangleBounds(*rectangle, bounds))
         {
             return Result<SimplePolygon>::FromError(
                 {ErrorCode::InvalidInput, "invalid external rectangle"});
         }
         return SimplePolygon::Create({
-            {rectangle->xMin, rectangle->yMin},
-            {rectangle->xMin + rectangle->width, rectangle->yMin},
-            {rectangle->xMin + rectangle->width,
-             rectangle->yMin + rectangle->height},
-            {rectangle->xMin, rectangle->yMin + rectangle->height}});
+            {bounds.xMin, bounds.yMin},
+            {bounds.xMax, bounds.yMin},
+            {bounds.xMax, bounds.yMax},
+            {bounds.xMin, bounds.yMax}});
     }
     if (const auto* polygon = std::get_if<ExternalSimplePolygon>(&shape.value))
         return ImportSimplePolygon(polygon->points);
@@ -225,17 +296,17 @@ Result<SimplePolygon> Importer::ImportContainerOuter(const ExternalShape& shape)
 {
     if (const auto* rectangle = std::get_if<ExternalRectangle>(&shape.value))
     {
-        if (!finiteRectangle(*rectangle))
+        Rect2d bounds{};
+        if (!normalizedRectangleBounds(*rectangle, bounds))
         {
             return Result<SimplePolygon>::FromError(
                 {ErrorCode::InvalidInput, "invalid external rectangle"});
         }
         return SimplePolygon::Create({
-            {rectangle->xMin, rectangle->yMin},
-            {rectangle->xMin + rectangle->width, rectangle->yMin},
-            {rectangle->xMin + rectangle->width,
-             rectangle->yMin + rectangle->height},
-            {rectangle->xMin, rectangle->yMin + rectangle->height}});
+            {bounds.xMin, bounds.yMin},
+            {bounds.xMax, bounds.yMin},
+            {bounds.xMax, bounds.yMax},
+            {bounds.xMin, bounds.yMax}});
     }
     if (const auto* polygon = std::get_if<ExternalSimplePolygon>(&shape.value))
         return ImportSimplePolygon(polygon->points);
@@ -246,11 +317,8 @@ Result<SimplePolygon> Importer::ImportContainerOuter(const ExternalShape& shape)
 
 Result<SimplePolygon> Importer::ImportZoneShape(const ExternalShape& shape) const
 {
-    if (const auto* polygon = std::get_if<ExternalPolygon>(&shape.value))
-    {
-        if (!polygon->holes.empty())
-            return invalidShape("quality zones with holes are unsupported");
-    }
+    if (std::holds_alternative<ExternalPolygon>(shape.value))
+        return invalidShape("quality zone polygons are unsupported");
     if (std::holds_alternative<ExternalMultiPolygon>(shape.value))
         return invalidShape("quality zone multipolygons are unsupported");
     return ImportItemShape(shape);
@@ -265,7 +333,7 @@ Result<RotationRange> Importer::ImportRotation(const RotationPolicy& rotation) c
         return Result<RotationRange>::FromValue(
             RotationRange{RotationMode::None, {}});
 
-    std::vector<double> degrees;
+    std::vector<float> degrees;
     if (rotation.kind == RotationPolicyKind::Discrete)
     {
         if (rotation.anglesDegrees.empty() ||
@@ -278,23 +346,25 @@ Result<RotationRange> Importer::ImportRotation(const RotationPolicy& rotation) c
         degrees.reserve(rotation.anglesDegrees.size());
         for (double angle : rotation.anglesDegrees)
         {
-            if (!std::isfinite(angle))
+            const float angleF32 = static_cast<float>(angle);
+            if (!std::isfinite(angleF32))
             {
                 return Result<RotationRange>::FromError(
                     {ErrorCode::InvalidInput, "rotation angles must be finite"});
             }
-            degrees.push_back(normalizeDegrees(angle));
+            degrees.push_back(normalizeDegreesRustF32(angleF32));
         }
     }
     else
     {
-        const double step = rotation.stepDegrees;
-        if (!std::isfinite(step) || step <= 0.0 || step > 360.0)
+        const float stepF32 = static_cast<float>(rotation.stepDegrees);
+        if (!std::isfinite(stepF32) || stepF32 <= 0.0F || stepF32 > 360.0F)
         {
             return Result<RotationRange>::FromError(
                 {ErrorCode::InvalidInput,
                  "rotation step must be finite and in (0, 360]"});
         }
+        const double step = static_cast<double>(stepF32);
         const double count = std::round(360.0 / step);
         const double tolerance = 360.0 * std::numeric_limits<float>::epsilon();
         if (count < 1.0 || count > static_cast<double>(MAX_ANGLES) ||
@@ -307,21 +377,21 @@ Result<RotationRange> Importer::ImportRotation(const RotationPolicy& rotation) c
         degrees.reserve(static_cast<std::size_t>(count));
         for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i)
         {
-            degrees.push_back(360.0 * static_cast<double>(i) / count);
+            degrees.push_back(static_cast<float>(
+                360.0 * static_cast<double>(i) / count));
         }
     }
 
     std::sort(degrees.begin(), degrees.end());
     degrees.erase(std::unique(degrees.begin(), degrees.end()), degrees.end());
-    if (degrees.size() == 1 && degrees.front() == 0.0)
+    if (degrees.size() == 1 && degrees.front() == 0.0F)
         return Result<RotationRange>::FromValue(
             RotationRange{RotationMode::None, {}});
 
-    const double pi = std::acos(-1.0);
     std::vector<double> radians;
     radians.reserve(degrees.size());
-    for (double angle : degrees)
-        radians.push_back(angle * pi / 180.0);
+    for (float angle : degrees)
+        radians.push_back(radiansRustF32(angle));
     return Result<RotationRange>::FromValue(
         RotationRange{RotationMode::Discrete, std::move(radians)});
 }
@@ -370,6 +440,7 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
         return Result<Container>::FromError(outer.GetError());
 
     std::vector<std::vector<SimplePolygon>> grouped(MAX_QUALITIES);
+    std::vector<SimplePolygon> holes;
     if (const auto* polygon = std::get_if<ExternalPolygon>(&external.shape.value))
     {
         for (const auto& hole : polygon->holes)
@@ -377,13 +448,7 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
             auto holeShape = ImportSimplePolygon(hole);
             if (!holeShape.HasValue())
                 return Result<Container>::FromError(holeShape.GetError());
-            OriginalShape holeOriginal{
-                std::move(holeShape.Value()), Transform2d::Identity(),
-                ShapeModifyMode::Inflate, ShapeConfig()};
-            auto converted = holeOriginal.ConvertToInternal();
-            if (!converted.HasValue())
-                return Result<Container>::FromError(converted.GetError());
-            grouped[0].push_back(std::move(converted.Value()));
+            holes.push_back(std::move(holeShape.Value()));
         }
     }
 
@@ -397,20 +462,31 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
         auto zoneShape = ImportZoneShape(zone.shape);
         if (!zoneShape.HasValue())
             return Result<Container>::FromError(zoneShape.GetError());
-        OriginalShape zoneOriginal{
-            std::move(zoneShape.Value()), Transform2d::Identity(),
-            ShapeModifyMode::Inflate, ShapeConfig()};
-        auto converted = zoneOriginal.ConvertToInternal();
-        if (!converted.HasValue())
-            return Result<Container>::FromError(converted.GetError());
-        grouped[zone.quality].push_back(std::move(converted.Value()));
+        grouped[zone.quality].push_back(std::move(zoneShape.Value()));
     }
+
+    for (SimplePolygon& hole : holes)
+        grouped[0].push_back(std::move(hole));
 
     std::vector<QualityZone> zones;
     for (std::size_t quality = 0; quality < grouped.size(); ++quality)
     {
         if (!grouped[quality].empty())
-            zones.push_back({quality, std::move(grouped[quality])});
+        {
+            std::vector<SimplePolygon> convertedShapes;
+            convertedShapes.reserve(grouped[quality].size());
+            for (SimplePolygon& shape : grouped[quality])
+            {
+                OriginalShape zoneOriginal{
+                    std::move(shape), Transform2d::Identity(),
+                    ShapeModifyMode::Inflate, ShapeConfig()};
+                auto converted = zoneOriginal.ConvertToInternal();
+                if (!converted.HasValue())
+                    return Result<Container>::FromError(converted.GetError());
+                convertedShapes.push_back(std::move(converted.Value()));
+            }
+            zones.push_back({quality, std::move(convertedShapes)});
+        }
     }
 
     OriginalShape originalOuter{
@@ -566,58 +642,12 @@ JAGUARCORE_API Result<BPInstance> Importer::ImportBPInstance(
 }
 
 JAGUARCORE_API Result<BPSolution> Importer::ImportBPSolution(
-    const BPInstance& instance, const ExternalBPSolution& external) const
+    const BPInstance&, const ExternalBPSolution&) const
 {
-    auto problem = BPProblem::Create(instance);
-    if (!problem.HasValue())
-        return Result<BPSolution>::FromError(problem.GetError());
-    auto& value = problem.Value();
-    for (const ExternalLayout& layout : external.layouts)
-    {
-        std::size_t binIndex = instance.BinCount();
-        for (std::size_t i = 0; i < instance.BinCount(); ++i)
-        {
-            if (instance.GetBin(i).externalId == layout.containerId)
-            {
-                binIndex = i;
-                break;
-            }
-        }
-        if (binIndex >= instance.BinCount() || layout.placedItems.empty())
-        {
-            return Result<BPSolution>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "BP solution references an invalid or empty layout"});
-        }
-
-        std::size_t layoutIndex = 0;
-        for (std::size_t i = 0; i < layout.placedItems.size(); ++i)
-        {
-            const ExternalPlacedItem& placed = layout.placedItems[i];
-            ItemIndex itemIndex = 0;
-            const Item* item = findItemByExternalId(instance, placed.itemId, itemIndex);
-            if (!item)
-            {
-                return Result<BPSolution>::FromError(
-                    {ErrorCode::SnapshotMismatch,
-                     "BP solution references an unknown item ID"});
-            }
-            const auto transform = externalToInternal(
-                placed.transformation, item->GetOriginalShape());
-            if (!transform.HasValue())
-                return Result<BPSolution>::FromError(transform.GetError());
-            const auto result = value.PlaceItem({
-                i == 0 ? LayoutTargetKind::Closed : LayoutTargetKind::Open,
-                layoutIndex, binIndex, itemIndex, transform.Value()});
-            if (!result.HasValue())
-                return Result<BPSolution>::FromError(result.GetError());
-            if (i == 0)
-                layoutIndex = result.Value().layoutIndex;
-        }
-    }
-    return Result<BPSolution>::FromValue(value.Save());
+    return Result<BPSolution>::FromError(
+        {ErrorCode::UnsupportedOperation,
+         "BPP solution import is not implemented in the reference crate"});
 }
-
 JAGUARCORE_API Result<BPInstance> Importer::ImportBPInstanceJson(
     const std::string& json) const
 {
@@ -658,93 +688,12 @@ JAGUARCORE_API Result<MSPInstance> Importer::ImportMSPInstance(
 }
 
 JAGUARCORE_API Result<MSPSolution> Importer::ImportMSPSolution(
-    const MSPInstance& instance, const ExternalMSPSolution& external) const
+    const MSPInstance&, const ExternalMSPSolution&) const
 {
-    if (external.layouts.size() != external.containers.size())
-    {
-        return Result<MSPSolution>::FromError(
-            {ErrorCode::SnapshotMismatch,
-             "MSP solution layouts and containers must have equal counts"});
-    }
-    std::set<ContainerId> containerIds;
-    for (const ExternalContainer& container : external.containers)
-    {
-        if (!containerIds.insert(container.id).second)
-        {
-            return Result<MSPSolution>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "MSP solution container IDs must be unique"});
-        }
-    }
-    auto problem = MSPProblem::Create(instance);
-    if (!problem.HasValue())
-        return Result<MSPSolution>::FromError(problem.GetError());
-    auto& value = problem.Value();
-    std::set<ContainerId> layoutContainerIds;
-    for (const ExternalLayout& layout : external.layouts)
-    {
-        if (!layoutContainerIds.insert(layout.containerId).second)
-        {
-            return Result<MSPSolution>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "MSP solution layouts must reference unique container IDs"});
-        }
-        const auto containerIt = std::find_if(
-            external.containers.begin(), external.containers.end(),
-            [&layout](const ExternalContainer& container) {
-                return container.id == layout.containerId;
-            });
-        if (containerIt == external.containers.end())
-        {
-            return Result<MSPSolution>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "MSP solution references an invalid layout"});
-        }
-        const auto rectangle = rectangleData(containerIt->shape);
-        if (!rectangle.HasValue())
-            return Result<MSPSolution>::FromError(rectangle.GetError());
-        if (!near(rectangle.Value().xMin, 0.0) ||
-            !near(rectangle.Value().yMin, 0.0) ||
-            !near(rectangle.Value().height,
-                  instance.BaseStrip().fixedHeight) ||
-            rectangle.Value().width > instance.BaseStrip().maxWidth + 1.0e-9)
-        {
-            return Result<MSPSolution>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "MSP solution container is incompatible with the instance strip"});
-        }
-        const auto strip = MultiStrip::Create(
-            instance.BaseStrip().maxWidth, rectangle.Value().height,
-            instance.BaseStrip().cdeConfig, instance.BaseStrip().shapeModifyConfig,
-            rectangle.Value().width);
-        if (!strip.HasValue())
-            return Result<MSPSolution>::FromError(strip.GetError());
-        const auto added = value.AddLayout(strip.Value());
-        if (!added.HasValue())
-            return Result<MSPSolution>::FromError(added.GetError());
-        for (const ExternalPlacedItem& placed : layout.placedItems)
-        {
-            ItemIndex itemIndex = 0;
-            const Item* item = findItemByExternalId(instance, placed.itemId, itemIndex);
-            if (!item)
-            {
-                return Result<MSPSolution>::FromError(
-                    {ErrorCode::SnapshotMismatch,
-                     "MSP solution references an unknown item ID"});
-            }
-            const auto transform = externalToInternal(
-                placed.transformation, item->GetOriginalShape());
-            if (!transform.HasValue())
-                return Result<MSPSolution>::FromError(transform.GetError());
-            const auto result = value.PlaceItem({added.Value(), itemIndex,
-                                                 transform.Value()});
-            if (!result.HasValue())
-                return Result<MSPSolution>::FromError(result.GetError());
-        }
-    }
-    return Result<MSPSolution>::FromValue(value.Save());
+    return Result<MSPSolution>::FromError(
+        {ErrorCode::UnsupportedOperation,
+         "MSPP solution import is not implemented in the reference crate"});
 }
-
 JAGUARCORE_API Result<MSPInstance> Importer::ImportMSPInstanceJson(
     const std::string& json) const
 {

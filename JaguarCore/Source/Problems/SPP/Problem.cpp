@@ -59,8 +59,10 @@ bool sameStripContainer(const Container& container, const Strip& strip) noexcept
         {strip.width, strip.fixedHeight}, {0.0, strip.fixedHeight}}};
     for (std::size_t i = 0; i < expected.size(); ++i)
     {
-        if (!near(shape.Vertices()[i].x, expected[i].x) ||
-            !near(shape.Vertices()[i].y, expected[i].y))
+        if (static_cast<float>(shape.Vertices()[i].x) !=
+                static_cast<float>(expected[i].x) ||
+            static_cast<float>(shape.Vertices()[i].y) !=
+                static_cast<float>(expected[i].y))
             return false;
     }
     return true;
@@ -175,14 +177,16 @@ JAGUARCORE_API Result<void> SPProblem::FitStrip()
             {ErrorCode::Infeasible, "cannot fit an empty strip"});
     }
 
-    const double offset = m_Strip.shapeModifyConfig.offset.value_or(0.0);
-    const double fittedWidth = *rightmost * 1.00001 + offset;
-    if (!std::isfinite(fittedWidth) || fittedWidth <= 0.0)
+    const float itemXMax = static_cast<float>(*rightmost);
+    const float offset = static_cast<float>(
+        m_Strip.shapeModifyConfig.offset.value_or(0.0));
+    const float fittedWidth = itemXMax * 1.00001F + offset;
+    if (!std::isfinite(fittedWidth) || fittedWidth <= 0.0F)
     {
         return Result<void>::FromError(
             {ErrorCode::Infeasible, "computed strip width is invalid"});
     }
-    return ChangeStripWidth(fittedWidth);
+    return ChangeStripWidth(static_cast<double>(fittedWidth));
 }
 
 JAGUARCORE_API SPSolution SPProblem::Save() const
@@ -238,8 +242,11 @@ JAGUARCORE_API Result<void> SPProblem::Restore(const SPSolution& solution)
     if (!restoredResult.HasValue())
         return restoredResult;
 
+    const auto restoredInPlace = m_Layout.Restore(solution.layoutSnapshot);
+    if (!restoredInPlace.HasValue())
+        m_Layout = std::move(restored);
+
     m_Strip = solution.strip;
-    m_Layout = std::move(restored);
     m_RemainingDemand = std::move(remaining);
     DebugAssertSPSolution(*this);
     return Result<void>::FromValue();

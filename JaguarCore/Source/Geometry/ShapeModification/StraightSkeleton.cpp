@@ -14,6 +14,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -25,6 +27,55 @@ namespace
 constexpr double EPSILON = 1.0e-9;
 constexpr double ROUNDED_STEP = 0.1;
 constexpr std::size_t INVALID_INDEX = std::numeric_limits<std::size_t>::max();
+
+std::uint32_t orderedFloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    constexpr std::uint32_t signBit = std::uint32_t{1} << 31U;
+    return (bits & signBit) != 0U ? ~bits : (bits ^ signBit);
+}
+
+bool rustApproxEqual(double first, double second) noexcept
+{
+    const float lhs = static_cast<float>(first);
+    const float rhs = static_cast<float>(second);
+    if (lhs == rhs)
+        return true;
+    if (std::abs(lhs - rhs) <= std::numeric_limits<float>::epsilon())
+        return true;
+
+    const std::uint32_t lhsBits = orderedFloatBits(lhs);
+    const std::uint32_t rhsBits = orderedFloatBits(rhs);
+    const std::uint32_t ulpDistance = lhsBits < rhsBits
+                                          ? rhsBits - lhsBits
+                                          : lhsBits - rhsBits;
+    return ulpDistance <= 4U;
+}
+
+std::vector<Point2d> eliminateDegenerateOffsetVertices(
+    const std::vector<Point2d>& input)
+{
+    std::vector<bool> remove(input.size(), false);
+    for (std::size_t i = 0; i < input.size(); ++i)
+    {
+        const std::size_t next = (i + 1U) % input.size();
+        if (rustApproxEqual(input[i].x, input[next].x) &&
+            rustApproxEqual(input[i].y, input[next].y))
+        {
+            remove[i] = true;
+        }
+    }
+
+    std::vector<Point2d> points;
+    points.reserve(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i)
+    {
+        if (!remove[i])
+            points.push_back(input[i]);
+    }
+    return points;
+}
 
 bool eq(double lhs, double rhs) noexcept
 {
@@ -821,6 +872,19 @@ void cleanLoop(std::vector<Point2d>& points)
 }
 }
 
+Result<SimplePolygon> createRustImportedOffsetPolygon(
+    std::vector<Point2d> points)
+{
+    points = eliminateDegenerateOffsetVertices(points);
+    const auto polygon = SimplePolygon::Create(std::move(points));
+    if (!polygon.HasValue())
+    {
+        return Result<SimplePolygon>::FromError(
+            {ErrorCode::OffsetFailed, polygon.GetError().message});
+    }
+    return polygon;
+}
+
 Result<std::vector<SimplePolygon>> roundedStraightSkeletonOffsets(
     const SimplePolygon& shape, double signedDistance)
 {
@@ -837,7 +901,7 @@ Result<std::vector<SimplePolygon>> roundedStraightSkeletonOffsets(
         cleanLoop(loop);
         if (loop.size() < 3 || signedArea(loop) <= EPSILON)
             continue;
-        const auto polygon = SimplePolygon::Create(std::move(loop));
+        const auto polygon = createRustImportedOffsetPolygon(std::move(loop));
         if (polygon.HasValue())
             polygons.push_back(polygon.Value());
     }

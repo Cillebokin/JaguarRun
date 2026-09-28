@@ -14,10 +14,17 @@ struct SparrowOptimizationResult
 {
     jaguar::SPSolution solution;
     LbfMetrics metrics;
+    OptimizationHistory history;
 };
 
 SPARROWCORE_API Result<SparrowOptimizationResult> Optimize(
     const jaguar::SPInstance& instance,
     const SparrowConfig& config,
+    OptimizationListener* listener = nullptr);
+
+SPARROWCORE_API Result<SparrowOptimizationResult> Optimize(
+    const jaguar::SPInstance& instance,
+    const SparrowConfig& config,
+    OptimizationTerminator& terminator,
     OptimizationListener* listener = nullptr);
 }

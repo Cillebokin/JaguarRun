@@ -1,7 +1,5 @@
 #include "JaguarCore/Problems/MSpp.h"
 
-#include <cmath>
-
 namespace jaguar
 {
 JAGUARCORE_API Result<MultiStrip> MultiStrip::Create(
@@ -11,26 +9,43 @@ JAGUARCORE_API Result<MultiStrip> MultiStrip::Create(
     ShapeModifyConfig shapeModifyConfig,
     double width)
 {
-    if (!std::isfinite(maxWidth) || maxWidth <= 0.0 ||
-        !std::isfinite(fixedHeight) || fixedHeight <= 0.0 ||
-        !std::isfinite(width) || width <= 0.0 || width > maxWidth)
+    if (!(maxWidth > 0.0) || !(fixedHeight > 0.0) || !(width > 0.0))
     {
         return Result<MultiStrip>::FromError(
             {ErrorCode::InvalidInput,
              "MSPP strip width, maximum width and height are invalid"});
     }
+    const float rustMaxWidth = static_cast<float>(maxWidth);
+    const float rustFixedHeight = static_cast<float>(fixedHeight);
+    const float rustWidth = static_cast<float>(width);
+    if (!(rustMaxWidth > 0.0F) || !(rustFixedHeight > 0.0F) ||
+        !(rustWidth > 0.0F))
+    {
+        return Result<MultiStrip>::FromError(
+            {ErrorCode::InvalidInput, "MSPP strip dimensions exceed f32 range"});
+    }
     return Result<MultiStrip>::FromValue(
-        MultiStrip{maxWidth, fixedHeight, width, cdeConfig, shapeModifyConfig});
+        MultiStrip{static_cast<double>(rustMaxWidth),
+                   static_cast<double>(rustFixedHeight),
+                   static_cast<double>(rustWidth),
+                   cdeConfig, shapeModifyConfig});
 }
 
 JAGUARCORE_API Result<void> MultiStrip::SetWidth(double newWidth)
 {
-    if (!std::isfinite(newWidth) || newWidth <= 0.0 || newWidth > maxWidth)
+    const float rustWidth = static_cast<float>(newWidth);
+    const float rustMaxWidth = static_cast<float>(maxWidth);
+    if (!(rustWidth <= rustMaxWidth))
     {
         return Result<void>::FromError(
-            {ErrorCode::InvalidInput, "MSPP strip width exceeds maximum width"});
+            {ErrorCode::InvalidInput, "MSPP strip width exceeds f32 range"});
     }
-    width = newWidth;
+    if (!(rustWidth > 0.0F))
+    {
+        return Result<void>::FromError(
+            {ErrorCode::InvalidInput, "MSPP strip width must be positive"});
+    }
+    width = static_cast<double>(rustWidth);
     return Result<void>::FromValue();
 }
 

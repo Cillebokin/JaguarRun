@@ -2,13 +2,14 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace
 {
 constexpr std::uint64_t SPLIT_MIX_INCREMENT = 0x9E3779B97F4A7C15ULL;
 constexpr std::uint64_t SPLIT_MIX_MULTIPLIER_A = 0xBF58476D1CE4E5B9ULL;
 constexpr std::uint64_t SPLIT_MIX_MULTIPLIER_B = 0x94D049BB133111EBULL;
-constexpr std::uint64_t UNIFORM_MANTISSA_SCALE = 1ULL << 24U;
+constexpr std::uint32_t UNIFORM_MANTISSA_SCALE = 1U << 23U;
 constexpr float TWO_PI = 6.28318530717958647692F;
 
 std::uint64_t SplitMix64Next(std::uint64_t& state) noexcept
@@ -57,10 +58,32 @@ std::uint32_t SparrowRng::NextU32() noexcept
     return static_cast<std::uint32_t>(NextU64() >> 32U);
 }
 
+std::uint32_t SparrowRng::UniformIndex(std::uint32_t upperExclusive) noexcept
+{
+    if (upperExclusive == 0U)
+    {
+        return 0U;
+    }
+
+    const std::uint64_t product =
+        static_cast<std::uint64_t>(NextU32()) * upperExclusive;
+    std::uint32_t result = static_cast<std::uint32_t>(product >> 32U);
+    const std::uint32_t low = static_cast<std::uint32_t>(product);
+    const std::uint32_t threshold = 0U - upperExclusive;
+    if (low > threshold)
+    {
+        const std::uint32_t nextHigh = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(NextU32()) * upperExclusive) >> 32U);
+        result += static_cast<std::uint32_t>(
+            low > std::numeric_limits<std::uint32_t>::max() - nextHigh);
+    }
+    return result;
+}
+
 float SparrowRng::Uniform01F32() noexcept
 {
-    const std::uint64_t top24Bits = NextU64() >> 40U;
-    return static_cast<float>(top24Bits) / static_cast<float>(UNIFORM_MANTISSA_SCALE);
+    const std::uint32_t top23Bits = NextU32() >> 9U;
+    return static_cast<float>(top23Bits) / static_cast<float>(UNIFORM_MANTISSA_SCALE);
 }
 
 float SparrowRng::Normal01F32()

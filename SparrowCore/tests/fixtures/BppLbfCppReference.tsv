@@ -1,3 +1,3 @@
 # Task10 C++ SparrowCore BPP reference generated from TestBppLbf.cpp seed=42.
 # fixture problem seed samples placed remaining width density cost feasible
-lbf_bpp_small_cpp 42 64 1 0 0 0.1111111111111111 10 true
+lbf_bpp_small_cpp 42 178 1 0 0 0.1111111111111111 10 true

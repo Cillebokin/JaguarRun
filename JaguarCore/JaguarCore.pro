@@ -44,10 +44,12 @@ HEADERS += \
     $$PWD/Include/JaguarCore/NumericPolicy.h \
     $$PWD/Include/JaguarCore/Geometry/Point.h \
     $$PWD/Include/JaguarCore/Geometry/Rect.h \
+    $$PWD/Include/JaguarCore/Geometry/RustF32.h \
     $$PWD/Include/JaguarCore/Geometry/Edge.h \
     $$PWD/Include/JaguarCore/Geometry/Circle.h \
     $$PWD/Include/JaguarCore/Geometry/Transformation.h \
     $$PWD/Include/JaguarCore/Geometry/ConvexHull.h \
+    $$PWD/Include/JaguarCore/Geometry/PointOfInaccessibility.h \
     $$PWD/Include/JaguarCore/Geometry/SimplePolygon.h \
     $$PWD/Include/JaguarCore/Geometry/ShapeModification.h \
     $$PWD/Include/JaguarCore/Geometry/OriginalShape.h \
@@ -76,6 +78,7 @@ SOURCES += \
     $$PWD/Source/Geometry/Primitives/Edge.cpp \
     $$PWD/Source/Geometry/Primitives/Circle.cpp \
     $$PWD/Source/Geometry/Transformation/Transformation.cpp \
+    $$PWD/Source/Geometry/Primitives/PointOfInaccessibility.cpp \
     $$PWD/Source/Geometry/Primitives/SimplePolygon.cpp \
     $$PWD/Source/Geometry/ConvexHull/ConvexHull.cpp \
     $$PWD/Source/Geometry/OriginalShape/OriginalShape.cpp \

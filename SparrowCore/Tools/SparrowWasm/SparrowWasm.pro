@@ -16,3 +16,6 @@ PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCore.lib
 
 SOURCES += \
     $$PWD/SparrowWasm.cpp
+
+HEADERS += \
+    $$PWD/SparrowWasm.h

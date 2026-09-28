@@ -5,12 +5,40 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace jaguar
 {
 namespace
 {
+constexpr std::size_t kLayoutKeyPartBits = sizeof(std::size_t) * 4U;
+constexpr std::size_t kLayoutKeyPartMask =
+    std::numeric_limits<std::size_t>::max() >> kLayoutKeyPartBits;
+
+std::size_t makeLayoutKey(std::size_t slotIndex,
+                          std::uint32_t generation) noexcept
+{
+    return (static_cast<std::size_t>(generation & kLayoutKeyPartMask)
+            << kLayoutKeyPartBits) |
+           (slotIndex & kLayoutKeyPartMask);
+}
+
+void splitLayoutKey(std::size_t key,
+                    std::size_t& slotIndex,
+                    std::uint32_t& generation) noexcept
+{
+    slotIndex = key & kLayoutKeyPartMask;
+    generation = static_cast<std::uint32_t>(key >> kLayoutKeyPartBits);
+}
+
+std::uint32_t nextLayoutGeneration(std::uint32_t generation) noexcept
+{
+    return static_cast<std::uint32_t>(
+        (static_cast<std::size_t>(generation) + 1U) & kLayoutKeyPartMask);
+}
+
 bool near(double first, double second) noexcept
 {
     return std::abs(first - second) <=
@@ -80,7 +108,6 @@ bool sameItemDefinition(const Item& expected,
 bool sameStripContainer(const Container& container,
                         const MultiStrip& strip) noexcept
 {
-    constexpr double tolerance = NumericPolicy::DefaultEqualityTolerance();
     const auto& shape = container.GetOriginalShape().shape;
     if (shape.VertexCount() != 4)
         return false;
@@ -92,8 +119,10 @@ bool sameStripContainer(const Container& container,
         {0.0, strip.fixedHeight}}};
     for (std::size_t i = 0; i < expected.size(); ++i)
     {
-        if (std::abs(shape.Vertices()[i].x - expected[i].x) > tolerance ||
-            std::abs(shape.Vertices()[i].y - expected[i].y) > tolerance)
+        if (static_cast<float>(shape.Vertices()[i].x) !=
+                static_cast<float>(expected[i].x) ||
+            static_cast<float>(shape.Vertices()[i].y) !=
+                static_cast<float>(expected[i].y))
             return false;
     }
     return true;
@@ -103,8 +132,10 @@ bool sameStripContainer(const Container& container,
 MSPProblem::MSPProblem(MSPInstance instance,
                        std::vector<std::size_t> remainingDemand)
     : m_Instance(std::move(instance)),
+      m_Layouts(1),
       m_RemainingDemand(std::move(remainingDemand))
 {
+    m_Layouts.front().generation = 0;
 }
 
 JAGUARCORE_API Result<MSPProblem> MSPProblem::Create(MSPInstance instance)
@@ -118,26 +149,76 @@ JAGUARCORE_API Result<MSPProblem> MSPProblem::Create(MSPInstance instance)
 
 MSPProblem::LayoutSlot* MSPProblem::GetLayout(std::size_t layoutIndex) noexcept
 {
-    if (layoutIndex >= m_Layouts.size() || !m_Layouts[layoutIndex].layout.has_value())
+    std::size_t slotIndex = 0;
+    std::uint32_t generation = 0;
+    splitLayoutKey(layoutIndex, slotIndex, generation);
+    if (slotIndex >= m_Layouts.size() ||
+        m_Layouts[slotIndex].generation != generation ||
+        !m_Layouts[slotIndex].layout.has_value())
         return nullptr;
-    return &m_Layouts[layoutIndex];
+    return &m_Layouts[slotIndex];
 }
 
 const MSPProblem::LayoutSlot* MSPProblem::GetLayout(
     std::size_t layoutIndex) const noexcept
 {
-    if (layoutIndex >= m_Layouts.size() || !m_Layouts[layoutIndex].layout.has_value())
+    std::size_t slotIndex = 0;
+    std::uint32_t generation = 0;
+    splitLayoutKey(layoutIndex, slotIndex, generation);
+    if (slotIndex >= m_Layouts.size() ||
+        m_Layouts[slotIndex].generation != generation ||
+        !m_Layouts[slotIndex].layout.has_value())
         return nullptr;
-    return &m_Layouts[layoutIndex];
+    return &m_Layouts[slotIndex];
+}
+
+std::size_t MSPProblem::AllocateLayoutSlot(LayoutSlot slot)
+{
+    std::size_t slotIndex = 0;
+    if (!m_FreeLayoutIndices.empty())
+    {
+        slotIndex = m_FreeLayoutIndices.back();
+        m_FreeLayoutIndices.pop_back();
+        slot.generation = m_Layouts[slotIndex].generation | 1U;
+        m_Layouts[slotIndex] = std::move(slot);
+    }
+    else
+    {
+        slotIndex = m_Layouts.size();
+        m_Layouts.push_back(std::move(slot));
+    }
+    return makeLayoutKey(slotIndex, m_Layouts[slotIndex].generation);
+}
+
+void MSPProblem::ReleaseLayoutSlot(std::size_t layoutIndex)
+{
+    std::size_t slotIndex = 0;
+    std::uint32_t generation = 0;
+    splitLayoutKey(layoutIndex, slotIndex, generation);
+    if (slotIndex >= m_Layouts.size() ||
+        m_Layouts[slotIndex].generation != generation ||
+        !m_Layouts[slotIndex].layout.has_value())
+        return;
+    m_Layouts[slotIndex].layout.reset();
+    m_Layouts[slotIndex].generation = nextLayoutGeneration(generation);
+    m_FreeLayoutIndices.push_back(slotIndex);
 }
 
 JAGUARCORE_API Result<std::size_t> MSPProblem::AddLayout(MultiStrip strip)
 {
+    const auto normalized = MultiStrip::Create(
+        strip.maxWidth, strip.fixedHeight, strip.cdeConfig,
+        strip.shapeModifyConfig, strip.width);
+    if (!normalized.HasValue())
+        return Result<std::size_t>::FromError(normalized.GetError());
+    strip = normalized.Value();
+
     const auto container = strip.CreateContainer();
     if (!container.HasValue())
         return Result<std::size_t>::FromError(container.GetError());
-    m_Layouts.push_back(LayoutSlot{Layout{container.Value()}, strip});
-    return Result<std::size_t>::FromValue(m_Layouts.size() - 1);
+    const std::size_t layoutIndex = AllocateLayoutSlot(
+        LayoutSlot{Layout{container.Value()}, strip});
+    return Result<std::size_t>::FromValue(layoutIndex);
 }
 
 JAGUARCORE_API Result<void> MSPProblem::RemoveLayout(std::size_t layoutIndex)
@@ -159,7 +240,7 @@ JAGUARCORE_API Result<void> MSPProblem::RemoveLayout(std::size_t layoutIndex)
         }
         ++m_RemainingDemand[itemIndex];
     }
-    slot->layout.reset();
+    ReleaseLayoutSlot(layoutIndex);
     DebugAssertMSPSolution(*this);
     return Result<void>::FromValue();
 }
@@ -255,52 +336,65 @@ JAGUARCORE_API Result<void> MSPProblem::FitStrip(std::size_t layoutIndex)
         return Result<void>::FromError(
             {ErrorCode::Infeasible, "cannot fit an empty MSPP strip"});
     }
-    const double fittedWidth =
-        *rightmost * 1.00001 + slot->strip.shapeModifyConfig.offset.value_or(0.0);
-    if (!std::isfinite(fittedWidth) || fittedWidth <= 0.0)
+    const float itemXMax = static_cast<float>(*rightmost);
+    const float offset = static_cast<float>(
+        slot->strip.shapeModifyConfig.offset.value_or(0.0));
+    const float fittedWidth = itemXMax * 1.00001F + offset;
+    if (!std::isfinite(fittedWidth) || fittedWidth <= 0.0F)
     {
         return Result<void>::FromError(
             {ErrorCode::Infeasible, "computed MSPP strip width is invalid"});
     }
-    return ChangeStripWidth(layoutIndex, fittedWidth);
+    return ChangeStripWidth(layoutIndex, static_cast<double>(fittedWidth));
 }
 
 JAGUARCORE_API MSPSolution MSPProblem::Save() const
 {
     MSPSolution solution;
-    for (std::size_t i = 0; i < m_Layouts.size(); ++i)
+    for (std::size_t slotIndex = 0; slotIndex < m_Layouts.size(); ++slotIndex)
     {
-        if (m_Layouts[i].layout.has_value())
-        {
+        const LayoutSlot& slot = m_Layouts[slotIndex];
+        if (slot.layout.has_value())
             solution.layouts.push_back(
-                {i, m_Layouts[i].strip, m_Layouts[i].layout->Save()});
-        }
+                {makeLayoutKey(slotIndex, slot.generation), slot.strip,
+                 slot.layout->Save()});
     }
     return solution;
 }
 
-JAGUARCORE_API Result<void> MSPProblem::Restore(const MSPSolution& solution)
+JAGUARCORE_API Result<bool> MSPProblem::Restore(const MSPSolution& solution)
 {
-    std::size_t layoutCount = 0;
-    for (const MSPLayoutSnapshot& snapshot : solution.layouts)
-        layoutCount = std::max(layoutCount, snapshot.layoutIndex + 1);
-    std::vector<LayoutSlot> newLayouts(layoutCount);
-    std::vector<bool> seen(layoutCount, false);
+    struct PreparedLayout
+    {
+        std::size_t requestedKey = 0;
+        MultiStrip strip{};
+        Layout layout;
+        std::size_t slotIndex = 0;
+        bool preservesKey = false;
+    };
+
     std::vector<std::size_t> remaining(m_Instance.ItemCount(), 0);
     for (std::size_t i = 0; i < remaining.size(); ++i)
         remaining[i] = m_Instance.ItemDemand(i);
 
+    std::unordered_set<std::size_t> seenKeys;
+    std::unordered_set<std::size_t> seenSlots;
+    std::vector<PreparedLayout> prepared;
+    prepared.reserve(solution.layouts.size());
     for (const MSPLayoutSnapshot& snapshot : solution.layouts)
     {
-        if (snapshot.layoutIndex >= newLayouts.size() ||
-            seen[snapshot.layoutIndex] ||
+        std::size_t requestedSlot = 0;
+        std::uint32_t requestedGeneration = 0;
+        splitLayoutKey(snapshot.layoutIndex, requestedSlot, requestedGeneration);
+        if (requestedSlot == 0 || (requestedGeneration & 1U) == 0 ||
+            !seenKeys.insert(snapshot.layoutIndex).second ||
+            !seenSlots.insert(requestedSlot).second ||
             !std::isfinite(snapshot.strip.maxWidth) ||
             !std::isfinite(snapshot.strip.fixedHeight) ||
             !std::isfinite(snapshot.strip.width) ||
             snapshot.strip.maxWidth <= 0.0 ||
             snapshot.strip.fixedHeight <= 0.0 ||
             snapshot.strip.width <= 0.0 ||
-            snapshot.strip.width > snapshot.strip.maxWidth ||
             !near(snapshot.strip.maxWidth, m_Instance.BaseStrip().maxWidth) ||
             !near(snapshot.strip.fixedHeight,
                   m_Instance.BaseStrip().fixedHeight) ||
@@ -311,13 +405,13 @@ JAGUARCORE_API Result<void> MSPProblem::Restore(const MSPSolution& solution)
             !sameStripContainer(snapshot.layoutSnapshot.container,
                                 snapshot.strip))
         {
-            return Result<void>::FromError(
+            return Result<bool>::FromError(
                 {ErrorCode::SnapshotMismatch, "MSPP solution strip is invalid"});
         }
         Layout restored(snapshot.layoutSnapshot.container);
         const auto restoredResult = restored.Restore(snapshot.layoutSnapshot);
         if (!restoredResult.HasValue())
-            return restoredResult;
+            return Result<bool>::FromError(restoredResult.GetError());
         for (const LayoutPlacementSnapshot& placement :
              snapshot.layoutSnapshot.placements)
         {
@@ -325,21 +419,99 @@ JAGUARCORE_API Result<void> MSPProblem::Restore(const MSPSolution& solution)
             if (itemIndex >= remaining.size() || remaining[itemIndex] == 0 ||
                 !sameItemDefinition(m_Instance.GetItem(itemIndex), placement.placedItem))
             {
-                return Result<void>::FromError(
+                return Result<bool>::FromError(
                     {ErrorCode::SnapshotMismatch,
                      "MSPP solution contains an item beyond demand"});
             }
             --remaining[itemIndex];
         }
-        newLayouts[snapshot.layoutIndex] =
-            LayoutSlot{std::move(restored), snapshot.strip};
-        seen[snapshot.layoutIndex] = true;
+        prepared.push_back(PreparedLayout{
+            snapshot.layoutIndex, snapshot.strip, std::move(restored)});
+    }
+
+    // Rust iterates its SecondaryMap by slot index. Keep stale-key reinsertions
+    // deterministic even when a C++ solution vector is ordered differently.
+    std::sort(prepared.begin(), prepared.end(),
+              [](const PreparedLayout& left, const PreparedLayout& right) {
+                  return (left.requestedKey & kLayoutKeyPartMask) <
+                         (right.requestedKey & kLayoutKeyPartMask);
+              });
+
+    std::vector<bool> preservedCurrent(m_Layouts.size(), false);
+    for (PreparedLayout& layout : prepared)
+    {
+        std::size_t slotIndex = 0;
+        std::uint32_t generation = 0;
+        splitLayoutKey(layout.requestedKey, slotIndex, generation);
+        if (GetLayout(layout.requestedKey))
+        {
+            layout.slotIndex = slotIndex;
+            layout.preservesKey = true;
+            preservedCurrent[slotIndex] = true;
+        }
+    }
+
+    bool layoutKeysChanged = false;
+    std::vector<LayoutSlot> newLayouts(m_Layouts.size());
+    std::vector<std::size_t> newFreeLayoutIndices = m_FreeLayoutIndices;
+    for (std::size_t slotIndex = 0; slotIndex < m_Layouts.size(); ++slotIndex)
+    {
+        const LayoutSlot& current = m_Layouts[slotIndex];
+        newLayouts[slotIndex].generation = current.generation;
+        if (current.layout.has_value() && !preservedCurrent[slotIndex])
+        {
+            newLayouts[slotIndex].generation =
+                nextLayoutGeneration(current.generation);
+            newFreeLayoutIndices.push_back(slotIndex);
+            layoutKeysChanged = true;
+        }
+    }
+
+    for (PreparedLayout& layout : prepared)
+    {
+        std::size_t slotIndex = layout.slotIndex;
+        if (!layout.preservesKey)
+        {
+            layoutKeysChanged = true;
+            if (newFreeLayoutIndices.empty())
+            {
+                slotIndex = newLayouts.size();
+                newLayouts.emplace_back();
+            }
+            else
+            {
+                slotIndex = newFreeLayoutIndices.back();
+                newFreeLayoutIndices.pop_back();
+            }
+        }
+
+        const std::uint32_t generation = newLayouts[slotIndex].generation | 1U;
+        if (layout.preservesKey)
+        {
+            LayoutSlot* current = GetLayout(layout.requestedKey);
+            if (current)
+            {
+                const auto restored =
+                    current->layout->Restore(layout.layout.Save());
+                if (restored.HasValue())
+                {
+                    LayoutSlot preserved = std::move(m_Layouts[slotIndex]);
+                    preserved.strip = layout.strip;
+                    preserved.generation = generation;
+                    newLayouts[slotIndex] = std::move(preserved);
+                    continue;
+                }
+            }
+        }
+        newLayouts[slotIndex] = LayoutSlot{
+            std::move(layout.layout), layout.strip, generation};
     }
 
     m_Layouts = std::move(newLayouts);
+    m_FreeLayoutIndices = std::move(newFreeLayoutIndices);
     m_RemainingDemand = std::move(remaining);
     DebugAssertMSPSolution(*this);
-    return Result<void>::FromValue();
+    return Result<bool>::FromValue(layoutKeysChanged);
 }
 
 JAGUARCORE_API std::size_t MSPProblem::RemainingDemand(
@@ -373,29 +545,42 @@ JAGUARCORE_API double MSPProblem::StripWidth(std::size_t layoutIndex) const noex
     return slot ? slot->strip.width : 0.0;
 }
 
-JAGUARCORE_API double MSPProblem::TotalStripWidth() const noexcept
+JAGUARCORE_API std::vector<std::size_t> MSPProblem::ExtendableStrips() const
 {
-    double result = 0.0;
-    for (const LayoutSlot& slot : m_Layouts)
+    std::vector<std::size_t> result;
+    for (std::size_t slotIndex = 0; slotIndex < m_Layouts.size(); ++slotIndex)
     {
-        if (slot.layout.has_value())
-            result += slot.strip.width;
+        const LayoutSlot& slot = m_Layouts[slotIndex];
+        if (slot.layout.has_value() && slot.strip.width < slot.strip.maxWidth)
+            result.push_back(makeLayoutKey(slotIndex, slot.generation));
     }
     return result;
 }
 
+JAGUARCORE_API double MSPProblem::TotalStripWidth() const noexcept
+{
+    float result = 0.0F;
+    for (const LayoutSlot& slot : m_Layouts)
+    {
+        if (slot.layout.has_value())
+            result += static_cast<float>(slot.strip.width);
+    }
+    return static_cast<double>(result);
+}
+
 JAGUARCORE_API double MSPProblem::Density() const
 {
-    double containerArea = 0.0;
-    double itemArea = 0.0;
+    float containerArea = 0.0f;
+    float itemArea = 0.0f;
     for (const LayoutSlot& slot : m_Layouts)
     {
         if (!slot.layout.has_value())
             continue;
-        containerArea += slot.strip.fixedHeight * slot.strip.width;
-        itemArea += slot.layout->Density() * slot.layout->GetContainer().Area();
+        containerArea +=
+            static_cast<float>(slot.layout->GetContainer().Area());
+        itemArea += slot.layout->PlacedItemArea();
     }
-    return containerArea > 0.0 ? itemArea / containerArea : 0.0;
+    return static_cast<double>(itemArea / containerArea);
 }
 
 JAGUARCORE_API const MSPInstance& MSPProblem::Instance() const noexcept

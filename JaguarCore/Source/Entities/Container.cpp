@@ -12,11 +12,22 @@ constexpr std::size_t MAX_QUALITIES = 10;
 
 Rect2d squareBounds(const Rect2d& box)
 {
-    const double side = std::max(box.Width(), box.Height());
-    const double dx = (side - box.Width()) * 0.5;
-    const double dy = (side - box.Height()) * 0.5;
-    return Rect2d{box.xMin - dx, box.yMin - dy,
-                  box.xMin - dx + side, box.yMin - dy + side};
+    const float xMin = static_cast<float>(box.xMin);
+    const float yMin = static_cast<float>(box.yMin);
+    const float xMax = static_cast<float>(box.xMax);
+    const float yMax = static_cast<float>(box.yMax);
+    const float width = xMax - xMin;
+    const float height = yMax - yMin;
+    float dx = 0.0F;
+    float dy = 0.0F;
+    if (height < width)
+        dy = (width - height) * 0.5F;
+    else if (width < height)
+        dx = (height - width) * 0.5F;
+    return Rect2d{static_cast<double>(xMin - dx),
+                  static_cast<double>(yMin - dy),
+                  static_cast<double>(xMax + dx),
+                  static_cast<double>(yMax + dy)};
 }
 }
 
@@ -54,11 +65,6 @@ JAGUARCORE_API Result<Container> Container::Create(
             return Result<Container>::FromError(
                 {ErrorCode::InvalidInput,
                  "container quality zones must have unique qualities below 10"});
-        }
-        if (zone.shapes.empty())
-        {
-            return Result<Container>::FromError(
-                {ErrorCode::InvalidInput, "container quality zone is empty"});
         }
         qualitySeen[zone.quality] = true;
     }
@@ -111,6 +117,11 @@ JAGUARCORE_API const OriginalShape& Container::GetOriginalShape() const noexcept
 JAGUARCORE_API const SimplePolygon& Container::CollisionShape() const noexcept
 {
     return *m_Data->collisionOuter;
+}
+
+JAGUARCORE_API const std::vector<QualityZone>& Container::QualityZones() const noexcept
+{
+    return m_Data->qualityZones;
 }
 
 JAGUARCORE_API const Rect2d& Container::Bounds() const noexcept

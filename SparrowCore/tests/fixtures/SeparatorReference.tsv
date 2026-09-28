@@ -1,0 +1,4 @@
+# C++ SparrowCore separator regression after Rust worker and float-ordering parity.
+# seed workers item rotation translation_x translation_y
+42 2 0 0.0 0.33124297857284546 0.63230562210083008
+42 2 1 0.0 4.6692357063293457 0.11228921264410019

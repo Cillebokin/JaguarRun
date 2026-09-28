@@ -2,12 +2,12 @@
 
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <utility>
 
 namespace
 {
 constexpr float TWO_PI = 6.28318530717958647692F;
+constexpr std::size_t ROT_N_SAMPLES = 16U;
 
 sparrow::Result<sparrow::RotationDistribution> InvalidRotation(const char* message)
 {
@@ -34,8 +34,18 @@ Result<RotationDistribution> RotationDistribution::FromItem(const jaguar::Item& 
         return Result<RotationDistribution>::FromValue(
             RotationDistribution{Kind::ROTATION_KIND_NONE, {}});
     case jaguar::RotationMode::Continuous:
+    {
+        std::vector<float> radians;
+        radians.reserve(ROT_N_SAMPLES);
+        for (std::size_t index = 0U; index < ROT_N_SAMPLES; ++index)
+        {
+            radians.push_back(TWO_PI * static_cast<float>(index)
+                              / static_cast<float>(ROT_N_SAMPLES));
+        }
         return Result<RotationDistribution>::FromValue(
-            RotationDistribution{Kind::ROTATION_KIND_CONTINUOUS, {}});
+            RotationDistribution{Kind::ROTATION_KIND_CONTINUOUS,
+                                  std::move(radians)});
+    }
     case jaguar::RotationMode::Discrete:
     {
         if (allowedRotation.radians.empty())
@@ -69,19 +79,15 @@ float RotationDistribution::Sample(SparrowRng& rng) const noexcept
     case Kind::ROTATION_KIND_NONE:
         return 0.0F;
     case Kind::ROTATION_KIND_CONTINUOUS:
-        return TWO_PI * rng.Uniform01F32();
+    {
+        const auto index = rng.UniformIndex(
+            static_cast<std::uint32_t>(m_DiscreteRadians.size()));
+        return m_DiscreteRadians[index];
+    }
     case Kind::ROTATION_KIND_DISCRETE:
     {
-        const std::uint64_t bound =
-            static_cast<std::uint64_t>(m_DiscreteRadians.size());
-        const std::uint64_t threshold =
-            (std::numeric_limits<std::uint64_t>::max() % bound + 1U) % bound;
-        std::uint64_t randomValue = 0;
-        do
-        {
-            randomValue = rng.NextU64();
-        } while (randomValue < threshold);
-        const std::uint64_t index = randomValue % bound;
+        const auto index = rng.UniformIndex(
+            static_cast<std::uint32_t>(m_DiscreteRadians.size()));
         return m_DiscreteRadians[static_cast<std::size_t>(index)];
     }
     }

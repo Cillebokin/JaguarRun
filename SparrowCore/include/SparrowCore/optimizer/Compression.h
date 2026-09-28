@@ -16,6 +16,7 @@ struct CompressionResult
 {
     jaguar::SPSolution solution;
     LbfMetrics metrics;
+    OptimizationHistory history;
 };
 
 SPARROWCORE_API Result<CompressionResult> Compress(

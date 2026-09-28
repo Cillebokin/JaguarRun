@@ -3,13 +3,16 @@
 
 #include "JaguarCore/IO/Importer.h"
 #include "JaguarCore/IO/JsonCodec.h"
+#include "JaguarCore/IO/SvgExport.h"
 #include "JaguarCore/Version.h"
 
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <string>
 
 namespace
@@ -17,7 +20,9 @@ namespace
 void PrintUsage()
 {
     std::cerr << "usage: SparrowCli --input <instance.json> "
-                 "--output <solution.json> [--seed <u64>] [--samples <n>]\n";
+                 "--output <solution.json> [--svg <layout.svg>] "
+                 "[--seed <u64>] [--samples <n>] [--time-ms <n>] "
+                 "[--early-termination]\n";
 }
 
 bool ParseUnsigned(const std::string& text, std::uint64_t& value)
@@ -54,13 +59,22 @@ int main(int argc, char** argv)
 {
     std::string inputPath;
     std::string outputPath;
+    std::string svgPath;
     std::uint64_t seed = 0U;
     std::uint64_t samples = 1000U;
+    std::uint64_t timeMs = 0U;
+    bool earlyTermination = false;
     for (int index = 1; index < argc; ++index)
     {
         const std::string argument = argv[index];
+        if (argument == "--early-termination")
+        {
+            earlyTermination = true;
+            continue;
+        }
         if ((argument == "--input" || argument == "--output"
-             || argument == "--seed" || argument == "--samples")
+             || argument == "--svg" || argument == "--seed"
+             || argument == "--samples" || argument == "--time-ms")
             && index + 1 < argc)
         {
             const std::string value = argv[++index];
@@ -72,6 +86,10 @@ int main(int argc, char** argv)
             {
                 outputPath = value;
             }
+            else if (argument == "--svg")
+            {
+                svgPath = value;
+            }
             else if (argument == "--seed")
             {
                 if (!ParseUnsigned(value, seed))
@@ -80,9 +98,17 @@ int main(int argc, char** argv)
                     return 2;
                 }
             }
-            else if (!ParseUnsigned(value, samples) || samples == 0U)
+            else if (argument == "--samples")
             {
-                std::cerr << "invalid samples\n";
+                if (!ParseUnsigned(value, samples) || samples == 0U)
+                {
+                    std::cerr << "invalid samples\n";
+                    return 2;
+                }
+            }
+            else if (!ParseUnsigned(value, timeMs))
+            {
+                std::cerr << "invalid time-ms\n";
                 return 2;
             }
         }
@@ -115,18 +141,21 @@ int main(int argc, char** argv)
 
     sparrow::SparrowConfig config;
     config.seed = seed;
-    config.constructor.seed = seed;
     config.constructor.nContainerSamples = static_cast<std::size_t>(samples);
-    config.constructor.nFocussedSamples = static_cast<std::size_t>(samples / 4U);
-    config.exploration.maxIterations = 16U;
-    config.exploration.maxConsecutiveFailures = 4U;
-    config.exploration.separator.nContainerSamples = 64U;
-    config.exploration.separator.nFocussedSamples = 32U;
-    config.compression.maxIterations = 32U;
-    config.compression.maxConsecutiveFailures = 4U;
-    config.compression.separator.nContainerSamples = 64U;
-    config.compression.separator.nFocussedSamples = 32U;
-    config.terminator.maxIterations = 1000U;
+    if (earlyTermination)
+    {
+        config.exploration.maxConsecutiveFailures = 10U;
+        config.compression.decayStrategy =
+            sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    }
+    if (timeMs > static_cast<std::uint64_t>(
+            std::numeric_limits<std::chrono::milliseconds::rep>::max()))
+    {
+        std::cerr << "time-ms is too large\n";
+        return 2;
+    }
+    config.terminator.maxDuration = std::chrono::milliseconds{
+        static_cast<std::chrono::milliseconds::rep>(timeMs)};
 
     const auto optimized = sparrow::Optimize(instance.Value(), config);
     if (!optimized.HasValue())
@@ -162,6 +191,41 @@ int main(int argc, char** argv)
     {
         std::cerr << "output write failed\n";
         return 8;
+    }
+
+    if (!svgPath.empty())
+    {
+        jaguar::Layout layout(optimized.Value().solution.layoutSnapshot.container);
+        const auto restored = layout.Restore(
+            optimized.Value().solution.layoutSnapshot);
+        if (!restored.HasValue())
+        {
+            std::cerr << "layout restore failed: "
+                      << restored.GetError().message << '\n';
+            return 9;
+        }
+        jaguar::SvgExportOptions svgOptions;
+        svgOptions.title = "SparrowCore Layout";
+        svgOptions.drawSurrogates = true;
+        const auto svg = jaguar::ExportLayoutSvg(layout, svgOptions);
+        if (!svg.HasValue())
+        {
+            std::cerr << "SVG export failed: "
+                      << svg.GetError().message << '\n';
+            return 9;
+        }
+        std::ofstream svgOutput(svgPath, std::ios::binary | std::ios::trunc);
+        if (!svgOutput.is_open())
+        {
+            std::cerr << "cannot write SVG: " << svgPath << '\n';
+            return 9;
+        }
+        svgOutput << svg.Value();
+        if (!svgOutput.good())
+        {
+            std::cerr << "SVG write failed\n";
+            return 9;
+        }
     }
     std::cout << "SparrowCore " << sparrow::Version()
               << " / JaguarCore " << jaguar::Version()

@@ -29,9 +29,16 @@ public:
     static Result<CollisionTracker> Create(const jaguar::Layout& layout);
 
     Result<void> Rebuild(const jaguar::Layout& layout);
+    Result<void> UpdateMovedItem(
+        const jaguar::Layout& layout,
+        jaguar::PlacedItemHandle previousHandle,
+        jaguar::PlacedItemHandle newHandle);
     CollisionTrackerSnapshot Save() const;
     Result<void> Restore(const CollisionTrackerSnapshot& snapshot,
                          const jaguar::Layout& layout);
+    Result<void> RestoreButKeepWeights(
+        const CollisionTrackerSnapshot& snapshot,
+        const jaguar::Layout& layout);
 
     std::size_t ItemCount() const noexcept;
     std::optional<std::size_t> IndexForHandle(
@@ -49,7 +56,13 @@ public:
         const jaguar::Item& item,
         const jaguar::Transform2d& transform,
         std::size_t movingIndex) const;
-    void UpdateWeights(float collisionMultiplier = 1.2F,
+    Result<float> EvaluateCandidateLoss(
+        const jaguar::Layout& layout,
+        const jaguar::Item& item,
+        const jaguar::Transform2d& transform,
+        std::size_t movingIndex) const;
+    void UpdateWeights() noexcept;
+    void UpdateWeights(float collisionMultiplier,
                        float clearDecay = 0.95F) noexcept;
 
 private:

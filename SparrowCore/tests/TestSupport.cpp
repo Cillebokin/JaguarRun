@@ -11,6 +11,7 @@ bool RunBppLbfTests(std::ostream& output);
 bool RunQuantifyTests(std::ostream& output);
 bool RunSeparatorTests(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
+bool RunWasmTests(std::ostream& output);
 
 int main()
 {
@@ -55,5 +56,9 @@ int main()
     {
         return 1;
     }
-    return RunExplorationTests(std::cerr) ? 0 : 1;
+    if (!RunExplorationTests(std::cerr))
+    {
+        return 1;
+    }
+    return RunWasmTests(std::cerr) ? 0 : 1;
 }

@@ -131,6 +131,8 @@ bool sameLayoutSnapshot(const LayoutSnapshot& first,
 {
     if (!first.container.SameBase(second.container) ||
         first.placements.size() != second.placements.size() ||
+        first.slotGenerations != second.slotGenerations ||
+        first.freeSlotIndices != second.freeSlotIndices ||
         first.cdeSnapshot.dynamicHazards.size() !=
             second.cdeSnapshot.dynamicHazards.size())
         return false;
@@ -256,19 +258,25 @@ JAGUARCORE_API Result<void> ValidateBPSolution(
     const BPSolution current = problem.Save();
     if (current.layouts.size() != solution.layouts.size())
         return mismatch("BP solution layout count differs from current state");
+    std::vector<bool> matchedLayouts(solution.layouts.size(), false);
     for (const BPLayoutSnapshot& expected : current.layouts)
     {
-        const auto actual = std::find_if(
-            solution.layouts.begin(), solution.layouts.end(),
-            [&expected](const BPLayoutSnapshot& candidate) {
-                return candidate.layoutIndex == expected.layoutIndex &&
-                       candidate.binIndex == expected.binIndex &&
-                       sameLayoutSnapshot(candidate.layoutSnapshot,
-                                          expected.layoutSnapshot);
-            });
-        if (actual == solution.layouts.end())
+        std::size_t actualIndex = 0;
+        while (actualIndex < solution.layouts.size())
+        {
+            const BPLayoutSnapshot& candidate = solution.layouts[actualIndex];
+            if (!matchedLayouts[actualIndex] &&
+                candidate.binIndex == expected.binIndex &&
+                sameLayoutSnapshot(candidate.layoutSnapshot,
+                                   expected.layoutSnapshot))
+                break;
+            ++actualIndex;
+        }
+        if (actualIndex == solution.layouts.size())
             return mismatch("BP solution layout differs from current state");
-        const auto valid = validateStandaloneSnapshot(actual->layoutSnapshot);
+        matchedLayouts[actualIndex] = true;
+        const auto valid = validateStandaloneSnapshot(
+            solution.layouts[actualIndex].layoutSnapshot);
         if (!valid.HasValue())
             return valid;
     }
@@ -316,25 +324,31 @@ JAGUARCORE_API Result<void> ValidateMSPSolution(
     const MSPSolution current = problem.Save();
     if (current.layouts.size() != solution.layouts.size())
         return mismatch("MSP solution layout count differs from current state");
+    std::vector<bool> matchedLayouts(solution.layouts.size(), false);
     for (const MSPLayoutSnapshot& expected : current.layouts)
     {
-        const auto actual = std::find_if(
-            solution.layouts.begin(), solution.layouts.end(),
-            [&expected](const MSPLayoutSnapshot& candidate) {
-                return candidate.layoutIndex == expected.layoutIndex &&
-                       near(candidate.strip.maxWidth, expected.strip.maxWidth) &&
-                       near(candidate.strip.fixedHeight, expected.strip.fixedHeight) &&
-                       near(candidate.strip.width, expected.strip.width) &&
-                       sameCdeConfig(candidate.strip.cdeConfig,
-                                     expected.strip.cdeConfig) &&
-                       sameShapeModifyConfig(candidate.strip.shapeModifyConfig,
-                                              expected.strip.shapeModifyConfig) &&
-                       sameLayoutSnapshot(candidate.layoutSnapshot,
-                                          expected.layoutSnapshot);
-            });
-        if (actual == solution.layouts.end())
+        std::size_t actualIndex = 0;
+        while (actualIndex < solution.layouts.size())
+        {
+            const MSPLayoutSnapshot& candidate = solution.layouts[actualIndex];
+            if (!matchedLayouts[actualIndex] &&
+                near(candidate.strip.maxWidth, expected.strip.maxWidth) &&
+                near(candidate.strip.fixedHeight, expected.strip.fixedHeight) &&
+                near(candidate.strip.width, expected.strip.width) &&
+                sameCdeConfig(candidate.strip.cdeConfig,
+                              expected.strip.cdeConfig) &&
+                sameShapeModifyConfig(candidate.strip.shapeModifyConfig,
+                                      expected.strip.shapeModifyConfig) &&
+                sameLayoutSnapshot(candidate.layoutSnapshot,
+                                   expected.layoutSnapshot))
+                break;
+            ++actualIndex;
+        }
+        if (actualIndex == solution.layouts.size())
             return mismatch("MSP solution layout differs from current state");
-        const auto valid = validateStandaloneSnapshot(actual->layoutSnapshot);
+        matchedLayouts[actualIndex] = true;
+        const auto valid = validateStandaloneSnapshot(
+            solution.layouts[actualIndex].layoutSnapshot);
         if (!valid.HasValue())
             return valid;
     }

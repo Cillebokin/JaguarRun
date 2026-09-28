@@ -1,14 +1,14 @@
 use crate::eval::lbf_evaluator::LBFEvaluator;
 use crate::eval::sample_eval::SampleEval;
-use crate::sample::search::{search_placement, SampleConfig};
+use crate::sample::search::{SampleConfig, search_placement};
 use itertools::Itertools;
-use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem};
 use jagua_rs::Instant;
+use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem};
 use log::debug;
 use ordered_float::OrderedFloat;
+use rand::rngs::Xoshiro256PlusPlus;
 use std::cmp::Reverse;
 use std::iter;
-use rand::rngs::Xoshiro256PlusPlus;
 
 /// The initial-placement heuristic could not construct a solution.
 /// This is not a proof that the instance is infeasible.
@@ -19,7 +19,11 @@ pub struct ConstructionError {
 
 impl std::fmt::Display for ConstructionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "could not construct an initial placement for item {}", self.item_idx)
+        write!(
+            f,
+            "could not construct an initial placement for item {}",
+            self.item_idx
+        )
     }
 }
 
@@ -33,12 +37,9 @@ pub struct LBFBuilder {
 }
 
 impl LBFBuilder {
-    pub fn new(
-        instance: SPInstance,
-        rng: Xoshiro256PlusPlus,
-        sample_config: SampleConfig,
-    ) -> Self {
-        let prob = SPProblem::new(instance.clone());
+    pub fn new(instance: SPInstance, rng: Xoshiro256PlusPlus, sample_config: SampleConfig) -> Self {
+        let prob = SPProblem::new(instance.clone())
+            .expect("validated Sparrow instance must produce its base strip container");
 
         Self {
             instance,
@@ -67,14 +68,20 @@ impl LBFBuilder {
             })
             .collect_vec();
 
-        debug!("[CONSTR] placing items in order: {:?}",sorted_item_indices);
+        debug!("[CONSTR] placing items in order: {:?}", sorted_item_indices);
 
         for item_idx in sorted_item_indices {
             self.place_item(item_idx)?;
         }
 
-        self.prob.fit_strip();
-        debug!("[CONSTR] placed all items in width: {:.3} (in {:?})",self.prob.strip_width(), start.elapsed());
+        self.prob
+            .fit_strip()
+            .expect("fitting a constructed Sparrow strip must remain valid");
+        debug!(
+            "[CONSTR] placed all items in width: {:.3} (in {:?})",
+            self.prob.strip_width(),
+            start.elapsed()
+        );
         Ok(self)
     }
 
@@ -82,20 +89,35 @@ impl LBFBuilder {
         loop {
             if let Some(placement) = self.find_placement(item_idx) {
                 self.prob.place_item(placement);
-                debug!("[CONSTR] placing item {}/{} with idx {} at [{}]", self.prob.layout.placed_items.len(), self.instance.total_item_qty(), placement.item_idx, placement.d_transf);
+                debug!(
+                    "[CONSTR] placing item {}/{} with idx {} at [{}]",
+                    self.prob.layout.placed_items.len(),
+                    self.instance.total_item_qty(),
+                    placement.item_idx,
+                    placement.d_transf
+                );
                 return Ok(());
             }
 
             let next_width = self.prob.strip_width() * 1.2;
             // Retain the existing heuristic ceiling, without treating it as infeasibility.
-            let width_limit = 2.0 * self.instance.items.iter()
-                .map(|(item, qty)| item.shape_cd.diameter * *qty as f32)
-                .sum::<f32>();
+            let width_limit = 2.0
+                * self
+                    .instance
+                    .items
+                    .iter()
+                    .map(|(item, qty)| item.shape_cd.diameter * *qty as f32)
+                    .sum::<f32>();
             if next_width >= width_limit {
                 return Err(ConstructionError { item_idx });
             }
-            debug!("[CONSTR] failed to place item with idx {}, expanding strip width", item_idx);
-            self.prob.change_strip_width(next_width);
+            debug!(
+                "[CONSTR] failed to place item with idx {}, expanding strip width",
+                item_idx
+            );
+            self.prob
+                .change_strip_width(next_width)
+                .expect("growing a Sparrow strip must preserve a valid container");
         }
     }
 
@@ -104,13 +126,18 @@ impl LBFBuilder {
         let item = self.instance.item(item_idx);
         let evaluator = LBFEvaluator::new(layout, item);
 
-        let (best_sample, _) = search_placement(layout, item, None, evaluator, self.sample_config, &mut self.rng);
+        let (best_sample, _) = search_placement(
+            layout,
+            item,
+            None,
+            evaluator,
+            self.sample_config,
+            &mut self.rng,
+        );
 
         match best_sample {
-            Some((d_transf, SampleEval::Clear { .. })) => {
-                Some(SPPlacement { item_idx, d_transf })
-            }
-            _ => None
+            Some((d_transf, SampleEval::Clear { .. })) => Some(SPPlacement { item_idx, d_transf }),
+            _ => None,
         }
     }
 }

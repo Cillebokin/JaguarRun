@@ -12,6 +12,9 @@ struct LbfConfig
 {
     std::uint64_t seed = 0;
     std::size_t samplesPerItem = 5000;
+    // Number of distinct candidates retained for the reference two-stage
+    // coordinate-descent refinement.
+    std::size_t nCoordinateDescents = 3;
     double localSearchFraction = 0.2;
     double minTranslationStddevRatio = 0.0005;
     double maxTranslationStddevRatio = 0.01;

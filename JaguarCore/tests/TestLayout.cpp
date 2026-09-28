@@ -59,10 +59,148 @@ jaguar::Item makeItem(std::optional<std::size_t> minQuality = std::nullopt)
 
 void runLayoutTests()
 {
+    jaguar::OriginalShape emptyQualityZoneOuter{
+        Rectangle(0.0, 0.0, 4.0, 4.0),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Deflate,
+        {}};
+    const auto emptyQualityZoneContainer = jaguar::Container::Create(
+        18, std::move(emptyQualityZoneOuter),
+        {jaguar::QualityZone{1, {}}}, jaguar::CDEConfig{});
+    assert(emptyQualityZoneContainer.HasValue());
+
+    jaguar::OriginalShape emptyDiscreteRotationShape{
+        Rectangle(0.0, 0.0, 1.0, 1.0),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Inflate,
+        {}};
+    jaguar::SurrogateConfig emptyDiscreteRotationSurrogate{};
+    emptyDiscreteRotationSurrogate.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+    const auto emptyDiscreteRotationItem = jaguar::Item::Create(
+        20, 1020, std::move(emptyDiscreteRotationShape),
+        emptyDiscreteRotationSurrogate, std::nullopt,
+        {jaguar::RotationMode::Discrete, {}});
+    assert(emptyDiscreteRotationItem.HasValue());
+    assert(emptyDiscreteRotationItem.Value().AllowedRotation().mode ==
+           jaguar::RotationMode::Discrete);
+    assert(emptyDiscreteRotationItem.Value().AllowedRotation().radians.empty());
+
+    jaguar::OriginalShape roundedRotationShape{
+        Rectangle(0.0, 0.0, 1.0, 1.0),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Inflate,
+        {}};
+    const auto roundedRotationItem = jaguar::Item::Create(
+        21, 1021, std::move(roundedRotationShape),
+        emptyDiscreteRotationSurrogate, std::nullopt,
+        {jaguar::RotationMode::Discrete, {1.00000006}});
+    assert(roundedRotationItem.HasValue());
+    assert(roundedRotationItem.Value().AllowedRotation().radians.size() == 1);
+    assert(roundedRotationItem.Value().AllowedRotation().radians[0] ==
+           static_cast<double>(static_cast<float>(1.00000006)));
+
+    jaguar::OriginalShape precisionBoundsShape{
+        Rectangle(-16777216.0, 0.0, 1.0, 2.0),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Deflate,
+        {}};
+    jaguar::CDEConfig precisionBoundsConfig{};
+    const auto precisionBoundsContainer = jaguar::Container::Create(
+        17, std::move(precisionBoundsShape), {}, precisionBoundsConfig);
+    assert(precisionBoundsContainer.HasValue());
+    // Rust computes bbox width and square inflation in f32.
+    assert(precisionBoundsContainer.Value().Bounds().yMin == -8388607.0);
+    assert(precisionBoundsContainer.Value().Bounds().yMax == 8388609.0);
+
     const jaguar::Item item = makeItem();
     assert(std::abs(item.Area() - 4.0) < 1.0e-12);
     assert(item.GetOriginalShape().shape.VertexCount() == 4);
     assert(item.CollisionShape().GetSurrogate() != nullptr);
+
+    auto makeIndexedItem = [](jaguar::ItemIndex index, jaguar::ItemId externalId) {
+        jaguar::OriginalShape original{
+            Rectangle(0.0, 0.0, 2.0, 2.0),
+            jaguar::Transform2d::Identity(),
+            jaguar::ShapeModifyMode::Inflate,
+            {}};
+        jaguar::SurrogateConfig config{};
+        config.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+        const auto created = jaguar::Item::Create(
+            index, externalId, std::move(original), config);
+        assert(created.HasValue());
+        return created.Value();
+    };
+    jaguar::Layout distinctItemLayout(makeContainer(22, 30.0));
+    assert(distinctItemLayout.Items().empty());
+    const auto itemIndex5First = makeIndexedItem(5, 1005);
+    const auto itemIndex6 = makeIndexedItem(6, 1006);
+    const auto itemIndex5Later = makeIndexedItem(5, 1505);
+    const auto itemIndex5FirstHandle = distinctItemLayout.PlaceItem(
+        itemIndex5First,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0}));
+    const auto itemIndex6Handle = distinctItemLayout.PlaceItem(
+        itemIndex6,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {8.0, 1.0}));
+    const auto itemIndex5LaterHandle = distinctItemLayout.PlaceItem(
+        itemIndex5Later,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {15.0, 1.0}));
+    assert(itemIndex5FirstHandle.HasValue() && itemIndex6Handle.HasValue() &&
+           itemIndex5LaterHandle.HasValue());
+    const auto distinctItems = distinctItemLayout.Items();
+    assert(distinctItems.size() == 2);
+    assert(distinctItems[0].get().Index() == 5);
+    assert(distinctItems[0].get().ExternalId() == 1005);
+    assert(distinctItems[1].get().Index() == 6);
+    assert(distinctItems[1].get().ExternalId() == 1006);
+    assert(distinctItemLayout.RemoveItem(itemIndex5FirstHandle.Value()).HasValue());
+    const auto distinctItemsAfterRemoval = distinctItemLayout.Items();
+    assert(distinctItemsAfterRemoval.size() == 2);
+    assert(distinctItemsAfterRemoval[0].get().Index() == 6);
+    assert(distinctItemsAfterRemoval[1].get().Index() == 5);
+    assert(distinctItemsAfterRemoval[1].get().ExternalId() == 1505);
+
+    auto makeDensityItem = [](jaguar::ItemIndex index, double side) {
+        jaguar::OriginalShape original{
+            Rectangle(0.0, 0.0, side, side),
+            jaguar::Transform2d::Identity(),
+            jaguar::ShapeModifyMode::Inflate,
+            {}};
+        jaguar::SurrogateConfig config{};
+        config.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+        const auto created = jaguar::Item::Create(
+            index, 1100 + index, std::move(original), config);
+        assert(created.HasValue());
+        return created.Value();
+    };
+    jaguar::OriginalShape densityContainerShape{
+        Rectangle(0.0, 0.0, 8192.0, 4096.0),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Deflate,
+        {}};
+    jaguar::CDEConfig densityCdeConfig{};
+    densityCdeConfig.quadtreeDepth = 4;
+    densityCdeConfig.cdThreshold = 8;
+    const auto densityContainer = jaguar::Container::Create(
+        16, std::move(densityContainerShape), {}, densityCdeConfig);
+    assert(densityContainer.HasValue());
+    jaguar::Layout densityLayout(densityContainer.Value());
+    const auto largeDensityItem = makeDensityItem(0, 4096.0);
+    const auto unitDensityItem1 = makeDensityItem(1, 1.0);
+    const auto unitDensityItem2 = makeDensityItem(2, 1.0);
+    assert(densityLayout.PlaceItem(
+               largeDensityItem,
+               jaguar::Transform2d::FromRotationTranslation(0.0, {0.0, 0.0}))
+               .HasValue());
+    assert(densityLayout.PlaceItem(
+               unitDensityItem1,
+               jaguar::Transform2d::FromRotationTranslation(0.0, {5000.0, 100.0}))
+               .HasValue());
+    assert(densityLayout.PlaceItem(
+               unitDensityItem2,
+               jaguar::Transform2d::FromRotationTranslation(0.0, {6000.0, 100.0}))
+               .HasValue());
+    // Rust accumulates these f32 areas in slot order: 2^24 + 1 + 1 rounds to 2^24.
+    assert(densityLayout.Density() == 0.5);
 
     jaguar::Layout layout(makeContainer(10, 10.0));
     const auto invalidPlacement = layout.PlaceItem(
@@ -103,6 +241,19 @@ void runLayoutTests()
         item, jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 2.0}));
     assert(second.HasValue());
     assert(layout.PlacedItemCount() == 2);
+    const auto twoPlacementSnapshot = layout.Save();
+    assert(twoPlacementSnapshot.cdeSnapshot.dynamicHazards.size() == 2);
+    const auto& firstHazard =
+        twoPlacementSnapshot.cdeSnapshot.dynamicHazards[0];
+    const auto& secondHazard =
+        twoPlacementSnapshot.cdeSnapshot.dynamicHazards[1];
+    assert(!(firstHazard.entity == secondHazard.entity));
+    assert(firstHazard.entity.placedItemHandle ==
+           twoPlacementSnapshot.placements[0].handle);
+    assert(secondHazard.entity.placedItemHandle ==
+           twoPlacementSnapshot.placements[1].handle);
+    assert(firstHazard.entity.transform.translation.x == 2.0);
+    assert(secondHazard.entity.transform.translation.x == 5.0);
     assert(layout.Restore(snapshot).HasValue());
     assert(layout.PlacedItemCount() == 1);
     assert(layout.IsFeasible());
@@ -132,8 +283,6 @@ void runLayoutTests()
     const auto acceptableQualityPlacement = qualityOneLayout.PlaceItem(
         qualityItem, jaguar::Transform2d::FromRotationTranslation(0.0, {6.5, 0.5}));
     assert(acceptableQualityPlacement.HasValue());
-    // Rust filters zones with quality < min_quality. A quality-2 zone is
-    // therefore still a collision for an item requiring quality 2.
     assert(!qualityOneLayout.IsFeasible());
 
     jaguar::Layout qualityTwoLayout(
@@ -141,14 +290,14 @@ void runLayoutTests()
     const auto rejectedQualityPlacement = qualityTwoLayout.PlaceItem(
         qualityItem, jaguar::Transform2d::FromRotationTranslation(0.0, {0.5, 0.5}));
     assert(rejectedQualityPlacement.HasValue());
-    assert(qualityTwoLayout.IsFeasible());
+    assert(!qualityTwoLayout.IsFeasible());
 
     const std::vector<std::optional<std::size_t>> requiredQualities{
         std::nullopt, 0, 1, 2, 3};
     const std::vector<bool> qualityOneExpected{
-        false, false, false, true, true};
+        false, false, false, false, false};
     const std::vector<bool> qualityTwoExpected{
-        false, false, false, false, true};
+        false, false, false, false, false};
     for (std::size_t i = 0; i < requiredQualities.size(); ++i)
     {
         const jaguar::Item matrixItem = makeItem(requiredQualities[i]);
@@ -192,6 +341,86 @@ void runLayoutTests()
         assert(rebuiltState.cdeSnapshot.dynamicHazards.size() ==
                state.cdeSnapshot.dynamicHazards.size());
     };
+
+    jaguar::Layout slotMapReuseLayout(makeContainer(16, 20.0));
+    const auto firstSlotHandle = slotMapReuseLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0}));
+    const auto secondSlotHandle = slotMapReuseLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 1.0}));
+    assert(firstSlotHandle.HasValue() && secondSlotHandle.HasValue());
+    assert(firstSlotHandle.Value().index == 1);
+    assert(firstSlotHandle.Value().generation == 1);
+    assert(slotMapReuseLayout.RemoveItem(firstSlotHandle.Value()).HasValue());
+    assert(slotMapReuseLayout.RemoveItem(secondSlotHandle.Value()).HasValue());
+    const auto reusedMostRecentSlot = slotMapReuseLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {9.0, 1.0}));
+    assert(reusedMostRecentSlot.HasValue());
+    assert(reusedMostRecentSlot.Value().index == secondSlotHandle.Value().index);
+    assert(reusedMostRecentSlot.Value().generation ==
+           secondSlotHandle.Value().generation + 2);
+
+    const auto slotMapReuseSnapshot = slotMapReuseLayout.Save();
+    assert(slotMapReuseLayout.RemoveItem(reusedMostRecentSlot.Value()).HasValue());
+    jaguar::Layout restoredSlotMapReuseLayout(slotMapReuseSnapshot.container);
+    assert(restoredSlotMapReuseLayout.Restore(slotMapReuseSnapshot).HasValue());
+    const auto reusedAfterRestore = restoredSlotMapReuseLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {13.0, 1.0}));
+    assert(reusedAfterRestore.HasValue());
+    assert(reusedAfterRestore.Value().index == firstSlotHandle.Value().index);
+    assert(reusedAfterRestore.Value().generation ==
+           firstSlotHandle.Value().generation + 2);
+    assert(!restoredSlotMapReuseLayout.RemoveItem(
+                firstSlotHandle.Value())
+                .HasValue());
+    assert(!restoredSlotMapReuseLayout.RemoveItem(
+                secondSlotHandle.Value())
+                .HasValue());
+    assert(restoredSlotMapReuseLayout.RemoveItem(
+               reusedMostRecentSlot.Value())
+               .HasValue());
+
+    jaguar::Layout cdeRestoreLayout(makeContainer(18, 20.0));
+    const auto cdeRestoreHandleA = cdeRestoreLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0}));
+    const auto cdeRestoreHandleB = cdeRestoreLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 1.0}));
+    assert(cdeRestoreHandleA.HasValue() && cdeRestoreHandleB.HasValue());
+    const auto cdeRestoreSnapshot = cdeRestoreLayout.Save();
+    assert(cdeRestoreLayout.RemoveItem(cdeRestoreHandleA.Value()).HasValue());
+    assert(cdeRestoreLayout.RemoveItem(cdeRestoreHandleB.Value()).HasValue());
+    const auto cdeRestoreReplacement = cdeRestoreLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {9.0, 1.0}));
+    assert(cdeRestoreReplacement.HasValue());
+    assert(cdeRestoreLayout.Restore(cdeRestoreSnapshot).HasValue());
+    assert(jaguar::ValidateLayoutSnapshot(cdeRestoreLayout,
+                                          cdeRestoreSnapshot).HasValue());
+    assert(cdeRestoreLayout.RemoveItem(cdeRestoreHandleA.Value()).HasValue());
+    assert(cdeRestoreLayout.RemoveItem(cdeRestoreHandleB.Value()).HasValue());
+
+    jaguar::Layout swapAfterRestoreLayout(makeContainer(19, 20.0));
+    const auto swapRestoreFirst = swapAfterRestoreLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0}));
+    const auto swapRestoreSecond = swapAfterRestoreLayout.PlaceItem(
+        item, jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 1.0}));
+    assert(swapRestoreFirst.HasValue() && swapRestoreSecond.HasValue());
+    const auto swapRestoreSnapshot = swapAfterRestoreLayout.Save();
+    assert(swapAfterRestoreLayout.RemoveItem(swapRestoreFirst.Value()).HasValue());
+    assert(swapAfterRestoreLayout.RemoveItem(swapRestoreSecond.Value()).HasValue());
+    assert(swapAfterRestoreLayout
+               .PlaceItem(item,
+                          jaguar::Transform2d::FromRotationTranslation(
+                              0.0, {9.0, 1.0}))
+               .HasValue());
+    assert(swapAfterRestoreLayout.Restore(swapRestoreSnapshot).HasValue());
+    assert(swapAfterRestoreLayout.SwapContainer(makeContainer(20, 21.0)).HasValue());
+    const auto hazardsAfterSwapRestore =
+        swapAfterRestoreLayout.Save().cdeSnapshot.dynamicHazards;
+    assert(hazardsAfterSwapRestore.size() == 2);
+    // jagua-rs re-registers in the restored CDE snapshot order (second, first).
+    assert(hazardsAfterSwapRestore[0].entity.placedItemHandle ==
+           swapRestoreSecond.Value());
+    assert(hazardsAfterSwapRestore[1].entity.placedItemHandle ==
+           swapRestoreFirst.Value());
 
     jaguar::Layout randomLayout(makeContainer(14, 20.0));
     std::vector<jaguar::PlacedItemHandle> activeHandles;

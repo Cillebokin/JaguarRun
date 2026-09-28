@@ -121,6 +121,35 @@ bool TestSampleEvalOrdering(std::ostream& output)
         return false;
     }
 
+    float withinRustUlps = 1.0F;
+    for (int step = 0; step < 4; ++step)
+    {
+        withinRustUlps = std::nextafter(
+            withinRustUlps, std::numeric_limits<float>::infinity());
+    }
+    const sparrow::SampleEval lower{sparrow::SampleKind::SAMPLE_KIND_CLEAR, 1.0F};
+    const sparrow::SampleEval withinUlps{
+        sparrow::SampleKind::SAMPLE_KIND_CLEAR, withinRustUlps};
+    if (!Expect(!sparrow::IsBetterSample(lower, withinUlps)
+                    && !sparrow::IsBetterSample(withinUlps, lower),
+                output,
+                "SampleEval must treat Rust's default four-ULP margin as equal"))
+    {
+        return false;
+    }
+
+    const float outsideRustUlps = std::nextafter(
+        withinRustUlps, std::numeric_limits<float>::infinity());
+    const sparrow::SampleEval outsideUlps{
+        sparrow::SampleKind::SAMPLE_KIND_CLEAR, outsideRustUlps};
+    if (!Expect(sparrow::IsBetterSample(lower, outsideUlps)
+                    && !sparrow::IsBetterSample(outsideUlps, lower),
+                output,
+                "SampleEval must order values beyond Rust's four-ULP margin"))
+    {
+        return false;
+    }
+
     const sparrow::SampleEval nanEval{
         sparrow::SampleKind::SAMPLE_KIND_CLEAR,
         std::numeric_limits<float>::quiet_NaN()};

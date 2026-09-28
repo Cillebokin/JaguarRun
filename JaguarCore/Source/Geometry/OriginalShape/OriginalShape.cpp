@@ -4,7 +4,7 @@ namespace jaguar
 {
 JAGUARCORE_API Result<SimplePolygon> OriginalShape::ConvertToInternal() const
 {
-    const auto transformed = shape.Transformed(preTransform);
+    const auto transformed = shape.TransformedRustF32(preTransform);
     if (!transformed.HasValue())
         return Result<SimplePolygon>::FromError(transformed.GetError());
 

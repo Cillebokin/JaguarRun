@@ -17,6 +17,29 @@ struct Line2d
     Point2d end{};
 };
 
+struct NormalizedOffset
+{
+    ShapeModifyMode mode = ShapeModifyMode::Inflate;
+    double distance = 0.0;
+};
+
+NormalizedOffset normalizeOffsetRustF32(ShapeModifyMode mode,
+                                        double distance) noexcept
+{
+    const double f32Distance =
+        static_cast<double>(static_cast<float>(distance));
+    const double signedDistance =
+        mode == ShapeModifyMode::Inflate ? f32Distance : -f32Distance;
+    return {signedDistance < 0.0 ? ShapeModifyMode::Deflate
+                                 : ShapeModifyMode::Inflate,
+            std::abs(signedDistance)};
+}
+
+Result<SimplePolygon> reimportOffsetPolygon(const SimplePolygon& polygon)
+{
+    return detail::createRustImportedOffsetPolygon(polygon.Vertices());
+}
+
 std::optional<Point2d> intersectLines(const Line2d& first, const Line2d& second)
 {
     const double firstDx = first.end.x - first.start.x;
@@ -95,14 +118,46 @@ void appendRoundedJoin(std::vector<Point2d>& points,
     }
 }
 
+bool samePolygonCycle(const std::vector<Point2d>& first,
+                      const std::vector<Point2d>& second)
+{
+    if (first.size() != second.size())
+        return false;
+    if (first.empty())
+        return true;
+
+    for (std::size_t start = 0; start < second.size(); ++start)
+    {
+        if (!(second[start] == first.front()))
+            continue;
+        bool matches = true;
+        for (std::size_t i = 0; i < first.size(); ++i)
+        {
+            if (!(first[i] == second[(start + i) % second.size()]))
+            {
+                matches = false;
+                break;
+            }
+        }
+        if (matches)
+            return true;
+    }
+    return false;
+}
+
 bool preservesModificationMode(const SimplePolygon& original,
                                const SimplePolygon& modified,
                                ShapeModifyMode mode)
 {
+    if (modified.Area() == original.Area())
+    {
+        return samePolygonCycle(original.Vertices(), modified.Vertices());
+    }
+
     constexpr double tolerance = 1.0e-8;
     if (mode == ShapeModifyMode::Inflate)
     {
-        if (modified.Area() <= original.Area())
+        if (modified.Area() < original.Area())
             return false;
         for (const Point2d& point : original.Vertices())
         {
@@ -112,7 +167,7 @@ bool preservesModificationMode(const SimplePolygon& original,
         return true;
     }
 
-    if (modified.Area() >= original.Area())
+    if (modified.Area() > original.Area())
         return false;
     for (const Point2d& point : modified.Vertices())
     {
@@ -188,12 +243,10 @@ Result<SimplePolygon> fallbackOffsetShape(const SimplePolygon& shape,
         }
     }
 
-    const auto result = SimplePolygon::Create(std::move(offsetPoints));
+    const auto result =
+        detail::createRustImportedOffsetPolygon(std::move(offsetPoints));
     if (!result.HasValue())
-    {
-        return Result<SimplePolygon>::FromError(
-            {ErrorCode::OffsetFailed, result.GetError().message});
-    }
+        return result;
     if (!preservesModificationMode(shape, result.Value(), mode))
     {
         return Result<SimplePolygon>::FromError(
@@ -209,49 +262,66 @@ JAGUARCORE_API Result<SimplePolygon> OffsetShape(const SimplePolygon& shape,
                                                  ShapeModifyMode mode,
                                                  double distance)
 {
-    if (!std::isfinite(distance) || distance < 0.0)
+    const NormalizedOffset offset = normalizeOffsetRustF32(mode, distance);
+    if (!std::isfinite(offset.distance))
     {
         return Result<SimplePolygon>::FromError(
             {ErrorCode::InvalidInput, "invalid offset distance"});
     }
-    if (distance == 0.0)
-        return Result<SimplePolygon>::FromValue(shape);
+    if (offset.distance == 0.0)
+        return reimportOffsetPolygon(shape);
 
-    const auto skeletonOffsets = OffsetShapes(shape, mode, distance);
-    if (skeletonOffsets.HasValue() && !skeletonOffsets.Value().empty())
+    const auto skeletonOffsets = OffsetShapes(
+        shape, offset.mode, offset.distance);
+    if (skeletonOffsets.HasValue())
     {
-        return Result<SimplePolygon>::FromValue(
-            skeletonOffsets.Value().front());
+        if (skeletonOffsets.Value().empty())
+        {
+            return Result<SimplePolygon>::FromError(
+                {ErrorCode::OffsetFailed, "offset resulted in an empty polygon"});
+        }
+        return reimportOffsetPolygon(skeletonOffsets.Value().front());
     }
 
-    return fallbackOffsetShape(shape, mode, distance);
+    return fallbackOffsetShape(shape, offset.mode, offset.distance);
 }
 
 JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
     const SimplePolygon& shape, ShapeModifyMode mode, double distance)
 {
-    if (!std::isfinite(distance) || distance < 0.0)
+    const NormalizedOffset offset = normalizeOffsetRustF32(mode, distance);
+    if (!std::isfinite(offset.distance))
     {
         return Result<std::vector<SimplePolygon>>::FromError(
             {ErrorCode::InvalidInput, "invalid offset distance"});
     }
-    if (distance == 0.0)
+    if (offset.distance == 0.0)
         return Result<std::vector<SimplePolygon>>::FromValue({shape});
 
     const auto skeletonOffsets = detail::roundedStraightSkeletonOffsets(
-        shape, mode == ShapeModifyMode::Inflate ? distance : -distance);
+        shape,
+        offset.mode == ShapeModifyMode::Inflate
+            ? offset.distance
+            : -offset.distance);
     if (!skeletonOffsets.HasValue())
         return skeletonOffsets;
 
     if (skeletonOffsets.Value().empty())
     {
-        const auto fallback = fallbackOffsetShape(shape, mode, distance);
+        if (offset.mode == ShapeModifyMode::Deflate &&
+            offset.distance >= shape.PointOfInaccessibility().radius)
+        {
+            return skeletonOffsets;
+        }
+
+        const auto fallback =
+            fallbackOffsetShape(shape, offset.mode, offset.distance);
         if (fallback.HasValue())
         {
             return Result<std::vector<SimplePolygon>>::FromValue(
                 {fallback.Value()});
         }
-        if (mode == ShapeModifyMode::Inflate)
+        if (offset.mode == ShapeModifyMode::Inflate)
         {
             return Result<std::vector<SimplePolygon>>::FromError(
                 fallback.GetError());
@@ -261,7 +331,7 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
 
     for (const SimplePolygon& polygon : skeletonOffsets.Value())
     {
-        if (!preservesModificationMode(shape, polygon, mode))
+        if (!preservesModificationMode(shape, polygon, offset.mode))
         {
             return Result<std::vector<SimplePolygon>>::FromError(
                 {ErrorCode::OffsetFailed,

@@ -1,6 +1,5 @@
 #include "JaguarCore/Problems/Bpp.h"
 
-#include <limits>
 #include <memory>
 #include <utility>
 
@@ -20,13 +19,12 @@ JAGUARCORE_API Result<BPInstance> BPInstance::Create(
     std::vector<std::size_t> demands,
     std::vector<Bin> bins)
 {
-    if (items.empty() || items.size() != demands.size() || bins.empty())
+    if (items.size() != demands.size())
     {
         return Result<BPInstance>::FromError(
-            {ErrorCode::InvalidInput, "BPP instance has invalid items or bins"});
+            {ErrorCode::InvalidInput, "BPP item and demand counts differ"});
     }
 
-    std::size_t totalDemand = 0;
     std::vector<std::shared_ptr<const Item>> itemPointers;
     itemPointers.reserve(items.size());
     for (std::size_t i = 0; i < items.size(); ++i)
@@ -44,12 +42,6 @@ JAGUARCORE_API Result<BPInstance> BPInstance::Create(
                     {ErrorCode::InvalidInput, "BPP item external IDs must be unique"});
             }
         }
-        if (demands[i] > std::numeric_limits<std::size_t>::max() - totalDemand)
-        {
-            return Result<BPInstance>::FromError(
-                {ErrorCode::InvalidInput, "BPP demand total overflows"});
-        }
-        totalDemand += demands[i];
         itemPointers.push_back(std::make_shared<const Item>(items[i]));
     }
 
@@ -60,20 +52,6 @@ JAGUARCORE_API Result<BPInstance> BPInstance::Create(
             return Result<BPInstance>::FromError(
                 {ErrorCode::InvalidInput, "BPP bin indices must be dense"});
         }
-        for (std::size_t j = 0; j < i; ++j)
-        {
-            if (bins[j].externalId == bins[i].externalId)
-            {
-                return Result<BPInstance>::FromError(
-                    {ErrorCode::InvalidInput, "BPP bin external IDs must be unique"});
-            }
-        }
-    }
-
-    if (totalDemand == 0)
-    {
-        return Result<BPInstance>::FromError(
-            {ErrorCode::InvalidInput, "BPP instance must have positive demand"});
     }
 
     return Result<BPInstance>::FromValue(
@@ -88,6 +66,17 @@ JAGUARCORE_API std::size_t BPInstance::ItemCount() const noexcept
 JAGUARCORE_API const Item& BPInstance::GetItem(ItemIndex index) const noexcept
 {
     return *m_Items[index];
+}
+
+JAGUARCORE_API std::optional<ItemIndex>
+BPInstance::ItemIndexFromExternalId(std::uint64_t externalId) const noexcept
+{
+    for (const auto& item : m_Items)
+    {
+        if (item->ExternalId() == externalId)
+            return item->Index();
+    }
+    return std::nullopt;
 }
 
 JAGUARCORE_API std::size_t BPInstance::ItemDemand(ItemIndex index) const noexcept
@@ -111,5 +100,16 @@ JAGUARCORE_API std::size_t BPInstance::TotalDemand() const noexcept
     for (std::size_t demand : m_Demands)
         result += demand;
     return result;
+}
+
+JAGUARCORE_API double BPInstance::TotalItemArea() const noexcept
+{
+    float result = 0.0F;
+    for (std::size_t i = 0; i < m_Items.size(); ++i)
+    {
+        result += static_cast<float>(m_Items[i]->Area()) *
+                  static_cast<float>(m_Demands[i]);
+    }
+    return static_cast<double>(result);
 }
 }

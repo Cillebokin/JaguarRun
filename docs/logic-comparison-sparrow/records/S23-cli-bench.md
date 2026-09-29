@@ -1,0 +1,88 @@
+# S23. main.rs + cli.rs + bench.rs 逐文件逻辑比对
+**Rust**: `CodeResource/sparrow/src/main.rs`（13 行）+ `cli.rs`（127 行）+ `bench.rs`（229 行）
+**C++**: `SparrowCore/Tools/SparrowCli/Main.cpp`（235 行）+ `SparrowCore/bench/BenchMain.cpp`（223 行，`SparrowCoreBench.pro`）
+**判定**: 基本等价（CLI 主干"读实例→配置覆盖→Optimize→写解/写 SVG"一致；选项集/时间预算语义/输出产物有实质差异；bench 定位不同——Rust 统计基准 vs C++ 回归基准，并行多 run 统计缺失）
+
+## 逐条比对（main.rs + cli.rs vs SparrowCli/Main.cpp）
+
+### 入口选择：`#[cfg(feature = "tui")] mod tui; #[cfg(not)] mod cli;`（main.rs:1-13）
+- C++ 对应：无（单一 CLI 入口；TUI 归 S24）。
+- 判定：C++ 缺失（TUI 变体，归 S24）。
+- 证据与说明：Rust 用 cargo feature 在 CLI/TUI 间切换 `run()`；C++ 入口固定。
+
+### CLI 选项集（Rust MainCli io.rs:15-43 vs C++ Main.cpp:22-25/58-120）
+- 判定：差异（子集+改名）。
+- 证据与说明：
+  | 语义 | Rust | C++ |
+  |---|---|---|
+  | 输入 | `-i/--input <文件>`（实例或 warm-start 解） | `--input <instance.json>`（仅实例，S22 差异 1） |
+  | 全局时限 | `-t/--global-time <秒>`（与 -e/-c 互斥） | `--time-ms <n>`（→`terminator.maxDuration`，非分摊） |
+  | 探索/压缩时限 | `-e` 与 `-c`（互相 requires） | 无 |
+  | 早停 | `-x/--early-termination` | `--early-termination`（一致：maxConsecutiveFailures=10 + FAILURE_BASED，Main.cpp:146-150 vs cli.rs:53-57） |
+  | 种子 | `-s/--rng-seed <u64>` | `--seed <u64>`（一致） |
+  | worker 数 | `--workers <NonZeroUsize>`（覆盖两阶段 n_workers，io.rs:52-56） | 无 |
+  | 输出路径 | 固定约定 `output/final_{name}.{svg,json}`（cli.rs:88/119） | `--output <solution.json>` + `--svg <layout.svg>`（必填 output） |
+  | 采样数 | 无 | `--samples <n>`（默认 1000→constructor.nContainerSamples，Main.cpp:64/144） |
+  | 互斥校验 | clap 声明式（conflicts_with/requires） | 手写 if（无 -t/-e/-c 互斥需要） |
+  - 语义要点：Rust `-t 600` 按 0.8/0.2 分摊到两阶段 time_limit（cli.rs:40-41），无 -t/-e/-c 时默认 600s 同分摊（cli.rs:45-48）；C++ `--time-ms` 直接作为**全局**终止器 maxDuration（Main.cpp:157-158），两阶段 timeLimit 保持默认 9min/60s 不动——时间预算模型不同（S02 差异 1 的应用层体现）。无 `--time-ms` 时 C++ 走默认（9min+60s 相位超时，与 Rust 无时限默认 600s 分摊=480s/120s 数值不同：Rust 默认总 600s，C++ 默认总 600s 但分摊方式不同——C++ expl 540s vs Rust 480s）。
+  - 返回码：Rust anyhow 错误→exit 1；C++ 细分 2/3/4/5/6/7/8/9（Main.cpp:95-228），诊断更强。
+
+### `run()` 流程编排（cli.rs:26-127 vs Main.cpp:58-235）
+- 判定：基本等价（主干一致，节点差异如下）。
+- 证据与说明：
+  1. 读输入：`read_spp_input`（实例+可选解）vs `ImportSPInstanceJson`（仅实例）——S22 差异 1。
+  2. Importer 参数：Rust `Importer::new(cde_config, poly_simpl_tolerance, narrow_concavity_cutoff_ratio)`（cli.rs:78，配置三参数生效）；C++ `const jaguar::Importer importer;`（Main.cpp:133，无参=JaguarCore 默认）——**C++ CLI 不传多边形简化/窄凹闭合容差**，对应 S01 差异 2 的下沉。
+  3. RNG：Rust `config.rng_seed.map_or_else(rand::random, seed)`（cli.rs:62-72，未指定→真随机+warn 日志）；C++ `seed=0` 默认（确定性重跑）——S01 差异 1。
+  4. 监听器：Rust 传 `SvgExporter`（live/intermediate/final 三通道，cli.rs:87-105+109-117）vs C++ `Optimize(instance, config)` 不传 listener（Main.cpp:160），最终 SVG 由 CLI 事后导出（196-229）——S22 差异 4。
+  5. 终止器：Rust `CtrlCTerminator::new()`（cli.rs:107，Ctrl-C 可中断）；C++ `Optimize` 内建默认 terminator（SparrowOptimizer.cpp:237-238，`--time-ms`→maxDuration）——S20 差异 2。
+  6. 输出：Rust 写 `output/final_{name}.json`（实例+解）+ final SVG（经监听器）；C++ 写 `--output` 解 JSON + 可选 `--svg`——S22 差异 2。
+  7. C++ 额外：结尾打印 `SparrowCore/JaguarCore 版本 + width + density` 单行摘要（Main.cpp:230-233）。
+
+### `apply_config_overrides`（io.rs:47-57：seed+workers 覆盖并 warn）
+- C++ 对应：Main.cpp:142-150（seed、samples、early-termination 直接赋值；无 workers 覆盖入口）。
+- 判定：差异（workers 覆盖缺失，见选项表）。
+
+## 逐条比对（bench.rs vs BenchMain.cpp）
+
+### 入口参数（Rust 32-37：`args[1]`=输入文件、`args[2]`=时限秒、`args[3]`=总 run 数 vs C++ 186-192：仅 `all` 一个字面参数）
+- 判定：差异（定位不同）。
+- 证据与说明：Rust 是**统计基准**（多 run 分布）；C++ 是**固定回归基准**（两个内置场景、硬编码种子 42、CSV 一行输出），bench 夹具发现逻辑 FindFixture（BenchMain.cpp:32-47）。
+
+### 多 run 并行执行（Rust 59-128：rayon scope 按物理核/worker 数分批、每 run 独立子种子 `rng.random()`、LBFBuilder→exploration_phase→compression_phase 全程）
+- C++ 对应：无（单 run×2 场景，串行）。
+- 判定：C++ 缺失。
+- 证据与说明：Rust `n_runs_per_iter = physical_cores / n_workers`（59 行），批次内 rayon 线程各自 `Xoshiro256PlusPlus::seed_from_u64(rng.next_u64())`（83/87 行）派生独立流；C++ `RunBenchmark` 只调一次 `sparrow::Optimize`（150 行）。影响：性能/收敛分布对比（best/median/stddev）在 C++ 不可得——这是"基准场景覆盖面"的核心差距：C++ 覆盖的是**确定性回归**（checksum 锁定解指纹，BenchMain.cpp:67-82 FNV 哈希 strip.width+每 placement 的 item/transform），Rust 覆盖的是**统计性能**。
+
+### 基准场景覆盖
+- 判定：差异。
+- 证据与说明：Rust：任意用户实例（argv 传入）、time_limit 可调、n_runs 可调、输出逐 run SVG+best SVG+widths/usages 分布统计（140-169）。C++：两个内置场景 `lbf_spp_small`（夹具 JSON，LbfSppSmall.json）+ `lbf_spp_large`（程序生成 8 类矩形，MakeLargeInstance，84-125 行），固定小预算（maxIterations 256/512、strike 2、noImprovement 6，130-148 行），输出 CSV 指标行（169-181 行：版本/种子/样本数/放置数/剩余需求/宽度/密度/耗时/可行率/surrogate 拒绝数/精确碰撞数/checksum）。C++ 额外字段：surrogateRejectCount/exactCollisionCount/exactCollisionLayout/checksum；Rust 额外产物：分布统计与多 run SVG。
+
+### 统计函数（Rust 176-217：`calculate_percentile`（Excel 公式插值）/`calculate_median`/`calculate_average`/`calculate_stddev`）
+- C++ 对应：无。
+- 判定：C++ 缺失（随统计基准缺失）。
+
+### `get_git_commit_hash`（Rust 219-229）
+- C++ 对应：`sparrow::Version()`/`jaguar::Version()`（BenchMain.cpp:169-170）。
+- 判定：差异（等价意图）。
+- 证据与说明：两侧都做"输出版本指纹"；Rust 取 git HEAD，C++ 取编译期版本串。
+
+### 结果导出（Rust 115-119/140-146：每 run final_bench_{i}.svg + best SVG vs C++：仅 CSV，无 SVG）
+- 判定：C++ 缺失。
+
+### C++ 额外：`SolutionChecksum`（BenchMain.cpp:67-82）
+- 判定：C++ 额外。
+- 证据与说明：FNV-1a 哈希逐 placement 的 (itemIndex, handle index/generation, rotation, x, y)——为回归比对提供解级指纹，Rust 无此机制（靠 density 数值比对）。
+
+## 差异汇总表
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| 1 | CLI 选项集（-t/-e/-c 分摊模型、--workers、warm-start 输入） | 差异 | C++ 无相位级时限/worker 覆盖；`--time-ms` 走全局终止器而非 0.8/0.2 分摊；默认时限数值不同（expl 540s vs 480s） | io.rs:15-43 vs Main.cpp:22-25 |
+| 2 | Importer 参数传递（cde/poly_simpl/narrow_concavity） | 差异 | C++ CLI 无参构造，导入容差走 JaguarCore 默认；Rust 用 sparrow 配置值 | cli.rs:78 vs Main.cpp:133 |
+| 3 | RNG 缺省（真随机 vs seed=0） | 差异 | C++ 默认可复现；Rust 默认随机+日志 | cli.rs:62-72 vs Main.cpp:63/143 |
+| 4 | bench 定位：多 run 统计基准 vs 固定回归基准 | 差异 | C++ 无多 run/并行/分布统计（percentile/median/stddev 均缺）；有 checksum 指纹与 surrogate/碰撞计数 | bench.rs:59-128/176-217 vs BenchMain.cpp:127-183 |
+| 5 | bench 场景覆盖（任意实例×N runs vs 2 内置场景） | 差异 | C++ 不能对用户实例跑基准 | bench.rs:32-37 vs BenchMain.cpp:32-47/84-125 |
+| 6 | 输出产物（final_bench_*.svg、分布打印 vs CSV 单行） | 差异 | 形态不同；C++ CSV 利于自动化比对 | bench.rs:140-169 vs BenchMain.cpp:169-181 |
+| 7 | 退出码细分 | C++额外 | 9 档退出码 vs anyhow 单档 | Main.cpp:95-228 vs cli.rs（anyhow） |
+
+## 结论
+CLI 主干（读 JSON 实例→配置覆盖→Optimize→写解 JSON→可选 SVG→版本/指标摘要）两侧一致，早停/种子两选项语义逐项等价，判定基本等价。最大的实质差异在两处：时间预算模型（Rust 的 -t/-e/-c 相位分摊 vs C++ 的全局 --time-ms，默认时限数值也不同）与 bench 的定位分叉（Rust 是任意实例×多 run×并行×分布统计的性能基准，C++ 是双内置场景×固定种子×checksum 的确定性回归基准）——后者覆盖面互补但不重叠，做性能对齐时需另行在 C++ 侧补多 run 统计或用 Rust bench 驱动对照。

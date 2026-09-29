@@ -2370,6 +2370,10 @@ fn main() {
         Ok(shape) => print_polygon("offset.deflate_collapse", &shape),
         Err(error) => println!("offset.deflate_collapse=error:{error}"),
     }
+    match offset_shape(&square, ShapeModifyMode::Inflate, 0.25) {
+        Ok(shape) => print_polygon("offset.square_inflate", &shape),
+        Err(error) => println!("offset.square_inflate=error:{error}"),
+    }
     let negative_offset = offset_shape(&square, ShapeModifyMode::Inflate, -0.25).unwrap();
     println!(
         "offset.negative_inflate=area:{:.2},bbox:{:.2},{:.2},{:.2},{:.2}",

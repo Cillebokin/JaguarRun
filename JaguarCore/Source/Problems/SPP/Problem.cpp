@@ -2,7 +2,6 @@
 #include "JaguarCore/Assertions.h"
 #include "JaguarCore/NumericPolicy.h"
 
-#include <array>
 #include <cmath>
 #include <utility>
 
@@ -14,58 +13,6 @@ bool near(double first, double second) noexcept
 {
     return std::abs(first - second) <=
            NumericPolicy::DefaultEqualityTolerance();
-}
-
-bool sameCdeConfig(const CDEConfig& first,
-                   const CDEConfig& second) noexcept
-{
-    return first.quadtreeDepth == second.quadtreeDepth &&
-           first.cdThreshold == second.cdThreshold &&
-           first.itemSurrogateConfig == second.itemSurrogateConfig;
-}
-
-bool sameOptionalDouble(const std::optional<double>& first,
-                        const std::optional<double>& second) noexcept
-{
-    if (first.has_value() != second.has_value())
-        return false;
-    return !first.has_value() || near(*first, *second);
-}
-
-bool sameShapeModifyConfig(const ShapeModifyConfig& first,
-                           const ShapeModifyConfig& second) noexcept
-{
-    if (!sameOptionalDouble(first.simplifyTolerance,
-                            second.simplifyTolerance) ||
-        !sameOptionalDouble(first.offset, second.offset) ||
-        first.narrowConcavityCutoff.has_value() !=
-            second.narrowConcavityCutoff.has_value())
-        return false;
-    if (!first.narrowConcavityCutoff.has_value())
-        return true;
-    return near(first.narrowConcavityCutoff->first,
-                second.narrowConcavityCutoff->first) &&
-           near(first.narrowConcavityCutoff->second,
-                second.narrowConcavityCutoff->second);
-}
-
-bool sameStripContainer(const Container& container, const Strip& strip) noexcept
-{
-    const auto& shape = container.GetOriginalShape().shape;
-    if (shape.VertexCount() != 4)
-        return false;
-    const std::array<Point2d, 4> expected{{
-        {0.0, 0.0}, {strip.width, 0.0},
-        {strip.width, strip.fixedHeight}, {0.0, strip.fixedHeight}}};
-    for (std::size_t i = 0; i < expected.size(); ++i)
-    {
-        if (static_cast<float>(shape.Vertices()[i].x) !=
-                static_cast<float>(expected[i].x) ||
-            static_cast<float>(shape.Vertices()[i].y) !=
-                static_cast<float>(expected[i].y))
-            return false;
-    }
-    return true;
 }
 
 bool sameItemDefinition(const Item& expected, const PlacedItem& actual) noexcept
@@ -198,29 +145,8 @@ JAGUARCORE_API SPSolution SPProblem::Save() const
 
 JAGUARCORE_API Result<void> SPProblem::Restore(const SPSolution& solution)
 {
-    if (!std::isfinite(solution.strip.fixedHeight) ||
-        solution.strip.fixedHeight != m_Instance.BaseStrip().fixedHeight ||
-        !std::isfinite(solution.strip.width) || solution.strip.width <= 0.0)
-    {
-        return Result<void>::FromError(
-             {ErrorCode::SnapshotMismatch, "SPP solution strip is incompatible"});
-    }
-    if (!sameCdeConfig(solution.strip.cdeConfig,
-                       m_Instance.BaseStrip().cdeConfig) ||
-        !sameShapeModifyConfig(solution.strip.shapeModifyConfig,
-                               m_Instance.BaseStrip().shapeModifyConfig))
-    {
-        return Result<void>::FromError(
-            {ErrorCode::SnapshotMismatch,
-             "SPP solution strip configuration is incompatible"});
-    }
-    if (!sameStripContainer(solution.layoutSnapshot.container, solution.strip))
-    {
-        return Result<void>::FromError(
-            {ErrorCode::SnapshotMismatch,
-             "SPP solution strip does not match its layout container"});
-    }
-
+    // jagua-rs restore() accepts any strip configuration/width and only falls
+    // back to a full rebuild when the layout snapshot does not match.
     std::vector<std::size_t> remaining(m_Instance.ItemCount(), 0);
     for (std::size_t i = 0; i < remaining.size(); ++i)
         remaining[i] = m_Instance.ItemDemand(i);

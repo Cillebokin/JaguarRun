@@ -127,9 +127,16 @@ void runMsppTests()
     assert(!mismatchedStripContainer.layouts.empty());
     mismatchedStripContainer.layouts.front().strip.width *= 0.5;
     assert(mismatchedStripContainer.layouts.front().strip.width > 0.0);
-    assert(!problem.Value().Restore(mismatchedStripContainer).HasValue());
+    // jagua-rs restore() adopts a snapshot strip whose width no longer
+    // matches the layout container; the strip value is taken as-is.
+    assert(problem.Value().Restore(mismatchedStripContainer).HasValue());
+    assert(problem.Value().StripWidth(mismatchedStripContainer.layouts
+                                          .front()
+                                          .layoutIndex) ==
+           mismatchedStripContainer.layouts.front().strip.width);
     assert(problem.Value().LayoutCount() == 2);
     assert(problem.Value().PlacedItemCount() == 3);
+    assert(problem.Value().Restore(snapshot).HasValue());
 
     auto mismatchedStripSpec = snapshot;
     mismatchedStripSpec.layouts.front().strip.maxWidth = 20.0;

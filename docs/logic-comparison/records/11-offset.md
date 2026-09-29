@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Source/Geometry/ShapeModification/Offset.cpp`（343 行）+ `StraightSkeleton.cpp`（910 行）+ `StraightSkeleton.h`（15 行），对照 `Geometry/ShapeModification.h`（53 行）
 **判定**: 不等价（**算法本体替换**：Rust 调 geo-buffer 0.2.0 crate，C++ 是对 geo-buffer 事件模型的私有重实现 + 保模校验 + 简易 fallback + 双 API；失败边界不同）
 
+> **2026-09-29 更新**：与 geo-buffer 0.2.0 源码（cargo registry）完成逐函数审计：VertexQueue/Ray/Timeline/find_split_vertex/apply_event/apply_vertex_queue_rounded 均逐行对应；修复主循环 cleanup 分叉（Rust 在每次迭代末尾、含 continue 路径清理，C++ 原先只在 split 分支）。全量 fixture（12 项）Debug/Release 对照通过。判定从“不等价”上调为“基本等价（fixture 范围内逐行对齐；未覆盖输入不宣称等价）”。comb 第二原始组件不属于 jagua-rs 核心 API（Rust 只取首组件），维持不验收。
+
 **geo-buffer 版本确认**（以当前工作区为准）：`CodeResource/jagua-rs/Cargo.lock` 中 `geo-buffer 0.2.0`（checksum 267bf037…）。C++ 侧 StraightSkeleton.cpp:1-9 头注释自述为"event model used by geo-buffer 0.2.0"的独立 C++17 重实现，不链接 Rust。
 
 ## 函数逐条比对

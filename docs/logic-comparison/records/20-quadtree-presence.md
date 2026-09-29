@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Source/Collision/Quadtree/Quadtree.cpp`（340 行）中的 `Classify`/`BuildNode`/presence 相关
 **判定**: 基本等价（presence 三态与 Exterior 反转语义一致；实现机制不同：Rust 增量 constrict + 边子集 + n_active_edges 缓存 vs C++ 全量重建 + polygon-rect 相交分类）
 
+> **2026-09-29 重写基线**：presence 三态/Exterior 反转/邻居传播/质心回退已按 qt_hazard.rs 逐行移植（见重写后的 Quadtree.cpp Constrict）。本记录中“C++ 无增量 constrict/无边子集”条目已过时。
+
 ## 函数逐条比对
 
 ### `QTHazard` 结构（qt_hazard.rs:11-22）vs `QuadTree::Entry`（Quadtree.h:74-79）

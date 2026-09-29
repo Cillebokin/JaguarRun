@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Include/JaguarCore/Collision/Quadtree.h`（122 行）+ `JaguarCore/Source/Collision/Quadtree/Quadtree.cpp`（340 行）
 **判定**: 结果等价/实现不同（查询结果集合等价；架构差异：Rust 增量 constrict 树 + presence 驱动查询 vs C++ 每次注册/注销全量重建 + per-query 重分类；cd_threshold→edgeThreshold 语义同源）
 
+> **2026-09-29 重写基线**：C++ 四叉树已重写为 jagua-rs quadtree 的逐行结构移植（Node 持 presence 降序 NodeHazard + PartialHazard 边子集 + ffBbox；注册懒扩展 + Constrict 邻居传播；注销递归移除 + 无 Partial 折叠；activeEdges 缓存恢复 cd_threshold 查询时语义；根节点一律 Partial）。本记录中所有“全量重建/不存边子集/edgeThreshold 建树语义”相关条目已过时，仅作历史比对存档。当前实现与 Rust 为结构级逐行对应，notch/pier oracle 与 Debug/Release 全量测试通过。
+
 ## 函数逐条比对
 
 ### 节点结构 `QTNode`（qt_node.rs:13-25）vs `QuadTree::Node`（Quadtree.h:81-87）

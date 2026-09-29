@@ -145,16 +145,28 @@ private:
     HazardHandle AllocateHandle();
     bool ShapesCollide(const SimplePolygon& first, const SimplePolygon& second) const noexcept;
     bool ShapesCollide(const PolygonSoA& first, const PolygonSoA& second) const noexcept;
-    bool HazardCollides(const SimplePolygon& shape, const Hazard& hazard) const noexcept;
-    bool HazardCollides(const PolygonSoA& shape,
-                        const Hazard& hazard,
-                        const PolygonSoA& hazardShape) const noexcept;
     bool CircleCollides(const Circle2d& circle, const SimplePolygon& shape) const noexcept;
     bool EdgeCollides(const Edge2d& edge, const SimplePolygon& shape) const noexcept;
-    bool CircleCollidesWithHazard(const Circle2d& circle,
-                                  const Hazard& hazard) const noexcept;
-    bool EdgeCollidesWithHazard(const Edge2d& edge,
-                                 const Hazard& hazard) const noexcept;
+    bool NodeCollidesWithEdge(const QuadTree::Node& node,
+                              const Edge2d& edge,
+                              const HazardFilter& filter) const noexcept;
+    bool NodeCollidesWithCircle(const QuadTree::Node& node,
+                                const Circle2d& circle,
+                                const HazardFilter& filter) const noexcept;
+    bool CollectEdgeCollisionsUntil(
+        const QuadTree::Node& node,
+        const Edge2d& edge,
+        HazardCollector& collector,
+        const HazardFilter& filter,
+        const CollisionStopCallback& stopAfterCollision,
+        const std::function<bool(HazardHandle, const HazardEntity&)>& report) const;
+    bool CollectCircleCollisionsUntil(
+        const QuadTree::Node& node,
+        const Circle2d& circle,
+        HazardCollector& collector,
+        const HazardFilter& filter,
+        const CollisionStopCallback& stopAfterCollision,
+        const std::function<bool(HazardHandle, const HazardEntity&)>& report) const;
     ThreadPool& GetThreadPool(std::size_t workerCount) const;
 
     Rect2d m_Bounds;                                  // 引擎边界

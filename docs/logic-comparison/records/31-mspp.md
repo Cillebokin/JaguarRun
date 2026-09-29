@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Include/JaguarCore/Problems/MSpp.h`（212 行）+ `JaguarCore/Source/Problems/MSPP/{MspStrip,MspInstance,MspProblem,MspSolution}.cpp`（65 / 150 / 545 / 59 行）
 **判定**: 常规条带/布局逻辑基本等价；超需求 Debug 状态与 Restore 的不一致宽度接受边界仍不等价；C++ 保留额外快照校验和接口差异
 
+> **2026-09-29 更新**：`MSPProblem::Restore` 已删除 strip 数值合法性与 sameStripContainer 前置校验（对齐 Rust：快照 strip 直接生效；Rust Debug 的一致性断言在状态变更后 panic，不属于验收契约）。本记录中“C++ 两配置均拒绝宽度不一致”条目已过时。
+
 **2026-09-28 oracle 补充：** `--model-boundary-parity-only` 显示需求 0 的 MSPP 放置在 Rust Debug 先插入条目，再于需求下溢时 panic；捕获 panic 后为 `remaining=0, placed=1`。JaguarCore Debug 在放置前返回 `Infeasible`、布局不变；Release 两侧都成功放置并将需求回绕为 `usize::MAX`。此 Debug 部分状态差异需按待确认的 panic→Result 口径处理。
 
 ## 函数逐条比对

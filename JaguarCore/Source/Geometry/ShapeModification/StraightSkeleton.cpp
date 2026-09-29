@@ -751,7 +751,10 @@ private:
                     m_Queue.done(timeline.rightVertex) ||
                     m_Queue.realIndex(timeline.leftVertex) != timeline.leftReal ||
                     m_Queue.realIndex(timeline.rightVertex) != timeline.rightReal)
+                {
+                    m_Queue.cleanup();
                     continue;
+                }
 
                 const std::size_t newIndex = m_Vertices.size();
                 const Ray leftRay = m_Vertices[timeline.leftReal].leftRay;
@@ -779,19 +782,26 @@ private:
                     makeShrinkEvents(result, false);
                 }
                 m_Events.push_back(event);
+                m_Queue.cleanup();
                 continue;
             }
 
             if (m_Queue.done(timeline.anchorVertex) ||
                 m_Queue.realIndex(timeline.anchorVertex) != timeline.anchorReal)
+            {
+                m_Queue.cleanup();
                 continue;
+            }
             m_Queue.cleanup();
             const auto candidates = findSplit(timeline.anchorVertex, false);
             if (candidates.size() != 1 ||
                 !eq(candidates.front().time, timeline.time) ||
                 !eq(candidates.front().location.x, timeline.location.x) ||
                 !eq(candidates.front().location.y, timeline.location.y))
+            {
+                m_Queue.cleanup();
                 continue;
+            }
 
             const SplitCandidate& candidate = candidates.front();
             const std::size_t firstTree = m_Vertices.size();
@@ -820,6 +830,7 @@ private:
             makeShrinkEvents(children.first, false);
             makeShrinkEvents(children.second, false);
             m_Events.push_back(event);
+            m_Queue.cleanup();
         }
     }
 

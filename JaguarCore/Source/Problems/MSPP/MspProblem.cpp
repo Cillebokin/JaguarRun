@@ -3,7 +3,6 @@
 #include "JaguarCore/NumericPolicy.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <limits>
 #include <unordered_set>
@@ -59,29 +58,6 @@ bool sameItemDefinition(const Item& expected,
                   actual.GetItem().CollisionShape().Vertices()[i].x) ||
             !near(expected.CollisionShape().Vertices()[i].y,
                   actual.GetItem().CollisionShape().Vertices()[i].y))
-            return false;
-    }
-    return true;
-}
-
-bool sameStripContainer(const Container& container,
-                        const MultiStrip& strip) noexcept
-{
-    const auto& shape = container.GetOriginalShape().shape;
-    if (shape.VertexCount() != 4)
-        return false;
-
-    const std::array<Point2d, 4> expected{{
-        {0.0, 0.0},
-        {strip.width, 0.0},
-        {strip.width, strip.fixedHeight},
-        {0.0, strip.fixedHeight}}};
-    for (std::size_t i = 0; i < expected.size(); ++i)
-    {
-        if (static_cast<float>(shape.Vertices()[i].x) !=
-                static_cast<float>(expected[i].x) ||
-            static_cast<float>(shape.Vertices()[i].y) !=
-                static_cast<float>(expected[i].y))
             return false;
     }
     return true;
@@ -349,15 +325,7 @@ JAGUARCORE_API Result<bool> MSPProblem::Restore(const MSPSolution& solution)
         splitLayoutKey(snapshot.layoutIndex, requestedSlot, requestedGeneration);
         if (requestedSlot == 0 || (requestedGeneration & 1U) == 0 ||
             !seenKeys.insert(snapshot.layoutIndex).second ||
-            !seenSlots.insert(requestedSlot).second ||
-            !std::isfinite(snapshot.strip.maxWidth) ||
-            !std::isfinite(snapshot.strip.fixedHeight) ||
-            !std::isfinite(snapshot.strip.width) ||
-            snapshot.strip.maxWidth <= 0.0 ||
-            snapshot.strip.fixedHeight <= 0.0 ||
-            snapshot.strip.width <= 0.0 ||
-            !sameStripContainer(snapshot.layoutSnapshot.container,
-                                snapshot.strip))
+            !seenSlots.insert(requestedSlot).second)
         {
             return Result<bool>::FromError(
                 {ErrorCode::SnapshotMismatch, "MSPP solution strip is invalid"});

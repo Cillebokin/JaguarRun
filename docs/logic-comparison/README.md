@@ -103,7 +103,7 @@
 | 08 | [records/08-geo-enums-traits.md](records/08-geo-enums-traits.md) | 基本等价 | 7 |
 | 09 | [records/09-original-shape.md](records/09-original-shape.md) | 基本等价 | 7 |
 | 10 | [records/10-simplify.md](records/10-simplify.md) | 基本等价 | 11 |
-| 11 | [records/11-offset.md](records/11-offset.md) | **不等价**（算法本体替换 geo-buffer→私有 skeleton；保持性强校验/fallback/全组件 API/失败边界不同） | 11 |
+| 11 | [records/11-offset.md](records/11-offset.md) | 基本等价（2026-09-29 与 geo-buffer 0.2.0 逐函数审计 + cleanup 分叉修复；fixture 12/12 通过；未覆盖输入不宣称等价） | 11 |
 | 12 | [records/12-narrow-concavity.md](records/12-narrow-concavity.md) | 基本等价 | 12 |
 | 13 | [records/13-pole.md](records/13-pole.md) | 基本等价 | 12 |
 | 14 | [records/14-piers.md](records/14-piers.md) | 基本等价（空候选报错 eef0830 已对齐；缺"端点在形外"断言） | 15 |
@@ -111,18 +111,18 @@
 | 16 | [records/16-hazard.md](records/16-hazard.md) | 基本等价 | 5 |
 | 17 | [records/17-hazard-filter.md](records/17-hazard-filter.md) | 基本等价（from_irrelevant_qzones 无直接对应） | 6 |
 | 18 | [records/18-collector.md](records/18-collector.md) | 基本等价（bloom 快筛无对应） | 6 |
-| 19 | [records/19-quadtree-node.md](records/19-quadtree-node.md) | 结果等价/实现不同（**增量 constrict vs 全量重建**） | 9 |
-| 20 | [records/20-quadtree-presence.md](records/20-quadtree-presence.md) | 基本等价（三态/Exterior 反转一致，机制不同） | 7 |
+| 19 | [records/19-quadtree-node.md](records/19-quadtree-node.md) | 逐行结构移植（2026-09-29 重写：懒扩展 constrict + 边子集 + activeEdges；旧“全量重建”差异已消除） | 9 |
+| 20 | [records/20-quadtree-presence.md](records/20-quadtree-presence.md) | 逐行等价（2026-09-29 重写后 Constrict 含邻居传播/质心回退） | 7 |
 | 21 | [records/21-quadtree-assertions.md](records/21-quadtree-assertions.md) | **不等价**（4 项 quadtree 专项自检缺失，多为架构豁免） | 6 |
-| 22 | [records/22-cd-engine.md](records/22-cd-engine.md) | 结果等价/实现不同（eef0830 已对齐 surrogate Exterior 路径；collect-any 检测/Restore 全量重建为残余差异） | 13 |
+| 22 | [records/22-cd-engine.md](records/22-cd-engine.md) | 逐行等价（2026-09-29 重写：短路 detect/containment/surrogate 树内查询；collect-any 差异已消除，Restore 仍为重建式但结果等价） | 13 |
 | 23 | [records/23-item.md](records/23-item.md) | 基本等价 | 5 |
 | 24 | [records/24-container.md](records/24-container.md) | 基本等价 | 8 |
 | 25 | [records/25-placed-item.md](records/25-placed-item.md) | 基本等价 | 6 |
 | 26 | [records/26-layout.md](records/26-layout.md) | 基本等价 | 14 |
-| 27 | [records/27-spp.md](records/27-spp.md) | 基本等价（demand 耗尽已 debug-only，对齐 Rust） | 10 |
+| 27 | [records/27-spp.md](records/27-spp.md) | 基本等价（Restore 前置校验已删除对齐 Rust；demand 耗尽 debug-only） | 10 |
 | 28 | [records/28-prob-assertions.md](records/28-prob-assertions.md) | 基本等价（SP/BP 合一） | 10 |
 | 29 | [records/29-bpp.md](records/29-bpp.md) | 基本等价（LayoutTargetKind 注释写反为文档错误） | 12 |
-| 31 | [records/31-mspp.md](records/31-mspp.md) | 基本等价（含 MSP 断言节；Restore 配置校验 eef0830 已移除） | 13 |
+| 31 | [records/31-mspp.md](records/31-mspp.md) | 基本等价（Restore strip 校验已删除对齐 Rust） | 13 |
 | 33 | [records/33-ext-repr.md](records/33-ext-repr.md) | wire 基本一致 | 7 |
 | 34 | [records/34-import.md](records/34-import.md) | 基本等价（非连续重复顶点检查缺失） | 12 |
 | 35 | [records/35-export.md](records/35-export.md) | wire 基本一致（SPP container_id 双侧实际均为 0；min_item_separation 零值差异仍在） | 7 |

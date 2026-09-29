@@ -13,6 +13,19 @@
 
 namespace jaguar
 {
+// jagua-rs qt_traits 的象限分类辅助（供 QTNode 查询移植使用）。
+// 定义在 quadtree.cpp 的匿名命名空间中，这里通过引擎的 friend 访问节点。
+namespace quadtree_query
+{
+std::array<bool, 4> edgeCollidesWithQuadrants(
+    const Edge2d& edge, const Rect2d& nodeBounds,
+    const std::array<Rect2d, 4>& quadrants) noexcept;
+std::array<bool, 4> circleCollidesWithQuadrants(
+    const Circle2d& circle, const std::array<Rect2d, 4>& quadrants) noexcept;
+std::array<std::size_t, 4> circleQuadrantOrder(
+    const Circle2d& circle, const std::array<Rect2d, 4>& quadrants) noexcept;
+}
+
 namespace
 {
 Rect2d normalizeBoundsRustF32(const Rect2d& bounds) noexcept
@@ -30,25 +43,6 @@ bool isOutside(const Rect2d& bounds, const Rect2d& shapeBounds) noexcept
            bounds.RelationTo(shapeBounds) == RectRelation::Enclosed;
 }
 
-bool polygonInsideContainer(const SimplePolygon& polygon,
-                            const SimplePolygon& container) noexcept
-{
-    for (const Point2d& point : polygon.Vertices())
-    {
-        if (!container.ContainsRustF32(point))
-            return false;
-    }
-
-    for (const Edge2d& polygonEdge : polygon.Edges())
-    {
-        for (const Edge2d& containerEdge : container.Edges())
-        {
-            if (polygonEdge.IntersectsRustF32(containerEdge))
-                return false;
-        }
-    }
-    return true;
-}
 
 bool pointNearSegment(const Point2d& point, const Edge2d& edge, double radius) noexcept
 {
@@ -57,6 +51,27 @@ bool pointNearSegment(const Point2d& point, const Edge2d& edge, double radius) n
     const float radiusF32 = static_cast<float>(radius);
     return squaredDistance <= radiusF32 * radiusF32;
 }
+
+// jagua-rs detect_containment_collision 的移植：
+// bbox 近似关系判定 + POI 单点包含 + scope 解释
+bool DetectContainmentCollision(const SimplePolygon& shape,
+                                const SimplePolygon& hazardShape,
+                                const HazardEntity& entity) noexcept
+{
+    const RectRelation relation =
+        hazardShape.BoundingBox().AlmostRelationToRustF32(shape.BoundingBox());
+    bool contained = false;
+    if (relation == RectRelation::Surrounding)
+        contained = hazardShape.ContainsRustF32(shape.PointOfInaccessibility().center);
+    else if (relation == RectRelation::Enclosed)
+        contained = shape.ContainsRustF32(hazardShape.PointOfInaccessibility().center);
+
+    const bool interiorScope = entity.kind != HazardKind::Exterior;
+    return interiorScope == contained;
+}
+
+// ---- jagua-rs QTNode 查询的移植（binary detect 与 collect）----
+// 这些谓词在 CollisionEngine 的成员函数中使用（它是 QuadTree 的 friend）。
 
 }
 
@@ -210,84 +225,213 @@ bool CollisionEngine::ShapesCollide(const PolygonSoA& first,
     return first.Intersects(second);
 }
 
-bool CollisionEngine::HazardCollides(const SimplePolygon& shape,
-                                     const Hazard& hazard) const noexcept
-{
-    if (hazard.entity.kind == HazardKind::Exterior)
-    {
-        if (m_Config.quadtreeDepth > 0U)
-            return !polygonInsideContainer(shape, *hazard.shape);
-
-        const SimplePolygon& exteriorShape = *hazard.shape;
-        const RectRelation relation =
-            exteriorShape.BoundingBox().AlmostRelationToRustF32(
-                shape.BoundingBox());
-        bool contained = false;
-        if (relation == RectRelation::Surrounding)
-        {
-            contained = exteriorShape.ContainsRustF32(
-                shape.PointOfInaccessibility().center);
-        }
-        else if (relation == RectRelation::Enclosed)
-        {
-            contained = shape.ContainsRustF32(
-                exteriorShape.PointOfInaccessibility().center);
-        }
-        return !contained;
-    }
-    return ShapesCollide(shape, *hazard.shape);
-}
-
-bool CollisionEngine::HazardCollides(const PolygonSoA& shape,
-                                     const Hazard& hazard,
-                                     const PolygonSoA& hazardShape) const noexcept
-{
-    if (hazard.entity.kind == HazardKind::Exterior)
-    {
-        for (std::size_t i = 0; i < shape.VertexCount(); ++i)
-        {
-            if (!hazardShape.Contains(shape.vertex(i)))
-                return true;
-        }
-        for (std::size_t i = 0; i < shape.edgeCount(); ++i)
-        {
-            if (hazardShape.intersectsBoundary(shape.edge(i)))
-                return true;
-        }
-        return false;
-    }
-    return ShapesCollide(shape, hazardShape);
-}
-
 bool CollisionEngine::EdgeCollides(const Edge2d& edge,
                                    const SimplePolygon& shape) const noexcept
 {
     return shape.IntersectsRustF32(edge);
 }
 
-bool CollisionEngine::EdgeCollidesWithHazard(const Edge2d& edge,
-                                             const Hazard& hazard) const noexcept
+// jagua-rs QTNode::collides<T> for Edge 的移植（短路 detect）
+bool CollisionEngine::NodeCollidesWithEdge(
+    const QuadTree::Node& node,
+    const Edge2d& edge,
+    const HazardFilter& filter) const noexcept
 {
-    if (hazard.entity.kind != HazardKind::Exterior)
-        return hazard.shape->IntersectsRustF32(edge);
-
-    for (const Edge2d& boundaryEdge : hazard.shape->Edges())
+    // 节点内最强 relevant hazard（Entire > Partial > None；列表已按降序排列）
+    const QuadTree::NodeHazard* strongest = nullptr;
+    for (const QuadTree::NodeHazard& candidate : node.hazards)
     {
-        if (edge.IntersectsRustF32(boundaryEdge))
+        if (!filter.IsIrrelevant(candidate.handle, candidate.entity))
+        {
+            strongest = &candidate;
+            break;
+        }
+    }
+    if (!strongest)
+        return false;
+    if (strongest->presence == HazardPresence::None)
+        return false;
+    if (strongest->presence == HazardPresence::Entire)
+        return true;
+
+    if (node.children.front())
+    {
+        const auto quadrants = node.bounds.QuadrantsRustF32();
+        const auto colliding = quadtree_query::edgeCollidesWithQuadrants(
+            edge, node.bounds, quadrants);
+        for (std::size_t idx = 0; idx < 4; ++idx)
+        {
+            if (colliding[idx] &&
+                NodeCollidesWithEdge(*node.children[idx], edge, filter))
+                return true;
+        }
+        return false;
+    }
+
+    // jagua-rs QTHazPartial::collides_with：ff_bbox 预筛 + 边子集判交
+    for (const QuadTree::NodeHazard& hazard : node.hazards)
+    {
+        if (filter.IsIrrelevant(hazard.handle, hazard.entity))
+            continue;
+        if (hazard.presence == HazardPresence::Partial &&
+            edge.IntersectsRustF32(hazard.partial->ffBbox) &&
+            std::any_of(hazard.partial->edges.begin(), hazard.partial->edges.end(),
+                       [&edge](const Edge2d& candidate) {
+                           return candidate.IntersectsRustF32(edge);
+                       }))
             return true;
     }
     return false;
 }
 
-bool CollisionEngine::CircleCollidesWithHazard(const Circle2d& circle,
-                                               const Hazard& hazard) const noexcept
+// jagua-rs QTNode::collides<T> for Circle 的移植
+bool CollisionEngine::NodeCollidesWithCircle(
+    const QuadTree::Node& node,
+    const Circle2d& circle,
+    const HazardFilter& filter) const noexcept
 {
-    if (hazard.entity.kind != HazardKind::Exterior)
-        return CircleCollides(circle, *hazard.shape);
-
-    for (const Edge2d& boundaryEdge : hazard.shape->Edges())
+    const QuadTree::NodeHazard* strongest = nullptr;
+    for (const QuadTree::NodeHazard& candidate : node.hazards)
     {
-        if (pointNearSegment(circle.center, boundaryEdge, circle.radius))
+        if (!filter.IsIrrelevant(candidate.handle, candidate.entity))
+        {
+            strongest = &candidate;
+            break;
+        }
+    }
+    if (!strongest)
+        return false;
+    if (strongest->presence == HazardPresence::None)
+        return false;
+    if (strongest->presence == HazardPresence::Entire)
+        return true;
+
+    if (node.children.front())
+    {
+        const auto quadrants = node.bounds.QuadrantsRustF32();
+        const auto colliding =
+            quadtree_query::circleCollidesWithQuadrants(circle, quadrants);
+        const auto order =
+            quadtree_query::circleQuadrantOrder(circle, quadrants);
+        for (const std::size_t idx : order)
+        {
+            if (colliding[idx] &&
+                NodeCollidesWithCircle(*node.children[idx], circle, filter))
+                return true;
+        }
+        return false;
+    }
+
+    for (const QuadTree::NodeHazard& hazard : node.hazards)
+    {
+        if (filter.IsIrrelevant(hazard.handle, hazard.entity))
+            continue;
+        if (hazard.presence == HazardPresence::Partial &&
+            circle.IntersectsRustF32(hazard.partial->ffBbox) &&
+            std::any_of(hazard.partial->edges.begin(), hazard.partial->edges.end(),
+                       [&circle](const Edge2d& candidate) {
+                           return circle.IntersectsRustF32(candidate);
+                       }))
+            return true;
+    }
+    return false;
+}
+
+// jagua-rs QTNode::collect_collisions_until for Edge 的移植
+bool CollisionEngine::CollectEdgeCollisionsUntil(
+    const QuadTree::Node& node,
+    const Edge2d& edge,
+    HazardCollector& collector,
+    const HazardFilter& filter,
+    const CollisionStopCallback& stopAfterCollision,
+    const std::function<bool(HazardHandle, const HazardEntity&)>& report) const
+{
+    const bool performCdNow = node.activeEdges <= m_Config.cdThreshold;
+    if (node.children.front() && !performCdNow)
+    {
+        const auto quadrants = node.bounds.QuadrantsRustF32();
+        const auto colliding = quadtree_query::edgeCollidesWithQuadrants(
+            edge, node.bounds, quadrants);
+        for (std::size_t idx = 0; idx < 4; ++idx)
+        {
+            if (colliding[idx] &&
+                CollectEdgeCollisionsUntil(*node.children[idx], edge, collector,
+                                           filter, stopAfterCollision, report))
+                return true;
+        }
+        return false;
+    }
+
+    for (const QuadTree::NodeHazard& hazard : node.hazards)
+    {
+        if (collector.Contains(hazard.handle))
+            continue;
+        bool collides = false;
+        if (hazard.presence == HazardPresence::Entire)
+        {
+            collides = true;
+        }
+        else if (hazard.presence == HazardPresence::Partial)
+        {
+            collides = edge.IntersectsRustF32(hazard.partial->ffBbox) &&
+                      std::any_of(hazard.partial->edges.begin(),
+                                  hazard.partial->edges.end(),
+                                  [&edge](const Edge2d& candidate) {
+                                      return candidate.IntersectsRustF32(edge);
+                                  });
+        }
+        if (collides && report(hazard.handle, hazard.entity))
+            return true;
+    }
+    return false;
+}
+
+// jagua-rs QTNode::collect_collisions_until for Circle 的移植
+bool CollisionEngine::CollectCircleCollisionsUntil(
+    const QuadTree::Node& node,
+    const Circle2d& circle,
+    HazardCollector& collector,
+    const HazardFilter& filter,
+    const CollisionStopCallback& stopAfterCollision,
+    const std::function<bool(HazardHandle, const HazardEntity&)>& report) const
+{
+    const bool performCdNow = node.activeEdges <= m_Config.cdThreshold;
+    if (node.children.front() && !performCdNow)
+    {
+        const auto quadrants = node.bounds.QuadrantsRustF32();
+        const auto colliding =
+            quadtree_query::circleCollidesWithQuadrants(circle, quadrants);
+        const auto order =
+            quadtree_query::circleQuadrantOrder(circle, quadrants);
+        for (const std::size_t idx : order)
+        {
+            if (colliding[idx] &&
+                CollectCircleCollisionsUntil(*node.children[idx], circle, collector,
+                                             filter, stopAfterCollision, report))
+                return true;
+        }
+        return false;
+    }
+
+    for (const QuadTree::NodeHazard& hazard : node.hazards)
+    {
+        if (collector.Contains(hazard.handle))
+            continue;
+        bool collides = false;
+        if (hazard.presence == HazardPresence::Entire)
+        {
+            collides = true;
+        }
+        else if (hazard.presence == HazardPresence::Partial)
+        {
+            collides = circle.IntersectsRustF32(hazard.partial->ffBbox) &&
+                      std::any_of(hazard.partial->edges.begin(),
+                                  hazard.partial->edges.end(),
+                                  [&circle](const Edge2d& candidate) {
+                                      return circle.IntersectsRustF32(candidate);
+                                  });
+        }
+        if (collides && report(hazard.handle, hazard.entity))
             return true;
     }
     return false;
@@ -344,6 +488,8 @@ JAGUARCORE_API bool CollisionEngine::CollectPolygonCollisionsUntil(
     const HazardFilter& filter,
     const CollisionStopCallback& stopAfterCollision) const
 {
+    // jagua-rs collect_poly_collisions_until 的移植：先注入 exterior，
+    // 再按形状边在四叉树内收集，最后对 Partial hazard 做包含检测。
     const HazardHandle exteriorHandle{
         std::numeric_limits<std::size_t>::max(),
         std::numeric_limits<std::uint32_t>::max()};
@@ -381,20 +527,29 @@ JAGUARCORE_API bool CollisionEngine::CollectPolygonCollisionsUntil(
         }
     }
 
-    const auto candidates = m_QuadTree.QueryVirtualRoot(shape.BoundingBox());
-    for (const HazardHandle handle : candidates)
-    {
-        const Hazard* hazard = Get(handle);
-        if (!hazard || !hazard->shape ||
-            filter.IsIrrelevant(handle, hazard->entity) || collector.Contains(handle))
-            continue;
+    const auto& virtualRoot = m_QuadTree.VirtualRootFor(
+        m_QuadTree.m_Root, shape.BoundingBox());
 
-        // The AVX2 cache uses a separate double-precision representation. The
-        // Rust-compatible path must use POI containment and f32 predicates
-        // consistently, so exact collection goes through the canonical shape
-        // implementation.
-        const bool collides = HazardCollides(shape, *hazard);
-        if (collides && report(handle, hazard->entity))
+    // 形状边在树内的碰撞收集
+    for (const Edge2d& edge : shape.Edges())
+    {
+        if (CollectEdgeCollisionsUntil(
+                virtualRoot, edge, collector, filter, stopAfterCollision, report))
+            return true;
+    }
+
+    // 对虚拟根内 Partial hazard 做包含检测（jagua-rs detect_containment_collision）
+    for (const auto& nodeHazard : virtualRoot.hazards)
+    {
+        if (nodeHazard.presence != HazardPresence::Partial ||
+            collector.Contains(nodeHazard.handle))
+            continue;
+        const Hazard* hazard = Get(nodeHazard.handle);
+        if (!hazard || !hazard->shape ||
+            filter.IsIrrelevant(nodeHazard.handle, hazard->entity))
+            continue;
+        if (DetectContainmentCollision(shape, *hazard->shape, hazard->entity) &&
+            report(nodeHazard.handle, hazard->entity))
             return true;
     }
     return false;
@@ -412,9 +567,34 @@ JAGUARCORE_API bool CollisionEngine::CollectPolygonCollisionsUntil(
 JAGUARCORE_API bool CollisionEngine::DetectPolygonCollision(const SimplePolygon& shape,
                                                            const HazardFilter& filter) const
 {
+    // jagua-rs detect_poly_collision 的移植：短路边遍历 + 包含检测
     if (isOutside(m_Bounds, shape.BoundingBox()))
         return true;
-    return !CollectPolygonCollisions(shape, filter).empty();
+
+    const auto& virtualRoot = m_QuadTree.VirtualRootFor(
+        m_QuadTree.m_Root, shape.BoundingBox());
+
+    // 边相交快速路径
+    for (const Edge2d& edge : shape.Edges())
+    {
+        if (NodeCollidesWithEdge(virtualRoot, edge, filter))
+            return true;
+    }
+
+    // 包含检测（Partial hazard）
+    for (const auto& nodeHazard : virtualRoot.hazards)
+    {
+        if (nodeHazard.presence != HazardPresence::Partial)
+            continue;
+        if (filter.IsIrrelevant(nodeHazard.handle, nodeHazard.entity))
+            continue;
+        const Hazard* hazard = Get(nodeHazard.handle);
+        if (!hazard || !hazard->shape)
+            continue;
+        if (DetectContainmentCollision(shape, *hazard->shape, hazard->entity))
+            return true;
+    }
+    return false;
 }
 
 JAGUARCORE_API std::vector<std::uint8_t> CollisionEngine::DetectPolygonCollisions(
@@ -484,26 +664,14 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
             {ErrorCode::InvalidInput, "transform contains a non-finite value"});
     }
 
+    // jagua-rs detect_surrogate_collision：ff pole/pier 逐个在四叉树内查询
     for (std::size_t i = 0; i < surrogate.FailFastPoleCount(); ++i)
     {
         Circle2d transformedPole = surrogate.Poles()[i];
         transformedPole.center = transform.ApplyRustF32(transformedPole.center);
 
-        for (const HazardHandle handle :
-             m_QuadTree.QueryVirtualRoot(transformedPole.BoundingBox()))
-        {
-            const Hazard* hazard = Get(handle);
-            if (hazard && hazard->shape &&
-                !filter.IsIrrelevant(handle, hazard->entity))
-            {
-                if (hazard->entity.kind == HazardKind::Exterior &&
-                    m_QuadTree.HasEntirePresenceForCircleAtDepth(
-                        handle, transformedPole, m_Config.quadtreeDepth))
-                    return Result<bool>::FromValue(true);
-                if (CircleCollidesWithHazard(transformedPole, *hazard))
-                    return Result<bool>::FromValue(true);
-            }
-        }
+        if (NodeCollidesWithCircle(m_QuadTree.m_Root, transformedPole, filter))
+            return Result<bool>::FromValue(true);
     }
 
     for (const Edge2d& basePier : surrogate.Piers())
@@ -513,21 +681,8 @@ JAGUARCORE_API Result<bool> CollisionEngine::DetectSurrogateCollision(
         const auto transformed = Edge2d::Create(transformedStart, transformedEnd);
         if (!transformed.HasValue())
             continue;
-        for (const HazardHandle handle :
-             m_QuadTree.QueryVirtualRoot(transformed.Value().BoundingBox()))
-        {
-            const Hazard* hazard = Get(handle);
-            if (hazard && hazard->shape &&
-                !filter.IsIrrelevant(handle, hazard->entity))
-            {
-                if (hazard->entity.kind == HazardKind::Exterior &&
-                    m_QuadTree.HasEntirePresenceForEdgeAtDepth(
-                        handle, transformed.Value(), m_Config.quadtreeDepth))
-                    return Result<bool>::FromValue(true);
-                if (EdgeCollidesWithHazard(transformed.Value(), *hazard))
-                    return Result<bool>::FromValue(true);
-            }
-        }
+        if (NodeCollidesWithEdge(m_QuadTree.m_Root, transformed.Value(), filter))
+            return Result<bool>::FromValue(true);
     }
     return Result<bool>::FromValue(false);
 }
@@ -553,28 +708,16 @@ JAGUARCORE_API Result<bool> CollisionEngine::CollectSurrogateCollisionsUntil(
         return stopAfterCollision && stopAfterCollision(entity);
     };
 
+    // jagua-rs collect_surrogate_collisions_until：ff pole/pier 在树内收集
     for (std::size_t i = 0; i < surrogate.FailFastPoleCount(); ++i)
     {
         Circle2d transformedPole = surrogate.Poles()[i];
         transformedPole.center = transform.ApplyRustF32(transformedPole.center);
 
-        for (const HazardHandle handle :
-             m_QuadTree.QueryVirtualRoot(transformedPole.BoundingBox()))
-        {
-            const Hazard* hazard = Get(handle);
-            if (!hazard || !hazard->shape ||
-                filter.IsIrrelevant(handle, hazard->entity) || collector.Contains(handle))
-                continue;
-
-            const bool collidesWithBoundary =
-                CircleCollidesWithHazard(transformedPole, *hazard);
-            const bool collidesWithEntirePresence =
-                hazard->entity.kind == HazardKind::Exterior &&
-                m_QuadTree.HasEntirePresenceForCircle(handle, transformedPole);
-            if ((collidesWithBoundary || collidesWithEntirePresence) &&
-                report(handle, hazard->entity))
-                return Result<bool>::FromValue(true);
-        }
+        if (CollectCircleCollisionsUntil(
+                m_QuadTree.m_Root, transformedPole, collector, filter,
+                stopAfterCollision, report))
+            return Result<bool>::FromValue(true);
     }
     return Result<bool>::FromValue(false);
 }

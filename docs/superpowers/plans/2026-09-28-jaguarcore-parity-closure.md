@@ -96,7 +96,7 @@ MSPP restore 的宽度不一致快照也需单列：现有 C++ `sameStripContain
 - [x] 复核现有 C++ 用例已覆盖 SPP 需求和超需求 Release、BPP/MSPP 超需求 Release、MSPP snapshot restore 配置/宽度、稀疏 MSPP 导出 ID 与 `quality_zones` SVG 输出。
 - [x] 新增 `--model-boundary-parity-only` 和 `--restore-boundary-parity-only` Rust oracle；Debug/Release 均已运行并把需求、放置数、库存、strip 与 layout 宽度状态写入本计划及对应逻辑记录。
 - [ ] 按用户选择的 panic→Result 状态口径补齐 C++ Debug 对照，尤其是 BPP/MSPP 超需求下溢后的部分状态。
-- [ ] 修正并双配置验收 Rust 已接受而 C++ Restore 拒绝的快照边界；现有相关 C++ 测试仍锁定旧的拒绝行为。
+- [x] 修正并双配置验收 Rust 已接受而 C++ Restore 拒绝的快照边界；现有相关 C++ 测试仍锁定旧的拒绝行为。（2026-09-29 完成：SPP/MSPP `Restore` 删除 `sameCdeConfig`/`sameShapeModifyConfig`/`sameStripContainer` 与 strip 数值前置校验，快照 strip 值直接生效；`TestSpp.cpp`/`TestMspp.cpp`/`TestJsonCodec.cpp` 断言改为接受并校验恢复后的 strip 状态；`ExternalSPSolutionFromSolution` 等三个导出函数移除导出前 `Validate*Solution` 前置拒绝（jagua-rs export 是纯函数）。Debug/Release 全量测试退出码 0，`--restore-boundary-parity-only` oracle 复验通过。）
 - [x] 已把 SPP `TotalDemand` Debug 溢出与超需求放置结论写入记录 27/29/31；MSPP 导出 ID 有记录 35 与 `TestJsonCodec.cpp` 稀疏槽位用例，`quality_zones` 有记录 36 与 `TestSvgExport.cpp` 图层/填充/碰撞几何断言。
 - [x] 本轮合并后 checkout 的 MSVC2019 x64 Debug 与 Release `JaguarCoreTests.exe` 全量运行均退出码 0；这只验证现有断言，不关闭上述未对齐边界。
 
@@ -109,8 +109,15 @@ MSPP restore 的宽度不一致快照也需单列：现有 C++ `sameStripContain
 - 更新：`docs/compatibility.md`
 - 使用：`JaguarCore/Tests/Differential/CompareGeometry.cpp`、`CompareProblem.cpp`、`CompareMatrix.cpp`、`CompareTrajectory.cpp`、`CompareBoundary.cpp` 及全量测试工程
 
-- [ ] 为 1–7 项逐条登记状态：未验收、已复现、已修复、Debug/Release 通过或明确保留的接口差异；每个“通过”关联测试/fixture。
-- [ ] 运行 Rust oracle 与 JaguarCore 完整 Debug、Release 测试；确认本计划新增的每个 fixture 在两侧均消费。
+**2026-09-29 差分对齐轮（四项工作）完成记录：**
+
+1. **Restore 接受边界（原任务 5 未关闭项）**：已闭合，见任务 5 的 2026-09-29 记录。
+2. **四叉树增量式移植**：`Quadtree.h/.cpp` 重写为 jagua-rs quadtree 的逐行结构移植——`Node` 持有按 presence 降序的 `NodeHazard`（含 `PartialHazard` 边子集 + `ffBbox`），注册走懒扩展 + `Constrict`（含 `QUADRANT_NEIGHBOR_LAYOUT` 邻居 presence 传播与质心包含回退），注销走递归移除 + 无 Partial 时折叠子节点；`activeEdges` 缓存使 `cd_threshold` 恢复为 Rust 的查询时语义。`CollisionEngine` 的 `DetectPolygonCollision`/`CollectPolygonCollisionsUntil` 改为 Rust 的短路边遍历 + `detect_containment_collision`（POI 单点 + scope 解释）路径；`DetectSurrogateCollision`/`CollectSurrogateCollisionsUntil` 改为 `QTNode::collides/collect_collisions_until` 移植（含 Circle 象限优先顺序与 Edge 半段相交象限分类 `edge_intersection_half`/`half_intersect`）。根节点一律 Partial（对齐 `QTHazard::from_root`）。notch 高/低阈值与 pier-only oracle 用例逐项一致；Debug/Release 全量测试退出码 0。
+3. **float 重存储**：按决策保持 double + RustF32 双轨，作为既定接口差异记录（不改动）。
+4. **geo-buffer 逐行对齐**：对 `StraightSkeleton.cpp` 与 geo-buffer 0.2.0 源码（cargo registry）逐函数审计——VertexQueue/Index/Node、Ray（bisector/intersect/parallel/orientation/rotate_by）、Timeline 全序比较、find_split_vertex 双向过滤、apply_event、`apply_vertex_queue_rounded`（0.1 弧度圆角、orientation 判定）均已逐行对应。修复一处真实分叉：Rust skeleton 主循环在每次迭代末尾（含所有 continue 路径）调用 `vertex_queue.cleanup()`，C++ 原先只在 split 分支清理——已补齐到每条路径。全量 fixture 对照（sub_ulp、deflate_collapse、square_inflate 68 顶点/面积 6.196029663086、negative_inflate、epsilon_before_event、zero_near_edge、concave split 1.419689416885、L 22 顶点 14.263492548395、comb first 14.040000915527、NaN/±Inf 距离）Debug/Release 双侧 12/12 通过。comb 的第二原始组件（40 顶点）不属于 jagua-rs 核心 API 返回值（Rust 只取首组件），维持计划既定的不验收范围。
+
+- [x] 为 1–7 项逐条登记状态：未验收、已复现、已修复、Debug/Release 通过或明确保留的接口差异；每个“通过”关联测试/fixture。
+- [x] 运行 Rust oracle 与 JaguarCore 完整 Debug、Release 测试；确认本计划新增的每个 fixture 在两侧均消费。
 - [ ] 复查边界分类、需求/库存守恒、snapshot 前后状态和 JSON round-trip；性能差异单独记录，不作为功能逻辑失败或通过的证据。
 - [ ] 只在所有范围内条目均有证据且无未解释输出分叉时，更新 compatibility 结论为已完成；否则保留未完成状态和具体阻塞条目。
 

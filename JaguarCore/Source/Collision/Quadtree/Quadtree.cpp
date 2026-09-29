@@ -3,53 +3,563 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <functional>
+#include <limits>
 
 namespace jaguar
 {
 namespace
 {
-std::array<Edge2d, 4> rectangleEdges(const Rect2d& rect)
+// jagua-rs Rect::QUADRANT_NEIGHBOR_LAYOUT
+constexpr std::array<std::array<std::size_t, 2>, 4> kQuadrantNeighborLayout{
+    {{1, 3}, {0, 2}, {1, 3}, {0, 2}}};
+
+// 判断多边形是否与矩形边/角接触（用于 constrict 的边归类）
+// jagua-rs Rect::collides_with(&Edge)：bbox 预筛 + 端点包含 + 四边判交
+bool rectCollidesWithEdge(const Rect2d& rect, const Edge2d& edge) noexcept
 {
-    return {
-        Edge2d{Point2d{rect.xMin, rect.yMin}, Point2d{rect.xMax, rect.yMin}},
-        Edge2d{Point2d{rect.xMax, rect.yMin}, Point2d{rect.xMax, rect.yMax}},
-        Edge2d{Point2d{rect.xMax, rect.yMax}, Point2d{rect.xMin, rect.yMax}},
-        Edge2d{Point2d{rect.xMin, rect.yMax}, Point2d{rect.xMin, rect.yMin}},
-    };
+    return edge.IntersectsRustF32(rect);
 }
 
-std::array<Point2d, 4> rectangleCorners(const Rect2d& rect)
+bool rectContainsPolygonBBox(const Rect2d& rect,
+                             const Rect2d& polygonBounds) noexcept
 {
-    return {
-        Point2d{rect.xMin, rect.yMin}, Point2d{rect.xMax, rect.yMin},
-        Point2d{rect.xMax, rect.yMax}, Point2d{rect.xMin, rect.yMax},
-    };
+    return rect.RelationToRustF32(polygonBounds) == RectRelation::Surrounding;
 }
 
-bool sameBounds(const Rect2d& first, const Rect2d& second) noexcept
+// jagua-rs: CollisionHalf —— 半段相交方向
+enum class CollisionHalf
 {
-    return first.xMin == second.xMin && first.yMin == second.yMin &&
-           first.xMax == second.xMax && first.yMax == second.yMax;
+    FirstHalf,
+    Halfway,
+    SecondHalf,
+};
+
+// jagua-rs qt_traits::edge_intersection_half 的移植
+bool edgeIntersectionHalf(const Edge2d& first,
+                          const Edge2d& second,
+                          CollisionHalf& firstLocation,
+                          CollisionHalf& secondLocation) noexcept
+{
+    const float x1 = static_cast<float>(first.start.x);
+    const float y1 = static_cast<float>(first.start.y);
+    const float x2 = static_cast<float>(first.end.x);
+    const float y2 = static_cast<float>(first.end.y);
+    const float x3 = static_cast<float>(second.start.x);
+    const float y3 = static_cast<float>(second.start.y);
+    const float x4 = static_cast<float>(second.end.x);
+    const float y4 = static_cast<float>(second.end.y);
+
+    const float tNom = (x2 - x4) * (y4 - y3) - (y2 - y4) * (x4 - x3);
+    const float tDenom = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3);
+    const float uNom = (x2 - x4) * (y2 - y1) - (y2 - y4) * (x2 - x1);
+    const float uDenom = tDenom;
+    if (tDenom == 0.0F || uDenom == 0.0F)
+        return false;
+
+    const float t = tNom / tDenom;
+    const float u = uNom / uDenom;
+    if ((t >= 0.0F && t <= 1.0F) && (u >= 0.0F && u <= 1.0F))
+    {
+        const auto classify = [](float value) {
+            if (value > 0.5F)
+                return CollisionHalf::FirstHalf;
+            if (value < 0.5F)
+                return CollisionHalf::SecondHalf;
+            return CollisionHalf::Halfway;
+        };
+        firstLocation = classify(t);
+        secondLocation = classify(u);
+        return true;
+    }
+    return false;
 }
+
+// jagua-rs qt_traits::half_intersect：first/second 半段命中时置位对应象限
+template <std::size_t N>
+void halfIntersect(const Edge2d& probe,
+                   const Edge2d& splitter,
+                   std::array<std::optional<bool>*, N>& firstQuadrants,
+                   std::array<std::optional<bool>*, N>& secondQuadrants) noexcept
+{
+    bool anyUndetermined = false;
+    for (std::optional<bool>* flag : firstQuadrants)
+        anyUndetermined = anyUndetermined || !flag->has_value();
+    for (std::optional<bool>* flag : secondQuadrants)
+        anyUndetermined = anyUndetermined || !flag->has_value();
+    if (!anyUndetermined)
+        return;
+
+    CollisionHalf firstLocation;
+    CollisionHalf secondLocation;
+    if (!edgeIntersectionHalf(probe, splitter, firstLocation, secondLocation))
+        return;
+    if (secondLocation == CollisionHalf::FirstHalf ||
+        secondLocation == CollisionHalf::Halfway)
+    {
+        for (std::optional<bool>* flag : firstQuadrants)
+            *flag = true;
+    }
+    if (secondLocation == CollisionHalf::SecondHalf ||
+        secondLocation == CollisionHalf::Halfway)
+    {
+        for (std::optional<bool>* flag : secondQuadrants)
+            *flag = true;
+    }
+}
+}  // 匿名命名空间结束
+
+// jagua-rs QTQueryable for Edge：与四个象限相交的保守分类
+// （供 CollisionEngine 的 QTNode 查询移植使用）
+namespace quadtree_query
+{
+std::array<bool, 4> edgeCollidesWithQuadrants(
+    const Edge2d& edge, const Rect2d& nodeBounds,
+    const std::array<Rect2d, 4>& quadrants) noexcept
+{
+    const float eXMin = static_cast<float>(
+        std::min(edge.start.x, edge.end.x));
+    const float eXMax = static_cast<float>(
+        std::max(edge.start.x, edge.end.x));
+    const float eYMin = static_cast<float>(
+        std::min(edge.start.y, edge.end.y));
+    const float eYMax = static_cast<float>(
+        std::max(edge.start.y, edge.end.y));
+
+    std::array<std::optional<bool>, 4> classified{};
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        const Rect2d& q = quadrants[i];
+        const float xNoOverlap =
+            std::max(eXMin, static_cast<float>(q.xMin)) >
+            std::min(eXMax, static_cast<float>(q.xMax));
+        const float yNoOverlap =
+            std::max(eYMin, static_cast<float>(q.yMin)) >
+            std::min(eYMax, static_cast<float>(q.yMax));
+        if (xNoOverlap || yNoOverlap)
+            classified[i] = false;
+        else if (q.ContainsRustF32(edge.start) || q.ContainsRustF32(edge.end))
+            classified[i] = true;
+    }
+
+    if (std::all_of(classified.begin(), classified.end(),
+                    [](const std::optional<bool>& value) {
+                        return value.has_value();
+                    }))
+    {
+        return {classified[0].value(), classified[1].value(),
+                classified[2].value(), classified[3].value()};
+    }
+
+    // 与父节点中线/边的半段相交推断
+    // jagua-rs sides() 顺序（corners [TR,TL,BL,BR] 的相邻连线）：
+    // [0]=top, [1]=left, [2]=bottom, [3]=right
+    const std::vector<Edge2d> sides = nodeBounds.SidesRustF32();
+    const Edge2d top = sides[0];
+    const Edge2d left = sides[1];
+    const Edge2d bottom = sides[2];
+    const Edge2d right = sides[3];
+    const Point2d centroid = nodeBounds.CentroidRustF32();
+    const Edge2d hBisect{
+        Point2d{nodeBounds.xMin, centroid.y},
+        Point2d{nodeBounds.xMax, centroid.y}};
+    const Edge2d vBisect{
+        Point2d{centroid.x, nodeBounds.yMin},
+        Point2d{centroid.x, nodeBounds.yMax}};
+
+    std::array<std::optional<bool>*, 1> q1Left{&classified[1]};
+    std::array<std::optional<bool>*, 1> q2Left{&classified[2]};
+    halfIntersect(edge, left, q1Left, q2Left);
+    std::array<std::optional<bool>*, 1> q3Right{&classified[3]};
+    std::array<std::optional<bool>*, 1> q0Right{&classified[0]};
+    halfIntersect(edge, right, q3Right, q0Right);
+    std::array<std::optional<bool>*, 1> q0Top{&classified[0]};
+    std::array<std::optional<bool>*, 1> q1Top{&classified[1]};
+    halfIntersect(edge, top, q0Top, q1Top);
+    std::array<std::optional<bool>*, 1> q2Bottom{&classified[2]};
+    std::array<std::optional<bool>*, 1> q3Bottom{&classified[3]};
+    halfIntersect(edge, bottom, q2Bottom, q3Bottom);
+    std::array<std::optional<bool>*, 2> q1H{&classified[1], &classified[2]};
+    std::array<std::optional<bool>*, 2> q0H{&classified[0], &classified[3]};
+    halfIntersect(edge, hBisect, q1H, q0H);
+    std::array<std::optional<bool>*, 2> q2V{&classified[2], &classified[3]};
+    std::array<std::optional<bool>*, 2> q0V{&classified[0], &classified[1]};
+    halfIntersect(edge, vBisect, q2V, q0V);
+
+    std::array<bool, 4> result{};
+    for (std::size_t i = 0; i < 4; ++i)
+        result[i] = classified[i].value_or(false);
+    return result;
+}
+}  // namespace quadtree_query
+
+namespace quadtree_query
+{
+std::array<bool, 4> circleCollidesWithQuadrants(
+    const Circle2d& circle, const std::array<Rect2d, 4>& quadrants) noexcept
+{
+    return {circle.IntersectsRustF32(quadrants[0]),
+            circle.IntersectsRustF32(quadrants[1]),
+            circle.IntersectsRustF32(quadrants[2]),
+            circle.IntersectsRustF32(quadrants[3])};
+}
+
+// jagua-rs QTQueryable for Circle：按圆心所在象限优先的搜索顺序
+std::array<std::size_t, 4> circleQuadrantOrder(
+    const Circle2d& circle, const std::array<Rect2d, 4>& quadrants) noexcept
+{
+    const Point2d split{quadrants[0].xMin, quadrants[0].yMin};
+    const bool right = circle.center.x >= split.x;
+    const bool top = circle.center.y >= split.y;
+    const std::size_t rowMask = top ? 0U : 2U;
+    const std::size_t containingQuadrant =
+        rowMask | static_cast<std::size_t>(right != top);
+    const std::size_t firstAdjacentMask = rowMask | 1U;
+    return {containingQuadrant,
+            containingQuadrant ^ firstAdjacentMask,
+            containingQuadrant ^ (firstAdjacentMask ^ 2U),
+            containingQuadrant ^ 2U};
+}
+}  // namespace quadtree_query
+
+void QuadTree::Node::AddHazard(NodeHazard hazard)
+{
+    // jagua-rs QTHazardVec::add：按 presence 降序插入（Entire > Partial > None）
+    activeEdges += hazard.EdgeCount();
+    const auto sortKey = [](HazardPresence presence) {
+        switch (presence)
+        {
+        case HazardPresence::Entire:
+            return 2;
+        case HazardPresence::Partial:
+            return 1;
+        case HazardPresence::None:
+        default:
+            return 0;
+        }
+    };
+    const int key = sortKey(hazard.presence);
+    const auto it = std::find_if(
+        hazards.begin(), hazards.end(),
+        [key, sortKey](const NodeHazard& existing) {
+            return sortKey(existing.presence) <= key;
+        });
+    hazards.insert(it, std::move(hazard));
+}
+
+bool QuadTree::Node::RemoveHazard(HazardHandle handle)
+{
+    const auto it = std::find_if(
+        hazards.begin(), hazards.end(),
+        [handle](const NodeHazard& hazard) {
+            return hazard.handle == handle;
+        });
+    if (it == hazards.end())
+        return false;
+    activeEdges -= it->EdgeCount();
+    hazards.erase(it);
+    return true;
+}
+
+bool QuadTree::Node::HasPartialHazard() const noexcept
+{
+    return std::any_of(hazards.begin(), hazards.end(),
+                       [](const NodeHazard& hazard) {
+                           return hazard.presence == HazardPresence::Partial;
+                       });
+}
+
+QuadTree::NodeHazard QuadTree::MakeRootHazard(HazardHandle handle,
+                                              const Hazard& hazard,
+                                              const Rect2d& rootBounds)
+{
+    // jagua-rs QTHazard::from_root：根节点一律 Partial（整形状边集）。
+    NodeHazard root;
+    root.qtBbox = rootBounds;
+    root.handle = handle;
+    root.entity = hazard.entity;
+    root.presence = HazardPresence::Partial;
+    root.partial = std::make_unique<PartialHazard>();
+    if (hazard.shape)
+    {
+        root.partial->edges = hazard.shape->Edges();
+        root.partial->ffBbox = hazard.shape->BoundingBox();
+    }
+    else
+    {
+        // bounds-only 注册（C++ 额外入口）：用一条根节点对角线代表整形状
+        root.partial->edges = {
+            Edge2d{Point2d{rootBounds.xMin, rootBounds.yMin},
+                   Point2d{rootBounds.xMax, rootBounds.yMax}}};
+        root.partial->ffBbox = rootBounds;
+    }
+    return root;
+}
+
+std::array<QuadTree::NodeHazard, 4> QuadTree::Constrict(
+    const NodeHazard& hazard,
+    const std::array<Rect2d, 4>& quadrants,
+    const SimplePolygon& shape)
+{
+    std::array<std::optional<NodeHazard>, 4> constricted{};
+
+    if (hazard.presence == HazardPresence::Entire)
+    {
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            NodeHazard clone;
+            clone.qtBbox = quadrants[i];
+            clone.handle = hazard.handle;
+            clone.entity = hazard.entity;
+            clone.presence = HazardPresence::Entire;
+            constricted[i] = std::move(clone);
+        }
+        return {std::move(constricted[0].value()),
+                std::move(constricted[1].value()),
+                std::move(constricted[2].value()),
+                std::move(constricted[3].value())};
+    }
+
+    // Partial：先找 hazard bbox 完全落入的象限
+    const Rect2d shapeBounds = shape.BoundingBox();
+    std::optional<std::size_t> enclosedQuadrant;
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        if (rectContainsPolygonBBox(quadrants[i], shapeBounds))
+        {
+            enclosedQuadrant = i;
+            break;
+        }
+    }
+
+    if (enclosedQuadrant.has_value())
+    {
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            NodeHazard child;
+            child.qtBbox = quadrants[i];
+            child.handle = hazard.handle;
+            child.entity = hazard.entity;
+            child.presence = i == *enclosedQuadrant
+                                 ? HazardPresence::Partial
+                                 : HazardPresence::None;
+            if (child.presence == HazardPresence::Partial)
+            {
+                child.partial = std::make_unique<PartialHazard>(*hazard.partial);
+            }
+            constricted[i] = std::move(child);
+        }
+    }
+    else
+    {
+        // 多象限活跃：先按边与象限相交归 Partial
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            std::vector<Edge2d> collidingEdges;
+            for (const Edge2d& edge : hazard.partial->edges)
+            {
+                if (rectCollidesWithEdge(quadrants[i], edge))
+                    collidingEdges.push_back(edge);
+            }
+            if (!collidingEdges.empty())
+            {
+                NodeHazard child;
+                child.qtBbox = quadrants[i];
+                child.handle = hazard.handle;
+                child.entity = hazard.entity;
+                child.presence = HazardPresence::Partial;
+
+                auto partial = std::make_unique<PartialHazard>();
+                if (collidingEdges.size() == hazard.partial->edges.size())
+                {
+                    partial->ffBbox = hazard.partial->ffBbox;
+                }
+                else
+                {
+                    float xMin = std::numeric_limits<float>::infinity();
+                    float yMin = std::numeric_limits<float>::infinity();
+                    float xMax = -std::numeric_limits<float>::infinity();
+                    float yMax = -std::numeric_limits<float>::infinity();
+                    for (const Edge2d& edge : collidingEdges)
+                    {
+                        xMin = std::min(
+                            xMin, std::min(static_cast<float>(edge.start.x),
+                                           static_cast<float>(edge.end.x)));
+                        yMin = std::min(
+                            yMin, std::min(static_cast<float>(edge.start.y),
+                                           static_cast<float>(edge.end.y)));
+                        xMax = std::max(
+                            xMax, std::max(static_cast<float>(edge.start.x),
+                                           static_cast<float>(edge.end.x)));
+                        yMax = std::max(
+                            yMax, std::max(static_cast<float>(edge.start.y),
+                                           static_cast<float>(edge.end.y)));
+                    }
+                    if (xMin < xMax && yMin < yMax)
+                    {
+                        partial->ffBbox = Rect2d{
+                            static_cast<double>(xMin), static_cast<double>(yMin),
+                            static_cast<double>(xMax), static_cast<double>(yMax)};
+                    }
+                    else
+                    {
+                        partial->ffBbox = hazard.partial->ffBbox;
+                    }
+                }
+                partial->edges = std::move(collidingEdges);
+                child.partial = std::move(partial);
+                constricted[i] = std::move(child);
+            }
+        }
+
+        // 无相交边的象限按邻居 presence 或质心包含判定 Entire/None
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            if (constricted[i].has_value())
+                continue;
+
+            bool noneNeighbor = false;
+            bool entireNeighbor = false;
+            for (const std::size_t neighbor : kQuadrantNeighborLayout[i])
+            {
+                if (!constricted[neighbor].has_value())
+                    continue;
+                if (constricted[neighbor]->presence == HazardPresence::None)
+                    noneNeighbor = true;
+                if (constricted[neighbor]->presence == HazardPresence::Entire)
+                    entireNeighbor = true;
+            }
+
+            HazardPresence presence;
+            if (noneNeighbor)
+            {
+                presence = HazardPresence::None;
+            }
+            else if (entireNeighbor)
+            {
+                presence = HazardPresence::Entire;
+            }
+            else
+            {
+                const bool colliding =
+                    shape.ContainsRustF32(quadrants[i].CentroidRustF32());
+                const bool interiorScope =
+                    hazard.entity.kind != HazardKind::Exterior;
+                presence = interiorScope == colliding
+                               ? HazardPresence::Entire
+                               : HazardPresence::None;
+            }
+
+            NodeHazard child;
+            child.qtBbox = quadrants[i];
+            child.handle = hazard.handle;
+            child.entity = hazard.entity;
+            child.presence = presence;
+            constricted[i] = std::move(child);
+        }
+    }
+
+    return {std::move(constricted[0].value()),
+            std::move(constricted[1].value()),
+            std::move(constricted[2].value()),
+            std::move(constricted[3].value())};
+}
+
+void QuadTree::RegisterIntoNode(Node& node,
+                                NodeHazard hazard,
+                                const std::vector<RegisteredShape>& shapes)
+{
+    const auto shapeIt = std::find_if(
+        shapes.begin(), shapes.end(),
+        [&hazard](const RegisteredShape& registered) {
+            return registered.handle == hazard.handle;
+        });
+
+    // 懒扩展：节点无子节点、还可细分、且新 hazard 为 Partial
+    if (node.level > 0 && node.children.front() == nullptr &&
+        hazard.presence == HazardPresence::Partial)
+    {
+        const auto quadrants = node.bounds.QuadrantsRustF32();
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            node.children[i] = std::make_unique<Node>();
+            node.children[i]->bounds = quadrants[i];
+            node.children[i]->level = static_cast<std::uint8_t>(node.level - 1);
+        }
+        // 把已有 hazard constrict 到新子节点
+        for (const NodeHazard& existing : node.hazards)
+        {
+            if (shapeIt == shapes.end() || !shapeIt->shape)
+                continue;
+            std::array<NodeHazard, 4> children =
+                Constrict(existing, quadrants, *shapeIt->shape);
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                if (children[i].presence != HazardPresence::None)
+                    RegisterIntoNode(*node.children[i], std::move(children[i]),
+                                     shapes);
+            }
+        }
+    }
+
+    if (node.children.front() != nullptr)
+    {
+        // jagua-rs：constrict 到子节点需要完整形状
+        if (shapeIt != shapes.end() && shapeIt->shape)
+        {
+            const auto quadrants = node.bounds.QuadrantsRustF32();
+            std::array<NodeHazard, 4> children =
+                Constrict(hazard, quadrants, *shapeIt->shape);
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                if (children[i].presence != HazardPresence::None)
+                    RegisterIntoNode(*node.children[i], std::move(children[i]),
+                                     shapes);
+            }
+        }
+    }
+    node.AddHazard(std::move(hazard));
+}void QuadTree::DeregisterFromNode(Node& node, HazardHandle handle)
+{
+    if (!node.RemoveHazard(handle))
+        return;
+
+    if (!node.HasPartialHazard())
+    {
+        // 无 Partial hazard 时折叠子节点（jagua-rs deregister_hazard）
+        node.children = {};
+    }
+    else
+    {
+        for (auto& child : node.children)
+        {
+            if (child)
+                DeregisterFromNode(*child, handle);
+        }
+    }
 }
 
 QuadTree::QuadTree(Rect2d bounds,
-                   std::uint8_t maxDepth,
-                   std::uint8_t edgeThreshold)
-    : m_Root{bounds, 0, {}, {}},
-      m_MaxDepth(maxDepth),
-      m_EdgeThreshold(edgeThreshold)
+                   std::uint8_t quadtreeDepth,
+                   std::uint8_t cdThreshold)
+    : m_Root{bounds, quadtreeDepth, {}, {}, 0},
+      m_CdThreshold(cdThreshold)
 {
 }
 
 void QuadTree::RegisterHazard(HazardHandle handle, const Hazard& hazard)
 {
-    RegisteredHazard registered;
+    RegisteredShape registered;
     registered.handle = handle;
-    registered.hazard = hazard;
-    registered.hasGeometry = hazard.shape != nullptr;
-    registered.bounds = registered.hasGeometry ? hazard.shape->BoundingBox() : m_Root.bounds;
+    registered.shape = hazard.shape;
+    registered.bounds =
+        hazard.shape ? hazard.shape->BoundingBox() : m_Root.bounds;
+    registered.entity = hazard.entity;
     SetRegistered(std::move(registered));
+
+    RegisterIntoNode(m_Root, MakeRootHazard(handle, hazard, m_Root.bounds),
+                     m_Registered);
 }
 
 void QuadTree::RegisterHazard(HazardHandle handle,
@@ -62,30 +572,74 @@ void QuadTree::RegisterHazard(HazardHandle handle,
 
 void QuadTree::RegisterHazard(HazardHandle handle, const Rect2d& hazardBounds)
 {
-    RegisteredHazard registered;
+    RegisteredShape registered;
     registered.handle = handle;
     registered.bounds = hazardBounds;
-    registered.hasGeometry = false;
-    registered.hazard.entity = HazardEntity{};
+    registered.entity = HazardEntity{};
     SetRegistered(std::move(registered));
+
+    // bounds-only：C++ 额外入口，等价于无完整几何的根 Partial
+    NodeHazard root;
+    root.qtBbox = m_Root.bounds;
+    root.handle = handle;
+    root.presence = HazardPresence::Partial;
+    root.partial = std::make_unique<PartialHazard>();
+    root.partial->edges = {
+        Edge2d{Point2d{hazardBounds.xMin, hazardBounds.yMin},
+               Point2d{hazardBounds.xMax, hazardBounds.yMax}}};
+    root.partial->ffBbox = hazardBounds;
+    RegisterIntoNode(m_Root, std::move(root), m_Registered);
 }
 
 void QuadTree::DeregisterHazard(HazardHandle handle)
 {
-    m_Hazards.erase(
-        std::remove_if(m_Hazards.begin(), m_Hazards.end(),
-                       [handle](const RegisteredHazard& hazard) {
-                           return hazard.handle == handle;
+    m_Registered.erase(
+        std::remove_if(m_Registered.begin(), m_Registered.end(),
+                       [handle](const RegisteredShape& registered) {
+                           return registered.handle == handle;
                        }),
-        m_Hazards.end());
-    Rebuild();
+        m_Registered.end());
+    DeregisterFromNode(m_Root, handle);
 }
 
 std::vector<HazardHandle> QuadTree::Query(const Rect2d& queryBounds) const
 {
+    // 兼容旧查询接口：在虚拟根子树内收集 Partial/Entire 的 hazard
     std::vector<HazardHandle> result;
-    QueryNode(VirtualRoot(queryBounds), queryBounds, m_Hazards, result);
-    SortUnique(result);
+    const Node& root = VirtualRootFor(m_Root, queryBounds);
+
+    struct Walker
+    {
+        const Node* node;
+    };
+    std::vector<Walker> stack{{&root}};
+    while (!stack.empty())
+    {
+        const Node& node = *stack.back().node;
+        stack.pop_back();
+        if (!node.bounds.IntersectsRustF32(queryBounds))
+            continue;
+        for (const NodeHazard& hazard : node.hazards)
+        {
+            if (hazard.presence != HazardPresence::None &&
+                std::find(result.begin(), result.end(), hazard.handle) ==
+                    result.end())
+            {
+                result.push_back(hazard.handle);
+            }
+        }
+        for (const auto& child : node.children)
+        {
+            if (child)
+                stack.push_back({child.get()});
+        }
+    }
+    std::sort(result.begin(), result.end(),
+              [](const HazardHandle& lhs, const HazardHandle& rhs) {
+                  if (lhs.index != rhs.index)
+                      return lhs.index < rhs.index;
+                  return lhs.generation < rhs.generation;
+              });
     return result;
 }
 
@@ -97,104 +651,35 @@ std::vector<HazardHandle> QuadTree::Query(const Edge2d& queryEdge) const
 std::vector<HazardHandle> QuadTree::QueryVirtualRoot(
     const Rect2d& queryBounds) const
 {
-    std::vector<HazardHandle> result;
-    QueryNode(VirtualRoot(queryBounds), queryBounds, m_Hazards, result);
-    SortUnique(result);
-    return result;
+    return Query(queryBounds);
 }
 
 HazardPresence QuadTree::PresenceAt(HazardHandle handle,
                                     const Rect2d& nodeBounds) const noexcept
 {
-    const RegisteredHazard* hazard = Find(handle);
-    if (!hazard)
-        return HazardPresence::None;
-    return Classify(*hazard, nodeBounds).presence;
-}
-
-bool QuadTree::HasEntirePresenceForCircle(
-    HazardHandle handle, const Circle2d& circle) const noexcept
-{
-    const RegisteredHazard* hazard = Find(handle);
-    if (!hazard)
-        return false;
-
-    const auto hasEntirePresence = [&](const auto& self, const Node& node) noexcept -> bool {
-        bool hasChildren = false;
-        for (const auto& child : node.children)
+    // 在树中找该 handle 且所在节点包围盒匹配 nodeBounds 的条目
+    const std::function<HazardPresence(const Node*)> findPresence =
+        [&findPresence, handle, &nodeBounds](const Node* node) noexcept {
+        for (const NodeHazard& hazard : node->hazards)
+        {
+            if (hazard.handle == handle && hazard.presence != HazardPresence::None &&
+                hazard.qtBbox.xMin == nodeBounds.xMin &&
+                hazard.qtBbox.yMin == nodeBounds.yMin &&
+                hazard.qtBbox.xMax == nodeBounds.xMax &&
+                hazard.qtBbox.yMax == nodeBounds.yMax)
+                return hazard.presence;
+        }
+        for (const auto& child : node->children)
         {
             if (!child)
                 continue;
-            hasChildren = true;
-            if (circle.IntersectsRustF32(child->bounds) &&
-                self(self, *child))
-                return true;
+            const HazardPresence presence = findPresence(child.get());
+            if (presence != HazardPresence::None)
+                return presence;
         }
-        return !hasChildren &&
-               Classify(*hazard, node.bounds).presence == HazardPresence::Entire;
+        return HazardPresence::None;
     };
-
-    return hasEntirePresence(hasEntirePresence, m_Root);
-}
-
-bool QuadTree::HasEntirePresenceForCircleAtDepth(
-    HazardHandle handle,
-    const Circle2d& circle,
-    std::uint8_t maxDepth) const noexcept
-{
-    const RegisteredHazard* hazard = Find(handle);
-    if (!hazard)
-        return false;
-
-    const auto hasEntirePresence = [&](const auto& self,
-                                       const Rect2d& nodeBounds,
-                                       std::uint8_t depth) noexcept -> bool {
-        const HazardPresence presence = Classify(*hazard, nodeBounds).presence;
-        if (presence == HazardPresence::Entire)
-            return true;
-        if (presence == HazardPresence::None || depth >= maxDepth)
-            return false;
-
-        for (const Rect2d& quadrant : nodeBounds.QuadrantsRustF32())
-        {
-            if (circle.IntersectsRustF32(quadrant) &&
-                self(self, quadrant, static_cast<std::uint8_t>(depth + 1U)))
-                return true;
-        }
-        return false;
-    };
-
-    return hasEntirePresence(hasEntirePresence, m_Root.bounds, 0);
-}
-
-bool QuadTree::HasEntirePresenceForEdgeAtDepth(
-    HazardHandle handle,
-    const Edge2d& edge,
-    std::uint8_t maxDepth) const noexcept
-{
-    const RegisteredHazard* hazard = Find(handle);
-    if (!hazard)
-        return false;
-
-    const auto hasEntirePresence = [&](const auto& self,
-                                       const Rect2d& nodeBounds,
-                                       std::uint8_t depth) noexcept -> bool {
-        const HazardPresence presence = Classify(*hazard, nodeBounds).presence;
-        if (presence == HazardPresence::Entire)
-            return true;
-        if (presence == HazardPresence::None || depth >= maxDepth)
-            return false;
-
-        for (const Rect2d& quadrant : nodeBounds.QuadrantsRustF32())
-        {
-            if (edge.IntersectsRustF32(quadrant) &&
-                self(self, quadrant, static_cast<std::uint8_t>(depth + 1U)))
-                return true;
-        }
-        return false;
-    };
-
-    return hasEntirePresence(hasEntirePresence, m_Root.bounds, 0);
+    return findPresence(&m_Root);
 }
 
 std::size_t QuadTree::NodeCount() const noexcept
@@ -204,12 +689,13 @@ std::size_t QuadTree::NodeCount() const noexcept
 
 Rect2d QuadTree::VirtualRootBounds(const Rect2d& queryBounds) const noexcept
 {
-    return VirtualRoot(queryBounds).bounds;
+    return VirtualRootFor(m_Root, queryBounds).bounds;
 }
 
-const QuadTree::Node& QuadTree::VirtualRoot(const Rect2d& queryBounds) const noexcept
+const QuadTree::Node& QuadTree::VirtualRootFor(const Node& root,
+                                               const Rect2d& queryBounds) noexcept
 {
-    const Node* current = &m_Root;
+    const Node* current = &root;
     while (true)
     {
         const Node* surroundingChild = nullptr;
@@ -228,163 +714,6 @@ const QuadTree::Node& QuadTree::VirtualRoot(const Rect2d& queryBounds) const noe
     }
 }
 
-void QuadTree::SortUnique(std::vector<HazardHandle>& result)
-{
-    std::sort(result.begin(), result.end(), [](const HazardHandle& lhs,
-                                               const HazardHandle& rhs) {
-        if (lhs.index != rhs.index)
-            return lhs.index < rhs.index;
-        return lhs.generation < rhs.generation;
-    });
-    result.erase(std::unique(result.begin(), result.end()), result.end());
-}
-
-const Rect2d& QuadTree::Bounds() const noexcept
-{
-    return m_Root.bounds;
-}
-
-bool QuadTree::PolygonIntersectsRect(const SimplePolygon& polygon,
-                                     const Rect2d& rect) noexcept
-{
-    if (!polygon.BoundingBox().IntersectsRustF32(rect))
-        return false;
-
-    const auto rectEdges = rectangleEdges(rect);
-    for (const Edge2d& polygonEdge : polygon.Edges())
-    {
-        for (const Edge2d& rectEdge : rectEdges)
-        {
-            if (polygonEdge.IntersectsRustF32(rectEdge))
-                return true;
-        }
-    }
-
-    for (const Point2d& point : polygon.Vertices())
-    {
-        if (rect.ContainsRustF32(point))
-            return true;
-    }
-    for (const Point2d& point : rectangleCorners(rect))
-    {
-        if (polygon.ContainsRustF32(point))
-            return true;
-    }
-    return false;
-}
-
-bool QuadTree::RectInsidePolygon(const SimplePolygon& polygon,
-                                 const Rect2d& rect) noexcept
-{
-    for (const Point2d& point : rectangleCorners(rect))
-    {
-        if (!polygon.ContainsRustF32(point))
-            return false;
-    }
-
-    const auto rectEdges = rectangleEdges(rect);
-    for (const Edge2d& polygonEdge : polygon.Edges())
-    {
-        for (const Edge2d& rectEdge : rectEdges)
-        {
-            if (polygonEdge.IntersectsRustF32(rectEdge))
-                return false;
-        }
-    }
-    return true;
-}
-
-QuadTree::PresenceInfo QuadTree::Classify(const RegisteredHazard& hazard,
-                                          const Rect2d& nodeBounds) noexcept
-{
-    if (hazard.hazard.entity.kind == HazardKind::Exterior &&
-        !nodeBounds.IntersectsRustF32(hazard.bounds))
-        return PresenceInfo{HazardPresence::Entire, 0};
-    if (hazard.hazard.entity.kind != HazardKind::Exterior &&
-        !nodeBounds.IntersectsRustF32(hazard.bounds))
-        return {};
-
-    if (!hazard.hasGeometry || !hazard.hazard.shape)
-    {
-        return PresenceInfo{HazardPresence::Partial, 1};
-    }
-
-    const SimplePolygon& shape = *hazard.hazard.shape;
-    const std::size_t edgeCount = shape.VertexCount();
-    if (hazard.hazard.entity.kind == HazardKind::Exterior)
-    {
-        if (RectInsidePolygon(shape, nodeBounds))
-            return PresenceInfo{HazardPresence::None, 0};
-        if (!PolygonIntersectsRect(shape, nodeBounds))
-            return PresenceInfo{HazardPresence::Entire, 0};
-        return PresenceInfo{HazardPresence::Partial, edgeCount};
-    }
-
-    if (RectInsidePolygon(shape, nodeBounds))
-        return PresenceInfo{HazardPresence::Entire, 0};
-    if (!PolygonIntersectsRect(shape, nodeBounds))
-        return PresenceInfo{HazardPresence::None, 0};
-    return PresenceInfo{HazardPresence::Partial, edgeCount};
-}
-
-void QuadTree::BuildNode(Node& node,
-                         const std::vector<RegisteredHazard>& hazards,
-                         std::uint8_t maxDepth,
-                         std::uint8_t edgeThreshold)
-{
-    node.entries.clear();
-    node.children = {};
-
-    std::size_t activePartialEdges = 0;
-    for (const RegisteredHazard& hazard : hazards)
-    {
-        const PresenceInfo info = Classify(hazard, node.bounds);
-        if (info.presence == HazardPresence::None)
-            continue;
-
-        node.entries.push_back(Entry{hazard.handle, info.presence, info.edgeCount});
-        if (info.presence == HazardPresence::Partial)
-            activePartialEdges += info.edgeCount;
-    }
-
-    if (node.depth >= maxDepth || activePartialEdges <= edgeThreshold)
-        return;
-
-    const auto quadrants = node.bounds.QuadrantsRustF32();
-    for (std::size_t i = 0; i < quadrants.size(); ++i)
-    {
-        node.children[i] = std::make_unique<Node>(
-            Node{quadrants[i], static_cast<std::uint8_t>(node.depth + 1), {}, {}});
-        BuildNode(*node.children[i], hazards, maxDepth, edgeThreshold);
-    }
-}
-
-void QuadTree::QueryNode(const Node& node,
-                         const Rect2d& queryBounds,
-                         const std::vector<RegisteredHazard>& hazards,
-                         std::vector<HazardHandle>& result)
-{
-    if (!node.bounds.IntersectsRustF32(queryBounds))
-        return;
-
-    for (const Entry& entry : node.entries)
-    {
-        const auto hazard = std::find_if(
-            hazards.begin(), hazards.end(),
-            [&entry](const RegisteredHazard& candidate) {
-                return candidate.handle == entry.handle;
-            });
-        if (hazard != hazards.end() &&
-            Classify(*hazard, queryBounds).presence != HazardPresence::None)
-            result.push_back(entry.handle);
-    }
-    for (const auto& child : node.children)
-    {
-        if (child)
-            QueryNode(*child, queryBounds, hazards, result);
-    }
-}
-
 std::size_t QuadTree::CountNodes(const Node& node) noexcept
 {
     std::size_t count = 1;
@@ -396,31 +725,26 @@ std::size_t QuadTree::CountNodes(const Node& node) noexcept
     return count;
 }
 
-const QuadTree::RegisteredHazard* QuadTree::Find(HazardHandle handle) const noexcept
+const QuadTree::RegisteredShape* QuadTree::Find(HazardHandle handle) const noexcept
 {
     const auto it = std::find_if(
-        m_Hazards.begin(), m_Hazards.end(), [handle](const RegisteredHazard& hazard) {
-            return hazard.handle == handle;
+        m_Registered.begin(), m_Registered.end(),
+        [handle](const RegisteredShape& registered) {
+            return registered.handle == handle;
         });
-    return it == m_Hazards.end() ? nullptr : &*it;
+    return it == m_Registered.end() ? nullptr : &*it;
 }
 
-void QuadTree::SetRegistered(RegisteredHazard hazard)
+void QuadTree::SetRegistered(RegisteredShape registered)
 {
     const auto it = std::find_if(
-        m_Hazards.begin(), m_Hazards.end(),
-         [handle = hazard.handle](const RegisteredHazard& existing) {
-            return existing.handle == handle;
-        });
-    if (it == m_Hazards.end())
-        m_Hazards.push_back(std::move(hazard));
+        m_Registered.begin(), m_Registered.end(),
+         [handle = registered.handle](const RegisteredShape& existing) {
+             return existing.handle == handle;
+         });
+    if (it == m_Registered.end())
+        m_Registered.push_back(std::move(registered));
     else
-        *it = std::move(hazard);
-    Rebuild();
-}
-
-void QuadTree::Rebuild()
-{
-    BuildNode(m_Root, m_Hazards, m_MaxDepth, m_EdgeThreshold);
+        *it = std::move(registered);
 }
 }

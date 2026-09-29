@@ -1788,11 +1788,8 @@ JAGUARCORE_API Result<ExternalSPSolution> ExternalSPSolutionFromSolution(
         return Result<ExternalSPSolution>::FromError(
             {ErrorCode::SerializationFailure,
              "cannot restore the SPP solution for export"});
-    const auto valid = ValidateSPSolution(problem.Value(), solution);
-    if (!valid.HasValue())
-        return Result<ExternalSPSolution>::FromError(
-            {ErrorCode::SerializationFailure,
-             "cannot export an invalid SPP solution"});
+    // jagua-rs export is a pure function over the solution struct; it does
+    // not re-validate strip/container consistency before serializing.
     const auto externalLayout = ExternalLayoutFromSnapshot(
         solution.layoutSnapshot, solution.layoutSnapshot.container.Id());
     if (!externalLayout.HasValue())
@@ -1815,11 +1812,6 @@ JAGUARCORE_API Result<ExternalBPSolution> ExternalBPSolutionFromSolution(
         return Result<ExternalBPSolution>::FromError(
             {ErrorCode::SerializationFailure,
              "cannot restore the BPP solution for export"});
-    const auto valid = ValidateBPSolution(problem.Value(), solution);
-    if (!valid.HasValue())
-        return Result<ExternalBPSolution>::FromError(
-            {ErrorCode::SerializationFailure,
-             "cannot export an invalid BPP solution"});
     ExternalBPSolution external{};
     external.cost = solution.Cost(instance);
     external.density = solution.Density();
@@ -1856,11 +1848,6 @@ JAGUARCORE_API Result<ExternalMSPSolution> ExternalMSPSolutionFromSolution(
         return Result<ExternalMSPSolution>::FromError(
             {ErrorCode::SerializationFailure,
              "cannot restore the MSPP solution for export"});
-    const auto valid = ValidateMSPSolution(problem.Value(), solution);
-    if (!valid.HasValue())
-        return Result<ExternalMSPSolution>::FromError(
-            {ErrorCode::SerializationFailure,
-             "cannot export an invalid MSPP solution"});
     ExternalMSPSolution external{};
     external.density = solution.Density();
     external.runTimeSec = runTimeSec;

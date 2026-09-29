@@ -180,8 +180,12 @@ void runSppTests()
     assert(!jaguar::ValidateSPSolution(problem.Value(), invalidSolution).HasValue());
     auto invalidStripConfig = solution;
     invalidStripConfig.strip.cdeConfig.cdThreshold = 1;
-    assert(!problem.Value().Restore(invalidStripConfig).HasValue());
-    assert(!jaguar::ValidateSPSolution(problem.Value(), invalidStripConfig).HasValue());
+    // jagua-rs restore() accepts a snapshot with a different strip
+    // configuration and adopts it as the new problem state.
+    assert(problem.Value().Restore(invalidStripConfig).HasValue());
+    assert(problem.Value().Save().strip.cdeConfig.cdThreshold == 1);
+    assert(problem.Value().StripWidth() ==
+           invalidStripConfig.strip.width);
     const auto thirdPlacement = problem.Value().PlaceItem({
         1, jaguar::Transform2d::FromRotationTranslation(0.0, {0.0, 0.0})});
     assert(thirdPlacement.HasValue());

@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Include/JaguarCore/Problems/Spp.h`（157 行）+ `JaguarCore/Source/Problems/SPP/{Strip,Instance,Problem,Solution}.cpp`（53 / 177 / 282 / 19 行）
 **判定**: 普通合法输入基本等价；超需求 Debug 错误形态、TotalDemand 溢出构建模式及 Restore 输入接受边界仍有差异；C++ 另有 time_stamp 缺口与额外校验
 
+> **2026-09-29 更新**：`SPProblem::Restore` 已删除 sameCdeConfig/sameShapeModifyConfig/sameStripContainer 及 strip 数值前置校验（对齐 Rust `restore()` 的无校验接受语义，快照 strip 直接生效）；`ExternalSPSolutionFromSolution` 不再前置 `ValidateSPSolution`（Rust export 是纯函数）。本记录中“C++ Restore 额外前置校验”条目已过时。
+
 **2026-09-28 oracle 补充：** `--model-boundary-parity-only` 的 Rust Debug/Release 实测确认：需求 0 时 Rust SPP 先递减需求，因此 Debug 在放置前 panic、状态保持 `remaining=0, placed=0`；Release 放置成功且需求回绕为 `usize::MAX`。JaguarCore Debug 在放置前返回 `Infeasible`、状态相同，Release 状态相同。另 `[usize::MAX, 1]` 的 `total_item_qty()` 在 Rust Debug panic、Release 回绕为 0；C++ `TotalDemand()` 的无符号累加在 Debug/Release 均回绕为 0，故该查询仍有 Debug 差异。
 
 ## 函数逐条比对

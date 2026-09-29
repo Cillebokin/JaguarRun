@@ -61,7 +61,12 @@ void runCollisionTests()
                             {jaguar::HazardKind::PlacedItem, 43, 0, 0},
                             std::make_shared<const jaguar::SimplePolygon>(
                                 coveringShape.Value()), false);
+    // jagua-rs QTHazard::from_root：根节点一律 Partial；Entire 只出现在
+    // 懒扩展后的子节点（覆盖形状在四个象限的质心都在形内 → Entire）。
     assert(quadtree.PresenceAt(coveringHandle, root.Value()) ==
+           jaguar::HazardPresence::Partial);
+    assert(quadtree.PresenceAt(
+               coveringHandle, root.Value().QuadrantsRustF32()[0]) ==
            jaguar::HazardPresence::Entire);
     assert(quadtree.QueryVirtualRoot(root.Value()) ==
            quadtree.Query(root.Value()));

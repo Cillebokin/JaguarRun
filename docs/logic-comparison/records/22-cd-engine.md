@@ -3,6 +3,8 @@
 **C++**: `JaguarCore/Include/JaguarCore/Collision/CollisionEngine.h`（169 行）+ `JaguarCore/Source/Collision/CollisionEngine.cpp`（727 行）
 **判定**: 结果等价/实现不同（结果矩阵等价：本记录基于 2026-09-28 eef0830 后代码逐行验证；主要差异为 DetectPolygonCollision 的 collect-any 非短路路径、HazardCollides(Exterior, depth>0) 全顶点检查、Restore 全量重建、Slot/generation/LIFO 句柄管理；detectParallel/SoA/AVX2/ThreadPool 为 C++ 额外）
 
+> **2026-09-29 重写基线**：DetectPolygonCollision/CollectPolygonCollisionsUntil 已改为 Rust 短路边遍历 + detect_containment_collision（POI + scope）路径；DetectSurrogateCollision/CollectSurrogateCollisionsUntil 已改为 QTNode::collides/collect_collisions_until 移植（含象限顺序与半段相交分类）；bounds 预检短路与隐式 exterior 哨兵语义保持与 cd_engine.rs 对齐。本记录中“collect-any 检测路径/HasEntirePresenceForCircle 兜底”条目已过时。
+
 ## 函数逐条比对
 
 ### `CDEngine::new`（cd_engine.rs:34-56）vs `CollisionEngine::CollisionEngine`（CollisionEngine.cpp:63-70）

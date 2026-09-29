@@ -403,9 +403,13 @@ void runJsonCodecTests()
                     importedSppSolution.Value().Density()) < 1.0e-12);
     auto invalidExportedSppSolution = importedSppSolution.Value();
     invalidExportedSppSolution.strip.width += 1.0;
-    const auto rejectedSppExport = jaguar::ExternalSPSolutionFromSolution(
+    // jagua-rs export is a pure function over the solution struct; a strip
+    // width that disagrees with the layout container is exported as-is.
+    const auto acceptedSppExport = jaguar::ExternalSPSolutionFromSolution(
         importedSpp.Value(), invalidExportedSppSolution);
-    assert(!rejectedSppExport.HasValue());
+    assert(acceptedSppExport.HasValue());
+    assert(std::abs(acceptedSppExport.Value().stripWidth -
+                    invalidExportedSppSolution.strip.width) < 1.0e-12);
     const auto unknownSppItem = importer.ImportSPSolutionJson(
         importedSpp.Value(),
         R"json({"strip_width": 4, "layout": {"container_id": 0, "placed_items": [{"item_id": 999, "transformation": {"rotation": 0, "translation": [1, 1]}}], "density": 0}, "density": 0, "run_time_sec": 0})json");

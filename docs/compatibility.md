@@ -163,10 +163,21 @@ Debug 与 Release 分别对应 Rust 的低/高分辨率搜索参数。
 
 越界 Surrogate Pole 同样遵守 `HazardFilter`；忽略 Exterior 时不会误报越界碰撞。
 
-## 核心逻辑等价验收状态（2026-09-28）
+## 核心逻辑等价验收状态（2026-09-29）
 
-当前不能宣称 JaguarCore 与 `jagua-rs/jagua-rs` 核心 crate 已完全等价。碰撞差分、零值 `min_item_separation` 序列化和已列出的 Importer/几何输入边界已有 Debug/Release 对照；Offset 的固定 fixture 通过，但私有 straight-skeleton、fallback 与保模校验仍未覆盖到足以证明全输入等价。
+当前不能宣称 JaguarCore 与 `jagua-rs/jagua-rs` 核心 crate 已完全等价，但 2026-09-29 差分对齐轮已把功能逻辑差异清单收敛到 Debug panic 形态一类。本轮完成的闭合项：
 
-模型边界复核仍发现未闭合项：SPP `total_item_qty()` 溢出在 Rust Debug panic、Release 回绕，而 C++ 两配置均回绕；SPP Restore 接受 Rust 接受的配置/宽度不一致快照但当前 C++ 拒绝；MSPP 宽度不一致快照在 Rust Release 接受、Debug 在变更状态后 panic，而当前 C++ 两配置均拒绝；BPP/MSPP Debug 超需求放置的 Rust panic 状态与 C++ 原子 `Infeasible` 不同。可重复证据与具体输出见 [parity closure plan](superpowers/plans/2026-09-28-jaguarcore-parity-closure.md) 和 [Differential README](../JaguarCore/Tests/Differential/README.md)。
+- **四叉树已改为 jagua-rs quadtree 的逐行结构移植**（per-node hazard 边子集、懒扩展 constrict、`cd_threshold` 查询时语义、`QTNode::collides/collect_collisions_until` 短路查询、Circle 象限优先顺序、Edge 半段相交象限分类）。碰撞/矩阵/oracle 用例 Debug/Release 双侧一致。
+- **SPP/MSPP `Restore` 接受边界已对齐 Rust**：不再前置拒绝配置/宽度不一致的快照，快照 strip 值直接生效；三个导出函数不再前置 `Validate*Solution`（jagua-rs export 是纯函数）。
+- **Offset 与 geo-buffer 0.2.0 逐函数审计完成**并修复主循环 cleanup 分叉（Rust 在每次迭代末尾、含 continue 路径清理队列）。全量 fixture（sub_ulp、collapse、square_inflate、negative_inflate、epsilon、zero_near_edge、concave split、L、comb first、非有限距离）Debug/Release 12/12 对照通过。comb 第二原始组件不属于 jagua-rs 核心 API 返回值，维持不验收。
+- **float 存储保持 double + RustF32 双轨**，为既定接口差异（含 C++ 额外的 `Intersects(tolerance)` 容差语义）。
 
-合并后的 Debug 与 Release `JaguarCoreTests.exe` 全套退出码均为 0；这只能证明已有断言通过，不能关闭上面的未覆盖差异。等价结论需等差异逐项修复/明确约定并完成同一清单的双侧复验后再更新。
+仍开放的差异（均为既定或待决事项，不影响 Release 求解语义）：
+
+- Rust Debug panic 与 C++ `Result` 错误的形态差异：`total_item_qty()` 溢出（Rust Debug panic、Release 回绕；C++ 两配置均回绕）；BPP/MSPP Debug 超需求放置（Rust 先改状态再 panic，C++ 原子 `Infeasible`）。panic 后状态不属于验收契约，是否补齐 Debug 对照待用户口径决定。
+- SVG 输出为有意重写（非格式兼容）；`time_stamp`/feature 门控等诊断与结构层差异维持排除。
+- 全输入 offset 等价不宣称：固定 fixture 集合内无已知分叉，未覆盖的病态输入以真实 CAD 回归为准。
+
+可重复证据与具体输出见 [parity closure plan](superpowers/plans/2026-09-28-jaguarcore-parity-closure.md) 和 [Differential README](../JaguarCore/Tests/Differential/README.md)。
+
+本轮 Debug 与 Release `JaguarCoreTests.exe` 全套退出码均为 0，六个 `--*-parity-only` Rust oracle 均已复验。等价结论需等差异逐项修复/明确约定并完成同一清单的双侧复验后再更新。

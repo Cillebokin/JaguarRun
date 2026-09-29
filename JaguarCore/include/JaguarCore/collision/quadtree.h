@@ -14,6 +14,7 @@
 namespace jaguar
 {
 struct Circle2d;
+class CollisionEngine;
 
 // 障碍物相对节点的覆盖状态
 enum class HazardPresence
@@ -24,26 +25,27 @@ enum class HazardPresence
 };
 
 // 碰撞障碍物的四叉树索引
+// 逐行移植 jagua-rs quadtree：节点持有带边子集的 QTHazard 列表（按
+// presence 降序排序），懒扩展子节点，增量 constrict/deregister。
 class QuadTree
 {
 public:
     // 创建四叉树
     JAGUARCORE_API QuadTree(Rect2d bounds,
-                            std::uint8_t maxDepth,
-                            std::uint8_t edgeThreshold);
+                            std::uint8_t quadtreeDepth,
+                            std::uint8_t cdThreshold);
 
-    // 注册完整障碍物
+    // 注册完整障碍物（以根节点 Partial presence 起步，按需向子节点 constrict）
     JAGUARCORE_API void RegisterHazard(HazardHandle handle, const Hazard& hazard);
     // 注册障碍物数据
     JAGUARCORE_API void RegisterHazard(
         HazardHandle handle, const HazardEntity& entity,
         std::shared_ptr<const SimplePolygon> shape, bool dynamic);
-
     // 仅使用保守包围盒注册障碍物
     // 没有多边形几何时统一标记为部分覆盖
     JAGUARCORE_API void RegisterHazard(HazardHandle handle,
                                        const Rect2d& hazardBounds);
-    // 注销障碍物
+    // 注销障碍物（子节点递归移除，无 Partial hazard 时折叠子节点）
     JAGUARCORE_API void DeregisterHazard(HazardHandle handle);
 
     // 查询与矩形相交的障碍物
@@ -67,70 +69,72 @@ public:
 private:
     friend class CollisionEngine;
 
-    struct RegisteredHazard
+    // 部分覆盖节点内的边子集（jagua-rs QTHazPartial）
+    struct PartialHazard
     {
-        HazardHandle handle{};    // 障碍物句柄
-        Hazard hazard{};          // 障碍物数据
-        Rect2d bounds{};          // 障碍物包围盒
-        bool hasGeometry = false; // 是否包含多边形几何
+        std::vector<Edge2d> edges; // 节点内活跃的边
+        Rect2d ffBbox;             // 覆盖所有边的快速失败包围盒
     };
 
-    struct Entry
+    // 节点内一个障碍物的表示（jagua-rs QTHazard）
+    struct NodeHazard
     {
-        HazardHandle handle{};                          // 障碍物句柄
-        HazardPresence presence = HazardPresence::None; // 覆盖状态
-        std::size_t edgeCount = 0;                      // 边数量
+        Rect2d qtBbox;                       // 所在节点包围盒
+        HazardHandle handle;                 // 障碍物句柄
+        HazardEntity entity;                 // 诱发实体
+        HazardPresence presence = HazardPresence::None;
+        std::unique_ptr<PartialHazard> partial; // presence == Partial 时有效
+
+        std::size_t EdgeCount() const noexcept
+        {
+            return presence == HazardPresence::Partial && partial
+                       ? partial->edges.size()
+                       : 0;
+        }
     };
 
+    // 节点（jagua-rs QTNode）
     struct Node
     {
-        Rect2d bounds;                                   // 节点边界
-        std::uint8_t depth = 0;                          // 节点深度
-        std::vector<Entry> entries;                      // 节点条目
-        std::array<std::unique_ptr<Node>, 4> children{}; // 子节点
+        Rect2d bounds;                                     // 节点包围盒
+        std::uint8_t level = 0;                            // 剩余可细分层数
+        std::array<std::unique_ptr<Node>, 4> children{};   // 子节点（懒扩展）
+        std::vector<NodeHazard> hazards;                   // 按 presence 降序
+        std::size_t activeEdges = 0;                       // Partial 边数缓存
+
+        void AddHazard(NodeHazard hazard);
+        bool RemoveHazard(HazardHandle handle);
+        bool HasPartialHazard() const noexcept;
     };
 
-    struct PresenceInfo
+    // 注册形状登记表（供 constrict 查询完整多边形）
+    struct RegisteredShape
     {
-        HazardPresence presence = HazardPresence::None; // 覆盖状态
-        std::size_t edgeCount = 0;                      // 边数量
+        HazardHandle handle;
+        std::shared_ptr<const SimplePolygon> shape; // 可为空（bounds-only 注册）
+        Rect2d bounds;
+        HazardEntity entity;
     };
 
-    static bool PolygonIntersectsRect(const SimplePolygon& polygon,
-                                      const Rect2d& rect) noexcept;
-    static bool RectInsidePolygon(const SimplePolygon& polygon,
-                                  const Rect2d& rect) noexcept;
-    static PresenceInfo Classify(const RegisteredHazard& hazard,
-                                 const Rect2d& nodeBounds) noexcept;
-    static void BuildNode(Node& node,
-                          const std::vector<RegisteredHazard>& hazards,
-                          std::uint8_t maxDepth,
-                          std::uint8_t edgeThreshold);
-    static void QueryNode(const Node& node,
-                          const Rect2d& queryBounds,
-                          const std::vector<RegisteredHazard>& hazards,
-                          std::vector<HazardHandle>& result);
-    const Node& VirtualRoot(const Rect2d& queryBounds) const noexcept;
-    static void SortUnique(std::vector<HazardHandle>& result);
+    static NodeHazard MakeRootHazard(HazardHandle handle,
+                                     const Hazard& hazard,
+                                     const Rect2d& rootBounds);
+    static std::array<NodeHazard, 4> Constrict(
+        const NodeHazard& hazard,
+        const std::array<Rect2d, 4>& quadrants,
+        const SimplePolygon& shape);
+    static void RegisterIntoNode(Node& node, NodeHazard hazard,
+                                 const std::vector<RegisteredShape>& shapes);
+    static void DeregisterFromNode(Node& node, HazardHandle handle);
+    static const Node& VirtualRootFor(const Node& root,
+                                      const Rect2d& queryBounds) noexcept;
     static std::size_t CountNodes(const Node& node) noexcept;
 
-    const RegisteredHazard* Find(HazardHandle handle) const noexcept;
-    bool HasEntirePresenceForCircle(
-        HazardHandle handle, const Circle2d& circle) const noexcept;
-    bool HasEntirePresenceForCircleAtDepth(
-        HazardHandle handle,
-        const Circle2d& circle,
-        std::uint8_t maxDepth) const noexcept;
-    bool HasEntirePresenceForEdgeAtDepth(
-        HazardHandle handle,
-        const Edge2d& edge,
-        std::uint8_t maxDepth) const noexcept;
-    void SetRegistered(RegisteredHazard hazard);
-    void Rebuild();
+    const RegisteredShape* Find(HazardHandle handle) const noexcept;
+    void SetRegistered(RegisteredShape registered);
 
-    Node m_Root;                             // 根节点
-    std::uint8_t m_MaxDepth = 0;             // 最大深度
-    std::uint8_t m_EdgeThreshold = 0;        // 边数量阈值
-    std::vector<RegisteredHazard> m_Hazards; // 已注册障碍物
+    Node m_Root;                                    // 根节点
+    std::uint8_t m_CdThreshold = 0;                 // 查询时的活动边数阈值
+    std::vector<RegisteredShape> m_Registered;      // 已注册障碍物
 };
 }

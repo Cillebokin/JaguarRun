@@ -188,22 +188,33 @@ bool TestRotationModes(std::ostream& output)
         }
     }
 
-    const auto emptyDiscreteItem = MakeItem({jaguar::RotationMode::Discrete, {}});
-    if (!Expect(!emptyDiscreteItem.HasValue()
-                    && emptyDiscreteItem.GetError().code == jaguar::ErrorCode::InvalidInput,
+    // jagua-rs 的 1..=65536 角数量规则在 Importer 层执行（Item::new 不校验）；
+    // 此处按 Importer 的 JSON 入口验证拒绝行为，与 Rust import_rotation 一致。
+    const jaguar::Importer importer;
+    const auto rejectedEmptyDiscrete = importer.ImportItemJson(R"json({
+        "id": 9101,
+        "orientation": {"rotation": {"mode": "discrete", "angles": []}},
+        "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 1, "height": 1}}
+    })json", 0);
+    if (!Expect(!rejectedEmptyDiscrete.HasValue()
+                    && rejectedEmptyDiscrete.GetError().code
+                           == jaguar::ErrorCode::InvalidInput,
                 output,
-                "Empty discrete rotation must be rejected by JaguarCore"))
+                "Empty discrete rotation must be rejected at the import boundary"))
     {
         return false;
     }
 
+    // jagua-rs Item::new 接受非有限角（NaN 在 Transformation 构造时才
+    // NotNan panic）；JaguarCore 对应行为是接受并存储，由求值层产生
+    // "无合法变换"（LegalizeTransform 对空/NaN 角集返回 nullopt）。
     const auto nonFiniteItem = MakeItem({
         jaguar::RotationMode::Discrete,
         {std::numeric_limits<double>::quiet_NaN()}});
-    return Expect(!nonFiniteItem.HasValue()
-                      && nonFiniteItem.GetError().code == jaguar::ErrorCode::InvalidInput,
-                output,
-                "Non-finite discrete rotation must be rejected by JaguarCore");
+    return Expect(nonFiniteItem.HasValue(),
+                  output,
+                  "Non-finite discrete rotation is deferred to evaluation "
+                  "like jagua-rs Item::new");
 }
 
 bool TestBestSamplesRotationBoundary(std::ostream& output)

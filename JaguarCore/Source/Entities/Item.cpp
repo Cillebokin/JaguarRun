@@ -14,6 +14,7 @@ bool rotationRangeRepresentable(const RotationRange& rotation) noexcept
     case RotationMode::Continuous:
         return rotation.radians.empty();
     case RotationMode::Discrete:
+        // jagua-rs Item::new 不校验角数量；1..=65536 规则在 Importer 层执行。
         return true;
     }
     return false;

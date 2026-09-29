@@ -497,17 +497,26 @@ bool TestBppJsonRoundTrip(std::ostream& output)
     {
         return false;
     }
-    const auto restored = jaguar::Importer{}.ImportBPSolutionJson(
-        instance.Value(), json.Value());
-    if (!Expect(restored.HasValue(), output, "BPP solution JSON import failed"))
+    // jagua-rs 参考库的 BPP solution import 是 unimplemented!()（bpp import.rs:66）；
+    // JaguarCore 为 Rust parity 返回 UnsupportedOperation。round-trip 只验证
+    // 序列化产物可被解析，导入通道按参考行为拒绝。
+    const auto reparsed = jaguar::ParseExternalBPSolutionJson(json.Value());
+    if (!Expect(reparsed.HasValue(), output, "BPP solution JSON must reparse"))
     {
         return false;
     }
-    return Expect(restored.Value().layouts.size() == solved.Value().solution.layouts.size()
-                      && restored.Value().Cost(instance.Value())
+    const auto restored = jaguar::Importer{}.ImportBPSolutionJson(
+        instance.Value(), json.Value());
+    return Expect(!restored.HasValue()
+                      && restored.GetError().code
+                             == jaguar::ErrorCode::UnsupportedOperation
+                      && reparsed.Value().layouts.size()
+                             == solved.Value().solution.layouts.size()
+                      && reparsed.Value().cost
                              == solved.Value().solution.Cost(instance.Value()),
                   output,
-                  "BPP JSON round-trip must preserve non-empty layouts and cost");
+                  "BPP JSON import must follow the reference stub and preserve "
+                  "layouts and cost through reparse");
 }
 }
 

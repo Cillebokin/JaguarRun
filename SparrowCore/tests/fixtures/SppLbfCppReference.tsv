@@ -1,3 +1,6 @@
 # Rust-equivalent C++ SparrowCore reference generated from TestSppLbf.cpp seed=42.
+# Regenerated 2026-09-29 at JaguarCore parity baseline 291f057+ (incremental
+# quadtree + offset cleanup fixes); density shifts by ~1e-8 (f32 rounding path)
+# with identical placements/width.
 # fixture seed samples placed remaining width density
-lbf_spp_small_cpp 42 738 2 0 4.0028257369995117 0.49964703222358742
+lbf_spp_small_cpp 42 738 2 0 4.0028257369995117 0.49964702129364014

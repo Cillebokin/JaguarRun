@@ -76,11 +76,15 @@ SeparationEvaluator::SeparationEvaluator(
     {
         for (const jaguar::LayoutPlacementSnapshot& placement : snapshot.placements)
         {
+            // jagua-rs 的 PlacedItem 实体含 pk（每次放置唯一）；评估引擎
+            // 是私有实例，用布局句柄+变换保证实体唯一性，同 Layout::MakeHazard。
             const jaguar::Hazard hazard{
                 {jaguar::HazardKind::PlacedItem,
                  placement.placedItem.GetItemIndex(),
                  0,
-                 0},
+                 0,
+                 placement.handle,
+                 placement.placedItem.Transform()},
                 std::make_shared<const jaguar::SimplePolygon>(
                     placement.placedItem.CollisionShape()),
                 true};

@@ -535,8 +535,10 @@ sparrow::Result<void> DisruptSolution(
         return sparrow::Result<void>::FromError(secondMoved.GetError());
     }
 
-    const jaguar::Transform2d firstConversion = firstNew.Inverse()
-        .FollowedBy(firstOld);
+    // jagua-rs: converting_transformation = dt_new.compose().inverse()
+    //     .transform(&dt_old.compose()) — f32 矩阵路径；用 RustF32 位级对应。
+    const jaguar::Transform2d firstConversion =
+        firstNew.InverseRustF32().FollowedByRustF32(firstOld);
     const auto firstContained = CollectContainedHandles(
         separator.SaveSolution(), firstMoved.Value());
     if (!firstContained.HasValue())
@@ -558,7 +560,8 @@ sparrow::Result<void> DisruptSolution(
         const auto moved = separator.MoveItem(
             handle,
             LegalizeTransform(
-                placement->placedItem.Transform().FollowedBy(firstConversion),
+                placement->placedItem.Transform().FollowedByRustF32(
+                    firstConversion),
                 placement->placedItem.GetItem()));
         if (!moved.HasValue())
         {
@@ -566,8 +569,10 @@ sparrow::Result<void> DisruptSolution(
         }
     }
 
-    const jaguar::Transform2d secondConversion = secondNew.Inverse()
-        .FollowedBy(secondOld);
+    // jagua-rs: converting_transformation = dt2_new.compose().inverse()
+    //     .transform(&dt2_old.compose()) — f32 矩阵路径；用 RustF32 位级对应。
+    const jaguar::Transform2d secondConversion =
+        secondNew.InverseRustF32().FollowedByRustF32(secondOld);
     const auto secondContained = CollectContainedHandles(
         separator.SaveSolution(), secondMoved.Value());
     if (!secondContained.HasValue())
@@ -589,7 +594,8 @@ sparrow::Result<void> DisruptSolution(
         const auto moved = separator.MoveItem(
             handle,
             LegalizeTransform(
-                placement->placedItem.Transform().FollowedBy(secondConversion),
+                placement->placedItem.Transform().FollowedByRustF32(
+                    secondConversion),
                 placement->placedItem.GetItem()));
         if (!moved.HasValue())
         {

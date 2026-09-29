@@ -485,10 +485,15 @@ Result<float> CollisionTracker::EvaluateCandidateLoss(
 
     std::vector<jaguar::HazardHandle> collisionHandles;
     collisionHandles.reserve(m_PlacedItems.size());
-    for (const jaguar::PlacedItem& placedItem : m_PlacedItems)
+    for (std::size_t itemSequence = 0U; itemSequence < m_PlacedItems.size();
+         ++itemSequence)
     {
+        const jaguar::PlacedItem& placedItem = m_PlacedItems[itemSequence];
+        // jagua-rs 的 PlacedItem 实体含 pk（每次放置唯一）；跟踪引擎是
+        // 私有实例，用布局句柄+变换保证实体唯一性，同 Layout::MakeHazard。
         const jaguar::Hazard hazard{
-            {jaguar::HazardKind::PlacedItem, placedItem.GetItemIndex(), 0, 0},
+            {jaguar::HazardKind::PlacedItem, placedItem.GetItemIndex(), 0, 0,
+             m_Handles[itemSequence], placedItem.Transform()},
             std::make_shared<const jaguar::SimplePolygon>(
                 placedItem.CollisionShape()),
             true};
@@ -670,10 +675,15 @@ Result<void> CollisionTracker::BuildFromLayout(const jaguar::Layout& layout)
     }
     std::vector<jaguar::HazardHandle> collisionHandles;
     collisionHandles.reserve(m_PlacedItems.size());
-    for (const jaguar::PlacedItem& placedItem : m_PlacedItems)
+    for (std::size_t itemSequence = 0U; itemSequence < m_PlacedItems.size();
+         ++itemSequence)
     {
+        const jaguar::PlacedItem& placedItem = m_PlacedItems[itemSequence];
+        // jagua-rs 的 PlacedItem 实体含 pk（每次放置唯一）；跟踪引擎是
+        // 私有实例，用布局句柄+变换保证实体唯一性，同 Layout::MakeHazard。
         const jaguar::Hazard hazard{
-            {jaguar::HazardKind::PlacedItem, placedItem.GetItemIndex(), 0, 0},
+            {jaguar::HazardKind::PlacedItem, placedItem.GetItemIndex(), 0, 0,
+             m_Handles[itemSequence], placedItem.Transform()},
             std::make_shared<const jaguar::SimplePolygon>(
                 placedItem.CollisionShape()),
             true};

@@ -1,5 +1,8 @@
 # C++ SparrowCore phase regression after root-RNG child-stream derivation.
+# Regenerated 2026-09-29 at JaguarCore parity baseline 291f057+ (incremental
+# quadtree + offset cleanup + tracker entity-handle fixes); density shifts by
+# ~2e-9 (f32 rounding path) with identical widths.
 # seed phase strip_width density
-42 exploration 1.0005494356155396 0.49972543304909189
-42 compression 1.0005494356155396 0.49972543304909189
-42 optimize 1.0004585981369019 0.49977080603947238
+42 exploration 1.0005494356155396 0.49972543120384216
+42 compression 1.0005494356155396 0.49972543120384216
+42 optimize 1.0004585981369019 0.49977082014083862

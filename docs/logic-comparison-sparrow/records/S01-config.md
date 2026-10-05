@@ -69,3 +69,8 @@
 
 ## 结论
 SparrowConfig 的两阶段（exploration/compression）字段与默认值（shrink 0.001、9min/60s、0.25、0.75、separator 200/3 与 100/5、50/25/3）与 Rust 逐项一致，判定基本等价。核心形态差异有三：种子 `Option` 语义弱化为零值、导入相关三参数下沉 JaguarCore 层、枚举载荷外提为平字段；C++ 额外引入 warmStart/constructor/terminator 三个子配置块与 Validate 校验链，均为 C++ 侧 Result 错误通道与 API 收敛的选择，不改变默认行为。Rust 的 config.rs 无 serde 反序列化，"JSON 配置解析"在两侧均不存在，输入 JSON 的解析语义归 S22/S23 记录。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：逐行覆盖完整性】** config.rs 98 行全量复核：3 结构体（SparrowConfig 7 字段 / ExplorationConfig 6 字段 / CompressionConfig 4 字段）、1 枚举（ShrinkDecayStrategy 2 变体）、1 常量（DEFAULT_SPARROW_CONFIG 98 行展开）——主文 5 个小节 + JSON 小节全覆盖，无遗漏项；derive（Debug/Clone/Copy）与 doc 注释不构成逻辑项。
+2. **【遗漏补记：log_level 字段的四层级联】** 主文差异 #4 记了"expl Info/cmpr Debug 无 C++ 对应"；补记使用链：`separator.rs:91/139/151/183` 的 `log!(self.config.log_level, ...)` 使 separator 日志随相位升降级——即 Rust 侧同一 Separator 在探索期打 Info、压缩期打 Debug。C++ 无日志框架（判定不变），此为该字段唯一消费语义，防后续误查。
+3. **【核对确认：DEFAULT 的 cde_config 三参数默认值】** quadtree_depth=4 / cd_threshold=64 / SPSurrogateConfig n_pole_limits=[(64,0.0),(16,0.8),(8,0.9)]、ff_pole_area_ratio=0.5、n_ff_piers=0（config.rs:87-95）——C++ 侧归属 JaguarCore（S01 差异 #2 已记"由调用方传 CDEConfig{}"）；BenchMain.cpp:124 现场确认 `CDEConfig{}` 默认构造（JaguarCore 默认值是否等于 Rust 此组值属 JaguarCore 记录范围，SparrowCore 侧仅登记接线缺失）。判定维持。

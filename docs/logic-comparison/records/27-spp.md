@@ -141,3 +141,28 @@ debug_assert_eq!(feasible_before, self.layout.is_feasible());
 
 ## 结论
 SPP 的常规放置、移除和数值路径一致；已由 oracle 证实 Release 超需求回绕行为一致，Debug 的 `Result` 适配保持与 Rust panic 前相同状态。仍未对齐的边界包括 TotalDemand 溢出的 Debug 行为，以及 Rust 接受而 C++ Restore 拒绝的配置/宽度不一致快照。C++ 额外校验、panic→Result 形态与缺失的 time_stamp 仍需按范围逐项记录。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 SPP 四文件全部符号：Strip{new,set_width,From<Container>}；SPInstance{new,item_area,item_qty,total_item_qty,item,item_idx}；SPProblem{new,change_strip_width,fit_strip,place_item,remove_item,save,restore,register_included_item,deregister_included_item,density,strip_width,n_placed_items}、SPPlacement；SPSolution{density,strip_width}。正文已全覆盖，无【遗漏】函数。逐行复核补充：
+
+### 补-1【修正·重要】Restore 前置校验的范围已缩小：正文步骤 4 / 差异 #6 过时
+正文记"cpp:201-222 strip 数值合法 + sameCdeConfig/sameShapeModifyConfig + sameStripContainer"为 C++ 前置校验。当前代码（Problem.cpp:146-177）**已删除**这些校验（2026-09-29 更新注记已声明，但正文步骤 4 与差异 #6 行文未删）。当前 Restore 保留的前置校验仅剩：
+- placements 对账（cpp:153-164）：itemIndex 越界/需求耗尽/物品定义一致（sameItemDefinition）→ SnapshotMismatch；
+- 独立重建（cpp:166-170：先在快照容器上 restored.Restore 预验证）。
+随后原地 Restore 失败→整体替换（172-174）、`m_Strip = solution.strip` 直接赋值（175）、`m_RemainingDemand = remaining`（176）。与 Rust restore（problem.rs:94-114）的差异仅剩：Rust 无 placements 对账与预验证（信任内部约定）。判定：**C++ Restore 输入接受边界已对齐 Rust**（strip 配置/宽度不再被拒）——正文第 100 行"当前 C++ 对两者均返回 SnapshotMismatch"的表述已过时（cd_threshold 修改与宽度 5/容器 10 的快照现均被接受：strip 直接赋值、layout 失败走 from_snapshot 替换路径）。
+
+### 补-2【验证】`sameItemDefinition` 的比较内容（细节登记）
+Problem.cpp:15-30：Index + ExternalId + 碰撞形状逐顶点（near 容差）。Rust 无对应（信任 Layout 中 item 与 instance 同源——layout.rs place_item 收到的 Arc<Item> 即 instance.item() 的克隆）。判定：C++ 额外（防御性），正文差异 #6 的残留部分（物品一致性）仍成立。
+
+### 补-3【验证】`PlaceItem` 的顺序（细节确认）
+Rust（problem.rs:61-66）：`register_included_item`（先扣需求）→ `layout.place_item`。C++（Problem.cpp:111-134）：校验 → `m_Layout.PlaceItem`（放）→ `--m_RemainingDemand`（后扣）。正文步骤 1 已记顺序差异（失败路径上有意义）；重写后 C++ Layout::PlaceItem 可失败（Result），失败时不扣需求（133-135 前已 return），Rust 无失败路径。判定维持正文。
+
+### 补-4【遗漏】`instance_item_indices_correct` 的 assert 性质（细节）
+Rust SPInstance::new 的两条校验均为 `assert!`（非 debug_assert，instance.rs:19-26）——**Release 也生效**，panic。C++ Create 返回 InvalidInput 错误。判定：一致（正文差异 #9 已含；补充确认 Rust 侧为常驻 assert 非 debug-only，正文 39 行的表述正确）。
+
+### 补-5【验证】SPInstance::Create(height) 重载的附加校验现状（细节确认）
+Instance.cpp:23-30（items 非空/尺寸一致/fixedHeight 有限正）、逐 item 面积有限性（43-54）、正需求且总面积正（56-60）、自动条宽 `totalArea/rustFixedHeight`（63-69）。与正文差异 #5 一致，行号经复核无误。判定维持。
+
+### 补-6【遗漏】`FitStrip` 的 `RightmostCollisionX` 空值语义（细节）
+Rust `unwrap()` panic（problem.rs:50）；C++ `RightmostCollisionX` 返回 `optional<double>`（Layout.cpp:461-473），FitStrip 空→Infeasible（Problem.cpp:133-139 一带）。正文差异 #2 已记。补充：C++ 判空由 `!itemXMax.has_value()` 承担（Problem.cpp:130-131），错误码 Infeasible。判定维持。

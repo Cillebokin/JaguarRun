@@ -106,3 +106,28 @@ Transformation::empty()
 ## 结论
 
 导入管线的转换语义（形状四分支、Inflate/Deflate 修改模式、中心化预变换、旋转展开与 65536 上限、stepped 容差判定、`[0.0]→None` 归一、连续重复顶点消除、holes 合并 quality 0、preTransform 逆变换合成公式）双侧一致。此前把"非连续重复顶点"列为接受边界缺口不准确：C++ 下游 `SimplePolygon::Create` 已拒绝该输入；两侧只在错误诊断上不同。非有限多边形/变换输入的定向 oracle 在 Rust Debug 与 Release 都失败（panic），C++ 对应入口返回 `Result` 错误，符合保留 C++ `Result` 的约定。其余差异为错误通道、C++ 保留容器外部 id 和额外 API 能力。
+
+### 补充审计（2026-09-29）
+
+对 import.rs 311 行逐行复核（含辅助函数全量），原记录遗漏/需修正各点：
+
+1. **`import_item` 中 `debug!("[IMPORT] starting item {:?}", ext_item.id)`（import.rs:58，遗漏）**——Rust 导入每个物品时打日志；C++ 无日志输出。判定：C++ 缺失（日志，无行为影响）。同理 `eliminate_degenerate_vertices` 内 `debug!` 已在原记录差异表 10 提及。
+2. **`import_container` zones 断言的**短路顺序**（浅覆盖→补齐）**——Rust `assert!` 在函数最前（import.rs:108-111），**先于**形状导入；C++ `zone.quality >= MAX_QUALITIES` 检查在 zone 循环内（cpp:457-461），即先导入外轮廓与 holes、再在首个非法 zone 处失败。若输入同时含非法外轮廓与非法 zone，Rust 报 zone 断言（debug 下 panic）、C++ 报外轮廓错误。失败优先级不同，接受边界相同（两侧最终都拒绝）。判定：差异（轻微，错误次序）。
+3. **`import_rotation` Stepped 分支 `count < 1.0` 的可达性再核验（原记录 54 行已分析，补充 f32 收窄细节）**——Rust `step: f32`（`ExtRotation::Stepped { step: f32 }`）；C++ `RotationPolicy::stepDegrees` 为 double，`ImportRotation` 先 `static_cast<float>` 再校验（cpp:360）。`(0,360]` 上界排除 step>360；step→360⁻ 时 `360/step > 1`，round 后 count≥1；step=360 时 count=1。`count<1` 仅在 step>360（已被拒）出现，双侧不可达，原分析成立。另注意 C++ 展开式 `360.0 * i / count`（cpp:380-381）与 Rust `f64::from(i) * 360.0 / count`（import.rs:232）运算次序相同（先乘后除），逐位一致。
+4. **`import_container` 空 zone 语义（原记录 44 行的判定补充 C++ InferiorQualityZone 空列表行为）**——Rust 对每个 `q in 0..N_QUALITIES`（含空）调用 `InferiorQualityZone::new(q, vec![])`；C++ `if (!grouped[quality].empty())` 才建（cpp:474）。原记录已指出"最终容器 zone 集合语义一致"。补充：Rust `InferiorQualityZone::new` 对空 shapes 是否成功由 entities 层决定（若失败则 Rust 直接报错而 C++ 静默跳过）；查 Rust `container.rs` 中 `InferiorQualityZone::new` 允许空列表（POI 计算在空列表时返回单位元）——该点属记录 24 范畴，本记录交叉引用。双侧最终行为一致。
+5. **`import_simple_polygon` 的非连续重复检查在 Rust 是 `itertools::unique()`（浅覆盖→补齐算法细节）**——`points.len() != points.iter().unique().count()`（import.rs:256）：`unique()` 按**首次出现序**迭代去重，与排序无关；即检查"任意顶点值出现超过一次"。C++ 侧等价检查由 `SimplePolygon::Create` 的逐对比较承担（原记录已比对），此处仅补 Rust 侧语义（原记录未说明 `unique()` 的 O(n²) 全对语义）。
+6. **`Importer::new` 的 `#[must_use]` 与 `with_min_item_separation` 返回 `Result<Self>`（遗漏的 API 形态细节）**——Rust builder 链式（`with_min_item_separation` 消耗 self 返回 `Result<Self>`）；C++ `ImporterConfig` 值拷贝 + `withSeparation` 自由函数返回新 config（cpp:114-122），无 builder 链。原记录差异 4 已覆盖语义，此处补充：C++ `withSeparation` 位于匿名命名空间，非公共 API——外部调用方无法复现"带 separation 的配置派生"，必须走 `Import*Instance` 入口。判定：差异（API 可达性，C++ 收窄）。
+7. **`ext_to_int_transformation` 参数为 `&DTransformation` 而非 `&ExtTransformation`（遗漏的签名细节）**——Rust 该函数接**内部**分解变换类型（调用方 spp/import.rs:72-74 先 `DTransformation::from(ext)` 转换）；C++ `externalToInternal` 接 `ExternalTransformation`（cpp:131-134）内部做度→弧度。即 Rust 把"度→弧度"放在 From 转换（ext_repr.rs:180-184），C++ 放在 externalToInternal 内部——归属位置不同，数值路径一致（均 f32 域 `deg * (π/180)`）。
+8. **`import_item` 的 `Item::new` 参数 `base_quality: Option<usize>`（浅覆盖→补齐字段名）**——原记录 31 行写"参数顺序不同但语义一致"；补充证据：C++ `Item::Create(internalIndex, external.id, original, itemSurrogateConfig, external.minQuality, rotation)`（cpp:423-425）中 `minQuality` 位置对应 Rust `base_quality`（import.rs:101），两侧均为 `Option/optional`。一致。
+9. **`import_container` 的 holes 导入失败传播（遗漏）**——Rust `json_holes.iter().map(import_simple_polygon).collect::<Result<Vec<_>>>()?`（import.rs:139-143）任一 hole 失败即整体失败；C++ 同（cpp:446-452 逐 hole `ImportSimplePolygon` 失败即返回）。一致（补齐证据）。
+10. **`import_item` Rectangle 分支的 `Rect::try_new` 错误传播（补齐 C++ 分支细节）**——Rust `Rect::try_new(*x_min, *y_min, x_min + width, y_min + height)?`：`x_min + width` 在 **f32 域**计算（Rust f32 类型）；C++ `normalizedRectangleBounds`（cpp:61-82）同样先收窄到 float 再 `xMin + width`（cpp:73-74）。原记录 26 行已提"f32 域校验"，此处补充加法也在 f32 域（非 double），逐位一致。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | `import_container` 断言/zone 校验时点 | 差异（轻微） | Rust zone 断言最先（debug panic）；C++ 外轮廓先行、zone 校验在循环内。失败优先级不同，接受边界相同 | import.rs:108-111 vs Importer.cpp:438-461 |
+| S2 | `debug!` 日志（item 起始/退化顶点） | C++ 缺失 | 无行为影响 | import.rs:58,304-307 vs 无 |
+| S3 | `withSeparation` 为匿名命名空间私有 | 差异（API 可达性） | 外部调用方无法构造派生配置，必须走 instance 入口 | import.rs:47-54 vs Importer.cpp:114-122 |
+| S4 | `unique()` 全对去重语义（非相邻） | 补齐说明 | Rust 显式 O(n²) 检查 ↔ C++ SimplePolygon::Create 逐对比较 | import.rs:256 vs SimplePolygon.cpp:217-223 |
+| S5 | Rectangle 分支 f32 域加法 | 一致（补齐证据） | `x_min + width` 双侧均在 f32 域计算 | import.rs:68 vs Importer.cpp:73-74 |

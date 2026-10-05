@@ -71,3 +71,9 @@
 
 ## 结论
 util/io 与 svg 导出的**序列化语义**（JSON pretty 字段、SVG 内容）全部由 JaguarCore 记录 33/36 锁定，SparrowCore 侧接线（ImportSPInstanceJson→Optimize→SerializeExternalSPSolutionJson→ExportLayoutSvg）与 Rust 主干流程等价，判定基本等价。实质缺口有三：warm-start 的文件级闭环（双格式输入回退 + 实例回写均缺失，库级 `config.warmStart` 路径健全）、监听器形态的 live/intermediate SVG 导出（归宿主 UI，S24）、以及 debug 断言集 tracker_matches_layout（由终态独立校验替代，影响低）。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：io.rs 149 行覆盖完整性】** MainCli 7 字段+apply_config_overrides（归 S23）、ExtSPOutput、init_logger、write_svg、write_json、read_spp_input——主文均有条目；`init_logger` 的 fern 格式串（`[LEVEL][HH:MM:SS]<thread>` + 25 列左对齐前缀）与双通道（stdout+文件）细节、`log!("[EPOCH]: jiff 时间戳")` 首行均为应用层设施，C++ 缺失判定维持。
+2. **【遗漏补记：svg_exporter.rs 的三个 if let 链与计数器语义】** 主文记了三通道但未记细节：live 路径**对每个 report 都写**（含 ExplImproving，覆盖同名文件）、intermediate 路径 `&& report_type != ExplImproving` 排除改进解且 `svg_counter += 1` 仅在此分支递增（**live 写入不计数**）、final 路径 `&& report_type == Final` 用文件名 stem 而非计数器（svg_exporter.rs:45-64）。C++ 无对应物判定不变；此细节防止后续把"live 计数"误解进中间文件命名序。
+3. **【浅覆盖补全：assertions.rs 132 行的结构】** 主文已概括 tracker_matches_layout 全函数；补记内部结构以便定位：a) 前置两断言（pk_idx_map 覆盖 + layout_qt_matches_fresh_qt，:14-15）；b) 双层循环逐 pair 的三分支（有碰撞→loss 近似双序校验+反查 opp_collector（:25-73，含 10% 容差的双向 approx_eq 与"非对称碰撞"宽限）、无碰撞但 stored≠0→反查告警（:104-117））；c) container 逐项（ Exterior 命中→assert_approx_eq ulps=5，否则 assert==0，:118-131）。C++ 判定（缺失，终态校验替代）维持。
+4. **【核对确认：write_svg 的 canonicalize 日志】** Rust `fs::canonicalize(path).expect(...)` 在路径异常时 panic（io.rs:114-118）——属观测层日志的既定 panic 差异，主文未单独列出，影响可忽略（写盘成功后才会走到）。

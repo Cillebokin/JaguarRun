@@ -114,3 +114,28 @@
 ## 结论
 
 edge.rs 的核心几何（线段判交、交点计算、最近点、距离）在 C++ `IntersectsRustF32`/`IntersectionPointRustF32`/`ClosestPointRustF32` 中逐公式、逐舍入点复刻，包括平行列早退与 [0,1] 闭区间边界，行为等价。剩余差异为两点边缘行为（NaN 端点的创建判定相反；centroid 的 midpoint 模拟最多 1 ULP）加一套 C++ 自有的容差判交 API——后者对共线重叠的判定与 Rust 相反，使用时必须与 RustF32 族区分。
+
+## 补充审计（2026-09-29）
+
+逐行复核 edge.rs 全部 248 行（14 个方法 + 4 个 trait 实现 + 私有 edge_intersection + Intersection 枚举），确认主记录已覆盖全部条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】bbox 判交公式在 NaN 语义下的等价性（edge_intersection bbox 预检）
+- 主记录 collides_at 条称 bbox 预检"MinRustF32/MaxRustF32 组合 ↔ edge.rs:202-213 的 min/max 组合"一致。补充核对公式形态：Rust edge.rs:212 `x_min_e1.max(x_min_e2) > x_max_e1.min(x_max_e2)`（f32::max/min，NaN 时返回另一方）；C++ Edge.cpp:45-54 `MaxRustF32(MinRustF32(x1,x2), MinRustF32(x3,x4)) > MinRustF32(MaxRustF32(x1,x2), MaxRustF32(x3,x4))`——**嵌套组合次序逐字对应**（e1 内 min/max → 跨 e1/e2 max/min），fmin/fmax 的 NaN 传播语义与 Rust f32::min/max 相同。NaN 输入（Create 已拒）不可达。
+- 判定：【一致】（公式形态与 NaN 语义双重确认）。
+- 证据：edge.rs:202-213 vs Edge.cpp:45-54。
+
+### 【浅覆盖→补齐】Edge 无 Hash/Eq（同 Rect）
+- edge.rs:9 `#[derive(Clone, Debug, PartialEq, Copy)]`——Edge 无 Eq/Hash；C++ Edge2d 亦无 operator==（edge.h 全文无）。两侧一致地无哈希/相等容器依赖。
+- 注意：C++ 侧 Edge2d 的相等比较**实际通过 Point2d::operator== 成员级发生**（Simplify.cpp:160 `edge.start == affected[i]`、Offset.cpp:131-136 samePolygonCycle）——但 Rust 对应代码（shape_modification.rs:194/209）用的是 `[Point; 3]/[Point; 4].contains(&l.start)`，同为 Point 的 PartialEq。逐字段等价，已在记录 10/11 覆盖，此处确认无形态缝隙。
+- 判定：【一致】。
+- 证据：edge.rs:9 vs edge.h；Simplify.cpp:160 vs shape_modification.rs:194。
+
+### 【遗漏→补齐】collides_at 的 Intersection::Yes(None) 形态契约
+- Rust `Intersection::Yes(Option<Point>)`（edge.rs:245-248）允许 Yes 分支携带 None（calc_loc=false 时）。collides_at 用 `.expect(...)`（edge.rs:62）解包——**仅当 collides_at 传 true 而 edge_intersection 返回 Yes(None) 才 panic**，检查 edge.rs:233-240 确认 calc_loc=true 时 loc 恒为 Some，**该 expect 不可达**（与主记录判断一致，此处补行号证据）。
+- 判定：【一致】（不可达防御；C++ 直接返回 optional 无此形态）。
+- 证据：edge.rs:61-64, 235-239。
+
+### 【遗漏→补齐】cfg(test)——edge.rs 无测试模块
+- edge.rs 248 行无 `#[cfg(test)]`，无测试锁定行为契约。判定：不适用。
+
+补充结论：03 记录覆盖完整，无遗漏函数。两处补充确认（bbox 预检嵌套次序、Edge 相等的成员级消费链）均不改变既有判定。

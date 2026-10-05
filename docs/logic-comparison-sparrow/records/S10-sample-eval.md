@@ -49,3 +49,8 @@
 ## 结论
 
 SampleEval 的三态序（Clear < Collision < Invalid，同态按 FPA 容差比较 loss）在 C++ 中通过 `SampleKindRank` + `IsBetterSample`（`!approxEqual && loss<`）+ `RustApproxEqualF32`（ε=f32::EPSILON 或 ulps≤4，逐位复刻 float-cmp 0.10 默认 F32Margin）完整复刻，这是采样层全部接受/淘汰/精化决策的基石，被三个 Rust trace fixture 的位模式锁定。差异仅为 NaN 的 panic→定义序（既定形态）与枚举展平/虚分发等 API 形态。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：43 行逐项覆盖】** sample_eval.rs 全量复核：SampleEval 枚举 3 变体、PartialOrd、Ord（6 match 臂）、Eq derive、SampleEvaluator trait（2 方法）——主文 5 小节全覆盖无遗漏。
+2. **【浅覆盖补全：Ord 的 match 臂覆盖顺序】** 主文条目 1-3 已逐臂核对；补记遗漏臂验证：`(Collision{..}, Clear{..})→Greater`、`(Clear{..}, Collision{..})→Less`（sample_eval.rs:27-28）在 C++ 侧由 rank 数值序天然覆盖（COLLISION=1 > CLEAR=0），同 kind 复合模式 `|`（:29-32）对应 C++ 的 else 分支（非 Invalid 且同 rank）——**全 6 臂无遗漏映射**，判定维持。
+3. **【核对确认：FPA 的来源链】** `jagua_rs::util::FPA`（fpa.rs:17-33）经 float-cmp 0.10 `approx_eq!`（F32Margin 默认 ε+4ulps，eq.rs:69-76）——主文证据链完整（含两个上游文件行号），现场抽验 rand/float-cmp 未被引入本文件（仅 jagua-rs util），无未记依赖。

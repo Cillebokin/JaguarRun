@@ -82,3 +82,32 @@ if (!ShapeModificationValid(preSimplified, internal, modifyMode))
 
 ## 结论
 `convert_to_internal` 的五步管线（变换→offset→simplify→窄凹陷闭合→tolerance/10 再简化→有效性校验）在双侧顺序与守卫条件上完全一致，核心行为等价。主要偏差是错误通道：Rust 的 `debug_assert!`/unwrap 在 C++ 中全部升级为 `Result` 错误返回，其中有效性断言从 debug-only 变为全构建生效，使 C++ 在 release 下比 Rust 更严格。四个只读访问器（centroid/area/bbox/diameter）在 C++ 中未做独立封装，由 `SimplePolygon` 按需计算承担。
+
+## 补充审计（2026-09-29）
+
+逐行复核 original_shape.rs 全部 73 行（struct 定义 + convert_to_internal + 4 个访问器），确认主记录已覆盖全部条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】offset 守卫的 NaN 语义（`*offset != 0.0` 对 NaN 的行为）
+- Rust original_shape.rs:29 `if offset != 0.0`：**NaN != 0.0 为 true → NaN 偏移会执行 offset_shape**（随后 geo-buffer 对 NaN 距离的行为 → Rust oracle 已验证返回空多边形错误）。C++ OriginalShape.cpp:12 `*modifyConfig.offset != 0.0`：NaN 同样为 true → 走 OffsetShape → normalizeOffsetRustF32 后 `!isfinite` 检查（Offset.cpp:266-270）报错。**两侧对 NaN 偏移最终都报错**（Rust 经 geo-buffer 空结果 bail，C++ 经显式 isfinite 检查），失败通道内容不同（消息不同）但方向一致——11 号记录差异表 #10 已覆盖此边界，此处确认 OriginalShape 层的守卫不产生额外分叉。
+- 判定：【一致】（NaN 边界最终同为失败；通道差异已记录于 11 号）。
+- 证据：original_shape.rs:27-32 vs OriginalShape.cpp:12-18 + Offset.cpp:266-270。
+
+### 【浅覆盖→补齐】simplify_tolerance 守卫的嵌套结构（narrow_concavity 依赖 simplify 存在）
+- Rust original_shape.rs:33-49：`narrow_concavity_cutoff` 的处理**嵌套在 `simplify_tolerance.is_some()` 块内**——若只配 narrow_concavity 而不配 simplify_tolerance，**窄凹陷闭合不执行**（静默忽略）。C++ OriginalShape.cpp:19-44：同样嵌套于 `simplifyTolerance.has_value()` 内（cpp:27 在 cpp:19 块内）。逐字对齐（含这个"静默忽略无 simplify 的 concavity 配置"的隐性契约）。
+- 判定：【一致】（嵌套守卫对齐）。
+- 证据：original_shape.rs:33-43 vs OriginalShape.cpp:19-36。
+
+### 【浅覆盖→补齐】debug_assert 的 pre_simplified 取样点在二次简化失败时的行为
+- Rust original_shape.rs:34 `pre_simplified = internal.clone()` 在**首次 simplify 之前**取样；若 concavity/10 二次 simplify 产生非法形状（Rust panic 在 simplify 内部 unwrap），断言不执行。C++ cpp:21 同点取样；二次 SimplifyShape 失败直接透传（cpp:33-34），断言（cpp:38-43）同样不执行。两侧失败优先级一致。
+- 判定：【一致】。
+- 证据：original_shape.rs:34, 44-48 vs OriginalShape.cpp:21, 31-43。
+
+### 【遗漏→补齐】derive 集合（Clone, Debug——无 PartialEq/Default）
+- original_shape.rs:10 `#[derive(Clone, Debug)]`；C++ OriginalShape.h:11-20 有默认成员值（preTransform=Identity、modifyMode=Inflate——主记录差异表 #7 已记）。补充确认 Rust 无 Default derive，C++ 的默认值是额外便利——若 C++ 调用方默认构造后不设置 modifyConfig（offset/simplify 均 nullopt），ConvertToInternal 只做 transform，等价于 Rust 显式全 None 配置。无行为分叉。
+- 判定：【一致】（维持 #7 判定）。
+- 证据：original_shape.rs:10 vs OriginalShape.h:14-16。
+
+### 【遗漏→补齐】cfg(test)——original_shape.rs 无测试模块
+- original_shape.rs 73 行无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：09 记录覆盖完整，无遗漏函数。三处补充（NaN 偏移边界、嵌套守卫的静默忽略契约、失败优先级）均确认一致，不改变既有判定。

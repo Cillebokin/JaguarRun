@@ -75,3 +75,20 @@ for (double& angle : allowedRotation.radians)
 
 ## 结论
 `Item` 的构造管线（convert_to_internal → generate_surrogate → 装配）与面积/访问器在双侧逐行对应，核心逻辑等价。差异集中在 `RotationRange` 的表示法（枚举 vs mode+vector）及由此引入的 C++ 运行时校验与 f32 归一化，均属防御性/对齐性措施，不改变合法输入下的行为。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 item.rs（59 行）全部符号：struct Item 七字段、Item::new、Item::area。正文已全覆盖，无【遗漏】。逐行复核确认与补充：
+
+### 补-1【验证】构造管线顺序与 surrogate 生成对象（细节确认）
+Rust（item.rs:39-43）：`shape_orig.convert_to_internal()` 得到中间 SPolygon，再对其 `generate_surrogate(surrogate_config)`——**surrogate 生成在内部形状上、就地修改**（`let mut shape_int = ...; shape_int.generate_surrogate(...)?`）。C++（Item.cpp:57-62）：`originalShape.ConvertToInternal()` → `collisionShape.Value().GenerateSurrogate(surrogateConfig)`——同为对转换后的内部形状生成。判定：一致（正文步骤 1/2 的结论经当前代码行号复核成立）。
+注意 Rust 的 `shape_cd` = generate_surrogate 之后的**同一对象**（surrogate 字段挂在 SPolygon 上）；C++ `m_CollisionShape` 同为 GenerateSurrogate 后的对象。双侧 shape_cd 均内嵌 surrogate。判定：一致。
+
+### 补-2【验证】rotationRangeRepresentable 注释（细节）
+Item.cpp:9-20 当前版本在 Discrete 分支带注释"jagua-rs Item::new 不校验角数量；1..=65536 规则在 Importer 层执行"——正文引用的旧代码块无此注释，判定不变（C++ 额外校验），补充说明该差异的注释证据链完整。
+
+### 补-3【遗漏】`Item::area` 的 C++ 数值路径（细节）
+Rust（item.rs:56-58）：`self.shape_orig.area()` → `OriginalShape::area()`（原始形状面积，含 pre_transform 前的 caller 坐标）。C++（Item.cpp:106-109，正文已记）：`m_OriginalShape.shape.Area()`——注意 C++ OriginalShape 的 area 取 `.shape.Area()`，是否包含 pre_transform 的影响需核对 record 09 的 OriginalShape 语义；Rust OriginalShape::area 同样不含 pre_transform（面积在原始坐标系计算）。判定：一致（正文已记；此补充确认两侧 area 均不经过 pre_transform/modify）。
+
+### 补-4【验证】Create 参数与字段对应复核（正文差异 #5）
+Item::Create 签名（Item.cpp:42-47）：`(index, externalId, originalShape, surrogateConfig, minQuality={}, allowedRotation={})`——surrogateConfig 必填在前、minQuality/allowedRotation 带默认值。Rust `Item::new(idx, external_id, original_shape, allowed_rotation, min_quality, surrogate_config)` 全必填、顺序不同。判定维持正文差异 #5（API 形状，无逻辑影响）。

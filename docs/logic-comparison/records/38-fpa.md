@@ -66,3 +66,24 @@ return difference <= 4U;                                // ulps 容差 = 4
 ## 结论
 
 FPA 的核心语义——f32 域"EPSILON 绝对容差 + ulps≤4"近似相等及由此构成的偏序——被 C++ 完整复刻（`AlmostEqualRustF32` 及其私有拷贝 `rustFpaEqual`），逐行为等价；差异仅在形态（newtype 类型 vs 函数族）与一处极端 NaN 输入的分支次序。C++ 另有整套 `NumericPolicy`（1e-9 绝对容差）体系服务自身校验层，属无 Rust 对应的额外设施，使用时须注意它与 RustF32 族不可混用。
+
+### 补充审计（2026-09-29）
+
+对 fpa.rs 38 行逐行复核。原记录已覆盖全部 4 个 impl（From/PartialEq/PartialOrd/Display）与 float-cmp 参数语义；补充遗漏点：
+
+1. **`FPA` 使用点清单（原记录缺"谁在用"的全景，影响等价性判断）（浅覆盖→补齐）**——Rust `FPA` 的实际调用点：
+   - `simple_polygon.rs:296-298`：`SimplePolygon::contains` 中把 edge 端点与 point 包成 FPA 做 `>=`/`<=` 判定（原记录记录 05 应覆盖，交叉引用）；
+   - `rect.rs:76-83`：`Rect::overlaps`/`contains` 的 FPA 比较（记录 02 交叉引用）。
+   即 **FPA 作为类型的使用全部在几何谓词层**；C++ 对应点使用 `LessEqualRustF32` 等谓词族（Rect.cpp/SimplePolygon.cpp）。判定：原记录"形态差异（newtype vs 函数族）"在使用点全景上成立。
+2. **`impl<T> From<T> for FPA where T: Into<f32>`（Rust 9-16 行）的泛型收窄语义（遗漏细节）**——`From<T: Into<f32>>` 意味着 f64 输入经 `as f32` 收窄（Rust `f64: Into<f32>` 不可用——实际只有 u8/u16/i8 等整型与 f32 本身满足；f64 不 `Into<f32>`，需显式 `as`）。C++ 无类型即无对应；`rustFpaEqual` 的分量重载（Importer.cpp:47-53）在调用前显式 `static_cast<float>`。判定：一致（收窄位置不同，均在比较前完成）。
+3. **`PartialOrd for FPA` 的 `PartialEq` 短路次序（补齐）**——Rust `partial_cmp`：先 `self.eq(other)`（approx_eq）判 Equal，否则 `self.0.partial_cmp(&other.0)`（f32 严格序）（fpa.rs:25-31）。NaN 输入：`eq` 为 false（approx_eq NaN→false），`f32::partial_cmp(NaN, x)` → `None`（PartialOrd 返回 None，语义"不可比"）。C++ `LessRustF32 = a < b && !AlmostEqual`（NaN → a<b 为 false → Less 为 false，**返回 false 而非"不可比"**）。形态差异：Rust Option<Ordering> vs C++ bool 谓词——C++ 把 None 折叠为 false。几何路径输入已过滤 NaN（Rect::try_new/导入校验），不可达。判定：一致（可达路径）。
+4. **float-cmp 版本依赖核实（补齐证据）**——workspace `float-cmp` 版本需为 0.10.x（`approx_eq!` 默认 `F32Margin(4, f32::EPSILON)` 即 ulps=4/epsilon 绝对容差）。原记录判定以此为前提。核实 Cargo workspace 声明与 C++ 复刻常数（`difference <= 4U`、`epsilon`）吻合，前提成立。
+5. **`Display for FPA`（原记录判"C++ 缺失"，补充影响）**——Rust FPA Display 转发 f32 Display；库内 FPA 的 Display 无调用点（调试打印用 `{}` 的场合在 simple_polygon/rect 中不存在）。判定维持：C++ 缺失（无行为影响）。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | FPA 使用点全景（几何谓词层） | 一致（补齐） | simple_polygon contains / rect overlaps 走 FPA ↔ C++ RustF32 谓词族 | simple_polygon.rs:296-298, rect.rs:76-83 |
+| S2 | NaN 下 PartialOrd None vs bool false | 一致（不可达） | 几何路径已过滤非有限输入 | fpa.rs:24-32 vs RustF32.h:66-79 |
+| S3 | From 泛型收窄 | 一致（补齐） | 比较前收窄，位置不同 | fpa.rs:9-16 vs Importer.cpp:47-53 |

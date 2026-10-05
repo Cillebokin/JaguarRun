@@ -107,3 +107,38 @@ if (static_cast<float>(rustConfig.failFastPoleAreaRatio) != 0.0F) {
 
 ## 结论
 SPSurrogate 的数据模型（六字段）、ff 前缀计数算法（ratio 归零、累加达标即停、未达标全取）、hull 索引与面积、配置校验与 none 语义、变换语义在双侧完全对齐，eef0830 后 piers 的错误传播也已接通。差异均为形态层面：生成顺序 hull↔poles 互换（互不依赖、无行为影响）、`ff_poles()`/`transform_from` 两个 API 缺失（调用方可用现有接口等价重构）、double 配置经 f32 归一模拟、hull 点反查索引在重复坐标下可能取不同匹配。正常输入下生成的代理内容一致。
+
+## 补充审计（2026-09-29）
+
+逐行复核 sp_surrogate.rs 全部 170 行（struct SPSurrogate、new、ff_poles、ff_piers、2 个 trait 实现、N_POLE_LIMITS、SPSurrogateConfig + none()），确认主记录已覆盖全部条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】hull 反查索引在 ±0.0 顶点下的匹配（对 07 号补充审计结论的承接）
+- 07 号补充审计确认 Rust `position(|x| x == p)` 与 C++ `find_if(float==float)` 都取**首个 PartialEq 匹配**、机制一致。补充一个边界：hull 输出点含 +0.0 分量而原顶点表存 -0.0（或反向）时，两侧都以 `==`（±0.0 相等）命中**同一首个匹配**——一致。仅当重复坐标（同位置多顶点）时，Rust 与 C++ 都取首个出现者——两侧同（主记录 #7 的"索引反查可取不同匹配"担忧经 07 号审计已化解为"两侧同为首个匹配"）。
+- 判定：【一致】（修正主记录 #7 的"可取不同匹配"表述：两侧机制相同，取值相同）。
+- 证据：sp_surrogate.rs:40 + convex_hull.rs:13 vs Surrogate.cpp:615-635。
+
+### 【浅覆盖→补齐】ff 前缀计数的浮点累加次序
+- Rust sp_surrogate.rs:52-57 `position(|pole| { covered_area += pole.area(); covered_area >= target_area })`——**先累加当前 pole 再判定**（达标 pole 计入前缀）。C++ Surrogate.cpp:599-604 `poleArea += circleAreaRustF32(pole); ++failFastCount; if (poleArea >= targetArea) break;`——同序（先加后判）。f32 累加链（顺序求和，无重结合）两侧一致；`pole.area()` = `Circle::area`（r*r*PI）↔ `circleAreaRustF32` = `AreaRustF32`（r*r*rustPi，04 号已核位级）。
+- `target_area = simple_poly.area * ratio`（sp_surrogate.rs:50 f32 乘法）↔ Surrogate.cpp:595-596 `static_cast<float>(shape.Area()) * static_cast<float>(ratio)`（f32 乘法，shape.Area() 为存的正面积 double，f32 化后与 Rust 字段一致）。
+- 判定：【一致】。
+- 证据：sp_surrogate.rs:47-59 vs Surrogate.cpp:593-606。
+
+### 【浅覆盖→补齐】transform_from 中 debug_assert_eq 的双长度断言（release 不检查）
+- sp_surrogate.rs:114-115 `debug_assert_eq!(self.poles.len(), reference.poles.len())` 等——release 下 zip 遇长度不齐时**静默截断到较短者**（Rust zip 语义）。C++ 无对应（无 transform_from）。该断言锁定的契约（同构代理间变换）在 C++ 侧由"值语义全量重变换"天然满足（不存在长度不齐的调用形态）——主记录 #11 判 C++ 缺失的结论维持，此处补断言语义说明。
+- 判定：【C++缺失】（维持；数值等价由 TransformedRustF32 承担）。
+- 证据：sp_surrogate.rs:112-137。
+
+### 【浅覆盖→补齐】SPSurrogateConfig 的 PartialEq 与 GenerateSurrogate 的缓存判定
+- simple_polygon.rs:79 `surrogate.config == config`（GenerateSurrogate 的跳过条件）——SPSurrogateConfig 的 derive PartialEq：n_pole_limits 逐元素（usize == + f32 ==）、ff_pole_area_ratio（f32 ==）、n_ff_piers（usize ==）。**f32 的 ==**：±0.0 相等、NaN 不等。C++ Surrogate.h:25-48 operator==（记录已提"f32 化比较"）：`static_cast<float>(lhs.threshold) == static_cast<float>(rhs.threshold)` 等——先 float 化再 ==，与 Rust 直接 f32 == 同语义（double 存储经 float 化还原后比较）。
+- 判定：【一致】。
+- 证据：sp_surrogate.rs:143（derive PartialEq）vs Surrogate.h:25-48 + SimplePolygon.cpp:379。
+
+### 【遗漏→补齐】derive 集合差异（SPSurrogate: Clone+Debug；SPSurrogateConfig: Serialize/Deserialize+PartialEq）
+- sp_surrogate.rs:13 `#[derive(Clone, Debug)]`（无 PartialEq——代理间无相等比较需求，C++ 亦无 Surrogate operator==，一致）；sp_surrogate.rs:143 config 带 **Serialize/Deserialize**（JSON 配置导入链）——C++ SurrogateConfig 无序列化（JSON 映射在 34 号 io 层）。与 10 号的 ShapeModifyConfig 同模式。
+- 判定：【一致】（值域；序列化归 io 层）。
+- 证据：sp_surrogate.rs:13, 143 vs Surrogate.h:17-49。
+
+### 【遗漏→补齐】cfg(test)——sp_surrogate.rs 无测试模块
+- sp_surrogate.rs 170 行无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：15 记录覆盖完整。五处补充（hull 反查机制两侧同为首项匹配——修正 #7 表述、ff 累加次序、transform_from 断言语义、config PartialEq 的 f32 化等价、derive 集合）均确认或修正后维持原判定；其中 #7"索引反查可取不同匹配"经 07/15 双向核实应弱化为"机制与取值两侧相同"。

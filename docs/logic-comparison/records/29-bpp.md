@@ -130,3 +130,22 @@
 
 ## 结论
 BPP 的常规动态语义、Release 超需求回绕和键复用顺序一致；但 Debug 超需求调用的可观察状态不同：Rust 已开箱并放入条目后 panic，C++ 在放置前返回错误。Restore 预验证/原子提交、C++ 失败回滚、未暴露的 placed/used 迭代器与 time_stamp 仍属差异或接口缺口；不可据全套测试通过宣称完全等价。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 BPP 四文件全部符号：Bin{new}；BPInstance{new,item_area,item_qty,bins,bin_qty,total_item_qty,item,item_idx}；BPProblem{new,remove_layout,place_item,remove_item,save,restore,density,item_placed_qtys,bin_used_qtys,bin_cost,register_layout,deregister_layout,register/deregister_included_item,open_bin,close_bin,n_placed_items}、LayKey、BPPlacement{from_placed_item}、BPLayoutType；BPSolution{density,cost}。正文已全覆盖全部符号，无【遗漏】函数。逐行复核补充：
+
+### 补-1【验证】PlaceItem 回滚链（细节确认）
+BppProblem.cpp:171-217：itemIndex 越界（170-174）→ `#ifndef NDEBUG` 需求耗尽（175-181）→ Closed 分支 OpenLayout（183-190）→ GetLayout 失败回滚 `++m_RemainingBinStock` + ReleaseLayoutSlot（194-203）→ PlaceItem 失败同样回滚（205-215）→ 成功后 `--m_RemainingDemand`（216）。与正文步骤 1-4 一致，行号经复核准确。判定维持。
+
+### 补-2【验证】RemoveItem 的闭箱判定与 placement 构造（细节确认）
+BppProblem.cpp:223-258：removed → itemIndex 越界容错（238-243）→ `++m_RemainingDemand`（244）→ 构造 BPPlacement（Open, layoutIndex, binIndex, itemIndex, transform）（246-249）→ 空则 `++m_RemainingBinStock` + ReleaseLayoutSlot + 改 Closed 且 layoutIndex=0（250-257）。Rust remove_item（problem.rs:69-80）：`is_empty()` → deregister_layout → `BPPlacement::from_placed_item(Closed{bin_id})`。差异：Rust Closed placement 仍携带 bin_id；C++ result.binIndex 恒填（Open/Closed 均有），layoutIndex 在 Closed 时清 0（Rust Closed 变体无 lkey 概念，由枚举保证）。判定：一致（正文已记；补充 C++ 侧 layoutIndex=0 的清零细节）。
+
+### 补-3【验证】OpenLayout 的库存扣减时点（细节确认）
+BppProblem.cpp:146-164（正文步骤 1 引用）：校验 bin 越界/库存 → `Layout(bin.container)` → AllocateLayoutSlot → `--m_RemainingBinStock`（163）。Rust register_layout（problem.rs:210-217）：`open_bin(bin_idx)` 先扣库存 → 遍历放置项登记（新开布局为空，无操作）→ insert。判定：一致（扣减时点同为成功路径末段）。
+
+### 补-4【遗漏】BPSolution::Cost 的密度口径核对（细节）
+Rust cost（solution.rs:37-42）：`layout_bins.values().map(|idx| instance.bins[*idx].cost).sum()`。C++（BppSolution.cpp:51-60）：遍历 layouts 取 `instance.GetBin(binIndex).cost` 累加，**越界跳过**（Rust 越界 panic）。正文已记该差异（112 行）；补充确认 Rust 的 SecondaryMap<LayKey,usize> 的 values() 迭代序（槽序）↔ C++ vector 顺序——cost 为 u64 整数加法无浮点序差，顺序不影响结果。判定维持。
+
+### 补-5【验证】restore 的键保留排序注释（细节确认）
+BppProblem.cpp:370-376 的 std::sort 注释与正文差异 #9 一致。Rust 侧 SecondaryMap 迭代序=槽序（slotmap 文档语义），C++ sort 按 `requestedKey & kLayoutKeyPartMask`（槽序）对齐。判定维持。

@@ -91,3 +91,37 @@ match geo_poly_offsets.len() {
 
 ## 结论
 这是全部比对组中唯一的**算法本体替换**：Rust 调用 geo-buffer 0.2.0，C++ 用 straight-skeleton 事件模型重实现。已覆盖 fixture 的核心结果在 Debug/Release 对照中一致；圆角采样方向按 Rust `get_orientation()` 修正，非有限距离边界也已对齐。C++ 的保模校验、fallback 和 `OffsetShapes` 属额外实现；L 形 fallback 已有匹配 fixture，其余分支仍未完整验收。由于 Offset 仍缺少对这些分支的完整差分证据，本项暂不宣称等价。
+
+## 补充审计（2026-09-29）
+
+逐行复核 shape_modification.rs 的 offset 段（338-379 行：offset_shape 单函数）。行段归属确认：本记录覆盖 340-379（offset_shape 本体），338-339 为 doc 注释。与 10（52-336）、12（381-519）三段对 550 行的分配无重叠无遗漏。geo-buffer 0.2.0 源码（cargo registry）关键点核对如下：
+
+### 【浅覆盖→补齐】geo-buffer 弧步进常量 0.1 的源码级确认
+- 主记录差异表 #12 称 ROUNDED_STEP "源码可核对"。现核对：geo-buffer-0.2.0/src/skeleton/mod.rs:274 `left_normal.rotate_by(if orient {0.1} else {-0.1})`——**常量 0.1 为 f64 字面量**（无命名常量）；C++ StraightSkeleton.cpp:28 `constexpr double ROUNDED_STEP = 0.1` + cpp:592-593 `rotate(polygonOrientation ? ROUNDED_STEP : -ROUNDED_STEP)`。数值与符号分支（orient 控制 ±）逐字对应。**注意 Rust 的 0.1 无后缀默认 f64**——与 C++ double 0.1 位级相同（0.1 的最近 f64）。
+- 判定：【一致】（常量位级 + 符号分支）。
+- 证据：geo-buffer mod.rs:274 vs StraightSkeleton.cpp:28, 592-593。
+
+### 【浅覆盖→补齐】get_orientation 与 C++ polygonOrientation 的判定式核对
+- geo-buffer mod.rs:319-323 `get_orientation()`：`self.ray_vector[0].unwrap_base_ray().0（左射线）.orientation(ray_vector[0].ray().point_by_ratio(1.)) == 1`——用**顶点 0 的左射线对角线方向**判定。C++ StraightSkeleton.cpp:545-547：`m_Vertices[0].leftRay.orientation(m_Vertices[0].ray().point(1.0)) == 1`——**逐字对应**（首个顶点、左射线、角平分线单位点、==1）。主记录差异表 #11 称"已对齐"，此处补源码行号证据。
+- 判定：【一致】（确认）。
+- 证据：geo-buffer mod.rs:319-323 vs StraightSkeleton.cpp:545-547。
+
+### 【浅覆盖→补齐】圆角起点/终点的闭合点语义（left_normal 起、right_normal 止）
+- geo-buffer mod.rs:259-281：循环先 push `left_normal.point_by_ratio(time_left)`，rotate 步进，以 left_normal 到达 right_normal 方向为退出条件，退出后 push `right_normal.point_by_ratio(time_left)`。C++ StraightSkeleton.cpp:596-600：`while(true){ push(leftNormal.point(remaining)); leftNormal.rotate(±ROUNDED_STEP); if ((polygonOrientation && sideOrientation == -1) || ...) break; } push(rightNormal.point(remaining))`——**循环体次序完全一致**（先 push 当前 left、再旋转、再判退出、循环外补 right 终点）。
+- 判定：【一致】（逐语句）。
+- 证据：geo-buffer mod.rs:259-281 vs StraightSkeleton.cpp:596-600。
+
+### 【浅覆盖→补齐】cleanup 调用点分布的最终核对（修复注记的验证）
+- 2026-09-29 更新提到"修复主循环 cleanup 分叉（Rust 每次迭代末尾含 continue 路径清理）"。核对 geo-buffer mod.rs 的 cleanup 出现点：420（apply_event 内 EdgeEvent 分支后）、474、497（split 事件处理路径）与 312（make_shrink 相关）——Rust 主循环（构建 skeleton 的 timeline 循环）在**每轮迭代末尾**（mod.rs:497 `vertex_queue.cleanup()` 在 SplitEvent 分支闭合后、循环体末）统一清理。C++ StraightSkeleton.cpp 的 cleanup 出现于 552（loops 重放循环，与 Rust 的事件重放对应）、755/785/792/795/802/826（buildEvents 各分支）。行号分布与修复注记描述吻合。
+- 判定：【一致】（维持修复后基线）。
+- 证据：geo-buffer mod.rs:312, 420, 474, 497 vs StraightSkeleton.cpp:552, 755-826。
+
+### 【浅覆盖→补齐】非有限距离边界的 oracle 证据链确认
+- 主记录差异表 #10 引用 `--offset-boundary-parity-only`。核实工具源码（JaguarCore/tools/RustOracle/src/main.rs:532-566）：对 NaN/±Inf 各以 `catch_unwind` 包裹 offset_shape 调用（防 panic 中断 oracle），输出 `offset.boundary.{nan,positive_infinity,negative_infinity}=...`；Deflate 2.0（超出内切圆半径的收缩）单独输出 collapse 分支。oracle 证据链成立（main.rs:9 `geo-buffer = "0.2"` 确认 oracle 与 jagua-rs 同版本 crate）。
+- 判定：【一致】（确认差异表 #10 的证据）。
+- 证据：RustOracle/src/main.rs:532-566, 9。
+
+### 【遗漏→补齐】cfg(test)——offset 段无测试模块；fixture 驱动为 C++ 侧自有
+- shape_modification.rs 338-379 无 `#[cfg(test)]`；12 项 fixture 的 Debug/Release 对照属 C++ TestShapeModification 驱动（见更新注记）。判定：不适用（Rust 侧无测试契约）。
+
+补充结论：11 记录函数级覆盖完整（offset_shape 单函数 + 头部 enum/config 由 10 号覆盖）。geo-buffer 源码级核对新增四项确认（0.1 常量位级、get_orientation 判定式逐字对应、圆角循环体次序、cleanup 分布），全部支持 2026-09-29 更新后的"基本等价（fixture 范围内）"判定；保模校验与 fallback 的未验收边界维持原判。

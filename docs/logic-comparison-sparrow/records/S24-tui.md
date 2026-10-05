@@ -54,3 +54,8 @@
 
 ## 结论
 TUI 的三大职责在 C++ 生态的归属判定清晰：优化循环驱动是库本体的同步 API + 监听器/RequestStop 接口面（归属正确、无缺失）；仪表盘与交互渲染范围外归浏览器 Demo 与 NestLab GUI，且监听器事件面（S21）已提供仪表盘所需的全部数据字段；真正缺失的是三项——日志双通道组件、live SVG 导出组件、"跳过当前相位"的库级入口（S20 差异 3）。Demo 页面当前只覆盖了 TUI 的"最终布局可视化"一项，实时监控类功能全部未实现，NestLab GUI 落地时按上表缺口清单补齐即可。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：文件清单与行数】** tui.rs 96 + dashboard.rs 736 + runtime.rs 287 + logging.rs 52 + dashboard/tests.rs 66 + runtime/tests.rs 16 = 1253 行，与主文声称一致；tui/ 目录无其他文件（现场 ls 复验）。
+2. **【核对确认：归属判定关键事实】** a) TuiListener 五事件全实写经 mpsc 推送（runtime.rs:193-227，现场复验）——S21 补充审计第 3 条已确认 C++ 虚方法面对应无缺口；b) TuiTerminator 的 interrupt_phase 语义（kill = timeout || quit || interrupt_phase；new_timeout 重置 interrupt_phase 但**不重置 quit**——runtime.rs:244-256）与 S20 差异 3 的"StartPhase 不重置 m_StopRequested（quit 语义）"形成**单向错位**：Rust 的相位中断标志可重置而 C++ 停止标志不可重置——S24 差异 #4 的"跳相位缺失"判定维持且更精确：C++ 连"quit 与 skip"的分离都没有。c) Demo/App.js 现场复验仅 3 个交互点（文件选择 :37-45、Run 按钮 :47-51、SVG blob 预览 + JSON dump），无进度/状态/日志渲染——主文覆盖面判定维持。
+3. **【浅覆盖补全：tui.rs 与 cli.rs 的 configure 同构】** tui.rs:70-96 的 configure 与 cli.rs:26-58 的 run 前半（时间预算三分支/早停/种子）同构（复用同一 MainCli），主文条目 5 已记"语义同 S23"，现场确认无 TUI 专属配置项遗漏（仅输出路径固定 LIVE_DIR/output 同名）。

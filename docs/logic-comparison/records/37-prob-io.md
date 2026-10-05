@@ -2,7 +2,7 @@
 
 **Rust**: `probs/spp/io/`（ext_repr.rs 41 行 + import.rs 80 行 + export.rs 15 行）、`probs/bpp/io/`（ext_repr.rs 51 行 + import.rs 67 行 + export.rs 21 行）、`probs/mspp/io/`（ext_repr.rs 49 行 + import.rs 57 行 + export.rs 39 行）
 **C++**: `JaguarCore/Source/IO/JsonCodec.cpp`（prob 部分：`commonInstanceFields/Json` 1403-1435、SP 1437-1493、BP 1495-1634、MSP 1636-1744、三个 `External*FromSolution` 1779-1883）+ `Importer.cpp`（`importPositiveItems` 153-189、`ImportSPInstance` 517-535、`ImportSPSolution` 537-570、`ImportBPInstance` 590-642、`ImportBPSolution` 644-650、`ImportMSPInstance` 669-688、`ImportMSPSolution` 690-696）+ `ExternalRepr.h:176-280`
-**判定**: 基本等价（三模型实例/解的 io 语义一致；差异集中在 run_time_sec 取值方式、min_item_separation 零值序列化、MSPP container_id 数组下标（eef0830 已改）、并行导入、BPP/MSPP solution import 双侧均不可用）
+**判定**: 基本等价（三模型实例/解的 io 语义一致；2026-09-29 复核：min_item_separation 零值序列化与导出前强制校验两项差异已在 4540a76/291f057 消除，现存差异集中在 run_time_sec 取值方式、MSPP container_id 数组下标（eef0830 已改）、并行导入、BPP/MSPP solution import 双侧均不可用）
 
 ---
 
@@ -135,3 +135,29 @@ for (std::size_t index = 0; index < solution.layouts.size(); ++index)
 ## 结论
 
 三模型的实例导入（配置、id 唯一性、demand/stock 过滤、空集拒绝、基准条带参数）、SPP 解导入全流程与三模型导出的字段语义双侧一致，且大量错误文案逐字对齐。持久差异集中在四点：run_time_sec 的时间来源（Instant ↔ 显式传参）、min_item_separation 零值序列化、导出前的强制校验（C++ 额外）与并行导入（Rust 独有）。eef0830 已把 MSPP container_id 从槽位键改为数组下标，与 Rust `enumerate()` 对齐；BPP/MSPP 解导入双侧均为显式不可用状态，行为对称。
+
+### 补充审计（2026-09-29）
+
+对 spp/bpp/mspp 三组 io（ext_repr + import + export 共 9 文件 384 行）逐行复核，并核对 2026-09-29 后 JsonCodec.cpp 的两处改动（git 4540a76：`min_item_separation` 无条件输出；git 291f057：移除导出前 `Validate*Solution`）。原记录遗漏/需修正各点：
+
+1. **【记录过期·重要】差异 2（min_item_separation 零值序列化）已消除（4540a76）**——当前 `commonInstanceJson`（JsonCodec.cpp:1425-1434）无条件 `object.emplace("min_item_separation", JsonValue(separation))`，原 `if (separation != 0.0)` 守卫已删除。与 Rust serde（`#[serde(default)]` 仅读侧、写侧总是输出）**一致**。SPP/BPP/MSP 三处 `*InstanceJson` 均经 `commonInstanceJson`，一次修正三模型对齐。
+2. **【记录过期·重要】差异 10（导出前强制校验）已移除（291f057）**——三个 `External*FromSolution` 的 `Validate*Solution(problem.Value(), solution)` 调用已删除（保留 `Restore`），替换为注释 `// jagua-rs export is a pure function over the solution struct...`（JsonCodec.cpp:1791-1792, 1815, 1851）。原记录 SPP 节"差异 2"、BPP/MSPP 节及差异表 10 所述行为不再成立，改判**一致（291f057 后）**。BPP 的 `binIndex` 越界拒绝（cpp:1822-1827）保留。
+3. **SPP `import_instance` 的 `total_item_area` 计算域（浅覆盖→补齐关键数值细节）**——Rust：`items.iter().map(|(item, demand)| item.area() * *demand as f32).sum::<f32>()`（import.rs:38-41）——**f32 域**逐项乘加；C++ `SPInstance::Create`（Instance.cpp:32-64）：`float totalArea`、`itemArea * static_cast<float>(demands[i])`、`totalArea = nextTotalArea`——同为 f32 逐项累加（含溢出检查 `isfinite(nextTotalArea)`，Rust 溢出为 inf 后续 `Strip::new(width=inf)` 报错，路径不同但都失败）。**注意**：C++ 的面积累加在 `SPInstance::Create` 内做（先于 `Strip::Create`），Rust 在 import_instance 显式算后传给 `Strip::new`——两侧 `width = total_area / fixed_height` 的除法同为 f32 域（C++ Instance.cpp:72-73 `static_cast<float>(fixedHeight)` 后 f32 除法）。原记录 30 行只说"基准宽度计算移入 SPInstance::Create"，未提 f32 逐项累加次序（items 顺序双侧一致：过滤后枚举序）与溢出检查差异。判定：一致（f32 域、次序相同）；差异（溢出诊断：C++ 显式 `"SPP item area is non-finite"` vs Rust inf 经 Strip 宽度校验失败）。
+4. **SPP `import_instance` 的 `items` 传给 `SPInstance::new` 时的再次断言（遗漏）**——Rust `SPInstance::new` 内部 `assert!(indices correct)` + `assert!(external_id all_unique)`（instance.rs:19-24，debug 断言）；C++ `SPInstance::Create` 把两项升级为正式错误（Instance.cpp:38-50 `"SPP item indices must be dense"`/`"SPP item external IDs must be unique"`）。由于 importer 已保证唯一（记录差异 8），该层为冗余防御；C++ 升格为 Result。判定：基本等价（panic→Result，双层防御）。
+5. **BPP `import_instance` bin 排序的 C++ `std::sort` 稳定性（原记录 65 行已分析，补充证实）**——C++ 比较器仅 `id`（cpp:617-619），id 已查重唯一 → 无并列元素，`std::sort` 不稳定无影响。与 Rust `sort_by_key`（稳定）结果一致。原分析成立，无修正。
+6. **BPP `import_instance` 的 `Bin::new` 参数顺序（补齐）**——Rust `Bin::new(idx, bin.base.id, import_container(...), stock, cost)`（import.rs:49-55）；C++ `Bin{bins.size(), container.id, container.Value(), stock.Value(), cost}`（cpp:633-634）。字段一一对应（idx 为过滤后序号双侧一致）。一致。
+7. **MSPP `import_instance` 的 `Strip::new` 参数序（浅覆盖→补齐核验结论）**——Rust MSPP `Strip::new(max_width, fixed_height, cde_config, shape_modify_config, width)`（mspp/entities/strip.rs:22-27，签名即此序），import.rs:38-48 传 `(ext_strip.max_width, ext_strip.height, cde_config, cfg, ext_strip.max_width)`——初始 `width = max_width`。C++ `MSPInstance::Create(items, demands, maxWidth, fixedHeight, ...)`（cpp:684-687）内部 `MultiStrip::Create(maxWidth, fixedHeight, cdeConfig, shapeModifyConfig, maxWidth)`（MspInstance.cpp:66-67）——**参数序与初始宽完全一致**（maxWidth 在前、初始 width=maxWidth）。且 Rust MSPP Strip 语义确认为"固定高度、宽 ∈ (0, max_width]"（strip.rs:7 注释），与 SPP 的 Strip（固定高度、宽可超基准）同向，**无条带方向相反问题**。原记录 92 行判定成立，本条补齐 `MultiStrip::Create(maxWidth, fixedHeight, ..., maxWidth)` 的行号证据（MspInstance.cpp:66-67）并消除"参数序相反"的疑点。
+8. **`ExtSPSolution`/`ExtBPSolution`/`ExtMSPSolution` 的 serde 必填语义（补齐解析侧证据）**——Rust 三解结构体所有字段无 default → 缺任一键即错；C++ `parseSPSolutionValue`（cpp:1473-1481）/`parseBPSolutionValue`（cpp:1614-1622）/`parseMSPSolutionValue`（cpp:1724-1732）`requiredMember` 逐键必填 + `rejectDuplicateFields`。一致（补齐 BPP/MSP 的行号证据，原记录只给了 SP 的）。
+9. **`ExtMSPStrip` 字段名 wire（补齐）**——Rust `strips: ExtMSPStrip { height, max_width }`；C++ `parseMSPStripValue`（cpp:1639-1648）键 `height`/`max_width`、对象名报错串用 `"strips"`。键名一致。
+10. **BPP `export` 的 `solution.cost(instance)`（补齐 C++ 行号）**——原记录 75 行证据充分，补充：C++ `external.cost = solution.Cost(instance)`（cpp:1816），Rust `solution.cost(instance)`（export.rs:10）。一致。
+11. **MSPP `export` 的 containers `zones: vec![]`（补齐序列化侧）**——Rust `ExtContainer { ..., zones: vec![] }` 序列化经 `skip_serializing_if` **省略 zones 键**；C++ `externalRectangleContainer`（cpp:39-48）构造空 zones，`containerJson`（cpp:1224-1236）同样空时省略。一致（补齐证据）。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | min_item_separation 零值序列化 | ~~差异~~ → **已对齐（4540a76）** | 无条件输出；三模型一次修正 | JsonCodec.cpp:1430-1431 vs spp/ext_repr.rs:12-13 |
+| S2 | 导出前 Validate* 校验 | ~~C++ 额外~~ → **已移除（291f057）** | 纯函数导出对齐；BPP binIndex 拒绝保留 | JsonCodec.cpp:1791-1792,1822-1827 |
+| S3 | total_item_area 溢出诊断 | 差异（轻微） | C++ 显式 "item area is non-finite"；Rust inf 经 Strip::new 宽度校验失败 | spp/import.rs:38-46 vs Instance.cpp:54-60 |
+| S4 | SPInstance::new 双重断言 | 基本等价（panic→Result） | 冗余防御层双侧都有，C++ 升格 | instance.rs:19-24 vs Instance.cpp:38-50 |
+| S5 | MSPP Strip 参数序与初始宽 | 一致（补齐核验） | 双侧 `(maxWidth, fixedHeight, ..., width=maxWidth)`；Rust Strip 语义"固定高度、宽∈(0,max_width]"，无方向相反问题 | mspp/import.rs:38-48 + mspp/entities/strip.rs:22-27 vs MspInstance.cpp:66-67 |

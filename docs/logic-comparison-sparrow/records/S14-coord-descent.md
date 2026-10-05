@@ -60,3 +60,9 @@ C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/S
 ## 结论
 
 坐标下降的算法本体——ask 停止条件、五轴候选公式（含符号方向）、tell 的 better/worse 判定（FPA 容差语义）、步长乘子 1.1/0.5、对角 sqrt 衰减、!better 换轴（UniformIndex 随机数语义）——逐项等价，并由 `SamplingCoordinateDescentRustReference.tsv` 以 f32 位模式逐候选锁定（54 候选 + 终态全部匹配）。仅有的实质差异是并列候选选择方向（边界场景）与 C++ 额外的评估预算/配置校验（Result 通道，默认不触发）。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：179 行逐项覆盖】** coord_descent.rs 全量复核：CDConfig（5 字段）、refine_coord_desc、CoordinateDescent 结构（8 字段）、ask、tell、CDAxis（5 变体+random）——主文 5 小节全覆盖无遗漏。
+2. **【遗漏补记：refine_coord_desc 的 min_by_key 并列语义方向修正】** 主文条目 2 断言"min_by_key 并列取最后一个（候选 2）"。现场核对 Rust std 文档与实现：`Iterator::min_by_key` 的文档为 "If several elements are equally minimum, the **last** element is returned"——主文断言正确；但**两候选元组是 (DTransformation, SampleEval)，min_by_key 键为 eval**，并列即两候选 eval 位级相等（或 FPA 相等——Ord 走 FPA，近似相等返回 Equal 触发 last 语义）。C++ `IsBetterSample(evaluated[1], evaluated[0]) ? 1 : 0`——近似相等时 IsBetterSample=false → 选 0。**近似相等（非位级相等）的并列**在 Rust 取候选 2、C++ 取候选 0——触发面比主文"位级相等"更宽（4-ulp 内即触发）。判定：维持【差异】（边界），但影响面应从"仅位级相等"修正为"4-ulp 容差内的近似相等"（fixture 54 候选未出现，实际仍低频）。
+3. **【浅覆盖补全：tell 的 !worse 更新含 Equal】** Rust `if !worse { (pos, eval) = (pos, eval) }`——Equal（FPA 近似相等）时也接受新位置（coord_descent.rs:121-124）；C++ `if (!worse)` 同（cpp:223-227，IsBetterSample 双向 false 含 Equal）。主文条目 2（tell 第 2 点）已记"相等时也接受更新"，两侧一致判定维持；与上一条并列选择差**叠加**时：近似相等的候选 2 在 Rust 既被选中又更新位置、C++ 选候选 0——位置轨迹分叉点。归并为差异 #2 的完整描述。
+4. **【核对确认：CDAxis::random 的 4..6 双值映射】** `0..6` 时 4、5 均映射 Wiggle（coord_descent.rs:171-178）——即 Wiggle 被抽中概率 2/6、其余各 1/6；C++ `UniformIndex(6U)` switch 同映射（cpp:34-47）。主文"switch 映射完全相同"判定成立，此概率分布细节补记供后续验证随机流。

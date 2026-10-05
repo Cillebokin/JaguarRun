@@ -175,3 +175,26 @@ assert!(mspp.layouts.iter().all(|(p_lk, l)| {
 
 ## 结论
 MSPP 与 BPP 的常规布局槽位/需求记账及 Release 超需求回绕一致；Debug 超需求放置的 panic 后状态不同。条带配置变化本身双侧可接受，但 strip.width 与布局快照容器不一致时，Rust Release 接受、Debug 在状态变更后断言失败，C++ Debug/Release 均预检拒绝。Restore 的纯量/键/需求校验、`all_layouts` 与 `time_stamp` 等仍需区分记录；不能将快照配置对齐误扩大为 Restore 输入边界已对齐。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 MSPP 四文件 + assertions 全部符号：Strip{new,set_width,From<Container>}；MSPInstance{new,item_area,item_qty,total_item_qty,item,item_idx}；MSPProblem{new,add_layout_from_strip,remove_layout,fit_strip,place_item,remove_item,save,restore,change_strip_width,register_layout,deregister_layout,register/deregister_included_item,density,all_layouts,extendable_strips,total_strip_width,n_placed_items}、LayKey、MSPPlacement；MSPSolution{density,total_strip_width}；assertions{problem_matches_solution,instance_item_indices_correct}。正文已全覆盖全部符号，无【遗漏】函数。逐行复核补充：
+
+### 补-1【修正·重要】Restore 前置校验范围：正文结论段与差异 #5/#6 的部分表述过时
+当前 MspProblem.cpp:302-469 的 Restore 前置校验仅剩：键合法（槽 0 哨兵/代数奇/去重，326-333）、独立重建（334-337）、placements 对账（338-350：itemIndex 越界/需求耗尽/sameItemDefinition）。**正文步骤 1 引用的 "strip isfinite/>0 纯量校验（cpp:353-358）" 与 "sameStripContainer（cpp:67-88）" 在当前代码中已不存在**（2026-09-29 更新注记已声明删除，但正文步骤 1、差异 #6 与结论段仍引用）。快照 strip 直接进 `PreparedLayout{..., snapshot.strip, ...}`（350），保留槽 `preserved.strip = layout.strip`（453 附近）、新槽 `LayoutSlot{..., layout.strip, ...}`。结论段"strip.width 与布局快照容器不一致时 C++ Debug/Release 均预检拒绝"**已过时**——当前 C++ 与 Rust 一样直接接受（strip 赋值生效，layout 失败走 from_snapshot 替换）。
+当前仍存的 Rust↔C++ Restore 差异：Rust 无键合法/独立重建/placements 对账前置（信任 SecondaryMap 键与内部约定）。判定：C++ 额外（防御性缩小后的集合）。
+
+### 补-2【验证】`add_layout_from_strip` 的注册顺序（细节确认）
+Rust（problem.rs:44-49）：`Layout::new(Container::from(strip))` → `register_layout`（空布局无登记）→ `strips.insert(lk, strip)`。C++（MspProblem.cpp:166-181）：MultiStrip::Create 归一（168-173，C++ 额外重校验）→ CreateContainer → AllocateLayoutSlot（strip 入槽，178-179）。判定：一致（正文已记；确认 C++ 把 strips 映射内嵌于 LayoutSlot，无独立 SecondaryMap——键语义等价）。
+
+### 补-3【验证】`change_strip_width` 的 assert 顺序（细节确认）
+Rust（problem.rs:180-188）：外层 `assert!(new_width > 0)` → `strip.set_width`（内部 `assert!(width <= max_width)` + `assert!(width > 0)`）→ swap_container。C++（MspProblem.cpp:262-284）：`next.SetWidth(width)`（含两条校验，错误返回）→ CreateContainer → SwapContainer → 成功才提交 `slot->strip = next`。判定：一致（合法输入；C++ 失败原子性为额外，正文已记）。
+
+### 补-4【验证】MSPP remove 不闭布局（关键语义，细节确认）
+Rust（problem.rs:92-101）：remove_item 无 is_empty 分支——**空布局保留**。C++（MspProblem.cpp:238-260）：RemoveItem 同样无闭箱分支（仅 RemoveLayout 显式关）。与 BPP（remove_item 空则闭）形成对比，双侧一致地保留了该差异面。正文已记（67 行）。判定维持。
+
+### 补-5【验证】`extendable_strips` 判据（细节确认）
+Rust（problem.rs:234-239）：`s.width < s.max_width`。C++（MspProblem.cpp:502-512 附近）：同判据（`slot.strip.width < slot.strip.maxWidth`），槽序枚举。判定：一致（正文已记）。
+
+### 补-6【验证】`problem_matches_solution` 的 strips.len 断言（细节确认）
+Rust（mspp assertions.rs:16）：`assert_eq!(mspp.strips.len(), strips.len())`——C++ 因 strip 内嵌 LayoutSnapshot 无独立表，布局数相等即覆盖（正文 E 节第 2 项已记）。补充：Rust 的 SecondaryMap 双表（layout_snapshots + strips）理论上可出现键集不一致（双表独立插入），C++ 单表结构不可能——Rust 断言正是防此（debug-only）。判定维持正文。

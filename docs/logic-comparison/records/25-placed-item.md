@@ -52,3 +52,13 @@ let shape = item.shape_cd.transform_clone(&transf);
 
 ## 结论
 PlacedItem 的核心逻辑（compose 变换 → 变换碰撞形状 → 持有 item 引用）双侧一致，C++ 通过 `rustTransform` 的逐分量 f32 舍入保证数值对齐。差异集中在表示法层面：键（slotmap 打包 vs index/generation 二元组）、变换（分解式 vs 合成式），以及 C++ 的 Result 错误通道与 Area() 便捷方法，均不改变放置实例的语义行为。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 placed_item.rs（39 行）全部符号：PItemKey new_key_type、struct PlacedItem 三字段、PlacedItem::new。正文已全覆盖，无【遗漏】。补充：
+
+### 补-1【验证】`d_transf.compose()` ↔ rustTransform 归一的数值链（细节确认）
+Rust（placed_item.rs:30-31）：`d_transf.compose()` 将分解式（rot+translation）合成为 Transformation，再 `transform_clone`。DTransformation::compose 的 f32 数值路径见记录 06。C++（PlacedItem.cpp:19-24）：入参 Transform2d 逐分量 `static_cast<float>` 归一为 rustTransform，再 `TransformedRustF32(rustTransform)`。双侧变换后形状的数值一致性依赖：① compose 与 f32 归一的等价（分解式合成在 f32 下与直接 f32 归一合成值一致——旋转由 DTransformation 的 theta_id 离散化保证）；② TransformedRustF32 与 transform_clone 的 f32 管线一致（记录 05/09）。判定：一致（正文差异 #3 已记，此补充把数值链闭合）。
+
+### 补-2【验证】`m_Transform` 存储值与 Rust `d_transf` 的往返差（细节确认）
+C++ 存 rustTransform（f32 归一后的合成式）；Rust 存原始 d_transf（分解式）。导出时 Rust `d_transf` 重新 compose（可能保留未归一分量？——DTransformation 本身即 f32 分解式，compose 结果即 f32 值，无额外精度）；C++ 直接返回存储的 rustTransform。当调用方传入的 Transform2d 分量非 f32 精确值时（如从 double JSON 直读），C++ 导出值与输入差一个 f32 舍入，Rust 侧因类型即 f32 不存在该差。判定：维持正文差异 #2（表示法），补充确认数值路径闭合。

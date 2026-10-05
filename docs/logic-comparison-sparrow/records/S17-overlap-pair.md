@@ -103,3 +103,9 @@ Fixture 锁定情况：`TestQuantify.cpp` 的 `TestOverlapProxy`（TestQuantify.
 ## 结论
 
 quantify 三文件的数值公式（epsilon 计算、pole 代理双循环、decay 公式、shape penalty、container bbox 公式、三角矩阵语义）与 Rust 逐字对应且走 f32 运算路径，核心行为被 fixture 位模式锁定为等价。结构性差异集中在两点：PairMatrix 物理布局排列不同（自洽等价，仅影响全量求和的 ulp 级累加顺序）与 C++ 以 Transform 参数化替代 Rust 的"预变换 surrogate"入口（当前调用路径下恒等）。C++ 面向公共 API 全面增加了退化防御与 Result 溢出检查，属既定的 panic→Result/容错策略。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：52+26+49 行逐项覆盖】** quantify/mod.rs（3 pub fn + 2 模块声明 + calc_shape_penalty）、overlap_proxy.rs（overlap_area_proxy 单函数）、pair_matrix.rs（结构/new/Index/IndexMut/calc_idx）——主文 7 小节全覆盖无遗漏；`#[inline(always)]` 属性能标注。
+2. **【浅覆盖补全：mod.rs 的 debug_assert 位置与 release 行为】** `debug_assert!(overlap_proxy.is_normal())`（mod.rs:20/:48）与 `debug_assert!(total_overlap.is_normal())`（overlap_proxy.rs:24）——**is_normal 含下溢/零/inf/NaN 检查**，release 构建静默跳过；C++ 以 isfinite/<=0 检查返回 0 替代（主文差异 #3 已记方向，此处补 release 差异：release 下 Rust 对异常值继续参与运算（可能产 NaN loss → 上层 FPA panic 链），C++ 恒 0——即 C++ 的防御在 release 也生效，比 Rust debug-only 更强。判定维持【C++ 额外】，影响面精确化）。
+3. **【浅覆盖补全：calc_idx 的 debug_assert 越界与 C++ Contains 前置】** Rust `debug_assert!(row < size && col < size)`（pair_matrix.rs:43）release 下越界索引 data 数组（未定义内存读）；C++ At 无检查靠调用方 Contains（PairMatrix.h:27）——**两侧 release 均无硬检查**，等价暴露面。判定维持【差异】（既定 panic→无检查），此处补 release 语义。
+4. **【核对确认：布局映射手算复核】** 主文差异 #1 的 (0,3) 手算（Rust=3，C++=6）经独立验算正确：Rust 行优先下三角（r*size+c−r(r+1)/2），C++ 列段式（larger(larger+1)/2+smaller）——两映射在 (i,j) i≤j 上互为转置排列，元素一一对应。求和顺序差（TotalLoss 的 ulp 级）判定维持。

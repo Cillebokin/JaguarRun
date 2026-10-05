@@ -100,3 +100,25 @@ case RotationPolicyKind::None:
 ## 结论
 
 entities 层外部表示的字段集合、wire 名称与 JSON 形状双侧一致，可互操作。核心建模差异是 orientation：Rust 的嵌套 `ExtOrientation`+三变体 `ExtRotation` 在 C++ 扁平化为 `RotationPolicy`（kind + angles/step 数据域）并增加 `None` 哨兵，序列化侧以 `discrete [0.0]` 保持 wire 兼容，`[0.0]→None` 的归一化从表示层移到 Importer。C++ 用 double 存储（解析时经 f32 收窄）与静态工厂构造层为附加形态，不影响 wire 一致性。
+
+### 补充审计（2026-09-29）
+
+对 ext_repr.rs 184 行逐行复核（serde 语义含 Serialize 侧），原记录遗漏/需修正各点：
+
+1. **`ExtRotation` 的 `deny_unknown_fields`（serde 属性，ext_repr.rs:29-30）在序列化侧的对照缺失**——原记录只比对了反序列化侧的未知字段拒绝。C++ 解析侧三个 mode 分支分别用 `object->size() != 1 / != 2` 显式拒绝额外键（JsonCodec.cpp:1036-1039 `continuous`、cpp:1048-1051 `discrete`、cpp:1075-1078 `stepped`），与 serde enum 变体的 deny_unknown_fields 等价（`Continuous` 空变体只能有 `mode` 一个键，`Discrete` 只能 `mode+angles`，`Stepped` 只能 `mode+step`）。补齐后判定：一致（接受边界）。注意 serde tagged enum 本身默认拒绝未知字段（变体字段集固定），`deny_unknown_fields` 在此处是显式化声明。
+2. **`ExtRotation::Discrete` 序列化侧的"透传不清洗"语义（浅覆盖→补齐）**——Rust `Serialize` 派生对 `angles: Vec<f32>` 原样输出（ExtItem 的 `ExtRotation` 无 `Serialize` 派生，实际经由 `rotationJson`；但 Rust 侧 `ExtSPInstance` 等容器序列化路径中 `ExtItem` 本身只有 `Deserialize` 手工实现、`Serialize` 派生存在——派生序列化会原样输出 angles，不排序不去重不归一化）。C++ `rotationJson`（JsonCodec.cpp:1102-1110）同样原样输出 `anglesDegrees`。一致：**序列化是表示层的透传**，排序/去重/`rem_euclid` 归一化只发生在 Importer 层（记录 34）。原记录已隐含此点，此处显式化，防止读者误以为 `rotationJson` 会做归一化。
+3. **`ExtItem::min_quality` 的 `Option` 序列化 skip 语义（遗漏）**——Rust `Option<usize>` 无 `skip_serializing_if`，`None` 时 serde 输出 `"min_quality": null`；C++ `itemJson`（JsonCodec.cpp:1184-1185）在 `minQuality` 无值时**整个键省略**（不输出 null）。这是原记录遗漏的 wire 差异：Rust 序列化 ExtItem（作为独立 JSON，Rust 生态中该路径实际未用于实例导出——实例导出走 spp 层 demand item flatten，而 flatten 中 `Option` 同样输出 null）↔ C++ 键省略。读侧：C++ 解析侧（cpp:1160-1174）把 `null` 显式视为"无 min_quality"（`holds_alternative<nullptr_t>` 检查），缺省键同样无值——即 **C++ 读侧同时接受 null 与缺省两种形态；Rust serde 读侧 `Option<usize>` 也同时接受 null 与缺省**。故读侧双侧一致，写侧差异（null vs 省略键）仅出现在直接序列化单个 ExtItem 的路径上。判定：差异（写侧形态，读侧兼容）。
+4. **`ExtContainer::zones` 的 `#[serde(default)]`（读侧）与 `skip_serializing_if`（写侧）组合（已有条目，补充读侧细节）**——原记录差异 5 只写了写侧。读侧：Rust `#[serde(default)]` 缺省空 vec；C++ `parseContainerValue`（cpp:1255-1258）`zones` 键缺省时保持空。一致。
+5. **`ExtPolygon::inner` 的 `#[serde(default)]`（读侧）写侧行为（遗漏）**——Rust 序列化 `ExtPolygon` 时 `inner` **总是输出**（无 skip 属性，空 vec 输出 `"inner": []`）；C++ `polygonJson`（JsonCodec.cpp:958-964）**无条件输出 `inner` 键**（空时输出空数组）。一致（补齐证据：双侧都输出空数组，此点与 `zones` 的条件输出形成对照，易混淆，显式化）。
+6. **`ExtShape::MultiPolygon` 序列化（原记录判定"一致"未给序列化侧逐字段证据，补齐）**——Rust `MultiPolygon(Vec<ExtPolygon>)` 序列化为 `{"type":"multi_polygon","data":[{outer,inner},...]}`；C++ `shapeJson` 多边形分支（JsonCodec.cpp:995-1001）同构。一致。
+7. **`impl From<ExtTransformation> for DTransformation`（180-184 行）与 `From<DTransformation>`（171-178 行）的调用方补充**——原记录给出 JsonCodec/Importer 的内联对应，另核实 spp 解导入路径（Rust import_solution import.rs:71-75 显式调用 `DTransformation::from(ext_placement.transformation)`；C++ `externalToInternal` cpp:134-148 直接读 `external.rotationDegrees/translation` 度→弧度）。一致。
+8. **`ExtLayout`/`ExtPlacedItem`/`ExtTransformation` 无 deny_unknown_fields（遗漏的对照点）**——Rust 这三个结构体 serde 默认**忽略未知字段**；C++ `parseLayoutValue`/`parseTransformationValue`（cpp:1302,1274）的 `rejectDuplicateFields` 只查重复键，未知键因 `object->size()` 未被校验而在 C++ 侧同样被忽略（与 `parseRotationValue` 的 size==N 校验不同——layout/transformation 层无 size 校验）。**修正原记录差异 4 的表述**：C++ 对 layout/transformation 层的未知字段同样容忍，并非"整体拒绝未知字段"；只有 item/orientation/rotation/shape/quality zone/bin/instance/solution 层有 size 校验拒绝未知键。判定修正：未知字段容忍度**按层级不同**，两侧在 layout/transformation 层一致（均忽略），在 item/orientation 层 C++ 更严。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | `min_quality` 为 None 时：Rust 输出 `null`，C++ 省略键 | 差异（写侧） | 读侧双侧兼容（均接受 null/缺省） | ext_repr.rs:15 vs JsonCodec.cpp:1160-1174,1184-1185 |
+| S2 | 未知字段容忍度按层级不同（layout/transformation 层双侧均忽略） | 修正原差异 4 | 原记录"C++ 整体拒绝未知字段"表述过强 | ext_repr.rs:142-169 vs JsonCodec.cpp:1274,1302（无 size 校验） |
+| S3 | `ExtPolygon.inner` 写侧无条件输出空数组 | 一致（显式化） | 与 zones 的条件输出形成对照 | ext_repr.rs:122-123 vs JsonCodec.cpp:958-964 |
+| S4 | ExtRotation 各变体额外键拒绝（size 校验） | 一致 | continuous/discrete/stepped 三分支逐一对照 | ext_repr.rs:29-30 vs JsonCodec.cpp:1036-1078 |

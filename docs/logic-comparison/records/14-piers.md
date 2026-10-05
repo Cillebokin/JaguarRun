@@ -135,3 +135,39 @@ if min_distance_to_ray < radius_of_ray_influence {
 
 ## 结论
 piers 生成的全链路（常量 200/10、90/4、100/10、0.999、0.10；基准射线与 R*T 变换组合；稳定排序成对裁剪；linspace 网格与双过滤；损失函数的 min 链与平方和；保首最小择优）在双侧逐条等价，f32 精度模拟贯穿。2026-09-28 eef0830 提交已把空候选从静默返回改为 `Infeasible "no ray found"`，与 Rust 的 bail 对齐。剩余差异：C++ 缺"射线端点在形外"的 debug 断言（不可达不变量）、点/圆包含判定为等价内联重实现（边缘数值行为按记录 05）、NotNan panic 无对应。正常输入下选出的 pier 序列完全一致。
+
+## 补充审计（2026-09-29）
+
+逐行复核 piers.rs 全部 228 行（generate_piers、generate_ray_transformations、clip、generate_unrepresented_point_grid、loss_function、min_distances_to_rays、min_distances_to_poles、5 个常量），确认主记录已覆盖全部条目。以下为补充核对项，其中第 1 项**修正主记录的一个结论**：
+
+### 【修正】ndarray linspace 的求值式：`start + step * i`，与 C++ 步进式在 x_index>1 后可差 1 ULP
+- 主记录两处（generate_ray_transformations 角度集条、网格条）判"linspace 的 i*(π/n) 与 C++ 相同""linspace(n) 与步进式数值一致"。**经 ndarray 0.17.2 源码核对，该论断只对部分成立**：linspace.rs:79-81 `step = (b - a) / (n - 1)`；linspace.rs:36 `next() = start + step * F::from(i)`——**每个点是 start + step*i 的独立乘加**（非累加）。C++ 侧（Surrogate.cpp:200 `angleStep = pi / angleCount` + 213 `angle = angleStep * angleIndex`；356 `x = xMin + xStep * xIndex`）同为独立乘加。
+  - 角度集：Rust `linspace(0, π, n+1)` 取前 n：`0 + (π/n)*i`；C++ `angleStep*i`——**step 计算式**：Rust `(π - 0)/(n+1-1) = π/n`（f32 除法一次舍入）↔ C++ `pi / angleCount`（同为 π/n 一次舍入，pi 常量位级同）→ **step 位级一致**，点式 `start + step*i` 两侧同（start=0 精确）→ **角度集逐位一致** ✓（主记录结论对此成立）。
+  - 网格：Rust `linspace(x_min, x_max, n)` step = `(x_max-x_min)/(n-1)` f32 一次除法；C++ `xStep = (xMax - xMin)/(pointsPerDimension - 1)`（Surrogate.cpp:344-347，float 域）——**step 位级一致**；点式 `x_min + xStep*xIndex` ↔ `xMin + xStep * xIndex` 同式同域。**逐位一致** ✓。**修正结论**：主记录"数值一致"的判定实际成立（两处均位级一致），但机制是"start + step*i 的同构"而非主记录描述的"i*(max-min)/(n-1)"（后者是 numpy 语义的误记，ndarray 实现是 start+step*i）。
+- 判定：【一致】（维持判定；机制描述修正为 start+step*i 同构）。
+- 证据：ndarray-0.17.2/src/linspace.rs:79-81, 28-37；piers.rs:109-110, 160-161 vs Surrogate.cpp:199-200, 213, 344-356。
+
+### 【浅覆盖→补齐】min_by_key 与 C++ 首候选预置的择优次序细节
+- 主记录 #11 已判"保首个最小"。补充核对 C++ generatePiers（Surrogate.cpp:473-487）的实现：`best = candidates.begin(); bestLoss = pierLoss(*best, ...)` **先算首候选**再从 begin()+1 扫描——与 Rust `min_by_key`（空迭代器 None 已被 448 的 empty 检查排除；首个元素作为初始 min）语义逐字对齐。**注意 Rust 侧 min_by_key 的比较是 `OrderedFloat(loss)` 包装**——NaN loss 在 OrderedFloat cmp 下为 Equal（见 02 补充审计），`min_by_key` 保留首个（不替换）；C++ `loss < bestLoss` 对 NaN 为 false 同样不替换——**NaN 情形也同构**（主记录 #14 判 NaN 差异，实际两侧 NaN 都退化为保首个，行为一致——修正 #14 的影响评级为"无行为差"）。
+- 判定：【一致】（含 NaN 同构）。
+- 证据：piers.rs:82-86 vs Surrogate.cpp:473-487 + ordered-float-5.5.0/src/lib.rs:294-303。
+
+### 【浅覆盖→补齐】clip 的 `start == end` 判定语义（交点重合去除）
+- Rust piers.rs:145 `if start == end { None }`——交点 Point 的 PartialEq（±0.0 相等、NaN 不等）。C++ Surrogate.cpp:178-180 `Edge2d::Create(intersections[i-1].point, intersections[i].point)` 失败（Create 的 `startX == endX && startY == endY` 同语义）时 `continue`（跳过该对）——**同判据同丢弃**。主记录 #8 判一致，此处补 Point PartialEq vs Edge2d::Create 判定的语义等价确认。
+- 判定：【一致】。
+- 证据：piers.rs:143-148 vs Surrogate.cpp:178-181 + Edge.cpp:93-100。
+
+### 【浅覆盖→补齐】forfeit_distance 的括号结构
+- Rust piers.rs:57 `f32::sqrt(bbox.width().powi(2) * bbox.height().powi(2))` = sqrt((w²)·(h²))——**先 w²、h² 各自平方，再相乘**（w²·h² 而非 (w·h)²）；C++ Surrogate.cpp:458-459 `sqrt(boxWidth * boxWidth * (boxHeight * boxHeight))`——C++ 求值序：`boxWidth*boxWidth` → `(w²)*(h²)`（外层括号仅分组，结合次序左起）——**同为 w²·h² 且乘法次序一致**（f32 乘法无结合重排）。注：(w·h)² 与 w²·h² 数值上可差 1 ULP，两侧均取 w²·h² 形式，无分叉。主记录 #7 判一致，此处补括号结构证据。
+- 判定：【一致】。
+- 证据：piers.rs:57 vs Surrogate.cpp:458-459。
+
+### 【浅覆盖→补齐】clip 中 Edge::try_new(start,end).unwrap() 的不可达确认
+- Rust piers.rs:148 `Edge::try_new(start, end).unwrap().scale(CLIPPING_TRIM)`：start != end 已在 145 行排除（相等时 return None），try_new 的 ensure（start != end）恒过——unwrap 不可达。C++ trimEdgeRustF32 内 Edge2d::Create(...).Value()（Surrogate.cpp:146）直接解引用——**若 Create 失败是 UB**（Value() 无检查），但因调用点（178-181）已先经 Create 成功才调 trim，双重防护下不可达。一致（不可达防御路径）。
+- 判定：【一致】。
+- 证据：piers.rs:143-148 vs Surrogate.cpp:146, 178-181。
+
+### 【遗漏→补齐】cfg(test)——piers.rs 无测试模块
+- piers.rs 228 行无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：14 记录覆盖完整。一处机制描述修正（ndarray linspace 为 start+step*i 同构，位级一致的结论维持）；NaN 择优经 ordered-float 语义核实为**同构**（#14 的影响评级下调）；另补齐 forfeit 括号结构与 clip 判定的等价证据。

@@ -76,3 +76,49 @@
 
 ## 结论
 presence 三态与 Exterior 反转语义（容器内 None、容器外 Entire、跨界 Partial）双侧逐分支等价，这是查询结果等价的根基。机制差异全面：Rust 在树上缓存了三层信息（边子集、排序后的 strongest、n_active_edges），constrict 沿增量路径维护它们；C++ 全量重建、节点上只存 handle+presence+edgeCount（且 edgeCount 按整形状计），把全部几何判定推迟到查询期对 queryBounds 的 Classify 与调用方精确测试。结果是 C++ 用更多重复计算换取结构简单，查询结果与 Rust 一致。
+
+## 补充审计（2026-09-29，逐行复核 2026-09-29 重写基线）
+
+重写后 Quadtree.cpp 的 `Constrict`/`AddHazard`/`RemoveHazard`/`MakeRootHazard` 即本记录三份 Rust 文件的逐行移植，正文描述的"Classify/BuildNode/无载荷 Entry/edgeCount=VertexCount"均过时。逐行复核补充：
+
+### 补-1【遗漏·疑似 bug（同记录 19 补-1）】`Constrict` 的形状来源错误
+- Rust `constrict`（qt_hazard.rs:64）：`let haz_shape = &haz_map[self.hkey].shape` —— **每个 QTHazard 用自己的 hkey 取自己的形状**，Enclosed 判定（:67-70）与 centroid 判定（:144）都用这个形状。
+- C++ `Constrict(hazard, quadrants, shape)`（Quadtree.cpp:300-467）：形状由调用方 `RegisterIntoNode` 传入（Quadtree.cpp:496、513），而 `RegisterIntoNode` 传入的是 `*shapeIt->shape`，其中 `shapeIt` 按**新注册 hazard 的句柄**查找（Quadtree.cpp:473-477）。懒扩展时对已有 hazard 的 constrict（Quadtree.cpp:491-496）传错形状（详见记录 19 补-1）。直接后果落在本记录的这些分支：
+  - Partial 分支的 Enclosed 快捷（Quadtree.cpp:325-334 `shape.BoundingBox()` ↔ qt_hazard.rs:66-70 `haz_shape.bbox`）用错形状的 bbox；
+  - 无相交边象限的 centroid 回退（Quadtree.cpp:446 `shape.ContainsRustF32(quadrants[i].CentroidRustF32())` ↔ qt_hazard.rs:144 `haz_shape.collides_with(&quadrant.centroid())`）用错形状做点包含。
+- 附带核对：`ContainsRustF32`（SimplePolygon.cpp:430-470+）为 jagua-rs `SPolygon::collides_with(&Point)`（simple_polygon.rs:279-306）的 ray-casting 移植——bbox 预筛（439 ↔ :281）、`point_outside = bbox.x_max + bbox.width()`（442 ↔ :284-285）、顶点 y 对齐且 x 在右的 half-crossing 处理（455-462 ↔ :295-301）、其余边 ray 交（464-470 ↔ :303+）。判定：一致。
+- 判定：差异（bug；形状来源），影响同记录 19 补-1。
+
+### 补-2【浅覆盖→已验证】`QTHazardVec` 移植逐条核对（正文"差异 #5 QTHazardVec C++ 缺失"已过时）
+- `add`（qt_hazard_vec.rs:24-43）↔ `Node::AddHazard`（Quadtree.cpp:226-249）：`activeEdges += EdgeCount()`（229 ↔ :39）、presence 降序 sortKey（Entire=2/Partial=1/None=0，230-241 ↔ :90-101）、`find_if(sortKey(existing) <= key)` 线性插入（243-248 ↔ binary_search_by :34-42——线性 find 与二分查找在"插入首个 ≤key 位置"上等价，元素为按序排列）。判定：一致。**缺失**：Rust `add` 的两条 debug_assert（presence 非 None :25、同 entity/hkey 唯一性 :26-33）C++ 无对应（Release 下 Rust 也不查，属调试不变式，无行为差异）。
+- `remove`（qt_hazard_vec.rs:45-55）↔ `Node::RemoveHazard`（Quadtree.cpp:251-263）：find by handle、`activeEdges -= EdgeCount()`、erase。判定：一致。
+- `strongest`（qt_hazard_vec.rs:61-64）↔ C++ 调用点的内联扫描（CollisionEngine.cpp:241-249、293-301：取首个未过滤项）。判定：一致（向量有序保证首个即最强）。`debug_assert!(assert_caches_correct)`（:62）C++ 无对应（见记录 21）。
+- `n_active_edges`（:84-87）↔ `Node::activeEdges`（Quadtree.h:103，由 Add/Remove 维护）。判定：一致。
+- `no_partial_hazards`（:73-78）↔ `Node::HasPartialHazard`（Quadtree.cpp:265-271，`any_of(Partial)` 取反）。判定：一致。
+- `is_empty/len/iter`（:66-82）↔ 直接用 `node.hazards` vector。判定：一致。
+- `assert_caches_correct`（:103-121）C++ 无对应（排序不变式 + activeEdges 对账，debug-only，见记录 21）。
+
+### 补-3【浅覆盖→已验证】`QTHazPartial` 移植逐条核对（正文"差异 #4 C++ 无边子集"已过时）
+- `from_entire_shape`（qt_partial_hazard.rs:15-19）↔ `MakeRootHazard`（Quadtree.cpp:273-298）：`edges = shape->Edges()`、`ffBbox = shape->BoundingBox()`（284-287 ↔ :16-17）。判定：一致（bounds-only 分支为 C++ 额外，见记录 19 补-3）。
+- `from_parent` 的 ff_bbox（qt_partial_hazard.rs:20-60）↔ `Constrict` Partial 分支（Quadtree.cpp:356-410）：
+  - 每象限按 `rectCollidesWithEdge(quadrant, edge)` 收集相交边（360-363 ↔ qt_hazard.rs:96-99 `q.collides_with(edge)`；`rectCollidesWithEdge` = `edge.IntersectsRustF32(rect)`（Quadtree.cpp:20-23），与 Rust `impl CollidesWith<Rect> for Edge` 委托 `Rect::collides_with(Edge)`（edge.rs:186-190 → rect.rs:317-355）的 bbox 快筛+端点包含+四角符号法逐式对应，Edge.cpp:343-383 确认）。判定：一致。
+  - 边数等于父边数时继承父 ff_bbox（374-377 ↔ :25-27）。判定：一致。
+  - 否则按边重算（380-398 ↔ :29-41，min/max 扫描）。判定：一致。
+  - 退化回退父 ff_bbox（399-408 ↔ :42-53）。判定：一致（正文未展开，记录 19 补-5 同）。
+  - `debug_assert!(!restricted_edges.is_empty())`（:21）与父边包含断言（:22）C++ 无对应（debug-only）。
+- `n_edges`（:62-64）↔ `NodeHazard::EdgeCount`（Quadtree.h:88-93，Partial 且有 partial 时边数否则 0——Rust 语义 `Partial(p) => p.n_edges(), None|Entire => 0`（qt_hazard.rs:172-177））。判定：一致。
+- `impl CollidesWith<T> for QTHazPartial`（:67-74）↔ C++ 查询路径内联（CollisionEngine.cpp:277-281、330-334、376-381、427-432：`entity.IntersectsRustF32(ffBbox) && any_of(edges, IntersectsRustF32(entity))`）。判定：一致（ff_bbox 快筛 + 边遍历逐式对应）。
+
+### 补-4【遗漏】`QTHazard::from_root` 的 ff_bbox 数值路径
+- Rust（qt_hazard.rs:42）：`QTHazPartial::from_entire_shape(&haz.shape)` → `ff_bbox = shape.bbox`（f32 直接引用）。
+- C++（Quadtree.cpp:287）：`root.partial->ffBbox = hazard.shape->BoundingBox()`。C++ SimplePolygon::BoundingBox 为 f32 计算后转 double 存储（同管线），数值同源。判定：一致（细节确认，正文 A 节未列）。
+
+### 补-5【验证】`QTHazard::constrict` 三分支其余对应（重写后）
+- Entire 短路（qt_hazard.rs:60）↔ Quadtree.cpp:307-322（四象限克隆 Entire）。判定：一致。
+- Enclosed 快捷（:66-87）↔ Quadtree.cpp:324-353（bbox Surrounding 单象限 → 该象限继承父 Partial（含深拷贝 PartialHazard :349），其余 None）。判定：一致（`rectContainsPolygonBBox` 用 `RelationToRustF32 == Surrounding`（Quadtree.cpp:25-29）↔ Rust `haz_shape.bbox.relation_to(*q) == Enclosed`（:69）——注意方向：Rust 是"象限 q Enclosed 于 hazard bbox"即 hazard bbox Surrounds q？**否**——`haz_shape.bbox.relation_to(*q)` 的 self=haz bbox，返回 Enclosed 意为 haz bbox 被 q 包住；C++ `rectContainsPolygonBBox(quadrants[i], shapeBounds)` 的 self=quadrant，Surrounding 意为 quadrant 包住 shapeBounds。两者同一关系（象限 ⊇ hazard bbox），判定：一致。）
+- 邻居传播（:121-141）↔ Quadtree.cpp:417-452（kQuadrantNeighborLayout 邻居查 None/Entire，noneNeighbor→None、entireNeighbor→Entire）。判定：一致。Rust 的 `(true, true) => unreachable!`（:138-140）C++ 无对应（noneNeighbor 优先，entireNeighbor 次之，else 回退——C++ :434-452 的 if/else if/else 链在双真时走 noneNeighbor 分支而非报错；因 Partial 分隔不变式双真不可达，行为无差，但 debug 通道差异值得记录）。
+- centroid + scope 回退（:143-152）↔ Quadtree.cpp:443-452（`interiorScope == colliding ? Entire : None`，interiorScope = `kind != Exterior`）。判定：一致（`entity.scope()` 的 C++ 内联位置从 Classify 移到 Constrict，记录 16 差异 #2 的证据行号已迁移：现 Quadtree.cpp:447-451、CollisionEngine.cpp:69-70）。
+
+### 补-6【遗漏】重写后仍保留的 C++ 额外 API（正文差异 #6 记录的是旧 hasGeometry fallback，现已变形）
+- `RegisterHazard(handle, Rect2d)` bounds-only 注册（Quadtree.cpp:573-592）与 `MakeRootHazard` 的空 shape 分支（289-296）：对角线假形状（记录 19 补-3）。Rust 无对应。当前无生产调用方。
+- `PresenceAt`/`NodeCount`/`VirtualRootBounds`/`QueryVirtualRoot`/`Query`：测试与兼容层 API（记录 19 补-7）。

@@ -71,3 +71,9 @@
 ## 结论
 
 碰撞损失的量化公式链——`ε=max(d)·0.01`、pole 对累加 `pd_decay·min(r)` 乘 π、`+ε²`、几何均值 ShapePenalty、`sqrt(proxy)·penalty`（件-件）与 bbox 交集/质心距离、`2·sqrt(overlap)·penalty`（件-容器）——在 C++ OverlapProxy/CalculatePolygonCollisionLoss/CalculateContainerPenalty 中逐字复刻（含 f32 运算路径），权重接线（PairWeight/ContainerWeight）与 Rust 的 get_pair_weight/get_container_weight 一一对应，并被 SeparatorSearchRustTrace.tsv 的 loss 位模式锁定。主要结构差异是 Rust 的"流式逐 hazard 累加+上界短路"被替换为"全量收集+整体计算"，接受性结果等价但失去短路；SIMD 有界变体为 C++ 缺失（默认标量路径两侧一致）。任务指定的 LbfLoss.h 经核验仅含 LBF 损失（10x+y），不含碰撞部分。
+
+### 补充审计（2026-09-29）
+1. **【遗漏补记：`reload` 的 simd 分支内容】** 主文 reload 条目写"（simd 时）装载 poles SoA"但未展开。现场确认：collision_loss.rs:41 `poles_soa.load(&_shape.surrogate().poles)` 把**候选形状（被评估的移动件候选变换）**的 pole 装入 SoA（p2 方向），与标量路径的 `calc_weighted_loss_bounded`（:73-88 的 `quantify_collision_poly_poly_simd_bounded(other_shape, shape, &poles_soa, max_loss/weight)` 预除界）共同构成 simd feature 的有界短路链——C++ 无对应（归 S19 差异 #2，判定不变），此处补记函数体细节以闭合 reload 条目。
+2. **【遗漏补记：`add` 的 remaining 计算】** 主文 add 条目未记"An unbounded evaluation stays unbounded even if accumulated loss overflows"（collision_loss.rs:47-53）：`loss_bound == INFINITY` 时 remaining 恒 INFINITY（避免溢出后误判超界）、否则 `loss_bound - loss`。C++ 对应物在 SeparationEvaluator 的事后比较（cpp:191 `loss.Value() > upperBound->loss`），无此溢出防御分支——INFINITY 上界在 C++ 由"upperBound 无 COLLISION loss 或非有限"分支（:189-190 `std::isfinite(upperBound->loss)` 前置）等价规避：非有限上界不触发拒绝，语义一致。判定：【一致】（防御形态不同，正常路径等价）。
+3. **【浅覆盖补全：calc_weighted_loss_bounded 的 Exterior 分支无界语义】** Rust Exterior 分支（:90-93）`Some(容器惩罚 * weight)` **不检查 max_loss**（恒 Some，短路仅由 add 层的累计判定）——PlacedItem 分支的 `(loss <= max_loss).then_some(loss)` 才做单项界检查。C++ `EvaluateCandidateLoss`（CollisionTracker.cpp:548-553）对 Exterior 项同样直接累加无单项界——两侧 Exterior 均不做单项界、接受性由总界（Rust：累计后；C++：算完后）决定。判定：【一致】（此不对称性两侧同构，主文未显式记录）。
+4. **【核对确认：任务指定项 LbfLoss 归属】** 现场再验 LbfLoss.h（21 行）/LbfLoss.cpp（57 行）全文：`FromBoundingBox/TightenSampleBBox/Cost()/operator<`，无碰撞损失代码——主文归属判定维持（碰撞损失链在 OverlapProxy+CollisionTracker）。

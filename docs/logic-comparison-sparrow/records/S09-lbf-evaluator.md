@@ -58,3 +58,8 @@
 ## 结论
 
 LBF 评估器的核心语义——"surrogate 先行、精确多边形随后、无碰撞时按 10·(poiX+bboxXMax)+(poiY+bboxYMax) 计 loss、从不返回 Collision"——逐项对齐，loss 的 f32 位模式被 LbfSearchRustTrace.tsv 全量锁定，端到端构造被 SparrowLbfRustReference.tsv 锁定。差异集中在实现形式（快照引擎 vs 借用 CDE、合法化防御、loss/检测顺序）与既定 API 形态（SparrowLbfEvaluator 包装、Result 错误通道），正常输入下行为等价。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：59+4 行逐项覆盖】** lbf_evaluator.rs 全量复核：X/Y_MULTIPLIER 常量、LBFEvaluator 结构（4 字段）、new、evaluate_sample（含 n_evals 计数/surrogate 检测/精确检测/loss 公式）、n_evals；eval/mod.rs 4 行模块声明——主文 7 小节全覆盖无遗漏。
+2. **【浅覆盖补全：LegalizeTransform 的角距公式（S09 侧差异 #1 的精确化）】** 主文差异 #1 笼统写"Discrete→最近允许角"。现场核对 LbfEvaluator.cpp:19-29/31-87：其 `ShortestRotationDistance = NormalizeRotation(fmod)→min(d, 2π-d)` **是循环最短角距**，与 Rust `convert_sample_to_closest_feasible`（normalize 后 abs，非环距）在**跨 ±π 边界的角集**（如 {350°,10°}）可选不同角——与 S11 补充审计第 3 条发现的 SeparationEvaluator **朴素绝对差版**（无归一化，偏离更大）构成**三版 Legalize**。主文差异 #1 判定"正常路径恒等"维持（采样器产合法旋转，Legalize 为恒等），但应知悉三版并非同源实现。判定：维持【C++ 额外（防御）】+ 边界差并入 S06 差异 #5 类。
+3. **【浅覆盖补全：MakeEffectiveFilter 的 Hole 例外与 evaluator 独立引擎】** 现场确认（LbfEvaluator.cpp:110-136）：filter 语义为 `entity.kind == Hole → 不忽略`（强制参与）+ 调用方 irrelevant/irrelevantHandle 叠加——主文差异 #3 已记；补记：LbfEvaluator 的独立引擎（快照重建，:141-155）**不注册 Exterior 静态 hazard**？现场核对构造（:141-156）仅 `Restore(snapshot.cdeSnapshot)` 恢复引擎全部静态 hazard（含容器外环/洞）——语义=布局 CDE 快照，与 Rust `layout.cde()` 同内容，主文差异 #2 判定维持。

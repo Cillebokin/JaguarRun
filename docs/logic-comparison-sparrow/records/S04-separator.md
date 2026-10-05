@@ -94,3 +94,13 @@
 
 ## 结论
 Algorithm 9/10 的控制流——strike×内层无改进计数、0.98 双阈值（改进重置、strike 判定）、GLS 权重每轮更新、strike 后 keep-weights 回滚、多 worker 取加权损失最小、丢弃其余工作——在 C++ `Separator::Run` 中逐项复现，并被 Separator(Round/MultiWorker/ThreeWorker) 系列与 PhaseReference fixture 锁定，判定基本等价。核心差异是结构性的：C++ 放弃常驻 worker（每轮从快照重建，RNG 按轮回写）、在 Run 尾部显式回滚最优解、公开 Rollback 只暴露重建分支；另有报告/权重更新顺序互换与平移的表示级差异，均不改变算法行为。
+
+### 补充审计（2026-09-29）
+本审计对 separator.rs 338 行做逐行覆盖复核（每个函数/常量/断言均已有条目），并对 C++ 侧现场重验，结果如下：
+
+1. **【核对确认：strike 内层结构与 `0.98` 双阈值】** 现场重验（Separator.cpp:509-655）：外层 `while (!ShouldTerminate && !IsSeparated() && strikes < strikeLimit)`、内层 `while (!ShouldTerminate && !IsSeparated() && noImprovement < noImprovementLimit)`、`loss < minLoss*0.98F → noImprovement=0`（:612）、`initialStrikeLoss*0.98F <= minLoss → ++strikes else strikes=0`（:648-655）与 separator.rs:107-178 逐项对应，判定维持。
+2. **【遗漏补记：loss==0 早退路径的 strike 判定跳过】** 主文条目 11 已提到"C++ 在 loss==0 break 时不执行 strike 判定/回滚而直接双层 break"。现场确认 C++ 在内层 break 后于外层检查 `if (m_Tracker.IsSeparated()) break;`（:647-650）**跳过了 strike 判定与 rollback** 直接退出外层——而 Rust `break 'outer`（separator.rs:146）同样跳过 strike 判定但**随后执行** Run 尾部回滚（C++ :671-682 对应）。两侧均以 keep-weights 回滚收尾（C++ 尾部统一回滚覆盖该路径），行为一致，主文条目 11 的分析成立，此处补记内层 break→外层 IsSeparated 短路的中间步骤（Separator.cpp:647-650，主文未显式记录该行）。
+3. **【浅覆盖补全：worker RNG 回写时点】** 主文差异 #2 记了派生时点，但未记"回写"。现场确认：worker 任务按值捕获 `workerRng = initialWorkerRng`（:535-536），future 收集时 `m_WorkerRngs[task.index] = task.rng`（:555-558）——即每个 worker 的随机流跨轮**连续**（等价 Rust 常驻 worker 自持 rng），而非每轮重置。该时序保证与 separator.rs:46（构造时一次派生、worker 永久持有）在流语义上对齐（差异仅派生触发时点），补记为差异 #2 的细化。
+4. **【浅覆盖补全：change_strip_width 的 `change_strip_width` expect 与 worker 重建 rng 消耗】** 主文 `change_strip_width` 条目已记 C++ 侧 `m_WorkerRngs.clear()`（:383）对应 Rust 重建 worker 时的 `rng.random()` 重派生（separator.rs:328-335）。**补记一个两侧一致的隐藏语义**：Rust 的重建在 `change_strip_width` 内同步发生（消耗 n_workers 次主 rng），C++ 的重派生延迟到下次 `Run` 入口（:475-483，同样消耗 n_workers 次 m_Rng）——消耗值与次数相同、时点不同，对后续随机流无影响（主 rng 的消耗序在两侧相同：均先于下次 Run 内的任何 worker 派生使用）。此点 S07 差异 #1（compress 的 split_pos 随机流错位分析）依赖该事实，其分析成立。
+5. **【核对确认：SeparatorResult 内容】** 现场（Separator.h:16-26 + Separator.cpp:694-703）确认 Result 携带 solution/trackerSnapshot/elapsed/surrogateReject/exactCollision/evals/moves/iterations 八字段，主文条目 12/差异 #11 判定维持。
+6. **【核对确认：行号漂移】** 当前 Separator.cpp 为 704 行，与主文头部声称一致，全部行号引用经抽验（:509-511/:612/:648/:655/:671-682）无漂移。

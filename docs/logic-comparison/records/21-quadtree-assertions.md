@@ -52,3 +52,27 @@
 
 ## 结论
 Rust 的 4 项 quadtree 专项自检（保守性 oracle、无悬挂 hazard、树 vs 新鲜树对账、排序/布局不变式）在 C++ 中全部没有直接对应；但这属架构差异的必然结果——C++ 树由单一数据源全量重建、无排序向量、无边级象限分类，这些断言保护的不变式要么不可能被破坏、要么断言对象不存在。C++ 的 Assertions.cpp 走的是另一条路：release 可用的快照/问题级正式校验，与 Rust 的 debug_assert 体系在机制与覆盖面上均不同（详见记录 39）。
+
+## 补充审计（2026-09-29，逐行复核 2026-09-29 重写基线）
+
+**前提变化**：正文多处以"架构豁免"为由豁免 C++ 缺失——但 2026-09-29 重写后 C++ 四叉树**已是增量 constrict 树**（懒扩展、QTHazardVec 排序向量、PartialHazard 边子集，见记录 19/20 补充），这些断言保护的旧前提已不存在，豁免理由部分失效。逐条复核：
+
+### 补-1【浅覆盖→判定反转】`edge_quadrant_classification_is_conservative` + f64 oracle 的"架构豁免"已失效
+- 正文差异 #1 称"C++ 无边级象限分类，断言对象不存在（架构豁免）"。重写后 `edgeCollidesWithQuadrants`（Quadtree.cpp:117-194）正是 Rust `Edge::collides_with_quadrants` 的 f32 生产实现，被 `NodeCollidesWithEdge`/`CollectEdgeCollisionsUntil`（CollisionEngine.cpp:260、353）调用——**保守性断言的对象在 C++ 中现在存在**，但既无 debug 断言也无 oracle。Rust 在每次调用后用 f64 oracle 验证 f32 分类是保守超集（qt_traits.rs:121-126）；C++ 的同类保护完全缺失。若 f32 分类出现**假阴性**（漏报相交象限），C++ 无任何防线（Rust debug 构建会 panic）。风险与 Rust 引入该断言的动机同源（tests.rs 锁定的正是 f32 假阳性/假阴性边界行为）。
+- 判定：C++ 缺失（豁免理由失效，真实测试缺口）。
+
+### 补-2【浅覆盖→判定变化】`qt_contains_no_dangling_hazards` 的"架构豁免"已失效
+- 正文差异 #2 称"C++ 全量重建无悬挂引用可能"。重写后 C++ 树为增量维护（RegisterIntoNode/DeregisterFromNode，Quadtree.cpp:469-541），与 Rust 相同的悬挂引用风险重新出现——尤其是记录 19 补-1 发现的 shapeIt 传错形状 bug 正属于这类增量维护错误的范畴，若有此断言体系（或对应测试）更易暴露。C++ 仍无对应自检。
+- 判定：C++ 缺失（豁免理由失效；与补-4 的测试缺口叠加）。
+
+### 补-3【验证】`collision_hazards_sorted_correctly` / `quadrants_have_valid_layout` 缺失现状
+- 重写后 C++ `Node::AddHazard` 维护 presence 降序向量（Quadtree.cpp:226-249），排序不变式真实存在，但无断言复核（Rust `assert_caches_correct`，qt_hazard_vec.rs:103-121，同时复核排序 + activeEdges 对账）。判定：C++ 缺失（豁免理由失效）。
+- `quadrants_have_valid_layout`（util/assertions.rs:233-260）：C++ 象限由 `QuadrantsRustF32()`（rect.h:300-319）固定生成，布局恒定——**此条豁免仍成立**（Quadtree.cpp 的 kQuadrantNeighborLayout 为编译期常量）。判定：维持 C++ 缺失（豁免有效）。
+
+### 补-4【遗漏】tests.rs 行为契约（36 行）的 C++ 对应测试缺口
+本记录正文完全未覆盖 `tests.rs`（审计任务指明需检查）。`edge_quadrants_allow_f32_false_positive_at_bisector`（tests.rs:6-36）锁定的行为契约：
+- 构造 rect=(0,6.1875,100,106.1875)（centroid.y 恰为非整 f32），edge=(-29.439_144,-32.354_836)→(51.902_332,212.291_02) 穿过水平 bisector 且穿越点在 f64 下高于 bisector 但差值小于 1 ULP；
+- 断言三件事：① `edge.collides_with(&quadrant)`（原始 Rect-Edge 测试）对 4 象限为 [false,true,true,false]（象限 1/2 出现 f32 假阳性）；② f64 oracle 为 [false,true,false,false]；③ **`edge.collides_with_quadrants(&rect, quadrants)`（快速分类）必须与 f64 oracle 一致 = [false,true,false,false]**——即快速分类在 bisector 附近**不允许**继承原始判交的假阳性，它必须更精确。
+- C++ 侧核验：全仓（tests/ 17 个文件）搜索无 6.1875/106.1875/bisector/该坐标常量；`edgeCollidesWithQuadrants`/`halfIntersect`/`CollisionHalf` 无任何测试引用（仅 Quadtree.cpp 与 CollisionEngine.cpp 两个生产文件使用）。TestCollision.cpp 有 notch/pier oracle 场景（TestCollision.cpp:543-648，notchContainer 高低阈值下 detect/collect 分歧的锁定测试），但**无 bisector f32 边界契约测试**。
+- 影响：C++ 的 `edgeCollidesWithQuadrants` 是 Rust 快速分类的移植（记录 19 补-4 已确认逐行一致），当前行为一致，但"bisector 附近 f32 假阳性被快速分类修正"这一微妙契约**无 C++ 测试锁定**——后续 C++ 侧重构（如改用 double 中间量、调整 halfIntersect 顺序）可能无声破坏该行为，而测试全绿。
+- 判定：C++ 缺失（测试契约缺口，建议补测试）。

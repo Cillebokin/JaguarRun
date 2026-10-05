@@ -133,3 +133,37 @@ candidates.iter()
 
 ## 结论
 simplify 算法（角点分类→候选生成→按面积增量稳定排序→取首个有效候选→执行→面积比守卫）在双侧逐行等价，包括 Deflate 的反转/翻转、交点"前方"判定公式、f32 精度路径与执行时的双删除+插入顺序。所有差异均为错误通道（unwrap/assert/panic → Result/nullopt）与日志缺失，正常输入下的输出多边形完全一致。
+
+## 补充审计（2026-09-29）
+
+逐行复核 shape_modification.rs 的 simplify 段（52-336 行：simplify_shape、calculate_area_delta、candidate_is_valid、edge_iter、execute_candidate、replacing_vertex_convex_convex_candidate、calculate_intersection_in_front、InvalidCandidate、Candidate、Corner+flip/to_points、CornerType+from）。与记录 11（338-379）、12（381-519）三段合计覆盖 52-519 行；**三段缝隙核查**：338-379 由 11 覆盖、381-519 由 12 覆盖、521-550（shape_modification_valid）由本记录覆盖；1-51 行（imports + ShapeModifyMode + ShapeModifyConfig）由本记录头部两条覆盖；**550 行全部行段无三段都漏的函数**（文件实际 550 行整）。以下为补充核对项：
+
+### 【遗漏→补齐】ShapeModifyMode 的 derive 集合（Serialize/Deserialize/Eq/Hash）
+- shape_modification.rs:19 `#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]`——该枚举可序列化（JSON 配置导入用）且可哈希。主记录 10 的枚举条只对了值域。C++ 侧：ShapeModification.h:14-18 enum class（天然值语义），**无枚举序列化**——JSON 层的字符串映射（"Inflate"/"Deflate"）属 io 层（34 号记录范围）。Eq/Hash 无 C++ 需求（无以 mode 为键的容器）。
+- 判定：【一致】（值域；序列化归 io 层）。
+- 证据：shape_modification.rs:19 vs ShapeModification.h:14-18。
+
+### 【遗漏→补齐】ShapeModifyConfig 的 Default derive（simplify/offset/narrow_concavity 全 None）
+- shape_modification.rs:27 `#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]`——`Default` 使三字段全 None（不修改）。C++ ShapeModification.h:21-26 靠 std::optional 默认空达成同一状态；PartialEq 经 34 号 JSON 层核对。主记录 10 的 config 条对了字段，未提 Default 语义——C++ 聚合默认构造 `ShapeModifyConfig{}` 等价（optional 默认空）。
+- 判定：【一致】。
+- 证据：shape_modification.rs:27 vs ShapeModification.h:21-26。
+
+### 【浅覆盖→补齐】candidateIsValid 的 affected 判定走 Point PartialEq（而非 Edge PartialEq）
+- Rust shape_modification.rs:190/205 `affected_points.contains(&l.start)`——`[Point; 3]/[Point; 4]` 的 contains 用 **Point 的 PartialEq**（±0.0 相等、NaN 不等）。C++ Simplify.cpp:160 `edge.start == affected[i]` 用 Point2d::operator==（point.h:42，同语义）。注意 array 第 4 元素：Rust Concave 分支 `[shape[c.0], shape[c.1], shape[c.2]]` 是**真三元组**；C++ 用定长 array 4 元素第 4 个填 `Point2d{}`（Simplify.cpp:178）且 `hasAffectedEndpoint(edge, affected, 3U)` 只查前 3——**等价**（第 4 元素哨兵不参与）。ConvexConvex 分支两侧都是真 4 元素。
+- 判定：【一致】。
+- 证据：shape_modification.rs:190, 205 vs Simplify.cpp:160-164, 176-178, 197-204。
+
+### 【浅覆盖→补齐】sorted_by_cached_key 的"缓存"语义与 stable_sort 比较器重算的行为等价性确认
+- 主记录差异表 #11 已列性能差。补充一个理论边界：`candidateAreaDelta` 对**同一 Candidate** 在排序期间被 C++ 反复调用，每次返回**相同的纯函数值**（无内部状态；replacingVertex 纯函数）——故缓存与重算结果恒等，比较器一致性成立（违反 strict weak ordering 的风险为零）。
+- 判定：【一致】（确认）。
+- 证据：Rust 112-114 vs Simplify.cpp:325-330 + candidateAreaDelta 纯函数性。
+
+### 【浅覆盖→补齐】find 首个 valid 与 stable_sort 的联动（同 delta 候选的选取次序）
+- Rust `sorted_by_cached_key(...).find(valid)`：稳定排序保相等键的原始序（candidates 生成序），find 取首个 valid。C++ stable_sort + find_if：同。**关键确认**：相等 delta（如多个 Collinear 候选 delta=0.0）的排序稳定性使两侧选取**同一个**候选（生成序由 corners 遍历序决定，两侧同序）。这消除了"多个零面积候选任选其一"的潜在分叉。
+- 判定：【一致】。
+- 证据：shape_modification.rs:110-115 vs Simplify.cpp:325-335 + generateCandidates 遍历序（Simplify.cpp:242-275 ↔ shape_modification.rs:68-107）。
+
+### 【遗漏→补齐】cfg(test)——shape_modification.rs 无测试模块
+- 全文件 550 行无 `#[cfg(test)]`（RustOracle 工具承担 oracle 职责）。判定：不适用。
+
+补充结论：10 记录覆盖完整。三段记录（10/11/12）对 550 行的行段分配核查完毕：**无缝隙遗漏**；ShapeModifyMode/Config 的 derive 契约与 affected 判定的 Point 相等语义、稳定排序联动均已确认一致。

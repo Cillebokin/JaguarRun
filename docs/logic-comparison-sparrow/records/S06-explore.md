@@ -61,7 +61,7 @@
 | 1 | 返回：可行解集合 vs 单一最优解+指标+history | 差异（形态） | mod.rs 取 last() 与 C++ bestSolution 等价；C++ 聚合 reject/exact 计数进 LbfMetrics | explore.rs:91 vs Exploration.cpp:854-856 |
 | 2 | 失败池上限 infeasiblePoolSize（pop_back 丢最差） | C++额外 | 默认 0 不启用；启用时改变池抽选分布 | explore.rs:61-63（无上限）vs Exploration.cpp:813-817 |
 | 3 | maxIterations 限流 + 独立 failures 计数 | C++额外 | 默认 0=无限；failures 语义=池长（池只在成功时清），等价 | explore.rs:33,65 vs Exploration.cpp:708-710,799,818-823 |
-| 4 | 长变换链精度：f32 矩阵 compose/inverse/transform vs f64 解析 Inverse/FollowedBy | 差异（数值） | 搬迁位置可有 ULP+ 级偏差；离散角场景被 fixture 锁定一致；未用 FollowedByRustF32 | explore.rs:187-196 vs Exploration.cpp:538-539,558-562（对照 Transformation.cpp:66-91） |
+| 4 | ~~长变换链精度：f64 解析 Inverse/FollowedBy~~（2026-09-29 修复后）InverseRustF32/FollowedByRustF32 位级对应 | 一致（已修复） | 见"补充审计"第 1 条；fixture 锁定 | explore.rs:187-196 vs Exploration.cpp:538-541,563-565,572-575,596-599 |
 | 5 | 旋转合法化：f32 归一化差值 vs f64 最短角距 | 差异（边界） | 非常规离散角集时选角可不同（±π 边界） | uniform_sampler.rs:104-121 vs Exploration.cpp:133-187 |
 | 6 | 初始解无条件报 ExplFeas vs 按 metrics.feasible 分支 | 差异（防御） | 合法输入下同为 FEASIBLE | explore.rs:28 vs Exploration.cpp:687-698 |
 | 7 | 正态池抽选的 ZIGNOR f64 复刻 | 一致 | 位级复刻 rand_distr 0.6；ExplorationPoolRustTrace.tsv 锁定 | explore.rs:73-76 vs Exploration.cpp:213-303 |
@@ -71,5 +71,12 @@
 | 11 | 逐轮 CalculateMetrics 可行性校验 | C++额外 | 防御+指标聚合；Rust 依赖不变式 | explore.rs（无）vs Exploration.cpp:17-55,724-731 |
 | 12 | contained 排除自身：收集后过滤 vs 收集时 filter | 一致 | 集合等价 | explore.rs:238-243 vs Exploration.cpp:360-365 |
 
+### 补充审计（2026-09-29）
+1. **【遗漏：主文 2026-09-29 修复注记与差异表 #4/结论未同步】** 修复注记已声明"FollowedBy f64 精度路径条目已消除"，但上方差异汇总表 #4 仍写"f64 解析 Inverse/FollowedBy、未用 FollowedByRustF32"，结论段同称"是本组唯一可能产生可见数值偏差的点"——**已过时**。经现场核验（Exploration.cpp:538-541,563-565,572-575,596-599）：两段 contained-relocation 的 4 处调用点全部为 `InverseRustF32().FollowedByRustF32(...)`（firstConversion/secondConversion 各 1 处 + 被搬件 `Transform().FollowedByRustF32(conversion)` 各 1 处），且源文件带 538-539/572-573 的"用 RustF32 位级对应"注释。更正判定：**一致（位级对齐）**——`FollowedByRustF32`（Transformation.cpp:71-91）以 f32 sin/cos 矩阵乘法复刻 jagua-rs `dot_prod`（transformation.rs:172-195），`InverseRustF32`（Transformation.cpp:49-63）复刻 3×3 矩阵求逆（含 `cos²+sin²` 行列式与 `atan2` 重分解）。差异表 #4 应据此替换为"一致（RustF32 位级路径，fixture 锁定）"。
+2. **【浅覆盖：第 6 条 Explore 内 LegalizeTransform 的角距公式描述滞后】** 主文第 6/9 条写 Exploration 用"RotationDistance（最短角距，f64，:133-146）"。现状核对（Exploration.cpp:133-146）：`NormalizeRotation`+`min(d, 2π-d)` 的最短角距仍在（与 uniform_sampler.rs:104-121 的 `normalize_rotation(delta).abs()` 非最短角差语义差在**跨 ±π 边界角集**可选不同角——主文已记为差异 #5，判定维持"差异（边界）"），但需注明该差异只影响非常规离散角集；常规 0/90/180/270 与连续旋转两路径同选。差异 #5 维持不变。
+3. **【核对确认】** 失败池抽选（Exploration.cpp:832-839）`abs(RustNormalF32(sep.Random(), stddev))`、`min(0.999F)`、`selectedIndex = min(sample*len, len-1)` 与 explore.rs:74-76 逐项对应（Rust `as usize` 截断 + C++ clamp 的防御差异主文已记）；`RustStandardNormalF64`（:262-297）为 rand_distr 0.6 ZIGNOR 的 257 项表逐位复刻（tail=3.654152885361008796、area=0.00492867323399、`u∈[1,2)` 位级、尾部对数拒绝环），判定"一致"成立。
+4. **【核对确认】** `0.98` 双阈值不在 explore.rs 也不在 Exploration.cpp（属 separator 内层，S04 范围）；Explore 主循环条件 `while (!terminator.ShouldTerminate(iteration) && (maxIterations==0 || iteration<max))`（:714-716）与 explore.rs:33 `while !term.kill()` 的差异（maxIterations 限流）主文 #3 已记。
+5. **【核对确认】** 逐项复核记录的 C++ 行号基线：当前 Exploration.cpp 为 863 行（主文头部"857 行"含 2026-09-29 修复引入的 +6 行漂移，行号引用整体仍准确±6）。
+
 ## 结论
-Algorithm 12 的探索主循环（分离→成功则收缩清池、失败则入有序池、连续失败上限、|N(0,σ)|·池长 抽选、回滚+扰动）连同扰动的四步交换流程在 C++ `Explore/DisruptSolution` 中逐项复现，正态抽选甚至位级复刻了 rand_distr 的 ZIGNOR 表，并被 Exploration(RustTrace/Pool/Contained) 与 PhaseReference fixture 锁定，判定基本等价。最重要的发现是差异 #4：搬迁变换链用了 f64 解析式 `Inverse/FollowedBy` 而非库内现成的 `FollowedByRustF32` f32 矩阵位级版——语义（先撤销新位形再施加旧位形）与 Rust 一致，但数值路径不同，是本组唯一可能产生可见数值偏差的点（离散角场景不触发）；其余差异均为 C++ 的防御性限流、指标聚合与返回形态重组。
+Algorithm 12 的探索主循环（分离→成功则收缩清池、失败则入有序池、连续失败上限、|N(0,σ)|·池长 抽选、回滚+扰动）连同扰动的四步交换流程在 C++ `Explore/DisruptSolution` 中逐项复现，正态抽选甚至位级复刻了 rand_distr 的 ZIGNOR 表，并被 Exploration(RustTrace/Pool/Contained) 与 PhaseReference fixture 锁定，判定基本等价。~~最重要的发现是差异 #4~~（**2026-09-29 更正**：差异 #4 的"f64 解析路径"已由 `InverseRustF32/FollowedByRustF32` 修复消除，长变换链现为 f32 矩阵位级对应，见补充审计第 1 条）；现存最重要的残余差异是 #5：Exploration 的 `LegalizeTransform` 用循环最短角距选角，而 Rust `convert_sample_to_closest_feasible` 用非循环归一化差值——非常规离散角集（跨 ±π 边界）时可选不同角；其余差异均为 C++ 的防御性限流、指标聚合与返回形态重组。

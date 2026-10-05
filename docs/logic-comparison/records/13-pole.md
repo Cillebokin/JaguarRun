@@ -132,3 +132,33 @@ if (static_cast<double>(current.distance + radius) <= bestRadius || current.leve
 
 ## 结论
 pole 生成（初始 POI + 迭代最大内切圆）与 compute_pole 的 BFS 求解（正方形根、深度 10、象限 FIFO 顺序、`distance+radius` prune、形外取负 clearance）在双侧逐行等价，覆盖率/上限筛选条件与 f32 精度模拟完全对齐。差异集中在错误通道：1000 上限由 assert panic（release 移除）变为全构建的 `InvalidInput` 错误，无解时的错误消息内容不同，`Circle::try_new().unwrap()` 变为 `Result`。正常输入下生成的 pole 序列（含顺序）完全一致。
+
+## 补充审计（2026-09-29）
+
+逐行复核 pole.rs 全部 138 行（generate_surrogate_poles、compute_pole、MAX_POI_TREE_DEPTH、POINode::new/split/distance_upperbound），确认主记录已覆盖全部条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】generate_piers 调用链中 compute_pole 对 poi 字段的非依赖确认
+- pole.rs 的 compute_pole 仅使用 shape.bbox / edge_iter / collides_with / separation_distance——**不读 shape.poi / shape.area / shape.diameter**（除 generate_surrogate_poles 的 total_pole_area / shape.area）。因此 05 号记录 calculate_poi 构造的 dummy_poi=(f32::MAX,f32::MAX),r=f32::MAX 恒不被读取，dummy 的 area/diameter 亦不被 compute_pole 读——**dummy 仅是类型系统垫片，无数值作用**（主记录 05 已判等价，此处补 compute_pole 消费面证据）。
+- 判定：【一致】（确认）。
+- 证据：pole.rs:54-137 全文消费面（bbox:55、edge_iter:98、collides_with:94、separation_distance:102）。
+
+### 【浅覆盖→补齐】BFS 的 best 半径比较使用 double 中转（Rust f32 vs C++ double 比较）
+- POI.cpp:109 `bestRadius = best.has_value() ? best->radius : 0.0`（double）；111 `static_cast<double>(current.distance) > bestRadius`——current.distance 是 float，比较在 double 域（无损提升）。Rust pole.rs:63 `node.distance > distance(&best)`（f32 > f32）。f32→double 无损，比较结果一致（同值同序）。
+- prune 条件 POI.cpp:123 `static_cast<double>(current.distance + radius) <= bestRadius`——`current.distance + radius` 是 **float 加法**（先 f32 舍入再提升）↔ Rust pole.rs:68 `node.distance_upperbound() > distance(&best)`（`radius + distance` f32 加法后比较）——**加法舍入点一致，比较域不同但无损**。`radius + distance` vs `distance + radius` 交换律在浮点加法下成立（f32 加法可交换）。
+- 判定：【一致】。
+- 证据：pole.rs:59-72, 135-137 vs POI.cpp:109-127。
+
+### 【浅覆盖→补齐】separation_distance 的 .1 取值等价性（元组第二元）
+- pole.rs:100-102 `distance_to_poles = poles.iter().map(|c| c.separation_distance(&bbox.centroid()).1)`——取 (GeoPosition, f32) 的距离分量，**无论 Interior/Exterior 都取值**。C++ POI.cpp:65-76 `separation = fabs(sqrt(dx²+dy²) - radius)`——即 |d-r|。核对 circle.rs separation_distance(Point)（157-166）：Interior 时 r-d（d≤r → 非负）、Exterior 时 d-r（非负）——**两分支都等于 |d-r|**，与 C++ fabs 式数值一致（d-r 与 |d-r| 在分支内同号）。f32 运算链：Rust sqrt 后减法（circle.rs:161-163）↔ C++ sqrt 后减再 fabs（POI.cpp:74）——fabs 对已非负值无位级影响（仅 -0.0 → +0.0，后续 min 不受影响）。一致。
+- 判定：【一致】。
+- 证据：pole.rs:100-102 vs POI.cpp:65-76 + circle.rs:157-166。
+
+### 【浅覆盖→补齐】distance_to_edges 的 fold 顺序（chain 后单次 min 链）
+- Rust pole.rs:104-106：`distance_to_edges.chain(distance_to_poles).fold(f32::MAX, f32::min)`——**先全部边后全部圆**的连接顺序，min 链按此序折叠。C++ POI.cpp:57-76：先边循环（std::min 链）后圆循环（同初值延续）——**同序**（边链耗尽后接圆链）。f32::min 与 std::min 对非 NaN 等价（NaN 已被排除）。一致。
+- 判定：【一致】。
+- 证据：pole.rs:97-106 vs POI.cpp:57-76。
+
+### 【遗漏→补齐】cfg(test)——pole.rs 无测试模块
+- pole.rs 138 行无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：13 记录覆盖完整，无遗漏函数。四处补充（compute_pole 消费面、BFS 比较域无损、|d-r| 的 fabs 等价、min 链次序）均确认一致。

@@ -96,3 +96,32 @@ SPolygon::calculate_area(&sub_shape_points)
 
 ## 结论
 窄凹陷闭合的全部筛选条件（相邻跳过、0.9999 缩边、距离比、双模式端点包含性、形状边相交、子形状负面积与面积比）与择优规则（最大消除顶点数、并列保先）、删除区间语义（含环绕）在双侧逐条一致，且 C++ 对 ratio/diameter/area/边长/面积全部做了 f32 化模拟。唯一实质差异是失败通道：Rust 在闭合结果非法时 panic，C++ break 并保留上一轮形状返回——同方向（更宽容）的 panic→Result 约定变体。正常输入下输出完全等价。
+
+## 补充审计（2026-09-29）
+
+逐行复核 shape_modification.rs 的 narrow concavity 段（381-519 行：close_narrow_concavities 单函数 + calc_vert_elim 闭包）。行段归属确认：382-383 为 doc 注释与 allow 属性；本记录覆盖 384-519。与 10（52-336）、11（338-379）三段对 550 行的分配**无重叠、无三段都漏的缝隙**。以下为补充核对项：
+
+### 【浅覆盖→补齐】debug! 日志中的 Edge::try_new(...).length() 的副作用核对
+- Rust shape_modification.rs:480-482：debug! 宏参数中**重复构造** `Edge::try_new(shape.vertex(i), shape.vertex(j)).expect(...).length()`——这是一次额外的 try_new+expect（与 410 行的候选边构造独立）。在 debug! 被编译（debug 构建或日志级别开启）时执行；**release 且日志关闭时参数不求值**（log 宏惰性）。若 410 的 expect 通过则此处必通过（相同输入），无新 panic 路径。C++ 无此重复（无日志）。行为等价性不受影响。
+- 判定：【一致】（日志惰性求值；无新失败路径）。
+- 证据：shape_modification.rs:474-484。
+
+### 【浅覆盖→补齐】候选边 scale(0.9999) 与 410 行构造的差异注意点
+- Rust 410-412：`Edge::try_new(...).expect(...).scale(0.9999)`——先验证原始边非退化，再缩放。**缩放后的边不再验证**（缩放 0.9999 不会产生退化，仅缩短）。C++ candidateEdgeRustF32（NarrowConcavity.cpp:16-34）：直接构造缩放后边，无验证。主记录差异表 #12 已判 try_new "不可达"，此处确认缩放后边也不引入退化可能（scale 保持方向、长度 ×0.9999 > 0）。一致。
+- 判定：【一致】。
+- 证据：shape_modification.rs:410-412 vs NarrowConcavity.cpp:16-34。
+
+### 【浅覆盖→补齐】Deflate 模式端点包含守卫的边界值（端点恰在边上）
+- Rust 419-431 端点包含守卫用 `shape.collides_with(point)`（射线法）：对**恰在边上的点**的返回值依赖射线法顶点穿透分支（FPA 近似相等）——边界点可能 true/false 摆动。C++ ContainsRustF32 同一算法（记录 05 已比对 FPA 谓词族位级一致）→ **边界情形两侧同摆动**（同算法同谓词）。主记录 #4 判一致，此处确认边界点的判定由同一 FPA 谓词族承担，无单侧偏差。
+- 判定：【一致】。
+- 证据：shape_modification.rs:419-431 vs NarrowConcavity.cpp:104-111 + 记录 05 ContainsRustF32 比对。
+
+### 【浅覆盖→补齐】drain 环绕分支的 j=0 边界（end = -1 空区间）
+- Rust 488-497 的环绕 drain 分支：`end = j - 1`；**j=0 时 end=-1** → `drain(0..=end)`（`0..=(-1)` 为空 RangeInclusive）不执行——即 j=0 时只删后段。`if end >= 0` 守卫在 j=0 时为 false，显式跳过。核对 C++ 对应：`eliminated = ... : i > first || i < second`（NarrowConcavity.cpp:152-154，second=0 时 `i < 0` 恒 false）——**同语义**（j=0 时前段无删除）。主记录 #8 判一致，此处补 j=0 边界的显式核对。
+- 判定：【一致】。
+- 证据：shape_modification.rs:485-498 vs NarrowConcavity.cpp:150-157。
+
+### 【遗漏→补齐】cfg(test)——本段无测试模块
+- 381-519 无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：12 记录覆盖完整。四项补充核对（debug! 惰性求值、缩放后边的退化不可能性、Deflate 边界点的同谓词摆动、j=0 环绕分支）全部确认一致，不改变"基本等价"判定。三段记录（10/11/12）对 550 行的覆盖经本次审计确认**无遗漏函数**。

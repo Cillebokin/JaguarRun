@@ -91,3 +91,28 @@
 ## 结论
 
 枚举与 trait 这层"契约层"在 C++ 中没有直接的结构对应物，而是被翻译成了命名约定：GeoPosition/GeoRelation 值域一致（仅 Rect 前缀命名与 RotationRange 平铺建模弱化了类型安全），五个 trait 家族（碰撞/几乎碰撞/距离/分离距离/可变换）逐方法映射到各形状的 `*RustF32` 方法族，其中 FPA 偏序的谓词本体与 float-cmp 的默认 margin（epsilon + 4 ULP）做到位级一致。结构性缺口是 AlmostCollidesWith 未成族与 TransformableFrom 整体缺失，两者分别影响"容差碰撞"的可调用范围（仅 Rect 两对）与热路径内存优化形态，均不改变已实现路径的数值行为。
+
+## 补充审计（2026-09-29）
+
+逐行复核 geo_enums.rs 全部 29 行（3 个枚举 + 全部 derive）与 geo_traits.rs 全部 57 行（6 个 trait + transform_clone 默认实现）。确认主记录已覆盖全部类型。以下为补充核对项：
+
+### 【遗漏→补齐】Transformable::transform_clone 默认实现（geo_traits.rs:43-48）
+- 主记录 Transformable 条提到"transform_clone（默认实现 clone+transform）C++ 无直接对应"。补充确认其机制：`clone.transform(t)` 返回 clone——对 SPolygon 而言 = clone（含全部派生缓存）+ transform（重算 bbox、保留 area/diameter）。C++ 侧对应物为 `SimplePolygon::TransformedRustF32`（返回新对象、**不复制/不重算 POI 半径与 surrogate 转发**）——但注意一个真实差异：Rust transform_clone 对 **surrogate** 做逐元素 transform（simple_polygon.rs:239-241）；C++ TransformedRustF32 同（SimplePolygon.cpp:363-372）✓；**POI**：Rust `poi.transform(t)`（圆心变换）；C++ 同（cpp:359-362）✓。主记录 05 已覆盖，此处确认 transform_clone 作为 trait 默认方法在 C++ 无统一入口（各形状按需 Transformed/TransformedRustF32/Transform 自行承担）。
+- 判定：【差异（形态）】（维持主记录判定；机制细节已确认无数值缝隙）。
+- 证据：geo_traits.rs:43-48；simple_polygon.rs:232-244 vs SimplePolygon.cpp:338-374。
+
+### 【遗漏→补齐】GeoPosition 的 derive 集合（Eq+Hash+Copy）与 C++ 枚举的使用面
+- geo_enums.rs:1 `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]`——GeoPosition 可哈希（作为 HashMap 键）。C++ `enum class GeoPosition`（rect.h:28-32）天然可哈希（枚举值）。全库检索：Rust 侧 GeoPosition 无哈希容器消费（仅 match/比较），两侧一致无需求缺口。
+- GeoRelation：`#[derive(Debug, PartialEq)]`（无 Clone/Copy/Eq/Hash）；C++ RectRelation 为普通 enum class（隐式可拷贝）。Rust 无 Copy 导致值语义按引用传递——纯形态差异，无行为影响。
+- 判定：【一致】。
+- 证据：geo_enums.rs:1, 7 vs rect.h:20-32。
+
+### 【浅覆盖→补齐】RotationRange 的 derive 集合（Clone, Debug, PartialEq——无 Eq/Hash/Serialize）
+- geo_enums.rs:21 `#[derive(Clone, Debug, PartialEq)]`——注意 **无 Serialize/Deserialize**（serde 在 ShapeModifyConfig 上有，这里没有）；无 Eq/Hash。C++ item.h:21-33 平铺 struct + operator==（记录 23 范围）。PartialEq 含 `Discrete(Vec<f32>)` 的逐元素 f32 == ——C++ 需在 item.h/operator== 提供向量比较（见 23 号记录，不在本层）。f32 逐元素 == 语义两侧同（NaN 不等、±0.0 相等）。
+- 判定：【一致】（契约层面；字段级比较的 C++ 落点在 23 号记录核实）。
+- 证据：geo_enums.rs:21-29 vs item.h:21-33。
+
+### 【遗漏→补齐】cfg(test)——两文件均无测试
+- geo_enums.rs / geo_traits.rs 均无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：08 记录类型级覆盖完整。三处补充均为契约细节确认（transform_clone 机制、两个枚举的 derive 集合与 C++ 天然能力对齐），无新缝隙。

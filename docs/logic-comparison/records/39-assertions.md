@@ -62,3 +62,28 @@
 ## 结论
 
 Rust 的 entities 层调试自检中，快照↔布局一致性检查被 C++ 升格为正式校验 API 且判定更强（双向、逐顶点、带 Restore 幂等），debug-only 语义另由 `DebugAssert*` 家族显式保留；但四项 quadtree 专项自检（排序不变量、悬挂 hazard、重建等价、象限布局）与 `print_layout` 未移植，其中前两项因 C++ quadtree 采用全量重建架构而部分不适用。C++ 校验采用 NumericPolicy 1e-9 绝对容差而非 Rust 的精确/FPA 比较，属体系性差异（记录 38）。
+
+### 补充审计（2026-09-29）
+
+对 assertions.rs 279 行逐行复核（8 个公开/私有函数全覆盖：`snapshot_matches_layout` 17-34、`collision_hazards_sorted_correctly` 37-55、`qt_contains_no_dangling_hazards` 58-67、`qt_node_contains_no_dangling_hazards` 69-95、`layout_qt_matches_fresh_qt` 98-111、`qt_nodes_match` 113-216、`hazards_match` 218-231、`quadrants_have_valid_layout` 235-260、`print_layout` 263-279）。原记录逐函数条目齐全，无整函数遗漏；补充遗漏/需修正各点：
+
+1. **`snapshot_matches_layout` 的 `Arc::ptr_eq` 指针等价语义（浅覆盖→补齐 C++ 对应细节）**——Rust 检查 `layout.container.base_cde` 与 `snapshot.container.base_cde` **Arc 指针相同**（同一分配，含引用计数对象），assertions.rs:18-22；C++ `SameBase`（Container.cpp:132-135）实现为 `m_Data == other.m_Data`——**同为指针同一性判定**（`shared_ptr` 的 `==` 即指针比较）。判定修正：**一致**（双侧均为同一性而非结构等价性；语义维度相同）。原记录 14 行引用的 `SameBase` 已在记录 24 覆盖，此处补充实现行号证据（Container.cpp:132-135）。
+2. **`qt_nodes_match` 的 `hashable` 闭包 presence 映射（遗漏的常量细节）**——Rust 把 `QTHazPresence` 折叠为 `None→0, Partial→1, Entire→2`（assertions.rs:114-121），**丢弃 Partial 的具体数值载荷**（Partial(f32) 的容差参数不参与比对）——即两个 Partial 容差不同的 hazard 视为相同。C++ 无对应函数（整体缺失，原记录已判）。补充：若未来移植需注意该"载荷丢弃"是有意设计（比对只关心存在性+档位）。
+3. **`qt_nodes_match` 的 `(None, None) => panic!("Both nodes are none")`（遗漏）**——Rust 递归守卫 panic（assertions.rs:168）；`println!("{}", from_1 == from_2)`（assertions.rs:149）为**调试残留输出**（打印布尔值，无格式化说明，明显是开发期残留）。两者均无 C++ 对应（函数整体缺失）。判定：随函数缺失，无独立影响；`println!` 残留属 Rust 代码质量问题。
+4. **`hazards_match` 的 `println!("Hazard vecs don't match")`（遗漏）**——与上条同类的调试残留（assertions.rs:227）。C++ 无对应。
+5. **`qt_contains_no_dangling_hazards` 的 `println!("Node contains dangling hazard")`（遗漏）**——同上（assertions.rs:82）。原记录未提这三个 `println!`（与 `error!` 日志并存，`error!` 有提）。
+6. **`quadrants_have_valid_layout` 的 `assert_eq!` 而非返回 false（浅覆盖→补齐）**——Rust 该函数返回 bool 但内部用 `assert_eq!(2, ...)` panic 而非返回 false（assertions.rs:244-257）——**panic 优先于返回值**，调用方拿到 false 的路径实际不存在（除了 4 象限全对时返回 true）。C++ 无对应（原记录已判缺失）。补充：该函数是"半断言"形态（标题说返回检查结果，实际 assert），移植时若按签名照抄会漏 panic 语义。
+7. **`print_layout` 的输出格式细节（原记录判"C++ 缺失"，补齐格式说明）**——生成 `let mut layout = Layout::new(container.clone());` + 每项 `layout.place_item(instance.item({idx}), &DTransformation::new({rot:.6},({tx:.6},{ty:.6})));`（assertions.rs:264-278）——**生成的代码是 jagua-rs Rust 代码**，对 C++ 移植版无意义（C++ 调试时无法直接执行 Rust 代码）。判定维持 C++ 缺失，补充"即便移植也需改写为目标语言代码生成器"的备注。
+8. **C++ `sameLayoutSnapshot` 比对项超出 Rust（补齐证据）**——C++ 额外比对 `slotGenerations`/`freeSlotIndices`/`cdeSnapshot.dynamicHazards`（cpp:134-137,152-167）——slotmap 槽位元数据与动态 hazard 集合的多重匹配（`std::vector<bool> matched` 防重复配对）。Rust `snapshot_matches_layout` 只查 container ptr + 放置项子集。原记录 14 行说"比 Rust 更细"，此处补齐具体比对项清单与 `sameHazard`（`dynamic && entity && samePolygon`，cpp:123-127）的行号证据。
+9. **C++ `demandMatches` 的 `used > required` 检查（补齐）**——`used[i] > required[i] || required[i] - used[i] != remaining[i]`（cpp:203）：超量放置（used 超需求）单独拒绝。该函数属 probs 断言（记录 28-30 范畴），本记录交叉引用补行号。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | `Arc::ptr_eq` 指针同一性 vs `SameBase` | 一致（补齐证据） | 双侧均为指针同一性判定（`shared_ptr::==` 即指针比较） | assertions.rs:18-22 vs Container.cpp:132-135 |
+| S2 | `qt_nodes_match` presence 载荷丢弃（Partial(f32)→1） | 随函数缺失（设计备注） | 比对只关心档位不关心容差值 | assertions.rs:114-121 |
+| S3 | 三处 `println!` 调试残留 | 遗漏条目 | Rust 代码质量问题，无 C++ 对应（函数缺失） | assertions.rs:82,149,227 |
+| S4 | `quadrants_have_valid_layout` 半断言形态（assert_eq 优先于返回值） | 遗漏细节 | 直接照签名移植会漏 panic 语义 | assertions.rs:244-257 |
+| S5 | `sameLayoutSnapshot` 比对项清单（slotGenerations/freeSlots/dynamicHazards 多重匹配） | C++ 更强（补齐证据） | 快照元数据级比对 | Assertions.cpp:123-167 |
+| S6 | `print_layout` 生成 Rust 代码 | C++ 缺失（备注：移植需换目标语言） | 纯调试工具 | assertions.rs:263-279 |

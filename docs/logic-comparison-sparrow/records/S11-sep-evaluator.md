@@ -57,3 +57,11 @@
 ## 结论
 
 SeparationEvaluator 的评估骨架——上界解析（Clear 上界拒绝一切碰撞、Collision 上界拒绝更劣 loss）、surrogate/精确两段收集、跳过移动件自身、零碰撞 Clear{0} / 有碰撞 Collision{loss}——在 C++ 中语义复刻，接受性判定与 Rust 逐 hazard 短路版本结果一致，并被 SeparatorSearchRustTrace.tsv 的 158 条 eval 位模式锁定。实质差异是 C++ 把"边收集边累加早停"改为"全量收集后调 CollisionTracker 整体算 loss"（结果等价、少一层短路），以及 loss ≥1e-6 下限钳制、LegalizeTransform 防御等 C++ 额外稳健性；精细的逐 hazard 权重累加语义归 S12。
+
+### 补充审计（2026-09-29，实体句柄专项）
+**【任务指定核对项】SeparationEvaluator 私有引擎的实体句柄（2026-09-29 修复，commit 6910145）现场复验**：
+
+1. **修复确认**：构造函数（SeparationEvaluator.cpp:76-101）注册 hazard 的实体字段已从 `{PlacedItem, itemIndex, 0, 0}` 补齐为 `{PlacedItem, itemIndex, 0, 0, placement.handle, placement.placedItem.Transform()}`（+`m_MovingHazardHandle` 记录移动件 hazard 句柄）。修复前同 item 多放置实例会在私有引擎触发 `RegisterHazard` 的重复实体拒绝（CollisionEngine.cpp:101-112），构造函数 `m_Engine.reset()` → 后续 Evaluate 全 INVALID；修复后以 (itemIndex, 布局句柄, f32 变换) 三元组保证实体唯一，与 jagua-rs `HazardEntity::PlacedItem { pk }` 的 slotmap 唯一键语义对应（与 pk 的语义等价性分析见 S18 补充审计第 2-3 条，此处不重复）。
+2. **主文条目 1 更新**：主文写"hazard 注册：…找不到则引擎置空（后续 Evaluate 全部 INVALID）"——现状不变，但置空的一个历史诱因（重复实体）已被修复消除，剩余置空条件为 handle 不在快照（正常输入不触发）。判定维持【差异】（既定 panic→Result 形态）。
+3. **【浅覆盖补全：Evaluate 的 LegalizeTransform 角距公式与 LbfEvaluator 不同源】** 主文引用的 LegalizeTransform 是 LbfEvaluator.cpp:31-87（`ShortestRotationDistance` = 归一化+min(d,2π-d) 循环最短角距，LbfEvaluator.cpp:25-29）。现场确认 **SeparationEvaluator.cpp 自带一份不同的 LegalizeTransform**（:15-58）：其 Discrete 分支用 `std::abs(result.rotationRad - allowed)` **朴素绝对差**（非归一化、非最短角距）——对跨 ±π 的离散角集（如 {350°, 10°}）会选错最近角，与 LbfEvaluator 版和 Rust 版（normalize_rotation 非循环）**都不同**。三处 Legalize 语义对照：Rust `convert_sample_to_closest_feasible`（归一化到 [0,2π) 后 abs，跨边界角不取环距）≈ LbfEvaluator 版（取环距）；SeparationEvaluator 版（无归一化朴素差，跨 ±π 且角度未归一时偏离最大）。**新发现差异（判定：差异/边界）**：正常调用链（采样器/CD 产出的角度已归一且角集常规）三版同选；非常规角集 + 未归一角度时 SeparationEvaluator 版偏差最大。影响低（S06 差异 #5 的既有分析已涵盖 Legalize 边界类差异的同类风险），此处补记防止后续维护者误以为两处 Legalize 同源。
+4. **【核对确认：主文行号基线】** 6910145 向本文件增 4 行，当前 216 行（主文头部"212 行"）；主文引用行号（:63-114/:126-195）整体 +0~+4 偏移仍在有效范围。

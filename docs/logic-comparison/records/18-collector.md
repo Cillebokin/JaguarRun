@@ -79,3 +79,19 @@
 
 ## 结论
 收集器的可观测行为（insert 去重覆盖、contains、remove、clear、size/empty、entries 遍历）双侧一致。核心差异是性能层面：Rust 的 SecondaryMap + 64 位 bloom 快筛在 C++ 中退化为裸 vector 线性扫描；另外 Rust `remove_by_entity` 的 panic 在 C++ 变为返回 false，属错误通道差异。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 collector.rs（146 行）全部符号：trait HazardCollector（contains_key/contains_entity/insert/remove_by_key/remove_by_entity/is_empty/len/iter/keys/entities + 默认实现）、BasicHazardCollector（new/with_capacity/clear/contains_key/insert/remove/retain/is_empty/len/iter/key_bit）、Default、impl HazardCollector、IntoIterator。正文已全覆盖全部符号，无【遗漏】函数。补充如下：
+
+### 补-1【浅覆盖→补齐】`keys()`/`entities()` 的 C++ 调用方影响（正文差异 #6 仅记"便捷性"，实际有测试锁定差）
+Rust `entities()` 被 util/assertions.rs 的若干 debug 断言使用（如 collector 内容对账）；`keys()` 无内部调用方。C++ 侧调用方遍历 `Entries()` 手工取 `.first/.second`（TestCollision.cpp:470 检查 `collisions.front().kind`；Assertions.cpp 的 sameHazard 比对遍历 entries）。判定维持：C++ 缺失（便捷性），并补充证据 TestCollision.cpp:460-470、Assertions.cpp:152-167。
+
+### 补-2【验证】`remove_by_entity` 错误通道差异在 2026-09-29 重写后的现状
+Rust trait 默认实现 `.expect("HazardEntity not found in collector")` panic（collector.rs:23）。C++ `RemoveEntity` 返回 bool（Collector.cpp:43-53），找不到 false。调用方：TestCollision.cpp:82-83 使用返回值（`assert(collector.RemoveEntity(...))`），生产代码无调用（grep RemoveEntity 仅测试）。判定维持正文差异 #3，影响面确认：仅测试与公共 API 层面，生产无依赖。
+
+### 补-3【验证】bloom 快筛缺失的影响面（细节确认）
+Rust `detected_key_bits` 优化只影响 contains_key/insert 性能。C++ `Contains` 线性 any_of（Collector.cpp:7-11）。重写后 collect 路径每叶级 hazard 都查 `collector.Contains(handle)`（CollisionEngine.cpp:367、418——注意这与 Rust qt_node.rs:194 的 `collector.contains_key` 检查同构），收集量大时 C++ 退化为 O(n²)。判定维持正文差异 #1/#2；重写使该性能面出现在与 Rust 相同的代码位置，行为等价性不变。
+
+### 补-4【验证】`retain` 缺失维持
+grep retain 无 C++ 对应、无 Rust 调用方（SecondaryMap::retain 仅 BasicHazardCollector::retain 包装）。判定维持正文差异 #4。

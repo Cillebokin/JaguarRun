@@ -83,3 +83,8 @@
 
 ## 结论
 LBF 构造器的核心行为——`ch_area*diameter` 降序、逐需求放置、1.2 倍宽度增长、2×Σ直径上限、1000 容器采样 + 3 候选两阶段 CD（0.25/0.02/5°/1° → 0.01/0.001/0.5°/0.05°）、损失公式 `10*(poi.x+bbox.xMax)+(poi.y+bbox.yMax)`——在 C++ 侧逐项复现且被 `LbfSearchRustTrace.tsv`/`SparrowLbfRustReference.tsv` 位级锁定，判定基本等价。真正的差异全部是结构性的：C++ 把搜索半边抽成可复用的 `SearchLbf`（带 tighteningHistory 观测与防御性回退），把 1.2/2.0/尝试上限等 Rust 硬编码提为配置字段，并新增 32 次增长尝试上限与质量区过滤；`samplesPerItem` 默认 5000 与 Rust 1000 的出入只在绕过 SparrowLbfBuilder 的求解器入口（S08）可见。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：143 行逐项覆盖】** lbf.rs 全量复核：ConstructionError（结构体+Display+Error impl）、LBFBuilder::new、construct、place_item、find_placement——主文 5 小节全覆盖无遗漏；`debug!` 的 4 处调用（:71/:80-84/:92-98/:114-117）属观测层（S01 差异 #4 已记 C++ 无日志）。
+2. **【浅覆盖补全：宽度上限比较符与容差】** 主文记了 Rust `next_width >= width_limit` vs C++ `nextWidth > widthCeiling`（"判定方向语义一致，因 C++ 另有 IsFiniteWidth"）。现场确认（SparrowLbfBuilder.cpp:166-184）：C++ 顺序为 `if (!IsFiniteWidth(nextWidth))` → `if (nextWidth > widthCeiling)`（严格大于）→ 增长/计数；Rust separator.rs 无 IsFinite 检查、用 `>=`。**恰好在 `next_width == width_limit` 的瞬时**：Rust 报 ConstructionError、C++ 继续增长一轮（下一轮再超）。边界单步差，主文"语义一致"判定可维持但方向描述应为此精确化——影响仅限构造上限恰好命中的实例。
+3. **【浅覆盖补全：f32/f64 求和域差异的位置】** 主文构造条目 3 已记"直径/面积在 f64 域累加（:114-125）、Rust f32（sum::<f32>()，lbf.rs:109）"。补记具体链：Rust 的 `width_limit = 2.0 * Σ_f32(diameter * qty)` 与排序键 `Reverse(OrderedFloat(convex_hull_area * diameter))` 均 f32；C++ 排序键 `ConvexHullArea()*Diameter()` 在 double（:119-124）——**排序键也有域差**（并列判定在边界值时可不同，稳定排序 tie-break 同为索引升序），widthCeiling f64。属既定 f32/f64 差异方向的补充实例，非新判定。

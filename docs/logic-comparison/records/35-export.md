@@ -53,3 +53,24 @@ Transformation::empty()
 ## 结论
 
 导出侧核心逻辑（放置项枚举、`T_int ∘ T_pre` 合成、度数换算、density、item_id）双侧一致，SPP container_id 经"传参 0 ↔ 默认 id=0 的容器"两条路径实际输出相同。C++ 的快照桥接、非有限拒绝与 Result 化为 panic→Result 系约定的常规附加。`min_item_separation` 零值序列化差异位于实例层，详见记录 37。
+
+### 补充审计（2026-09-29）
+
+对 export.rs 48 行逐行复核（2026-09-29 后 JsonCodec.cpp 有两处改动：`commonInstanceJson` 改为无条件输出 `min_item_separation`；三个 `External*FromSolution` 移除了导出前的 `Validate*Solution` 强制校验——见 git 4540a76/291f057），原记录遗漏/需修正各点：
+
+1. **【记录过期】原记录差异表未收录"导出前校验已移除"（git 291f057，2026-09-29）**——原记录 17 行、44 行及记录 37 差异 10 所述"C++ 导出前 Restore + Validate*，无效解拒绝导出"**已不再成立**：当前 `ExternalSPSolutionFromSolution`/`ExternalBPSolutionFromSolution`/`ExternalMSPSolutionFromSolution` 只保留 `Restore`（cpp:1786-1790, 1810-1814, 1846-1850），`Validate*Solution` 调用已删除，替换为注释 `// jagua-rs export is a pure function over the solution struct; it does not re-validate strip/container consistency before serializing.`（JsonCodec.cpp:1791-1792）。这使 C++ 与 Rust 的"纯函数导出"语义**完全对齐**。本条差异由"C++ 额外"改判为"一致（291f057 后）"。注意 BPP 的 `binIndex` 越界拒绝（cpp:1822-1827）与变换非有限拒绝（cpp:1761-1767）**保留**，仍为 C++ 额外。
+2. **`export_layout_snapshot` 的 `#[must_use]`（遗漏）**——Rust 标记纯函数；C++ 返回 `Result<ExternalLayout>`。形态差异，原记录差异 6 已涵盖，无新增。
+3. **`ExtLayout` 字段构造顺序（遗漏的对照）**——Rust `ExtLayout { container_id, placed_items, density }`；C++ `ExternalLayout{}` 先赋 `containerId`/`density`（cpp:1750-1751）再填 `placedItems`（cpp:1754-1774）。JSON 键序由 `layoutJson`（cpp:1341-1348）固定为 `container_id/placed_items/density`，与 Rust serde 结构体字段序一致。键序对 JSON 语义无关，双侧 wire 兼容（补齐证据）。
+4. **`int_to_ext_transformation` 的调用点唯一性（补齐）**——Rust 仅两处调用：export.rs:16 与 layout_to_svg.rs:280；C++ 对应 `ExternalLayoutFromLayout`（cpp:1758-1760）与 SvgExport.cpp:179-181。双侧调用点集合对称（记录 36 交叉引用）。
+5. **`layout.density()`（export.rs:28）vs `layout.Density()`（cpp:1752）在快照路径下的取值（补齐）**——Rust 直接读 `LayoutSnapshot.density` 字段？核实：Rust `export_layout_snapshot` 参数为 `&LayoutSnapshot`，调用 `layout.density()` 实为 `LayoutSnapshot::density()`（entities 层快照方法）；C++ `ExternalLayoutFromLayout` 接 `const Layout&`、`layout.Density()`（cpp:1752）经 `Save()` 快照后由 Layout 计算——两条路径最终都源自快照 density 计算（记录 26 差异 5 的 C++ Density 缓存语义），数值一致。原记录 18 行已判一致，此处补充两侧类型路径（Snapshot 方法 ↔ Layout 方法经内部快照）。
+6. **`ExternalLayoutFromSnapshot` 桥接（原记录已有，补充失败传播细节）**——C++ cpp:29-37：`Layout layout(snapshot.container)` + `Restore` 失败透传错误（不吞）；Rust 无此桥接（直接读快照字段）。Restore 只会把放置项逐个放回，无变换运算失败路径（变换非有限已在源头 ImportItem 时拒绝），桥接为纯结构重建。判定不变：C++ 额外、行为等价。
+7. **`min_item_separation` 关联项更新（修正记录 37 差异 2/本记录差异 7 的现状）**——2026-09-29（git 4540a76）后 C++ `commonInstanceJson` **无条件输出** `min_item_separation`（JsonCodec.cpp:1430-1431，`object.emplace("min_item_separation", JsonValue(separation))`），与 Rust serde 序列化（无 skip 属性，总是输出）**一致**。原"零值省略"差异已消除，详见记录 37 补充审计。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | 导出前 Validate* 强制校验 | ~~C++ 额外~~ → **已移除（291f057）** | 三模型导出不再拒绝无效解，与 Rust 纯函数导出对齐；BPP binIndex 越界与变换非有限拒绝保留 | git 291f057 diff + JsonCodec.cpp:1791-1792 |
+| S2 | min_item_separation 零值序列化 | ~~差异~~ → **已对齐（4540a76）** | 无条件输出，与 Rust 一致 | JsonCodec.cpp:1430-1431（原 1431-1432 条件输出已删） |
+| S3 | ExtLayout JSON 键序 | 一致（补齐） | `container_id/placed_items/density` 双侧同序 | export.rs:25-29 vs JsonCodec.cpp:1341-1348 |
+| S4 | density 取值路径 | 一致（补齐） | Snapshot 方法 ↔ Layout 方法（内部经快照） | export.rs:28 vs JsonCodec.cpp:1752 |

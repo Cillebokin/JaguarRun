@@ -76,3 +76,20 @@
 
 ## 结论
 过滤语义（忽略哪些 hazard）双侧一致，"检测自身 hazard 时排除自身"（Layout::IsFeasible）与 NoFilter 均逐点对上。形态差异为 trait→std::function、以及 `from_irrelevant_qzones` 质量区过滤器在 C++ 无对应构造器——后者是真实的公共能力缺口，但 jagua-rs 自身 src 内也未见调用，当前不产生行为分叉。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 filter.rs（77 行）全部符号：trait HazardFilter::is_irrelevant、HazKeyFilter + from_keys + from_irrelevant_qzones、impl HazardFilter for HazKeyFilter、impl HazardFilter for HazKey、NoFilter、blanket impl<T: HazardCollector>。正文已全覆盖，无【遗漏】函数。补充如下：
+
+### 补-1【验证+行号更新】`irrelevant` entity 通道的实际使用点（新增证据）
+正文称"正常调用链（Layout 的自身过滤）只设置 irrelevantHandle"。逐行复核确认当前全仓 HazardFilter 的构造点：
+- Layout.cpp:211-216（IsFeasible）：`irrelevantHandle = [ownHazard](h){ return h == ownHazard; }` —— 对应 Rust `impl HazardFilter for HazKey`。
+- CollisionEngine.cpp:456、564（CollectPolygonCollisions 无 filter 重载 / CollectSurrogateCollisionsUntil 无 filter 重载）：`NoFilter{}`。
+- 测试：TestCollision.cpp:348-351（ignorePlaced 按 kind 过滤）、448-451（exteriorFilter）、678-683（exteriorHandleFilter）——entity 通道与 handle 通道的并集语义（IsIrrelevant(handle,entity) 先 handle 后 entity，HazardFilter.h:22-27）在测试中被显式锁定。
+判定：与正文一致，无变化。
+
+### 补-2【浅覆盖→补充】2026-09-29 重写后 filter 在 collect 路径的语义面变化
+重写后 C++ collect 路径（CollectEdgeCollisionsUntil/CollectCircleCollisionsUntil/CollectPolygonCollisionsUntil）通过 `report` lambda 应用 filter（CollisionEngine.cpp:498-504、703-709），而 **Rust 的 collect_* 系列根本不接收 filter**（cd_engine.rs:263-321 无 filter 形参；qt_node.rs:149-210 的 collect_collisions_until 也无 filter）。即：C++ collect API 的 filter 能力是 Rust 没有的接口面（当前调用点均传 NoFilter，无行为分叉）。详见记录 22 补-3/补-7。判定：C++ 额外（接口面差异，新增登记）。
+
+### 补-3【验证】`from_irrelevant_qzones` 缺失现状维持
+全仓 grep `Irrelevant`（区分大小写）仍仅命中 HazardFilter.h 自身、Layout.cpp:214 的 lambda、TestCollision 的测试过滤器——质量区过滤器无任何构造点。jagua-rs 侧确认 filter.rs:22-43 在 src 内无调用（examples 层可能有，超出比对范围）。判定：维持正文（C++ 缺失，无行为分叉）。

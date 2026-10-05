@@ -125,3 +125,38 @@
 ## 结论
 
 该组是 8 组中偏离最大的一组：C++ 放弃了 Rust 的 3×3 矩阵表示，改用 DTransformation 式分解模型，因此矩阵族 API（matrix、is_empty、通用 inverse、任意仿射组合）整体缺失。在刚体变换这一实际使用域内，C++ 的 ApplyRustF32 与 Rust 的矩阵-向量乘逐元素一致，合成与求逆的中间量（含 det=cos²+sin² 的刻意复刻）也逐项对齐，但"存储角度、用时再 sin/cos"的往返使连续组合存在 1 ULP 级的累积偏差。normalize_rotation 是上层有实际依赖的缺失项。
+
+## 补充审计（2026-09-29）
+
+逐行复核 transformation.rs 全部 223 行（17 个方法/函数 + EMPTY_MATRIX + 4 个矩阵构造函数 + dot_prod/inverse + 2 个 From + Default）与 d_transformation.rs 全部 85 行（6 个方法 + From + Display + normalize_rotation + 常量）。确认主记录已覆盖全部函数。以下为补充核对项：
+
+### 【遗漏→补齐】`Default for Transformation`（transformation.rs:119-123）
+- 主记录在 empty 条中提到 Default 但未单列。补充确认：`Default::default() = Self::empty()`（单位矩阵）↔ C++ `Transform2d` 的默认成员初始化（transformation.h:13-14 `rotationRad = 0.0; translation{}`）。**注意一个细节**：C++ 中 `Transform2d{}` 与 `Identity()` 等价，但**聚合初始化 `Transform2d{rot, off}` 不带默认值**（h:20-24 FromRotationTranslation 直接透传）——与 Rust 一致（Rust 聚合字面量也无默认）。一致。
+- 判定：【一致】。
+- 证据：transformation.rs:119-123 vs transformation.h:13-14。
+
+### 【遗漏→补齐】常量 `_0`/`_1`/`EMPTY_MATRIX`（transformation.rs:125-128）
+- `NotNan::new_unchecked(0.0/1.0)` 的 unsafe 常量 + 单位矩阵。C++ 无显式常量（Identity 用 0/默认值隐式表达）。数值等价（0.0/1.0 字面量两侧位级相同）。`unsafe { NotNan::new_unchecked }` 的安全性契约（0.0/1.0 恒非 NaN）无 C++ 对应物，无行为影响。
+- 判定：【一致】（数值；形态缺失无影响）。
+- 证据：transformation.rs:125-128 vs transformation.h:17。
+
+### 【遗漏→补齐】`From<T: Borrow<Transformation>> for DTransformation`（d_transformation.rs:55-62）——主记录已列但补充消费链核实
+- 主记录判 C++ 缺失（无矩阵可提取）。补充全库检索：jagua-rs 核心中该转换的调用方为 `io/ext_repr.rs`、`entities/layout.rs` 等的 `Into<DTransformation>` 链——C++ 侧因模型统一（Transform2d 即分解态）该转换退化为恒等，无行为损失（主记录结论维持）。normalize_rotation 的全库消费检索结果：**jagua-rs 核心代码无任何调用方**（仅 geometry/mod.rs:34 再导出）——主记录称"被 entities/quantum 等层使用"，**经检索不成立**，它是无消费方的公共 API（lbf 仓库或外部用户可能使用）。缺失影响从"上层有实际依赖"降级为"无内部依赖，纯 API 面"。
+- 判定：【C++缺失】（维持；影响评级下调）。
+- 证据：d_transformation.rs:76-85；全库 grep `normalize_rotation` 仅定义与再导出两处。
+
+### 【浅覆盖→补齐】Display 的 to_degrees 常量核对（RustF32.h:12-17 的孤立性确认）
+- 主记录称 ToDegreesRustF32 在几何层无调用。补充全库检索：C++ 中该函数的调用方为 `Source/IO/SvgExport.cpp:90,188` 与 `Source/IO/JsonCodec.cpp:1769`——**并非孤立**，是 IO 层（Rust 的 layout_to_svg.rs:485 / ext_repr.rs:174 的 `dt.rotation().to_degrees()` 对应物）。
+- 修正主记录"孤立复刻（差异表 #8）"的表述：该常量是 io 属性转换的真实复刻，归属于 33/36 号记录范围。Rust `to_degrees`（f32）内部 = `self * (180.0/PI)`（core 实现：乘以 57.29577951308232 的 f32 舍入）↔ RustF32.h:14-16 `static_cast<float>(radians) * 57.2957795130823208767981548141051703F`——**乘法与常量位级一致**（同一实数舍入到 f32）。
+- 判定：【一致】（常量位级；归属记录修正）。
+- 证据：RustF32.h:12-17；SvgExport.cpp:90；layout_to_svg.rs:485；ext_repr.rs:174。
+
+### 【浅覆盖→补齐】FollowedByRustF32 的 matrix10 确认（rotation 非负角方向的合成核对）
+- 核对 Transformation.cpp:81 `matrix10 = nextSine * cosine + nextCosine * sine` 对应 dot_prod 第二行第一列（transformation.rs:183 `l[1][0]*r[0][0] + l[1][1]*r[1][0] + l[1][2]*r[2][0]`，l=next 阵 [[c,-s,h],[s,c,k],[0,0,1]]，r=self 阵）= nextSine*cos + nextCosine*sin + k*0 ✓。与主记录 rotate 条的推导一致，此处补齐第二元素核对（主记录只推了 matrix00）。
+- 判定：【一致】（维持）。
+- 证据：Transformation.cpp:80-81 vs transformation.rs:178-185。
+
+### 【遗漏→补齐】cfg(test)——两文件均无测试模块
+- transformation.rs / d_transformation.rs 均无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：06 记录函数级覆盖完整。三处修正/补充：(1) normalize_rotation 在 jagua-rs 核心**无调用方**（主记录"上层有实际依赖"不成立，影响降级）；(2) ToDegreesRustF32 并非孤立——是 IO 层 to_degrees 的真实复刻（归属修正至 33/36 号记录，常量位级一致）；(3) Default/常量/matrix10 均确认一致。

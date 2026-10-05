@@ -133,3 +133,16 @@ assert!(bpp.layouts.iter().all(|(key, layout)| {
 
 ## 结论
 SP/BP 校验的目标完全对齐：解与当前问题状态一致（strip/布局/bin/数量），且双侧都以 debug-only 方式接入问题层（C++ DebugAssert* 的 #ifndef NDEBUG 与 Rust debug_assert! 语义对齐）。实现上 C++ 走得更远：把 panic 断言重构为返回 Result 的公共 Validate API，用容差+结构化比较替代逐字段相等，并附加了 Rust 没有的三类校验（物品定义对账、需求/库存精确对账、快照独立可重建性），而 Rust 的密度/成本相等断言在 C++ 中被更强的结构匹配隐式覆盖。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 spp/bpp assertions.rs 全部符号：spp{problem_matches_solution, instance_item_indices_correct}、bpp{problem_matches_solution, instance_item_bin_ids_correct}。正文已全覆盖。补充：
+
+### 补-1【遗漏·断言强度细节】Rust `problem_matches_solution` 的 `assert!` 常驻性
+Rust 这两个函数体内是 `assert!`/`assert_eq!`（非 debug_assert!），但**调用点**是 `debug_assert!(problem_matches_solution(...))`（spp/problem.rs:88,113、bpp/problem.rs:97,166）——Release 下函数不执行。C++ `DebugAssert*` 的 `#ifndef NDEBUG` 对应此语义。正文"总体形态差异"节已正确描述，此补充确认调用点闭合（正文未给出调用点行号：spp/problem.rs:88、113；bpp/problem.rs:97、166）。
+
+### 补-2【验证】`snapshot_matches_layout` 的单向包含细节（细节确认）
+util/assertions.rs:17-34：base_cde 指针相等 + **快照每个放置项在布局中有同 (idx, d_transf) 匹配**（快照→布局方向）。C++ sameLayoutSnapshot（Assertions.cpp:129-169）双向（数量+句柄+槽元数据+动态 hazard 集合）。正文差异 #8 维持；补充：Rust 侧布局比快照多物时不报（restore 后立即校验的场景下布局=快照克隆，理论不触发；但 restore 到部分状态后调 save 之外的断言可能暴露——实际调用点均在 save/restore 后即时执行，无暴露面）。
+
+### 补-3【验证】C++ `demandMatches` 的公式（细节确认）
+Assertions.cpp:187-207：`used[i] <= required[i] && required[i] - used[i] == remaining[i]`。Rust 无对应（需求记账由 place/remove/restore 逻辑保证）。正文差异 #6 维持。BPP 版另有 `usedBins` 对账（303-316）。判定：C++ 额外（维持）。

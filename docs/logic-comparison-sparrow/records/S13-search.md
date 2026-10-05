@@ -77,3 +77,9 @@
 ## 结论
 
 Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最终精化）在 C++ 侧被拆为 `SearchLbfImpl`（无参照，三阶段）与 `FindBestSeparatorMoveImpl`（全五阶段）两个内联编排，配合 BestSamples/UniformRectSampler/RefineCoordinateDescent 三个独立组件复现；阶段顺序、上界传递、report 回写、两段精化参数（0.25/0.02、5°/1°、0.01/0.001、0.5°/0.05°）逐项一致，且被 `LbfSearchRustTrace.tsv` 与 `SeparatorSearchRustTrace.tsv` 两个 Rust 参考逐位锁定。C++ 额外提供的 `LocalSearchSampler`（高斯采样 + ShiftMean + DecayStddev）在 Rust sparrow 中没有对应物，属于超出 sparrow 的公共 API 扩展，不参与搜索编排；其余差异均为错误通道与防御性回退等既定形态差异。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：343 行逐项覆盖】** search.rs 全量复核：SampleConfig、SearchPhase、SearchObserver trait（3 方法默认空体）、NoopSearchObserver、ObservedEvaluator（set_phase/report/evaluate 转发）、SearchTracePhase+SearchTraceEvent+CallbackSearchObserver+From（oracle-trace 门控）、search_placement、search_placement_with_trace、search_placement_impl（五阶段主体）、prerefine_cd_config、final_refine_cd_config——主文 8 小节 + 差异表全覆盖无遗漏。
+2. **【浅覆盖补全：impl 形态与阶段枚举的调用方】** 主文条目 2 已对齐 SearchPhase 枚举；补记：`impl From<SearchPhase> for SearchTracePhase`（search.rs:166-181）把**私有枚举映射到 trace 公有枚举**——C++ 对应物是两个独立的 trace 枚举类型（LbfSearchTrace.h 三值/SeparatorSearchTrace.h 五值），**无 From 桥**（类型即阶段集）——形态差异已隐含在主文条目 2，判定维持。
+3. **【浅覆盖补全：n_focussed_samples=0 时 focussed_sampler 仍构造】** Rust `ref_pk=Some` 时**无条件构造** focussed_sampler（search.rs:264-268，构造本身消耗计算但不耗 rng），随后 `for _ in 0..0` 零循环（:274-282）——即 LBF 路径 ref_pk=None 才跳过构造；C++ SeparatorWorker.cpp:188-196 同构（构造+HasValue 检查）。主文条目 3 的"失败则跳过聚焦阶段"指 sampler 构造失败（放不下），n=0 的零循环路径两侧一致。判定维持。
+4. **【核对确认：final_refine 的结果不回 report】** 主文条目 4 已确认两侧一致；现场复核 C++ 位置（SeparatorWorker.cpp:253-267 的 refinedBest 回退链 + LbfSearch.cpp:246-248），行号有效。

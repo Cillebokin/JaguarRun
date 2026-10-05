@@ -401,9 +401,9 @@ bool CollisionEngine::CollectCircleCollisionsUntil(
         const auto quadrants = node.bounds.QuadrantsRustF32();
         const auto colliding =
             quadtree_query::circleCollidesWithQuadrants(circle, quadrants);
-        const auto order =
-            quadtree_query::circleQuadrantOrder(circle, quadrants);
-        for (const std::size_t idx : order)
+        // jagua-rs collect 路径固定 0..3 顺序（quadrant_order 仅用于
+        // collides 路径，qt_node.rs:183-187）。
+        for (std::size_t idx = 0; idx < 4; ++idx)
         {
             if (colliding[idx] &&
                 CollectCircleCollisionsUntil(*node.children[idx], circle, collector,

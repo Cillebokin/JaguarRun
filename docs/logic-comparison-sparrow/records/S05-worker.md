@@ -71,3 +71,9 @@
 
 ## 结论
 Algorithm 5（worker 单轮：随机序处理所有仍碰撞项、为每项跑含参考位形的五相搜索、remove-place-register 移动）在 C++ 侧以"自由函数 + Separator 编排"的形态完整复现，候选择取、洗牌消耗、搜索相位序、CD 参数与统计口径全部一致并被 SeparatorSearchRustTrace/RoundRustTrace 系列位级锁定，判定基本等价。值得注意的差异是 C++ 把 Rust 的 `expect` 不变量（best_sample 必存在）降格为可空+跳过，并以值快照 layout 的每步 Restore 支撑无状态函数式编排；新增的 surrogate/exact 计数与 trace 钩子是纯观测/测试设施。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：118 行逐项覆盖】** worker.rs 全量复核：结构体 4 字段、load、move_items、move_item、SepStats+Sum+AddAssign——主文 5 小节全覆盖无遗漏。
+2. **【浅覆盖补全：SepStats 的 Sum 聚合与 rayon 的结合】** 主文 SepStats 条目记了 rayon `.sum()`；补记：`Sum for SepStats`（worker.rs:99-111）是 rayon 并行归约的 folds+reduce 载体——**f32 无关**（纯 usize 累加，无浮点结合序问题），C++ 标量累加（Separator.cpp:566-569）等价无舍入差。判定维持。
+3. **【浅覆盖补全：候选过滤的 loss>0 vs ItemLoss 语义】** Rust `ct.get_loss(*pk) > 0.0`（worker.rs:37/47）与 C++ `tracker.ItemLoss(index) > 0.0F`（Separator.cpp:209-217/226-229）——注意两侧 ItemLoss/get_loss 均为 container+pair 行和（S18 已比），且 C++ SafeLoss 过滤非有限值（S18 差异 #7）在此处叠加：若行和含 NaN（正常不可能），C++ 判不碰撞跳过、Rust 比较 false 同跳过——等价。判定维持【一致】。
+4. **【核对确认：move_items 中 evaluator 的生命周期】** Rust 每个候选项新建 SeparationEvaluator（worker.rs:51，含 CDE hazard 预注册），C++ FindBestSeparatorMove 内部同样逐项新建（SeparatorWorker.cpp:154-155）——两侧"每项一 evaluator"粒度一致（主文条目 4 隐含但未明说，此处显式化）。

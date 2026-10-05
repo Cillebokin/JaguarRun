@@ -149,3 +149,26 @@ self.placed_items.iter().all(|(pk, pi)| {
 
 ## 结论
 Layout 的核心动态行为（place/remove/save/swap/is_feasible/面积密度）双侧语义一致，C++ 用手工槽位结构忠实复刻了 slotmap 的键分配与 LIFO 复用规则，并通过 f32 对齐保持数值路径一致。最大差异在 Restore/PlaceItem/SwapContainer 的防御性：C++ 将 Rust 的"内部约定 + debug 断言"升级为 Release 生效的多级校验与失败原子性（eef0830 后确认如此），对合法输入行为等价，对损坏输入 C++ 更严格。`cde()`/`is_empty()` 未暴露、`RightmostCollisionX`/`PlacedItemCount` 为 C++ 额外提炼。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 layout.rs（203 行）全部符号：struct Layout、new、from_snapshot、swap_container、save、restore、place_item、remove_item、is_empty、density、placed_item_area、items、cde、is_feasible、ContainerMismatch、struct LayoutSnapshot、density、placed_item_area。正文已全覆盖全部符号，无【遗漏】。逐行复核补充：
+
+### 补-1【验证】`Layout::new` 的 CDEngine 共享语义差异（细节确认）
+Rust（layout.rs:28）：`container.base_cde.as_ref().clone()` —— CDEngine **深克隆**（quadtree 树 + hazards_map + config），base_cde 与 layout 引擎独立；C++（Layout.cpp:54-60）：`m_Cde(m_Container.CreateCollisionEngine())` —— **新建**引擎并重新注册静态 hazard（Container.cpp:137-147）。每次 Layout::new 双侧都得到"独立可变"的引擎；Rust 克隆预建树（注册顺序即 base_cde 构建序），C++ 重新注册（同序）。判定：结果等价（正文已记，容器记录 24 差异 #1 的关联面）。
+
+### 补-2【浅覆盖→补充】`place_item` 的 `(pk, pi).into()` 实体构造（与记录 16 补-2 联动）
+Rust（layout.rs:98）：`Hazard::new((pk, pi).into(), pi.shape.clone(), true)` —— From 转换携带 `id: pi.item.idx, dt: pi.d_transf, pk`。C++（Layout.cpp:126 + MakeHazard:97-105）：MakeHazard 填 `itemIndex/placedItemHandle/transform`，`dynamic=true`，shape 为 `make_shared<SimplePolygon>(placedItem.CollisionShape())` **值拷贝**（Rust Arc 共享）。判定：结果等价/实现不同（Arc 共享 vs 值拷贝，同记录 23 差异 #4 的模式；行为等价因不可变）。
+
+### 补-3【验证】`is_feasible` 的 filter 通道（细节确认）
+Rust（layout.rs:166）：`detect_poly_collision(&pi.shape, &hkey)` —— filter 为 `impl HazardFilter for HazKey`（自身键排除）。C++（Layout.cpp:213-216）：`irrelevantHandle = [ownHazard](h){ return h == ownHazard; }`。判定：一致（正文已记；补充确认 ownHazard = slot.cdeHandle 即注册时返回的真实句柄，与 Rust hkey 语义逐点对应）。
+**注意 2026-09-29 重写后**：DetectPolygonCollision 已改为短路 detect（isOutside + NodeCollidesWithEdge + DetectContainmentCollision，CollisionEngine.cpp:567-598），与 Rust detect_poly_collision 的三段结构（前提→边→containment）逐行对应（记录 22 补-6）。IsFeasible 语义不变。
+
+### 补-4【验证】`items()` 的去重语义（细节确认）
+Rust（layout.rs:145-150）：`unique_by(|item| item.idx)` —— itertools unique_by 保留**首次出现**。C++（Layout.cpp:439-459）：按槽序首个 itemIndex 未见过则收。判定：一致（正文已记；补充确认"首次出现"语义双侧一致，槽序↔slotmap 迭代序）。
+
+### 补-5【遗漏】`LayoutSnapshot` 的 field 语义差（细节登记）
+Rust LayoutSnapshot 持 `placed_items: SlotMap<PItemKey, PlacedItem>` **完整克隆**（含空闲槽/代数）；C++ 持 `placements: vector<LayoutPlacementSnapshot>` **仅占用项** + `slotGenerations`/`freeSlotIndices` 显式元数据（h:24-34）。快照语义：Rust 克隆后 restore 即整体覆盖；C++ restore 需从 placements+元数据重建（或无元数据时推断，正文差异 #5）。判定：正文差异 #10 已记，此补充明确"仅占用项+元数据"vs"整表克隆"的具体形态。无行为差（合法快照）。
+
+### 补-6【验证】`RightmostCollisionX` 的数值路径（细节确认）
+Rust fit_strip 内联（spp/problem.rs:44-51）：`max(pi.shape.bbox.x_max)`（f32 max_by partial_cmp）。C++（Layout.cpp:461-473）：遍历占用槽 `placedItem->CollisionShape().BoundingBox().xMax` 取 max（double 比较，bbox 为 f32 计算转 double）。f32 值域内 max 结果一致。判定：一致（正文已记）。

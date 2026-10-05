@@ -144,3 +144,12 @@
 
 ## 结论
 consts.rs 的算法常量（GLS 权重 2.0/1.2/0.95、CD 步长 1.1/0.5、精化比例、去重阈值、LBF 采样 1000/0/3、失败衰减 0.9、探索失败上限 10）在 C++ 侧全部等值存在——分散内联于 Quantify/Sampling/Optimizer 实现与 LbfConfig 默认值，无集中 consts 文件；应用层常量（时间比例、日志级别、SVG 开关、EPOCH）按归属判定为 C++ 缺失（归 CLI/Demo/NestLab）。SparrowRng 是 rand `Xoshiro256PlusPlus`+`seed_from_u64`+f32/uniform/normal 采样的忠实重实现，种子语义（SplitMix64 播撒）与输出映射（u32 高位、23 位尾数、Lemire+拒绝修正）逐项对齐并有 TestRng 差分锁定。总体判定基本等价。
+
+### 补充审计（2026-09-29）
+本审计对 consts.rs 54 行的**全部 15 个常量**与 lib.rs 38 行的**全部声明**做逐项覆盖复核（主文已逐条有记录），现场补验两处：
+
+1. **【浅覆盖补全：`PRE_REFINE_CD_TL_RATIOS` 等 4 组常量的 C++ 落点行号】** 主文只说"数值内联/拆入 LbfConfig 相邻字段"。现场确认实际落点：两轮 CD 精化的 8 个数值（0.25/0.02、5°/1°、0.01/0.001、0.5°/0.05°）内联于 `LbfSearch.cpp:31-63` 与 `SeparatorWorker.cpp:21-53` 的 `MakeRefinementConfig`（两处同构副本，S13 差异已记双副本），不在 LbfConfig.h——LbfConfig.h:19-22 的 stddev 字段属 LbfSearch 扰动范围（主文已警示不要混淆，判定维持）。全部 8 数值与 consts.rs:17-26 逐项一致，无遗漏常量。
+2. **【浅覆盖补全：`OVERLAP_PROXY_EPSILON_DIAM_RATIO=0.01` 落点】** 主文说"值内联于 OverlapProxy.cpp"。现场确认：OverlapProxy.cpp:155-157 `epsilonDiameterRatio = 0.01F` 硬编码（无命名常量）；另外 UniformRectSampler 侧的 `RotEntry` 无关。常量值双侧一致。
+3. **【浅覆盖补全：lib.rs 的 `pub use` 面（任务指定核对项）】** 现场核验：**lib.rs 不含任何 `pub use` 再导出**（全文仅 `pub mod` ×7 + EPOCH/FMT/特性开关）；sparrow 的公共导出面=各模块自身可见性（`quantify::mod` 的 `pub mod overlap_proxy/tracker/simd` + `mod pair_matrix` 私有 + 3 个 `pub fn`；`sample::mod` 的 oracle-trace 门控 `pub use coord_descent::{CDConfig, refine_coord_desc}`（feature=oracle-trace 时，sample/mod.rs:4）；`eval::mod` 的 `mod collision_loss` 私有 + `pub mod` ×3；`optimizer::mod` 的 `mod worker` 私有）。C++ 头文件导出面对照：PairMatrix 在 C++ 升为公共（S17 差异已记）；CDConfig/RefineCoordinateDescent 在 C++ 公共（CoordinateDescent.h）；`CollisionLossEvaluator` 双侧私有（C++ 摊进 SeparationEvaluator，S12）；`SeparatorWorker` 双侧私有（C++ 为自由函数 FindBestSeparatorMove，S05）——**逐项对齐，无未记录的导出面差异**。
+4. **【核对确认：15 常量清单完整】** GLS×3、EPSILON_DIAM×1、CD_STEP×2、REFINE 组×4、UNIQUE_THRESHOLD×1、TIME_RATIO×2、MAX_CONSEQ_FAILS×1、FAIL_DECAY×1、LOG_FILTER×2、DRAW_OPTIONS×1、LBF_SAMPLE_CONFIG×1——主文 11 个小节全覆盖，无遗漏条目。
+5. **【核对确认：SparrowRng 数学】** 抽验 `UniformIndex`（SparrowRng.cpp:61-81）Lemire+拒绝修正与 `NextU64` rotl(s0+s3,23)+s0 与 rand_xoshiro 参考一致，判定维持"一致"。

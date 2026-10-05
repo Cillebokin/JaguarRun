@@ -106,3 +106,28 @@
 ## 结论
 
 circle.rs 全部方法（含三组 CollidesWith、三组 DistanceTo/SeparationDistance 及其平方版）在 C++ RustF32 族中逐式复刻，分支方向（< vs ≤）与求值次序（先开方后相减、先 distance 后平方）均一致，甚至保留了 Rust"相切时 collides 与 separation 判据不对称"的原始行为。实质差异仅两处：bounding_circle 的空输入失败通道（panic vs Result）与其内部 centroid 的 1 ULP 级 midpoint 模拟差；另有 C++ 自有 double API 族不参与对齐。
+
+## 补充审计（2026-09-29）
+
+逐行复核 circle.rs 全部 233 行（4 个自有方法 + 5 组 trait 实现），确认主记录已覆盖全部条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】bounding_circle 内 extend_at_front/back 的 edgeLength 复用差异（深入核对）
+- 主记录称 C++ Circle.cpp:58 的 `edgeLength 初值 = centerDistance` 与 Rust `self.length()` 一致。补充核对一个细节：Rust circle.rs:44-49 构造 `Edge{bc.center, c.center}.extend_at_front(bc.radius).extend_at_back(c.radius)`——**Rust 的 Edge 字面量未经 try_new**（直接结构体构造），两端点为两个圆心，长度即 centerDistance。C++ 同（不调 Edge2d::Create）。一致。
+- extend_at_back 的第二次长度：Rust 第二次调用作用于**已延伸 front 的 edge**（edge.rs:34-35 重算 dx/dy/l）；C++ Circle.cpp:62-66 同样重算延伸后的 dx/dy/edgeLength。一致（主记录已述，此处确认 dx/dy 重算而非复用）。
+- 判定：【一致】（bounding_circle 数值路径，除已单列的 midpoint 1ULP）。
+- 证据：circle.rs:44-53 vs Circle.cpp:53-74。
+
+### 【浅覆盖→补齐】PI 常量位级一致性的最终确认
+- 主记录 area 条已核对常量值。补充：Rust `std::f32::consts::PI`（core/src/num/f32.rs:285，rust 1.90 toolchain）= `3.14159265358979323846264338327950288_f32`；C++ Circle.cpp:12 `3.14159265358979323846F`——两者是同一十进制字面量的不同截断，**舍入到 f32 后位级相同**（f32 只有 24 位尾数，24 位后十进制位不改变舍入结果）。Surrogate.cpp:196 的 `pi = 3.14159265358979323846F`（piers 角度步进用）同值。
+- 判定：【一致】（位级）。
+- 证据：f32.rs:285；Circle.cpp:12；Surrogate.cpp:196。
+
+### 【遗漏→补齐】Circle 无 Hash/Eq + Rust 侧 `pole == poi` 的相等消费
+- circle.rs:15 `#[derive(Clone, Debug, PartialEq, Copy)]`——Circle 无 Eq/Hash。但 Rust 核心代码有一处 **Circle 的 PartialEq 实际消费**：`io/svg/layout_to_svg.rs:223 if pole == poi`（SVG 导出高亮 POI）。该比较经 `PartialEq`（center 与 radius 逐字段 f32 `==`）。C++ 侧 Circle2d **无 operator==**（circle.h 全文无）——SVG 导出层如何实现该判断需在 36 号（svg）记录核对（不在本层范围）。就 geometry 层而言：Rust 的 Circle PartialEq 是导出层的唯一依赖点，C++ 本层缺失 operator== 需由上层补偿。
+- 判定：【C++缺失（本层）】（Circle 相等 API；唯一消费点在 io 层，移交 36 号记录验证）。
+- 证据：circle.rs:15；circle.h 全文无 operator==；layout_to_svg.rs:223。
+
+### 【遗漏→补齐】cfg(test)——circle.rs 无测试模块
+- circle.rs 233 行无 `#[cfg(test)]`。判定：不适用。
+
+补充结论：04 记录覆盖完整。bounding_circle 的双重延伸次序与 PI 位级一致性获得最终确认；新发现 Circle PartialEq 在 SVG 导出层有一处真实消费点而 C++ 无对应 API（移交 36 号记录）。

@@ -80,3 +80,9 @@
 ## 结论
 
 均匀采样的三段逻辑——旋转集构造（None/Discrete/16 均分）、逐旋转可行域与采样盒求交、随机消耗序列（选旋转 → 采样 x → 采样 y，单点区间不耗随机数）——在 C++ 中逐语义复刻；关键随机数通道（Xoshiro256++ 状态与 SplitMix64 播种、u32>>32、Lemire gen_range、23 位 [0,1) f32）被 `SparrowUniformIndexRustReference.tsv` 与 `SamplingCoordinateDescentRustReference.tsv` 的 f32 位模式逐位锁定。残余差异全部是微精度路径（Continuous 旋转集乘除顺序、区间上溢钳制）与既定 Option→Result 形态；C++ 额外的 RotationDistribution 组件与 Normal01F32 仅服务于 sparrow 不存在的 LocalSearchSampler 扩展。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：120+6 行逐项覆盖】** uniform_sampler.rs 全量复核：ROT_N_SAMPLES、UniformBBoxSampler（rot_entries + new/sample）、RotEntry、sample_axis、intersect_range、convert_sample_to_closest_feasible；sample/mod.rs 6 行——主文 6 小节 + mod.rs 条目全覆盖无遗漏。
+2. **【遗漏补记：convert_sample_to_closest_feasible 在 explore 有 4 处调用（主文说"死代码"需修正）】** 主文条目 6/差异 #6 断言"该函数在 Rust sparrow 中当前无调用方（仅导出；死代码）"。**现场复核推翻**：explore.rs:172/173（disrupt 交换合法化）与 :199/:217（contained 搬迁合法化）共 **4 处调用**——`convert_sample_to_closest_feasible` 是扰动路径的核心合法化步骤（其非最短角距语义即 S06 差异 #5 的 Rust 侧主体）。C++ 对应物为 Exploration.cpp 的 `LegalizeTransform`（f64 最短角距）——**该函数有真实调用方，差异 #6 的"死代码"判定错误，应更正为"差异（归属位置与角距语义）"**：Rust 公共函数（uniform_sampler 导出，被 explore 消费）vs C++ 内化在各 Evaluator/Exploration 的 LegalizeTransform（LbfEvaluator 循环距版/SeparationEvaluator 朴素差版/Exploration 循环距 f64 版三份）。角距语义差并入 S06 差异 #5，此处修正记录。
+3. **【浅覆盖补全：RotEntry 的 Range 语义与 intersect 的半开区间】** Rust `Range<f32>`（start..end 半开）+ `intersect_range` 返回 `(start <= end).then_some`——**start==end 单点保留**（主文条目 2 已记）；补记：`sample_axis` 单点判定 `range.start == range.end`（位级相等，非近似）——若 start/end 相差 1 ulp 则走 random_range 消耗随机数。C++ `minValue == maxValue` 同位级判定（cpp:21-23）。两侧一致（判定维持），此细节影响随机流消耗序。
+4. **【核对确认：Continuous 乘除顺序差的量化】** 主文差异 #1（`i*(2π/16)` vs `(2π*i)/16`）判定维持；现场数值验算：2π/16 精确（2 的幂分母，无舍入），`step*i` 仅 i≥2 起有单次舍入；`(2π*i)/16` 的 2π*i 先舍入再精确除——i=5 时 Rust `0.3926991*5=1.9634955` vs C++ `6.2831855*5/16=1.9634954`（尾数差 1 ulp 实测可能）。fixture 无 Continuous 覆盖，判定"当前 fixture 不区分"维持。

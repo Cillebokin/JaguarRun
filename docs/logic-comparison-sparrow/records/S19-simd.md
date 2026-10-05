@@ -88,3 +88,9 @@
 ## 结论
 
 Rust 的 quantify SIMD 通道（CirclesSoA + portable_simd + 有界提前退出）是默认关闭的 opt-in 加速特性，与标量路径数值等价（ulp 级，其自身 1e-3 容差的 debug_assert 佐证）；SparrowCore 不做量化向量化，恒走与 Rust 标量逐字一致的标量双循环，因此两侧**产物数值等价，无需移植 SIMD 即可维持等价基线**。C++ 的 SoA/AVX2 能力存在于 JaguarCore 几何检测侧（PolygonSoA，double、预筛模式），与 quantify 的 pole SoA 是目标、精度、结构都不同的两套体系——检测段加速不影响量化数值链，这条"检测向量化在几何侧、量化恒标量"的分工是本次最重要的架构发现。若未来要在 C++ 复刻 SIMD 量化，需注意有界退出的控制流在 SeparationEvaluator 层已有等价替代，仅剩纯吞吐收益。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：Rust 侧文件与行数】** simd/mod.rs 46 行（2 入口封装 + bounded 主体）、circles_soa.rs 38 行、overlap_proxy_simd.rs 110 行——三个文件的每个函数（new/load、poles_overlap_area_proxy_simd、poles_overlap_area_proxy_simd_bounded、quantify_collision_poly_poly_simd、quantify_collision_poly_poly_simd_bounded）主文均有条目，无遗漏。
+2. **【浅覆盖补全：SIMD_WIDTH=4 与 tail 处理的边界】** 主文记了块宽 4 与标量尾巴；补记细节：`chunks = p2.x.len() / SIMD_WIDTH`（整块数）、尾巴从 `remaining_idx = chunks*SIMD_WIDTH` 起逐 pole 标量处理（overlap_proxy_simd.rs:53-92），且**有界检查在每个 p1 的块+尾巴全部完成后**（:94-96）而非块间——即上界退出粒度是"每 pole1 行"。C++ 无对应物判定不变。
+3. **【浅覆盖补全：bounded 上界换算公式方向】** simd/mod.rs:28-35 `max_unscaled_overlap = (max_loss/penalty)² - eps²) / PI`（loss = sqrt(overlap_proxy)*penalty 且 overlap_proxy 含 +eps²，故逆推先减 eps² 再除 π）；`overlap < 0 → None`（上界小于 eps² 的最小可表达 loss 时直接放弃）。该换算与 S12 补充审计第 1 条的 `max_loss/weight` 预除界是两层不同的界（外层权重界→内层未加权重叠界）。C++ 无对应，判定不变。
+4. **【核对确认：C++ 侧无 SoA/Simd/Avx 命中】** 现场重验 SparrowCore 全树 grep 无命中（量化侧）；JaguarCore 侧 SoaGeometry* 仍在 Collision/ 目录服务检测，主文分工判定维持。

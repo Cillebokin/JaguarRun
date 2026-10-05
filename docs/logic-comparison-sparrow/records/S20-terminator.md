@@ -68,3 +68,9 @@
 
 ## 结论
 相位超时的核心语义（设超时→超时即杀）与默认"仅相位超时限制"的行为两侧一致，判定基本等价。Rust 的 trait 抽象与三个实现（Basic/CtrlC/Tui）在 C++ 收敛为一个自带原子停止标志的具体类：OS 信号入口按预期缺失（影响低，CLI 场景可接受），其替代物 `RequestStop()` 的语义比 Ctrl-C 更强（不可被相位切换重置），导致"跳过单相位"功能无公共入口；C++ 额外引入全局迭代/总时长上限，默认关闭不影响等价性。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：文件覆盖完整性】** terminator.rs 44 行（trait 三方法 + BasicTerminator 三方法）与 ctrlc_terminator.rs 52 行（new/kill/new_timeout/timeout_at 四方法）逐方法比对——主文均有条目，无遗漏函数。
+2. **【遗漏补记：`Default for CtrlCTerminator`/`BasicTerminator`（Rust 24-27/ctrlc:16-19）】** 双侧均 `Default::default() = Self::new()`——trait 对象默认构造语义，C++ 无对应（构造直接传 config）。无行为影响，补记闭合清单。
+3. **【浅覆盖补全：kill() 的边界比较符】** BasicTerminator.kill 用严格 `>`（`Instant::now() > timeout`，terminator.rs:35）；C++ ShouldTerminate 用 `>=`（`now - start >= duration`，OptimizationTerminator.cpp:60-66）。恰好在截止瞬间求值的单次轮询差异（单调时钟下不可区分，主文"基本等价"条目已提），此处补记符号级证据。
+4. **【浅覆盖补全：TuiTerminator 的第三实现归 S24】** 主文记了三实现但 TuiTerminator 细节（quit 持久 + interrupt_phase 换相位重置，runtime.rs:244-256）归 S24 条目 4——两记录交叉引用一致，无缺口。

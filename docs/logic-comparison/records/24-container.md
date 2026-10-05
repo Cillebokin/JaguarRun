@@ -94,3 +94,24 @@ for (const Hazard& hazard : m_Data->staticHazards)
 
 ## 结论
 Container 的构造校验（质量唯一且 <10）、静态 hazard 生成（Exterior + Hole/InferiorQualityZone 按 quality 判别）与面积语义双侧一致。主要差异是 CDEngine 的构建时机（Rust 预建 base_cde vs C++ 按需 CreateCollisionEngine，配合 SameBase 指针等价判定）、质量区存储方式（quality 升序展平 vs 传入顺序，仅影响枚举顺序）以及 `shapes_orig`/质量区面积未保留。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 container.rs（132 行）全部符号：struct Container 四字段、Container::new、Container::area、N_QUALITIES、struct InferiorQualityZone、InferiorQualityZone::new/to_hazards/area。正文已全覆盖全部符号，无【遗漏】。补充：
+
+### 补-1【验证】`squareBounds` ↔ `inflate_to_square` 逐式核对（正文步骤 5 未展开公式）
+Rust（rect.rs:96-112）：`width = x_max-x_min; height = y_max-y_min; height<width → dy=(width-height)/2; width<height → dx=(height-width)/2;` 展开四边。C++（Container.cpp:13-31）：同公式 f32 中间量（`* 0.5F` ↔ `/ 2.0`——f32 乘 0.5 与除 2 等价（2 的幂），数值一致）。判定：一致。
+调用点：Rust `CDEngine::new(outer.bbox.inflate_to_square(), ...)`（container.rs:61）；C++ `data->bounds = squareBounds(collisionOuter->BoundingBox())`（Container.cpp:80）→ `CreateCollisionEngine` 用 `m_Data->bounds`（cpp:141）。判定：一致。
+
+### 补-2【验证】`Container::area` 的口径（细节确认）
+Rust（container.rs:75-77）：`outer_orig.area()`——OriginalShape 毛面积（未 deflate、不减孔/质量区）。C++（Container.cpp:107-110）：`m_Data->originalOuter->shape.Area()`。判定：一致（正文已记）。
+
+### 补-3【浅覆盖→补充】质量区注册顺序差异的实际影响面（正文差异 #2 补充证据）
+Rust 展平为 `[Option; 10]` 后 `iter().flatten()` 按 quality 升序注册；C++ 按传入顺序。2026-09-29 四叉树重写后，注册顺序影响 `m_Registered` 与 Node::AddHazard 的向量插入位置（Quadtree.cpp:738-749 SetRegistered、AddHazard 排序插入）——由于 AddHazard 按 presence 强度排序而非注册序，且查询对向量按序扫描仅在早停时受顺序影响（记录 19 补-2 的象限顺序差异同源），质量区 hazard 的注册顺序差异**仍仅影响枚举顺序**，结果集合不变。判定维持正文差异 #2。
+
+### 补-4【验证】`CreateCollisionEngine` 的注册失败路径（细节确认）
+Container.cpp:137-147：任一 RegisterHazard 失败返回 nullptr（正文已记）。补充：注册顺序 = Exterior 首位（staticHazards[0]，cpp:82-83）+ 质量区随后——与 Rust hazards 向量顺序一致（container.rs:55-59 `vec![Exterior] + qz_hazards`）。判定：一致。
+
+### 补-5【遗漏】`InferiorQualityZone::to_hazards` 的 Hole 判定（细节登记）
+Rust（container.rs:117-123）：`quality == 0 → Hole{idx}，否则 InferiorQualityZone{quality, idx}`，idx 为**形状下标**（`shapes_cd.iter().enumerate()`）。C++（Container.cpp:85-97）：`zone.quality == 0 ? HazardKind::Hole : InferiorQualityZone` + `zoneIndex = shapeIndex`（形状在 zone 内下标）。判定：一致（正文步骤 4 已记，此补充明确 idx 语义为 zone 内形状下标，非全局）。
+注意：**Hole/InferiorQualityZone 的 idx 语义在双侧一致为"该 quality zone 内的形状序号"**——多个 zone 各自从 0 计数，HazardEntity 相等性靠 kind+quality+zoneIndex 区分（同 quality 内 idx 唯一即可）。判定：一致。

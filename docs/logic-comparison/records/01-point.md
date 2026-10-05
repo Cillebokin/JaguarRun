@@ -69,3 +69,28 @@
 ## 结论
 
 Point 层的数值核心（距离计算、变换应用公式）在 `*RustF32` 族下与 jagua-rs 逐操作等价，包括 f32 域的减法、平方、求和与 sqrt 次序。剩余差异集中在 Rust trait 系统的形态性 API（Hash 位级语义、TransformableFrom、泛型反转委托），这些在 C++ 中没有直接对应物但几何数值行为已被覆盖；另有一组 C++ 自有的 double 无后缀 API 与防御性 IsFinite，属于设计上的双 API 族策略，不构成对 Rust 行为的偏离。
+
+## 补充审计（2026-09-29）
+
+逐行复核 point.rs 全部 87 行（结构、2 个 trait 实现、TRANSFORM_FORMULA、2 个访问器、DistanceTo、Eq/Hash、2 个 From、泛型 CollidesWith），确认主记录条目已覆盖全部函数。以下为补充核对项：
+
+### 【浅覆盖→补齐】Point 的 Hash（to_bits）实际消费链核实
+- 主记录判定 C++ 缺失 Hash，并推测"任何依赖 Point 哈希的 Rust 数据结构（如 UniqueVertices）在 C++ 中必须另行处理"。
+- 补充核实（全库检索）：jagua-rs 核心中**没有任何结构以 Point 为键做哈希**——`util/assertions.rs` 的 HashSet 键是 `(HazardEntity, u8)`，而 `HazardEntity`（hazard.rs:38-40 derive Eq+Hash）的字段为 `usize / DTransformation / PItemKey`，均不含 Point。geometry 层唯一疑似点 `simple_polygon.rs:45 points.iter().unique()` 经查 itertools 0.13.0 `unique_impl.rs:100-117` 确认其约束是 `Item: Eq + Hash + Clone`，**用的是 HashMap（Hash 路径）而非主记录推测的"Vec+contains（PartialEq 路径）"**——即 Rust 的重复点查重实际走 `to_bits` 哈希。这对 05 记录的"重复点查重语义一致"结论有修正，见 05 补充审计。
+- 判定：Hash 缺失本身成立，但**实际影响面比主记录表述更小**：jagua-rs 无任何以 Point 为哈希键的容器（除上述 unique 一处，其行为差异见 05）。
+- 证据：point.rs:59-66；itertools-0.13.0/src/unique_impl.rs:107-116（`used.entry(v)` HashMap）；全库 grep 无 `HashSet<Point>`。
+
+### 【浅覆盖→补齐】PartialEq/Eq 的 NaN 语义细节修正
+- 主记录"Eq / Hash"条称 `impl Eq`（point.rs:57）"在 f32 NaN 时技术上不被满足——这是 jagua-rs 接受的既有松动"。补充：`Point` 的 PartialEq 是**逐字段 f32 `==`**（derive），NaN != NaN；Eq 标记只是编译期断言"eq 是等价关系"，运行时无额外行为——该松动不影响任何已比对路径的数值行为，两侧（C++ `==` 同为 NaN 不等）在 NaN 判定上一致。
+- 判定：【一致】（NaN 语义两侧相同：`==` 均 false）。
+- 证据：point.rs:7（derive PartialEq）、point.h:42。
+
+### 【遗漏→补齐】TRANSFORM_FORMULA 常量条目
+- point.rs:26-31 的模块级 `const TRANSFORM_FORMULA`（闭包常量）是 Point 两个变换方法的唯一数值来源，主记录只在 transform 条目里间接引用。此处单列确认：公式 `m[0][0]*x + m[0][1]*y + m[0][2]*1.0`（y 同理）与 C++ `Transform2d::ApplyRustF32`（Transformation.cpp:34-35 `cosValue*x - sinValue*y + tx`）在 rot_transl 矩阵展开下逐项对应（m[0][0]=cos, m[0][1]=-sin, m[0][2]=tx）；`* 1.0` 在 f32 中精确无舍入。C++ 侧无独立常量（内联于 ApplyRustF32）。
+- 判定：【一致】（数值路径；C++ 缺常量形态但由 ApplyRustF32 内联覆盖，已在记录 06 覆盖）。
+
+### 【遗漏→补齐】point.rs 无 cfg(test) 测试模块——行为契约核实
+- 审计要求确认 cfg(test) 锁定的行为契约：point.rs 全文（87 行）**无任何 `#[cfg(test)]` 或 `#[test]`**，geometry 层除 quadtree/tests.rs 外同样无测试模块。因此 Point 层无测试锁定的行为需要 C++ 侧复刻。
+- 判定：不适用（无测试契约；C++ tests/TestGeometry.cpp 等的锁定属 C++ 自有验收，不影响等价性判定）。
+
+补充结论：01 记录覆盖完整，无实质遗漏；Hash 影响面表述已修正（更小），itertools unique 的哈希路径发现移交 05 记录处理。

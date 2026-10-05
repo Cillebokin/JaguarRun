@@ -487,13 +487,19 @@ void QuadTree::RegisterIntoNode(Node& node,
             node.children[i]->bounds = quadrants[i];
             node.children[i]->level = static_cast<std::uint8_t>(node.level - 1);
         }
-        // 把已有 hazard constrict 到新子节点
+        // 把已有 hazard constrict 到新子节点——每个 hazard 用自己的形状
+        // （jagua-rs qt_node.rs:44：constrict 按各自 hkey 从 haz_map 取形状）
         for (const NodeHazard& existing : node.hazards)
         {
-            if (shapeIt == shapes.end() || !shapeIt->shape)
+            const auto existingShape = std::find_if(
+                shapes.begin(), shapes.end(),
+                [&existing](const RegisteredShape& registered) {
+                    return registered.handle == existing.handle;
+                });
+            if (existingShape == shapes.end() || !existingShape->shape)
                 continue;
             std::array<NodeHazard, 4> children =
-                Constrict(existing, quadrants, *shapeIt->shape);
+                Constrict(existing, quadrants, *existingShape->shape);
             for (std::size_t i = 0; i < 4; ++i)
             {
                 if (children[i].presence != HazardPresence::None)

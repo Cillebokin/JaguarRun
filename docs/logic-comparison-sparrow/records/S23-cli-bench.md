@@ -86,3 +86,13 @@
 
 ## 结论
 CLI 主干（读 JSON 实例→配置覆盖→Optimize→写解 JSON→可选 SVG→版本/指标摘要）两侧一致，早停/种子两选项语义逐项等价，判定基本等价。最大的实质差异在两处：时间预算模型（Rust 的 -t/-e/-c 相位分摊 vs C++ 的全局 --time-ms，默认时限数值也不同）与 bench 的定位分叉（Rust 是任意实例×多 run×并行×分布统计的性能基准，C++ 是双内置场景×固定种子×checksum 的确定性回归基准）——后者覆盖面互补但不重叠，做性能对齐时需另行在 C++ 侧补多 run 统计或用 Rust bench 驱动对照。
+
+### 补充审计（2026-09-29，bench.rs 229 行逐场景复核）
+**【任务指定核对项】bench.rs 的每个基准场景/函数逐项覆盖核对**：
+
+1. **【遗漏补记：main 的三个参数解析与种子选择】** 主文"入口参数"条目记了 argv 三参但未记种子语义：bench.rs:42-50 `config.rng_seed` 有值（DEFAULT_SPARROW_CONFIG.rng_seed=None，故恒走 None 分支）→ `rand::random()` 真随机 + println（与 CLI 的 warn 日志不同通道）。C++ BenchMain 无对应 RNG 初始化（config.seed=42 硬编码，:131）。判定：【差异】（归入主文差异 #4 的定位分叉）。
+2. **【浅覆盖补全：批次划分数学】** bench.rs:59-60 `n_runs_per_iter = (physical_cores / n_workers).min(n_runs_total)`、`n_batches = ceil(n_runs_total / n_runs_per_iter)`——注意 `min(n_runs_total)` 使单批即可完成时不再分批；rayon scope 内每 run 派生 `rng.random()` 子种子（:84）+ 每 run 内部再按构造/探索/压缩三段 `next_u64()` 派生（:91-92，与 mod.rs:37 optimize 的派生序一致——bench 直接调 LBFBuilder/exploration_phase/compression_phase 三件而非 optimize()，**不消耗 optimize 的相位报告/相位超时语义**，terminator 用 BasicTerminator 手动 new_timeout（:96/:103）。C++ 侧 Optimize 单次调用含完整三阶段编排。判定：主文差异 #4（多 run 缺失）维持，此处补记 bench 复用 optimize 内部件的接线形态。
+3. **【浅覆盖补全：229 行中的每个函数清单核对】** main（:22-138）、calculate_percentile（:141-168，Excel (n-1) 插值公式 k=pct*(n-1)+1、lower/upper 线性插值）、calculate_median（:171-173 = percentile(0.5)）、calculate_average（:176-178）、calculate_stddev（:181-185，**总体**标准差/无 Bessel 修正）、get_git_commit_hash（:188-198，git rev-parse HEAD）——主文"统计函数"条目已概括，无遗漏函数；输出统计含 widths 与 usages 两组各 7 行（worst/25%/med/75%/best/avg/stddev，:128-137，**usages 的 25%/75% 与 widths 的 pct 参数互补**——widths 用 0.75/0.25 升序、usages 同参数但因 usages 越大越好而"best"取 max）。C++ 无对应（主文判定维持缺失）。
+4. **【核对确认：C++ 两个内置场景的现场细节】** BenchMain.cpp:127-152：`lbf_spp_small`（夹具 LbfSppSmall.json）/`lbf_spp_large`（MakeLargeInstance 程序生成 8 类矩形 0.8-1.4×0.9-1.2、demand 2/3、容器宽 8.0，:84-125）；配置 seed=42、constructor 128/32（large 48/12）采样、exploration/compression maxIterations 1-2、maxConsecutiveFailures 3、strike 2、noImprovement 6、timeLimit 0ms（**禁相位超时**）、terminator.maxIterations 256/512、FAILURE_BASED 衰减——全部为 Rust bench 无对应的回归专用配置，主文差异 #4/#5 判定维持。
+5. **【核对确认：main.rs 13 行】** 全文为 tui/cli feature 二选一 + `fn main() { run() }`，无遗漏逻辑，主文判定维持。
+6. **【核对确认：cli.rs 127 行】** 逐段（时间预算三分支 :40-55、早停 :53-57、种子 :62-72、Importer 三参 :78、SvgExporter 三路径 :87-105、CtrlCTerminator :107、optimize 调用 :109-117、ExtSPOutput 写盘 :119-125）主文与 S22 均有条目，无遗漏。

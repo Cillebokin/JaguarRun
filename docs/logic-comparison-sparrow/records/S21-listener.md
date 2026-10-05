@@ -59,3 +59,8 @@
 
 ## 结论
 监听器的事件面（解报告五类型、相位切换、分离进度/结果、压缩进度）与两个进度结构体字段在 C++ 侧一一对应且数值语义一致，默认空实现行为一致，判定基本等价。C++ 的扩展集中在工程形态上：trait→虚基类、二元参数→报告结构体、null 替代 dummy、并额外提供 OnProgress/OnImprovement 通道与解历史返回值，为浏览器 Demo 与 NestLab GUI 的展示需求服务（见 S24）；这些扩展不改变 Rust 侧既有事件流的语义。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：文件覆盖完整性】** listener.rs 62 行全量复核：trait 5 方法（report + 4 默认空实现）、OptimizationPhase 2 值、SeparationProgress 4 字段、SeparationResult 5 字段、ReportType 5 值、DummySolListener——主文均有条目，无遗漏项。
+2. **【遗漏补记：report 方法的必要性与 Dummy 的差异】** Rust trait 中 `report` **无默认实现**（强制实现者处理解事件，listener.rs:5）；其余 4 方法有默认空体。C++ 五个虚函数全部有空默认体（cpp:5-33）——即 C++ 允许全空监听器而 Rust 至少需实现 report（DummySolListener 提供空 report）。纯 API 形态差异，无行为影响，补记闭合。
+3. **【浅覆盖补全：消费方覆盖验证】** 现场核验 Rust 侧全部实现者：SvgExporter（report 实写，svg_exporter.rs:39-65）、DummySolListener（bench.rs:98/105 占位）、TuiListener（runtime.rs:193-227，**五方法全部实写**——report/report_phase/report_separation_progress/report_separation_result/report_compression_progress 经 mpsc 信道推 UI）。C++ 侧消费方：CLI 不传（nullptr）、Bench 不传、Demo 经 WASM 结果 JSON。S24 的"事件面无缺口"判定据此成立（TuiListener 消费的 5 事件在 OptimizationListener 均有对应虚方法）。

@@ -60,3 +60,9 @@ C++ `BestSamples` 类与 Rust `BestSamples` 结构逐方法对应；接受/淘�
 ## 结论
 
 BestSamples 的核心语义——"上界淘汰（未满容量放行）→ 相似度聚类（更好则整簇替换，否则拒绝）→ 插入后按 eval 排序（best 在前）"——在 C++ 中逐分支复刻，包括 FPA 容差语义的 `<`（近似相等不更优）、`% 2π` 非循环角度差、1° 旋转阈值。两侧均被 LbfSearch/SeparatorSearch 的 report/keep trace 锁定。差异集中在退化边界（排序稳定性、NaN 防御、size=0 下溢）与精度路径（double 中转），正常输入下行为等价。
+
+### 补充审计（2026-09-29）
+1. **【核对确认：107 行逐项覆盖】** best_samples.rs 全量复核：结构（3 字段）、new、report（三分支+排序+双 debug_assert）、best、upper_bound、dtransfs_are_similar——主文 5 小节全覆盖无遗漏。
+2. **【浅覆盖补全：report 的相似度四连调用的重复计算】** Rust report 内 `dtransfs_are_similar` 被**调用 4 次**（any :30-31 / filter :40-42 / all 的迭代 :43-45 / retain :50-52——同一 (dt, samples) 对重复求值）；C++ 收集 similarIndices 一次（cpp:62-69）复用索引。纯性能形态差（判定不变），补记供性能对照时定位。
+3. **【浅覆盖补全：upper_bound 的 get(size-1) 越界语义】** 主文条目 3 已记 size=0 下溢 panic；补记一个更常用的正确路径细节：`samples.len() < size` 时 `get(size-1)` 为 None → Invalid——**len 与 size 之间任意差值**（如 len=1,size=3）都返回 Invalid（未满即无界），C++ `m_Samples.size() < m_Capacity || empty()` 同语义（cpp:135-142）。判定维持一致；C++ 的 `|| m_Samples.empty()` 冗余防御（size>0 且非空时 size≥1 恒真于 empty false）无行为差。
+4. **【核对确认：sort_by_key 稳定性的实际影响面】** 主文差异 #1 的退化场景描述（FPA 近似相等的两样本 C++ std::sort 顺序不确定）判定维持；补记：Rust `sort_by_key` 稳定排序在 BestSamples 场景的键为 SampleEval（Ord 走 FPA）——近似相等键的插入序保持，C++ 不稳定排序可能交换——但**相似度淘汰在两近似相等样本间通常先触发**（1°/5% 阈值远宽于 4-ulp），实际不可达，与主文"fixture 未触发"结论一致。

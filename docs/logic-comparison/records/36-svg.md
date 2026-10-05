@@ -130,3 +130,32 @@
 ## 结论
 
 C++ 的 SVG 导出是一次有意的重写而非逐属性移植：y-flip、viewBox/stroke 公式、逐项展开（无 defs/use）共同决定了输出与 Rust 不兼容（同一布局渲染为镜像、尺寸参数不同）。功能覆盖上，eef0830 补齐 quality_zones 图层与十色主题后，容器/物品/质量区/代理/碰撞高亮五类核心图层均已存在且样式常量大量对齐；仍缺 quadtree 图层、可见信息标签、`draw_cd_shapes`/`highlight_cd_shapes` 开关、min_quality 混色与 GRAY 主题，另新增 axes 与调试元数据为 C++ 特有。
+
+### 补充审计（2026-09-29）
+
+对 layout_to_svg.rs（487 行）+ svg_util.rs（291 行）逐行复核（SvgExport.cpp 自 eef0830 后无改动，git log 确认最后修改为 2026-09-28 eef0830；quality_zones 图层与 `qualityZoneFills[10]` 主题已在位，原记录已反映）。重点核对任务关注的"功能性"遗漏：
+
+1. **`blend_colors` 的功能性影响再确认（原记录差异 10 判定"C++ 缺失"成立，补充量化）**——Rust 对 `min_quality = Some(q)` 的物品填充 `blend_colors(item_fill, qz_fill[q])`（layout_to_svg.rs:162-165，各分量 `(c1+c2)/2` 后 `as u8` 截断）。C++ 恒 `itemFill`（SvgExport.cpp:196-201）。**这是视觉语义差异而非纯样式**：Rust 的带质量要求物品颜色随 q 变化（q=1 → FF6400 系混合色、q=9 → E56300 系混合色），C++ 全部同色——用户无法从 C++ SVG 区分"有质量要求的物品"。判定维持：C++ 缺失（功能性视觉信息丢失）。
+2. **`DefaultHasher` 去重的功能性等价（原记录差异 12 已覆盖，补充机制细节）**——Rust `haz_hash < pi_hash` 用 `DefaultHasher`（SipHash-1-3，随机种子）对 `HazardEntity` 哈希（layout_to_svg.rs:375-386）：**每对碰撞去重的选择侧是随机的**（哈希序不定）；C++ 用 handle 的 `(index, generation)` 字典序（cpp:313-317）固定选 handle 大的一侧。效果同为每对一条线；方向随机 vs 固定。无视觉影响（线无箭头）。判定：基本等价（去重目标一致；确定性 C++ 更优）。
+3. **`halfBrightness` 对 `change_brightness(color, 0.5)` 的覆盖（原记录已比对，补充调用点差异）**——Rust 唯一调用点是 quality zone 描边（layout_to_svg.rs:129）；C++ 同（cpp:250）。Rust 的通用 fraction 参数（0.5 以外的值）在库内无其他调用点，C++ 固定 0.5 **无功能损失**。判定维持一致。
+4. **主题预设 `GRAY`（svg_util.rs:82-101）功能性评估（原记录差异 11 判"C++ 缺失"成立，补充影响面）**——GRAY 是库内第二预设（`stroke_width_multiplier=2.5`、灰阶配色、`qz_stroke_opac=0.9`），Rust 调用方可通过 `SvgDrawOptions::theme` 选择；C++ `SvgLayoutTheme` 无命名预设但**字段全部可配置**（值初始化默认即 EARTH_TONES 等价值）——调用方可手工填出 GRAY 等价主题。判定细化：**预设常量缺失、能力不缺失**（主题结构体可表达）。
+5. **`hole_fill`（svg_util.rs:48,65,86）的"死字段"确认（原记录判"C++ 缺失"，修正影响评估）**——核实 Rust 侧 `hole_fill` 在 layout_to_svg.rs 中**零调用**（holes 以 quality 0 zone 身份绘制，用 `qz_fill[0]` 黑色，不用 hole_fill）。即 hole_fill 是**未使用的主题字段**（serde 可配置但渲染不用）。C++ 不实现**无功能损失**。判定修正：C++ 缺失（字段级）但无行为影响（Rust 死字段）。
+6. **quality_zones 绘制顺序边界（补齐）**——Rust `container.quality_zones.iter().rev().flatten()`（layout_to_svg.rs:127）：zones 向量按质量升序存储（import 时 0..N 顺序 push），`.rev()` 从最高质量画起（后画的在下层——SVG 后序元素在上层，即**低质量（q=0 黑）最后画、显示在最上层**）。C++ `for (quality = fills.size(); quality-- > 0;)`（cpp:238-239）从 9 到 0，同序。一致（补齐"高→低"方向证据）。
+7. **items defs/use 的 `int_transf` 语义（原记录第 5/6 层已覆盖，补齐一个易错点）**——Rust `int_transf = draw_cd_shapes ? identity : pre_transform.compose().inverse()`（layout_to_svg.rs:184-190）：非 CD 模式下 item def 中的 path 是**原始形**、需先逆中心化才能配合 Use 的**外部**变换；surrogate def 中的 pole 坐标是 CD 域的、同样用 `int_transf` 逆中心化。C++ 无 defs 结构，path 直接用 `polygonPath(shape, internalTransform)`（cpp:203-208）以内部变换放置碰撞形。**最终几何位置双侧一致**（原记录 79 行已分析），此处补充：Rust 的 `poi_style` 黑色 POI 圆（fill-opacity 0.1）与 ff/非 ff 三级样式在 C++ 全部统一为 `surrogateStroke` 空心圆（cpp:99-112,218-224）——**POI（首位 pole）在 C++ 中无任何视觉区分**，调试时可辨识性下降。判定：差异（功能性调试信息丢失，非纯样式——Rust 的 POI 标记用于人工核对 pole-of-inaccessibility 位置）。
+8. **`transform_to_svg` 数值格式（补齐）**——Rust `format!("translate({tx} {ty}), rotate({r})")`：`{tx}` 默认 Display 格式（f32 最短表示）；C++ `number()` `setprecision(17)`（cpp:17-22）。数值精度不同（双侧解析后坐标一致，字符串形态不同）。属既有"数值格式"差异族（原记录 simple_polygon_data 条已提）。
+9. **`SvgDrawOptions` 的 serde 序列化（原记录差异 11 已提，补充用途评估）**——Rust `SvgDrawOptions`/`SvgLayoutTheme` 可 `Serialize/Deserialize`（svg_util.rs:13,43，含 `#[serde(default)]`）：用于从 JSON 配置驱动 SVG 渲染选项。C++ `SvgExportOptions` 为纯 POD 无序列化。若调用方生态（sparrow）用 JSON 传渲染配置，C++ 需自行实现。核实 sparrow 侧未用该序列化路径（仅代码内构造）。判定维持：C++ 缺失（能力级，当前无使用方）。
+10. **`quad_tree_data` 的 filter 参数（遗漏的细节）**——Rust `quad_tree_data(&layout.cde().quadtree, &NoFilter)`（layout_to_svg.rs:310）传 `NoFilter`（全量统计）；C++ 整层缺失（原记录差异 6）。无修正。
+11. **`aa_rect_data`（svg_util.rs:283-291，`#[allow(dead_code)]`）**——Rust 自标注死代码；C++ 无对应。一致（双侧均无行为）。
+12. **C++ `polygonPath` 的空多边形守卫（补齐）**——`if (vertices.empty()) return {}`（cpp:71-72）：空 path `d=""` 输出。Rust `simple_polygon_data` 对空多边形 `vertex(0)` 会 panic（索引越界）。C++ 更防御（Rust 侧空多边形在导入时已被 `SPolygon::new` 拒绝，不可达）。判定：C++ 额外防御，正常路径无差异。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | min_quality 物品混色（功能性） | C++ 缺失 | 带质量要求物品与普通物品在 C++ SVG 中不可视觉区分 | layout_to_svg.rs:162-165 vs SvgExport.cpp:196-201 |
+| S2 | POI 视觉标记（黑圆/ff 分级） | C++ 缺失（调试信息） | POI 位置不可人工核对；ff/非 ff pole 不可区分 | layout_to_svg.rs:195-216 vs SvgExport.cpp:99-112,218-224 |
+| S3 | hole_fill 为 Rust 死字段 | 修正影响评估 | 渲染不用（holes 走 qz_fill[0]），C++ 不实现无功能损失 | svg_util.rs:48 + layout_to_svg.rs 全文零调用 |
+| S4 | GRAY 预设 | 字段级缺失、能力不缺失 | 主题结构体可手工表达 | svg_util.rs:82-101 vs SvgExport.h:25-49 |
+| S5 | DefaultHasher 去重随机性 | 基本等价（C++ 确定） | 每对一条线；选侧随机 vs handle 字典序 | layout_to_svg.rs:375-386 vs SvgExport.cpp:313-317 |
+| S6 | 空多边形 path | C++ 额外防御 | `d=""` vs Rust panic（不可达路径） | svg_util.rs:185-191 vs SvgExport.cpp:71-72 |
+| S7 | 变换串数值格式 | 差异（字符串形态） | f32 Display vs setprecision(17) | layout_to_svg.rs:486 vs SvgExport.cpp:17-22,85-91 |

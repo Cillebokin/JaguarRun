@@ -140,3 +140,29 @@
 ## 结论
 
 rect.rs 的全部数值方法在 `*RustF32` 族中逐操作复刻成功，包括 FPA 偏序（LessEqualRustF32 ↔ float-cmp epsilon+4ULP，位映射公式两侧同构）、quadrants/corners/edges 的顺序、以及 Edge-in-Rect 判交的三段算法。仅存的实质行为差异是 `scale` 的失败通道（panic vs Result），以及 C++ 额外提供一套与 Rust 顺序都不同（quadrants）的无后缀 double API——后者只要调用方统一使用 RustF32 族就不构成对齐风险。
+
+## 补充审计（2026-09-29）
+
+逐行复核 rect.rs 全部 413 行（17 个方法 + 5 个 trait 实现块），确认主记录已覆盖全部函数级条目。以下为补充核对项：
+
+### 【浅覆盖→补齐】ordered-float 版本核实（OrderedFloat 的 Ord/Hash 语义）
+- 主记录多处引用 `OrderedFloat`（rect.rs:406 `min_by_key(OrderedFloat)`、07 记录凸包排序），未核对库版本。Cargo.lock 确认 jagua-rs 用 **ordered-float 5.5.0**。
+- 关键语义核实（ordered-float-5.5.0/src/lib.rs:292-304）：`Ord::cmp` 用 `<`/`>` 原生比较——**NaN 与任何值比较均为 false，落到 else 分支返回 Equal**。即 OrderedFloat(NaN) 与 OrderedFloat(x) 互相 cmp 为 Equal（非"NaN 排最后"的严格全序）。对 rect.rs:406 `min_by_key`：若某距离为 NaN，它与当前最小比较为 Equal → 不替换（保首个）——与 C++ `MinRustF32`/fmin（NaN 返回另一方）行为**不一致**（fmin(min, NaN)=min，即 NaN 永不成为最小；OrderedFloat 路径下 NaN 与 min 相等也不替换，结果同为保留非 NaN 最小值——**实际结果一致**）。仅当**全部**候选为 NaN 时两侧才有差异（Rust 返回首个 NaN，C++ 返回 f32 初值链的结果），该输入被 Create 的有限值校验排除，不可达。
+- 判定：【一致】（NaN 不可达；Ord 的 Equal-on-NaN 语义细节存档备查）。
+- 证据：rect.rs:406；ordered-float-5.5.0/src/lib.rs:294-303；rect.h:253-257。
+
+### 【浅覆盖→补齐】FPA 与 AlmostEqualRustF32 的±Inf 分支次序细节
+- 主记录 almost_relation_to 条称 float-cmp 与 AlmostEqualRustF32 "仅 ±Inf 两侧分支次序不同但结果同为'不等'"。补充核实 float-cmp 0.10.0 eq.rs：其 approx 检查在 ulps 比较前有 `isfinite` 短路（若任一非有限且 abs 差 > epsilon 即 false）。C++ RustF32.h:55-56 `if (!isfinite(first) || !isfinite(second)) return false;` 同语义（且 C++ 先做 `first == second` 短路：+Inf == +Inf → true；float-cmp 的 `approx_eq!` 宏同样以 `a == b` 起始短路）。两侧对 ±Inf：相等 Inf → true；不等 Inf → false——**完全一致**，主记录的"次序不同"仅指内部判断顺序，无行为差。
+- 判定：【一致】（确认主记录结论）。
+- 证据：RustF32.h:49-64；float-cmp-0.10.0/src/eq.rs。
+
+### 【遗漏→补齐】Rect 无 Hash/无 Eq derive（与 Point 的不对称）
+- rect.rs:13 `#[derive(Clone, Debug, PartialEq, Copy)]`——Rect **无 Eq、无 Hash**（Point 有）。C++ rect.h 亦无 Rect2d 的 operator==。两侧对称地都只提供字段级比较能力（Rust PartialEq vs C++ 无），无哈希容器依赖。
+- 判定：【一致】（均无哈希需求；C++ 连 == 都未提供，但 Rust 侧 Rect 的 PartialEq 在核心代码中无调用方——仅测试性使用）。
+- 证据：rect.rs:13 vs rect.h 全文无 operator==。
+
+### 【遗漏→补齐】cfg(test) 行为契约——rect.rs 无测试模块
+- rect.rs 全文 413 行无 `#[cfg(test)]`。四叉树层（19-21 号记录）通过 quadrants/relation_to 等间接锁定行为，本文件自身无测试契约。
+- 判定：不适用。
+
+补充结论：02 记录覆盖完整。新增两项库级语义核实（ordered-float 5.5.0 的 NaN-Equal Ord、float-cmp 的 Inf 短路）均确认主记录判定不变。

@@ -89,3 +89,35 @@ struct CDEConfig
 ## 结论
 
 库级配置的形态差异大于行为差异：C++ 移除了 feature 门控与 `Instant`/时间戳体系（三问题类型全量编译、计时责任上移调用方），错误处理以 `Result`/错误码完整替代 anyhow/thiserror（即本系列"panic→Result"约定的源头），`NumericPolicy` 为额外自有体系。唯一实质性语义差异是 CDEConfig 默认值：C++ 自造 `4/32` 默认而 Rust 无默认（参考调用方 sparrow 实际取 `4/64`），零初始化路径下 C++ 的 cd_threshold 与参考用法不一致，移植调参时需注意。
+
+### 补充审计（2026-09-29）
+
+对 lib.rs 36 行 + Cargo.toml 42 行逐行复核。原记录已覆盖模块声明/features/`document_features`/`Instant`/CDEConfig/错误形态/NumericPolicy/版本/clippy 共 9 项；补充遗漏/需修正各点：
+
+1. **Cargo.toml `[dependencies]` 18 项依赖的映射全景（遗漏）**——原记录未逐项盘点依赖。Rust 依赖 → C++ 承担方式：
+   - `serde`（17 处 derive/手工 impl）→ JsonCodec.cpp 手工解析/序列化（1977 行，记录 33/35/37）；
+   - `anyhow`/`thiserror` → result.h（记录 40 差异 5）；
+   - `float-cmp` → RustF32.h + Importer.cpp 私有拷贝（记录 38）；
+   - `itertools`（unique/all_unique/collect_vec 等）→ std::set/手工循环（Importer.cpp:158-168 等）；
+   - `svg` crate → SvgExport.cpp 手工拼 XML（记录 36）；
+   - `rayon` → 顺序循环（记录 37 差异 9）；
+   - `slotmap` → `handle{index, generation}` 手工实现（Assertions.cpp/placed item 处处）；
+   - `log` → 无对应（C++ 无日志设施）；
+   - `ndarray`/`rand_distr`/`getrandom`/`ordered-float`/`geo-types`/`geo-buffer` → 库内使用点分散（ndarray 系 surrogate 配置矩阵、geo-types/geo-buffer 系 sp 特性，C++ 用 std 容器替代）；
+   - `document-features`/`web-time` → 无对应（记录 40 差异 8/2）。
+   判定：依赖层面已全部有承接或显式缺失记录，无新增缺口。
+2. **`Instant` 类型别名的 `pub type`（浅覆盖→补齐 C++ 替代细节）**——Rust `pub type Instant = web_time::Instant;`（lib.rs:36）为**类型重导出**（非 newtype），Rust 调用方 `use jagua_rs::Instant` 获得 web 兼容 Instant。C++ 无时间抽象，`runTimeSec` 参数（JsonCodec.h:37,42,47 默认 0）+ 调用方计时。原记录差异 2 已覆盖，补充：`Instant::now()` 的调用点在 Rust `*Solution::new`（probs entities 层，记录 27/29/31 范畴），本记录不重复。
+3. **`#![warn(clippy::pedantic ...)]` + `#![allow(missing_panics_doc, missing_errors_doc)]`（原记录 73 行已提，补齐 allow 项）**——原记录只提 warn 集合，遗漏 `#![allow]`（lib.rs:9）：显式豁免 panics/errors 文档 lint——印证本系列"panic 是库的显式行为"的定位（与 C++ panic→Result 约定的背景一致）。判定：工具链差异，无行为影响。
+4. **Cargo.toml `[package.metadata.docs.rs] all-features = true`（遗漏）**——docs.rs 构建时全 feature 开启。无 C++ 对应（无 feature 体系）。判定：随差异 1/8 消失。
+5. **`probs/mod.rs` 的 feature 门控（原记录 27 行提到，补齐证据）**——`#[cfg(feature = "spp")] pub mod spp;` 等（probs/mod.rs）。C++ Problems/ 三组头全量。原记录差异 1 成立。
+6. **CDEConfig 差异 3 的现状复核（无变化）**——CollisionEngine.h:35-36 仍为 `quadtreeDepth = 4 / cdThreshold = 32`；sparrow/src/config.rs:88-89 仍为 `4/64`。原记录差异 3 **继续成立**（未在 9-29 改动中修正）。提醒：若 SparrowCore 调用方零初始化 `ImporterConfig{}`，将得到 cdThreshold=32 而非参考的 64——需调用方显式传值。
+7. **`SPSurrogateConfig` 默认值交叉核验（补齐）**——原记录 59 行称"C++ `{}` 默认构造；Rust 无 Default（sparrow 给 …）"。补充：C++ `SurrogateConfig{}` 的成员默认值若与 sparrow 实际值不同，则与差异 3 同性质（默认 vs 参考用法偏离）。记录 15 已覆盖该结构体，本记录交叉引用不重复判定。
+
+补充差异汇总：
+
+| # | 项 | 判定 | 影响 | 证据 |
+|---|---|---|---|---|
+| S1 | 18 项依赖映射全景 | 一致（补齐盘点） | 每项依赖均有承接或显式缺失记录 | Cargo.toml:13-30 vs 各 C++ 模块 |
+| S2 | `#![allow(missing_panics_doc/errors_doc)]` | 工具链差异（补齐） | 印证 panic 为显式行为的库定位 | lib.rs:9 |
+| S3 | `[package.metadata.docs.rs]` | 随 feature 体系消失（补齐） | 无行为影响 | Cargo.toml:40-42 |
+| S4 | CDEConfig 4/32 vs sparrow 4/64 | 差异 3 复核成立（未修正） | 零初始化路径取 32 偏离参考用法 | CollisionEngine.h:35-36 + sparrow/config.rs:88-89 |

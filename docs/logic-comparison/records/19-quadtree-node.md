@@ -81,3 +81,48 @@
 
 ## 结论
 查询结果层面双侧等价：virtual root 下降、象限相交过滤、presence 语义（Entire 立即命中、Partial 精确几何复核）一一对应。核心架构差异是 Rust 的增量 constrict + 节点内缓存（presence/边子集/n_active_edges）对比 C++ 的全量重建 + 查询期对 queryBounds 现场重分类，后者把 Rust 的三层优化（Entire 短路、边子集、quadrant_order 启发式）全部让位于"宁可重算"的统一路径；cd_threshold/edgeThreshold 同源但作用时点不同（查询时 vs 建树时）。
+
+## 补充审计（2026-09-29，逐行复核 2026-09-29 重写基线：Quadtree.cpp 当前 750 行）
+
+重写后的 C++ 已与本记录"判定"列中标注的旧架构条目全面脱钩：现版本 Quadtree.cpp 是 qt_node/qt_hazard/qt_partial_hazard/qt_hazard_vec 的结构级移植（Node 持 NodeHazard 向量按 presence 降序、PartialHazard 边子集 + ffBbox、activeEdges 缓存、懒扩展、增量 constrict/deregister、VirtualRootFor）。上表差异 #1/#2/#3/#9 描述的"全量重建/不存边子集/建树期阈值"均不再成立。逐行复核发现以下**新遗漏/偏差**（均为记录未覆盖）：
+
+### 补-1【遗漏·疑似 bug】`RegisterIntoNode` 的 constrict 形状查找按"新 hazard 句柄"而非"当前被 constrict 的 hazard 句柄"
+- Rust（qt_node.rs:39-82）：`register_hazard` 收到 `new_qt_haz` 后，懒扩展时对**每个已有 hazard** 调 `constrict_and_register_to_children`，其中 `qt_hazard.constrict(child_bboxes, haz_map)`（qt_node.rs:44）按**该 hazard 自身的 hkey** 从 `haz_map` 取形状（qt_hazard.rs:64 `haz_map[self.hkey].shape`）——每个 hazard 用自己的形状。
+- C++（Quadtree.cpp:469-521）：`RegisterIntoNode` 开头算出的 `shapeIt`（按 `hazard.handle` 查 `shapes`，Quadtree.cpp:473-477）在两处被复用：
+  - 懒扩展分支对已有 hazard 的 constrict（Quadtree.cpp:491-496）：`Constrict(existing, quadrants, *shapeIt->shape)` —— **用新 hazard 的形状 constrict 旧 hazard**！
+  - 新 hazard 下放分支（Quadtree.cpp:506-519）：`Constrict(hazard, ...)` 用 `shapeIt` —— 此处正确（新 hazard 用自己的形状）。
+- 后果：懒扩展时旧 hazard 的 constrict 走 `Partial` 分支时，`Constrict` 内部 `shape.BoundingBox()`（Quadtree.cpp:325）、`shape.ContainsRustF32(centroid)`（Quadtree.cpp:446）全部拿**错误的形状**（新注册 hazard 的形状）计算，导致旧 hazard 在子节点的 presence/Entire/None 判定失真。这与 Rust 语义直接分叉，属**行为 bug**而非表示法差异。触发条件：同一节点上已有非 None 的 hazard 且节点因新 Partial hazard 首次懒扩展（首次注册即扩展的常见单 hazard 树不触发，多 hazard 场景触发）。注意 `bounds-only` 注册（`RegisterHazard(handle, Rect2d)`）的 `shapeIt->shape` 为空时 C++ 直接 `continue`（Quadtree.cpp:493-494）跳过旧 hazard 的下放——旧 hazard 从父节点消失于子节点（查询仍可从父级命中，但 cd_threshold 语义破坏），也是 Rust 无对应的行为（Rust hazards 必有 shape，qt_node.rs:44 恒可取形状）。
+- 判定：差异（bug）。
+
+### 补-2【遗漏】`collect_collisions_until` 的子节点遍历顺序：Rust 固定 0..3，C++ 圆路径按 `quadrantOrder` 启发式
+- Rust（qt_node.rs:183-190）：`colliding_quadrants.iter().enumerate().filter(...)` 固定按象限下标 0..3 顺序递归，`quadrant_order` 只用于 `collides`（qt_node.rs:118-124），collect 路径**无**启发式排序（记录正文差异 #5 已正确指出这一点）。
+- C++（CollisionEngine.cpp:390-414 `CollectCircleCollisionsUntil`）：子节点遍历使用 `circleQuadrantOrder`（CollisionEngine.cpp:404-405，Quadtree.cpp:209-223 的圆心象限优先序），与 Rust collect 路径的固定序不一致；Edge 版 `CollectEdgeCollisionsUntil`（CollisionEngine.cpp:355-361）固定 0..3 与 Rust 一致。
+- 影响：仅早停时收集到的 hazard **集合顺序**（以及 stop 回调触发点）不同——`stop_after_collision` 为 true 时 collector 内残留的 hazard 选取可能与 Rust 不同（树中按序先到者留）。全量收集（回调恒 false）时结果集合一致。注意 C++ 的 `CircleCollides`/`NodeCollidesWithCircle`（detect 路径）用 quadrantOrder 与 Rust collides 一致，属移植者把启发式误用于 collect 路径。
+- 判定：差异（早停语义下的顺序分叉；非全量收集的行为差异）。
+
+### 补-3【遗漏】`MakeRootHazard`/`RegisterHazard(handle, Rect2d)` 的 bounds-only 对角线假形状
+- Rust（qt_hazard.rs:37-44）：`from_root` 恒以**整形状边集**构造根 Partial；Rust 无"无形状 hazard"（Hazard.shape 为 Arc<SPolygon> 必有值）。
+- C++（Quadtree.cpp:273-298）：`hazard.shape` 为空时用根节点对角线 `Edge2d{(xMin,yMin),(xMax,yMax)}` 充当"整形状"（ffBbox=rootBounds）；`RegisterHazard(handle, Rect2d)`（Quadtree.cpp:573-592）同样以 hazardBounds 对角线注册。此形状参与后续 constrict 的边-象限相交（rectCollidesWithEdge）与 centroid ContainsRustF32 判定，产生与真实几何无关的 presence。记录正文差异 #8 已记该变体为"C++ 额外"，但未指出其**假形状会流入 constrict 语义**（父节点 Partial 下放时按对角线裁边、按对角线 bbox 判 Enclosed）。当前 jagua-rs 侧无调用方产生该形态，JaguarCore 侧亦无生产调用（测试无），风险待定。
+- 判定：C++ 额外（语义外溢未记录）。
+
+### 补-4【浅覆盖→已验证】qt_traits 逐行核验结果（记录正文按旧架构写的"Edge 查询用包围盒/无象限分类"已过时）
+重写后 qt_traits.rs 的每个函数在 C++ 中都有逐行移植，记录未逐条登记，现补齐：
+- `QTQueryable::collides_with_quadrants`（默认，qt_traits.rs:13-16）↔ `circleCollidesWithQuadrants`（Quadtree.cpp:199-206，Circle2d::IntersectsRustF32 逐象限，同 Rust `qs.map(collides_with(q))`）。判定：一致。
+- `impl QTQueryable for Edge::collides_with_quadrants`（qt_traits.rs:54-129）↔ `edgeCollidesWithQuadrants`（Quadtree.cpp:117-194）：bbox 无重叠快判（135-140 ↔ qt_traits.rs:64-69）、端点包含（142 ↔ :70-72）、`std::all_of(has_value)` 早退（146-153 ↔ :80-82）、六次 halfIntersect（left/right/top/bottom/hBisect/vBisect 与象限共享边配对，Quadtree.cpp:171-188 ↔ qt_traits.rs:103-118）、`.value_or(false)` 收尾（Quadtree.cpp:190-193 ↔ :120）。判定：一致。一处细节差异：Rust `q.collides_with(&self.start)` 用 Rect::collides_with(Point) 的 f32 精确比较（rect.rs:300-305），C++ `q.ContainsRustF32`（Quadtree.cpp:142）同为 f32 比较但多一层 `static_cast<float>` 归一——数值同源，等价。
+- `half_intersect`（qt_traits.rs:134-164）↔ `halfIntersect`（Quadtree.cpp:80-110）：`anyUndetermined` 短路（86-92 ↔ :140）、方向匹配（FirstHalf/Halfway→firstQuadrants、SecondHalf/Halfway→secondQuadrants，Quadtree.cpp:98-109 ↔ :144-162）。判定：一致。
+- `edge_intersection_half`（qt_traits.rs:169-202）↔ `edgeIntersectionHalf`（Quadtree.cpp:40-77）：t/u 参数式（54-62 ↔ :176-187）、平行早退（58 ↔ :180-183）、`[0,1]` 双包含（63 ↔ :187）、按 0.5 三分（65-71 ↔ :188-197）。判定：一致（数值路径 f32 对 f32）。`CollisionHalf` 枚举（Quadtree.cpp:32-37 ↔ qt_traits.rs:204-208）一致。
+- `impl QTQueryable for Circle::quadrant_order`（qt_traits.rs:26-48）↔ `circleQuadrantOrder`（Quadtree.cpp:209-223）：rowMask/containingQuadrant/firstAdjacentMask 位运算逐式对应（215-222 ↔ :27-37）；split 点取 `quadrants[0].xMin/yMin`（Quadtree.cpp:212 ↔ :26 `Point(quadrants[0].x_min, quadrants[0].y_min)`）。判定：一致。Rust 的 `debug_assert_eq!` 四象限模式表（qt_traits.rs:38-46）C++ 无对应断言（见记录 21 补充）。
+- `Rect::QUADRANT_NEIGHBOR_LAYOUT`（rect.rs:141 `[[1,3],[0,2],[1,3],[0,2]]`）↔ `kQuadrantNeighborLayout`（Quadtree.cpp:15-16 同值）。判定：一致。
+- `Rect::sides` 顺序核对：Rust sides = corners[0]→[1]→[2]→[3]（rect.rs:172-193，corners=[TR,TL,BL,BR]），即 [top(TR→TL), left(TL→BL), bottom(BL→BR), right(BR→TR)]。C++ `SidesRustF32() = EdgesRustF32()`（Edge.cpp:86-89），`EdgesRustF32` 由 `CornersRustF32()`（rect.h:164-169 [TR,TL,BL,BR]）连出（Edge.cpp:79-84）——顺序同为 [top,left,bottom,right]。Quadtree.cpp:159-162 按 `sides[0]=top,[1]=left,[2]=bottom,[3]=right` 取用，与 Rust `let [top, left, bottom, right] = r.sides()`（qt_traits.rs:89）一致。判定：一致（记录正文未提供该顺序证据，现补）。
+
+### 补-5【遗漏】`Constrict` 的 ff_bbox 退化回退分支
+- Rust（qt_partial_hazard.rs:42-53）：`from_parent` 在边集退化（`x_min < x_max && y_min < y_max` 不成立，即边全轴向对齐）时回退**父 ff_bbox**。
+- C++（Quadtree.cpp:399-408）：`if (xMin < xMax && yMin < yMax)` 不成立时 `partial->ffBbox = hazard.partial->ffBbox` 同样回退父 ff_bbox；边数等于父时直接继承（Quadtree.cpp:374-377 ↔ qt_partial_hazard.rs:25-27）。判定：一致（记录 20 未展开此分支，见记录 20 补充）。
+
+### 补-6【浅覆盖】`DeregisterFromNode` 折叠语义
+- Rust（qt_node.rs:84-95）：`remove` 返回 Some 才递归/折叠；`no_partial_hazards()`（"无任何 Partial"）→ children=None。
+- C++（Quadtree.cpp:523-541）：`RemoveHazard` 返回 false 即 return（525-526）；`HasPartialHazard()`（Quadtree.cpp:265-271）为 false 时 `node.children = {}`（528-531），否则递归。判定：一致（重写后逐行对应，正文差异 #1/#9 的旧"全量 Rebuild"描述过时）。
+- 一个边缘差异：Rust `no_partial_hazards` 判定的是**整个 QTHazardVec 无 Partial**；C++ `HasPartialHazard` 同为整个向量无 Partial。子节点折叠后该节点的 None/Entire hazard 仍在向量中（双侧一致），但 C++ 折叠时**直接丢弃子节点中可能残留的同句柄 hazard 吗**？——Rust 语义：折叠发生在"无 Partial"时，子节点里该句柄必然全是 None/Entire；Entire 情形折叠后父节点仍持 Entire 条目（可查询），None 无影响。C++ 同。判定：一致。
+
+### 补-7【遗漏】`Query(Rect2d)` 兼容接口的语义（重写后新增，正文未登记）
+- 重写后 `QuadTree::Query`（Quadtree.cpp:605-644）= 从 `VirtualRootFor(m_Root, queryBounds)` 起 DFS，节点 bbox 与 queryBounds 相交才进，收集 presence != None 的 handle 去重排序。该接口与 Rust `collect_collisions_until` 的**候选集语义不同**（不做叶级精确边测试、无 cd_threshold、无 collector/回调），仅作为 C++ 兼容层存在（`QueryVirtualRoot` 直接转发，Quadtree.cpp:651-655）。Rust 侧无对应 API（Rust 查询走 CDEngine 的 collides/collect_collisions_until）。当前 CollisionEngine.cpp 的主检测路径（NodeCollidesWith*/Collect*CollisionsUntil）已不经 `Query`，`Query` 仅测试（TestCollision.cpp:52-54、71-72）使用。判定：C++ 额外（兼容层，非 Rust 对应物；`PresenceAt`（Quadtree.cpp:657-683）/`NodeCount`（685-688）同为测试辅助 API，Rust 无对应）。

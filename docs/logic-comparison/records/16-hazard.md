@@ -74,3 +74,29 @@
 
 ## 结论
 Hazard 领域模型（实体四分类、三字段载荷、scope 语义）双侧一一对应，行为等价。主要形态差异是 slotmap key→generation 句柄、enum 变体→kind 判别式，以及 `scope()` 在 C++ 中被内联到 Classify/HazardCollides 的 Exterior 分支而不作为独立 API 存在。
+
+## 补充审计（2026-09-29，逐行复核）
+
+逐行清点 hazard.rs（79 行）全部符号：HazKey new_key_type、Hazard{entity,shape,dynamic}、Hazard::new、HazardEntity 四变体、PartialEq/Eq/Hash derive、scope()、From<(PItemKey,T)>。正文已全覆盖，无【遗漏】函数。以下为逐行复核后的细节修正与补充：
+
+### 补-1【修正】scope() 的 C++ 内联证据行号已随 2026-09-29 四叉树重写迁移
+正文差异 #2 引用 `Quadtree.cpp:214-241`（旧 Classify 的 Exterior 分支）与 `CollisionEngine.cpp:216-237`（旧 HazardCollides Exterior 分支）均已不存在。当前对应位置：
+- `QuadTree::Constrict` 的 centroid 回退分支（Quadtree.cpp:447-451）：`interiorScope = hazard.entity.kind != HazardKind::Exterior; presence = interiorScope == colliding ? Entire : None` —— 即 `scope()` 与 qt_hazard.rs:145-151 的 match 逐式对应（Interior+colliding→Entire、Exterior+!colliding→Entire）。
+- `DetectContainmentCollision`（CollisionEngine.cpp:69-70）：`interiorScope == contained` —— 对应 cd_engine.rs:253-255 的 `(scope, contained)` 组合表（Interior+true | Exterior+false → true，逻辑等价）。
+判定维持：结果等价/实现不同（无独立 API，语义内联于上述两处）。记录 20 补-5 同步登记。
+
+### 补-2【修正】`From<(PItemKey, T)>` 的 C++ 对应物当前为 `Layout::MakeHazard`
+正文引用"Container.cpp:93 一带"有误（该处是 InferiorQualityZone hazard 的构造，不是 PlacedItem 转换）。Rust layout.rs:98 `(pk, pi).into()` 的真正 C++ 对应是 `Layout::MakeHazard`（Layout.cpp:97-105）：
+```cpp
+// Layout.cpp:97-105
+Hazard{ {HazardKind::PlacedItem, placedItem.GetItemIndex(), 0, 0,
+         handle, placedItem.Transform()},
+        std::make_shared<const SimplePolygon>(placedItem.CollisionShape()), true };
+```
+与 Rust `HazardEntity::from((pk, pi))` 的字段来源逐项对应：`id = pi.item.idx` ↔ `GetItemIndex()`、`dt = pi.d_transf` ↔ `Transform()`、`pk` ↔ `handle`。layout.rs:115 的 `(pk, &pi).into()`（deregister 用）对应 RemoveItem 走 cdeHandle 直接注销（Layout.cpp:146-147，不经实体转换）。判定维持：结果等价/实现不同。
+
+### 补-3【验证】HazardEntity::operator== 的 PlacedItem 变换比较（细节确认）
+hazard.h:58-63 对 rotationRad/translation 逐分量 `static_cast<float>` 后比较。核对 Rust：`DTransformation` 为分解式（rot: f32 + translation: Point），derive(PartialEq) 逐字段 f32 精确比较；C++ Transform2d 分量为 double（经 rustTransform f32 归一后存储）。当分量恒经 f32 管线构造（PlacedItem::Create 的 rustTransform 归一，PlacedItem.cpp:19-22）时双侧比较语义一致。判定维持正文差异 #3。
+
+### 补-4【验证】Hash derive 的用途（细节确认）
+Rust `Hash` 供 util/assertions.rs 的 `layout_qt_matches_fresh_qt` 走 HashSet/HashMap（util/assertions.rs:218-231 hazards_match 之外未见；实际用途在 collector 相关 debug 检查）——正文引用 "util/assertions.rs:132" 处实为 `qt_contains_no_dangling_hazards` 附近。C++ 无 Hash、无对应断言体系（记录 21），影响面维持"仅 debug 断言"。判定：无变化。

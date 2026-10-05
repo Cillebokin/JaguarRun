@@ -128,3 +128,12 @@ Fixture 锁定情况：`TestQuantify.cpp:168-303`（TestCollisionTrackerAndSepar
 ## 结论
 
 tracker 的 GLS 权重演化（Algorithm 8）、loss 读写接口、快照恢复语义与 Rust 逐项等价，且端到端被 SeparatorRoundRustTrace 系列 fixture 锁定。最重要的实现差异是 `register_item_move`：Rust 做单行增量重算（借助三角矩阵对称合一存储保证无陈旧条目），C++ 以全量 rebuild + 权重回拷替代并辅以前置对账校验——计算量 O(N²) vs O(N) 但观测语义等价。C++ 侧集中体现了既定转换策略（panic→Result/容错 0）与面向公共 API 的防御层（快照校验、entry 有效性、IsSeparated 缓存）。
+
+### 补充审计（2026-09-29，实体句柄专项）
+**【任务指定核对项】CollisionTracker 私有引擎的 hazard 实体句柄（2026-09-29 修复，commit 6910145）现场复验**：
+
+1. **修复内容确认**：`BuildFromLayout`（cpp:675-695）与 `EvaluateCandidateLoss(layout,...)`（cpp:488-506）注册 hazard 时，实体字段已从 `{PlacedItem, itemIndex, 0, 0}`（仅 itemIndex，同 item 多放置会撞 CollisionEngine::RegisterHazard 的重复实体检查，CollisionEngine.cpp:101-112 `slot.hazard->entity == hazard.entity` → 报错 "hazard entity is already registered"）改为 `{PlacedItem, itemIndex, 0, 0, m_Handles[itemSequence], placedItem.Transform()}`——即补上 `placedItemHandle`（布局槽位+generation）与 `transform` 两个字段，附注释"用布局句柄+变换保证实体唯一性，同 Layout::MakeHazard"。
+2. **与 Rust pk 语义的对应验证**：jagua-rs 的 hazard 实体 `HazardEntity::PlacedItem { pk, .. }` 以 slotmap PItemKey（每次放置唯一）标识；JaguarCore `HazardEntity::operator==`（hazard.h:57-62）对 PlacedItem 比较 `itemIndex && placedItemHandle && f32 精度的 rotation/translation`（hazard.h:44-46 两个字段）——C++ 的 `PlacedItemHandle{slotIndex, generation}`（Layout.cpp:90 AllocateHandle 的槽位复用+代数）在"每次放置唯一"意义上与 pk 对齐：remove_item 后 re-place 走新 slot/新 generation，即使同 itemIndex 也构成不同实体。同 item 两处放置（itemIndex 相同）现在因 handle 不同而实体不同 ✓。
+3. **改造点覆盖完整**：经 grep 复验，SparrowCore 内私有引擎注册 hazard 的位置共 3 处——SeparationEvaluator.cpp:76-101、CollisionTracker.cpp:488-506（EvaluateCandidateLoss）、CollisionTracker.cpp:675-695（BuildFromLayout），6910145 全部改齐（diff 确认 3 处同模式）；Exploration.cpp 的 `CollectContainedHandles`（:364-377）复用布局自带引擎快照（`engine->Restore(cdeSnapshot)`），实体来自 Layout::MakeHazard（Layout.cpp:97-103，本就带 handle+transform），无需改。**结论：实体唯一性修复已全覆盖，与 Rust pk 语义对应正确，主文"2026-09-29 修复注记"（S06 头部第②条）的描述准确**。
+4. **【浅覆盖补全】** 主文"register_item_move"条目的对账校验清单（cpp:77-138）经现场核对更新：容器 bbox 不变（:77-87）、previousHandle 在表（:89-94）、newHandle 在 layout（:96-108）、**逐项校验其余 item 的 transform 与缓存一致**（:110-138，通过 `candidate.handle == expectedHandle` 定位后比对旋转/平移）——主文已概括为"其余 item 的 itemIndex/rotation/translation 与缓存逐项相等"，判定维持。
+5. **【核对确认：行号漂移】** 6910145 向 CollisionTracker.cpp 增 4 行注释+字段，当前 738 行（主文头部声称 728 行）；抽验 `UpdateWeights` 硬编码（cpp:583-590 附近，现约 +4 偏移）、`EvaluateCandidateLoss` 重载（cpp:453 起）等引用仍在有效范围内，不影响判定。

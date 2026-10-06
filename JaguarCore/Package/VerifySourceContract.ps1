@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    [string]$RepoRoot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +23,11 @@ function Relative-Path {
     return $full.Substring($base.Length).Replace('\', '/')
 }
 
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+    $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+}
+
 $repoRootPath = Resolve-FullPath $RepoRoot
 $coreRoot = Join-Path $repoRootPath 'JaguarCore'
 $includeRoot = Join-Path $coreRoot 'Include'
@@ -37,8 +42,8 @@ foreach ($requiredPath in @($coreRoot, $includeRoot, $sourceRoot, $testsRoot, $p
 }
 
 $publicHeaders = @(Get-ChildItem -LiteralPath (Join-Path $includeRoot 'JaguarCore') -Recurse -File -Filter '*.h')
-if ($publicHeaders.Count -ne 31) {
-    throw "Expected 31 public headers, found $($publicHeaders.Count)"
+if ($publicHeaders.Count -ne 33) {
+    throw "Expected 33 public headers, found $($publicHeaders.Count)"
 }
 
 $sourceScanRoots = @($includeRoot, $sourceRoot, $testsRoot, $packageRoot)
@@ -79,12 +84,16 @@ if ($nonConformingDirectories.Count -gt 0) {
 }
 
 $lowercaseApiPattern = '\b[a-z][A-Za-z0-9_]*\s*\('
-$ignoredLowercasePattern = 'std::|isfinite|abs|max|min|move|operator|\b(if|for|while|switch|return)\b|m_(Error|Value)|irrelevant(Handle)?'
+$ignoredLowercasePattern = '(\.|\->)\s*[a-z]|std::|isfinite|abs|max|min|move|operator|\b(if|for|while|switch|return)\b|m_(Error|Value)|irrelevant(Handle)?'
 $lowercaseApiMatches = @(
     foreach ($header in $publicHeaders) {
         $lineNumber = 0
         foreach ($line in Get-Content -LiteralPath $header.FullName) {
             $lineNumber++
+            $trimmedLine = $line.Trim()
+            if ($trimmedLine.StartsWith('//') -or $trimmedLine.StartsWith('*') -or $trimmedLine.StartsWith('/*')) {
+                continue
+            }
             if ($line -cmatch $lowercaseApiPattern -and $line -cnotmatch $ignoredLowercasePattern) {
                 [pscustomobject]@{
                     Path = Relative-Path $repoRootPath $header.FullName

@@ -52,7 +52,7 @@ Keep the physical build-root path free of `debug` and `release` tokens because
 Qt 5.12 qmake rewrites shadow-build output paths containing those tokens.
 
 Before compiling, the matrix invokes `VerifySourceContract.ps1`. It checks the
-31-header public surface, uppercase code paths and filenames, public API
+33-header public surface, uppercase code paths and filenames, public API
 naming, and the project-level no-exception/no-Qt-object conventions.
 
 ## Runtime validation

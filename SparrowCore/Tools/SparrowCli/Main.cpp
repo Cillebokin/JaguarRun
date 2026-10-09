@@ -130,7 +130,7 @@ int main(int argc, char** argv)
         std::cerr << "cannot read input: " << inputPath << '\n';
         return 3;
     }
-    const jaguar::Importer importer;
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
     const auto instance = importer.ImportSPInstanceJson(inputJson);
     if (!instance.HasValue())
     {

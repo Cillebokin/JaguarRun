@@ -1,0 +1,17 @@
+# generator=Rust sparrow::optimizer::optimize with locked RustReference Cargo.lock
+# case=seed 3, one-item warm start, 250 ms phase limits; controlled 300 ms listener delays cross each positive deadline
+# rows: phase/report/placement trace, compression step, separation result (success/evals/moves/iterations), and delay counters
+phase	exploration
+report	expl_feas	1	4.000000000	0.495049506
+placement	expl_feas	0	0.000000000	1.003000021	1.009999990
+phase	compression
+step	compression	0.010000000
+separation	compression	1	0	0	0
+report	cmpr_feas	1	3.960000038	0.500050008
+placement	cmpr_feas	0	0.000000000	1.003000021	1.009999990
+report	final	1	3.960000038	0.500050008
+placement	final	0	0.000000000	1.003000021	1.009999990
+separation_count	1
+compression_steps	1
+timeout_exploration_delay	1
+timeout_compression_delay	1

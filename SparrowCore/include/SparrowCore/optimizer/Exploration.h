@@ -15,6 +15,7 @@ namespace sparrow
 struct ExplorationResult
 {
     jaguar::SPSolution solution;
+    jaguar::SPSolution separatorState;
     LbfMetrics metrics;
     OptimizationHistory history;
 };

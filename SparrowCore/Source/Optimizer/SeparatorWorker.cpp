@@ -108,17 +108,11 @@ namespace sparrow
 {
 Result<void> SeparatorConfig::Validate() const
 {
-    if (noImprovementLimit == 0U || nWorkers == 0U)
+    if (nWorkers == 0U)
     {
         return Result<void>::FromError(
             {jaguar::ErrorCode::InvalidInput,
-             "separator no-improvement limit and worker count must be positive"});
-    }
-    if (nContainerSamples == 0U && nFocussedSamples == 0U)
-    {
-        return Result<void>::FromError(
-            {jaguar::ErrorCode::InvalidInput,
-             "separator needs a positive sample budget"});
+             "separator worker count must be positive"});
     }
     return Result<void>::FromValue();
 }
@@ -162,7 +156,7 @@ Result<SeparatorWorkerResult> FindBestSeparatorMoveImpl(
         return InvalidWorker("separator item minimum dimension is invalid");
     }
     BestSamples best(
-        std::max<std::size_t>(1U, config.nCoordinateDescents),
+        config.nCoordinateDescents,
         minimumDimension * 0.05F);
     tracingEvaluator.SetPhase(SeparatorSearchTracePhase::ReferencePlacement);
     const SampleEval current = tracingEvaluator.Evaluate(

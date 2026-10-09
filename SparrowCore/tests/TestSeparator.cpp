@@ -991,6 +991,89 @@ bool TestRustSeparatorSearchTrace(std::ostream& output)
                   output,
                   "Rust/C++ separator event counts differ");
 }
+
+bool TestZeroSeparatorSampleBudgetUsesReferencePlacement(std::ostream& output)
+{
+    const auto instance = jaguar::SPInstance::Create(
+        {MakeItem(0U)}, {1U}, 4.0, jaguar::CDEConfig{}, jaguar::ShapeModifyConfig{});
+    if (!Expect(instance.HasValue(), output,
+                "zero-sample separator instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "zero-sample separator problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "zero-sample separator strip resize failed"))
+    {
+        return false;
+    }
+    const auto moving = problem.PlaceItem({0U, {0.0, {1.0, 1.0}}});
+    if (!Expect(moving.HasValue(), output,
+                "zero-sample separator reference placement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution snapshot = problem.Save();
+    jaguar::Layout layout(snapshot.layoutSnapshot.container);
+    if (!Expect(layout.Restore(snapshot.layoutSnapshot).HasValue(),
+                output,
+                "zero-sample separator layout restore failed"))
+    {
+        return false;
+    }
+    const auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output,
+                "zero-sample separator tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::SeparatorConfig config;
+    config.nContainerSamples = 0U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    std::vector<sparrow::SeparatorSearchTraceEvent> events;
+    sparrow::SparrowRng rng(42U);
+    const auto result = sparrow::FindBestSeparatorMoveWithTrace(
+        layout,
+        trackerResult.Value(),
+        moving.Value(),
+        config,
+        rng,
+        [&events](const auto& event) { events.push_back(event); });
+    if (!Expect(result.HasValue() && result.Value().transform.has_value()
+                    && result.Value().evaluationCount > 0U,
+                output,
+                "zero sample loops must still evaluate and refine the current reference placement"))
+    {
+        return false;
+    }
+    if (!Expect(!events.empty()
+                    && events.front().type
+                           == sparrow::SeparatorSearchTraceEvent::Type::Evaluation
+                    && events.front().phase
+                           == sparrow::SeparatorSearchTracePhase::ReferencePlacement,
+                output,
+                "zero-sample search must begin with the Rust reference placement"))
+    {
+        return false;
+    }
+    return Expect(std::none_of(
+                      events.begin(), events.end(), [](const auto& event) {
+                          return event.phase
+                                     == sparrow::SeparatorSearchTracePhase::FocusedSample
+                              || event.phase
+                                     == sparrow::SeparatorSearchTracePhase::ContainerSample;
+                      }),
+                  output,
+                  "zero sample budgets must not emit focused or container sample events");
+}
 }
 
 bool RunSeparatorTests(std::ostream& output)
@@ -1011,6 +1094,10 @@ bool RunSeparatorTests(std::ostream& output)
         return false;
     }
     if (!TestRustSeparatorSearchTrace(output))
+    {
+        return false;
+    }
+    if (!TestZeroSeparatorSampleBudgetUsesReferencePlacement(output))
     {
         return false;
     }
@@ -1088,6 +1175,109 @@ bool RunSeparatorTests(std::ostream& output)
                 output,
                 "separator rollback must preserve GLS weights"))
     {
+        return false;
+    }
+    std::ifstream highWeightFixtureFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "../SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\CollisionTrackerWeightRust.json"})
+    {
+        highWeightFixtureFile.open(path);
+        if (highWeightFixtureFile.is_open())
+        {
+            break;
+        }
+        highWeightFixtureFile.clear();
+    }
+    if (!Expect(highWeightFixtureFile.is_open(),
+                output,
+                "separator high-weight Rust fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string highWeightFixtureJson{
+        std::istreambuf_iterator<char>(highWeightFixtureFile),
+        std::istreambuf_iterator<char>()};
+    const auto highWeightInstance =
+        MakeSeparatorTraceImporter().ImportSPInstanceJson(highWeightFixtureJson);
+    if (!Expect(highWeightInstance.HasValue(),
+                output,
+                "separator high-weight Rust fixture import failed"))
+    {
+        return false;
+    }
+    auto highWeightProblemResult =
+        jaguar::SPProblem::Create(highWeightInstance.Value());
+    if (!Expect(highWeightProblemResult.HasValue(),
+                output,
+                "separator high-weight problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem highWeightProblem =
+        std::move(highWeightProblemResult.Value());
+    if (!Expect(highWeightProblem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "separator high-weight strip resize failed")
+        || !Expect(highWeightProblem.PlaceItem(
+                       {0U, {0.0, {1.0, 1.0}}}).HasValue(),
+                   output,
+                   "separator high-weight first item placement failed")
+        || !Expect(highWeightProblem.PlaceItem(
+                       {1U, {0.0, {1.0, 1.0}}}).HasValue(),
+                   output,
+                   "separator high-weight second item placement failed")
+        || !Expect(highWeightProblem.PlaceItem(
+                       {2U, {0.0, {1.5, 1.0}}}).HasValue(),
+                   output,
+                   "separator high-weight partial item placement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution highWeightSolution = highWeightProblem.Save();
+    jaguar::Layout highWeightLayout(highWeightSolution.layoutSnapshot.container);
+    if (!Expect(highWeightLayout.Restore(
+                    highWeightSolution.layoutSnapshot).HasValue(),
+                output,
+                "separator high-weight layout restore failed"))
+    {
+        return false;
+    }
+    auto highWeightTrackerResult =
+        sparrow::CollisionTracker::Create(highWeightLayout);
+    if (!Expect(highWeightTrackerResult.HasValue(),
+                output,
+                "separator high-weight tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker highWeightTracker =
+        std::move(highWeightTrackerResult.Value());
+    for (std::size_t update = 0U; update < 20U; ++update)
+    {
+        highWeightTracker.UpdateWeights();
+    }
+    if (!Expect(highWeightTracker.PairWeight(0U, 1U) == 1'048'576.0F,
+                output,
+                "Rust GLS pair weight must grow beyond one million without a cap"))
+    {
+        return false;
+    }
+    const float partialWeight = highWeightTracker.PairWeight(0U, 2U);
+    std::uint32_t partialWeightBits = 0U;
+    std::memcpy(&partialWeightBits, &partialWeight, sizeof(partialWeightBits));
+    const float partialLoss = highWeightTracker.PairLoss(0U, 2U);
+    std::uint32_t partialLossBits = 0U;
+    std::memcpy(&partialLossBits, &partialLoss, sizeof(partialLossBits));
+    if (partialWeightBits != 0x4801'92D6U)
+    {
+        output << "SEPARATOR TEST FAILURE: partial-collision GLS weight bits 0x"
+               << std::hex << partialWeightBits << std::dec
+               << " (pair loss " << partialLoss << " bits 0x"
+               << std::hex << partialLossBits << std::dec
+               << ") do not match Rust 0x480192d6\n";
         return false;
     }
     sparrow::SeparatorConfig separatorConfig;

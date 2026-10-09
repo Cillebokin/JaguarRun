@@ -53,29 +53,28 @@ sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     return sparrow::Result<sparrow::LbfMetrics>::FromValue(metrics);
 }
 
-double CalculateMinimumStripWidth(
+float CalculateMinimumStripWidth(
     const jaguar::SPInstance& instance,
     const jaguar::SPSolution& solution) noexcept
 {
-    constexpr double relativeTolerance = 1.0e-6;
+    constexpr float relativeTolerance = 1.0e-6F;
     const jaguar::Rect2d containerBounds =
         solution.layoutSnapshot.container.CollisionShape().BoundingBox();
-    if (!std::isfinite(containerBounds.Width())
-        || !std::isfinite(containerBounds.Height())
-        || containerBounds.Width() <= 0.0
-        || containerBounds.Height() <= 0.0)
-    {
-        return 0.0;
-    }
+    const float containerWidth = static_cast<float>(containerBounds.Width());
+    const float containerHeight = static_cast<float>(containerBounds.Height());
+    const float widthInset = static_cast<float>(solution.StripWidth())
+        - containerWidth;
 
     double totalArea = 0.0;
     for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
-        totalArea += instance.GetItem(index).CollisionShape().Area()
+        totalArea += static_cast<double>(static_cast<float>(
+                         instance.GetItem(index).CollisionShape().Area()))
             * static_cast<double>(instance.ItemDemand(index));
     }
-    double minimumWidth = totalArea / containerBounds.Height()
-        * (1.0 - relativeTolerance);
+    float minimumWidth = static_cast<float>(
+        totalArea / static_cast<double>(containerHeight))
+        * (1.0F - relativeTolerance);
     for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
         const jaguar::Item& item = instance.GetItem(index);
@@ -84,46 +83,48 @@ double CalculateMinimumStripWidth(
         {
             continue;
         }
-        std::vector<double> rotations;
+        std::vector<float> rotations;
         if (rotation.mode == jaguar::RotationMode::None)
         {
-            rotations.push_back(0.0);
+            rotations.push_back(0.0F);
         }
         else
         {
-            rotations = rotation.radians;
+            rotations.reserve(rotation.radians.size());
+            for (const double angle : rotation.radians)
+            {
+                rotations.push_back(static_cast<float>(angle));
+            }
         }
-        const double tolerance = item.CollisionShape().Diameter()
+        const float tolerance = static_cast<float>(
+                                   item.CollisionShape().Diameter())
             * relativeTolerance;
-        double itemWidth = std::numeric_limits<double>::infinity();
-        for (const double angle : rotations)
+        float itemWidth = std::numeric_limits<float>::infinity();
+        for (const float angle : rotations)
         {
             if (!std::isfinite(angle))
             {
                 continue;
             }
             const auto transformed = item.CollisionShape().TransformedRustF32(
-                jaguar::Transform2d::FromRotationTranslation(angle, {0.0, 0.0}));
+                jaguar::Transform2d::FromRotationTranslation(
+                    static_cast<double>(angle), {0.0, 0.0}));
             if (!transformed.HasValue())
             {
                 continue;
             }
             const jaguar::Rect2d bounds = transformed.Value().BoundingBox();
-            if (bounds.Height() <= containerBounds.Height() + tolerance)
+            const float boundsHeight = static_cast<float>(bounds.Height());
+            const float boundsWidth = static_cast<float>(bounds.Width());
+            if (boundsHeight <= containerHeight + tolerance)
             {
                 itemWidth = std::min(
-                    itemWidth,
-                    std::max(0.0, bounds.Width() - tolerance));
+                    itemWidth, std::max(0.0F, boundsWidth - tolerance));
             }
         }
-        if (std::isfinite(itemWidth))
-        {
-            minimumWidth = std::max(minimumWidth, itemWidth);
-        }
+        minimumWidth = std::max(minimumWidth, itemWidth);
     }
-    const double result = minimumWidth
-        + solution.StripWidth() - containerBounds.Width();
-    return std::isfinite(result) && result > 0.0 ? result : 0.0;
+    return minimumWidth + widthInset;
 }
 
 sparrow::OptimizationProgress MakeProgress(
@@ -138,6 +139,16 @@ sparrow::OptimizationProgress MakeProgress(
             metrics.density,
             collisionLoss,
             metrics.feasible};
+}
+}
+
+namespace sparrow::detail
+{
+float CompressionMinimumStripWidthForTrace(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& solution) noexcept
+{
+    return CalculateMinimumStripWidth(instance, solution);
 }
 }
 
@@ -165,6 +176,24 @@ Result<CompressionResult> Compress(
     OptimizationTerminator& terminator,
     OptimizationListener* listener)
 {
+    return Compress(instance,
+                    initialSolution,
+                    initialSolution,
+                    config,
+                    seed,
+                    terminator,
+                    listener);
+}
+
+Result<CompressionResult> Compress(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& separatorState,
+    const jaguar::SPSolution& initialSolution,
+    const CompressionConfig& config,
+    std::uint64_t seed,
+    OptimizationTerminator& terminator,
+    OptimizationListener* listener)
+{
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
     {
@@ -182,7 +211,7 @@ Result<CompressionResult> Compress(
         return Result<CompressionResult>::FromError(problemResult.GetError());
     }
     jaguar::SPProblem problem = std::move(problemResult.Value());
-    const auto restored = problem.Restore(initialSolution);
+    const auto restored = problem.Restore(separatorState);
     if (!restored.HasValue())
     {
         return Result<CompressionResult>::FromError(restored.GetError());
@@ -194,11 +223,13 @@ Result<CompressionResult> Compress(
             separatorResult.GetError());
     }
     Separator separator = std::move(separatorResult.Value());
+    // Rust constructs the compression workers before the first split draw.
+    separator.ResetWorkerRngs(config.separator.nWorkers);
 
     jaguar::SPSolution bestSolution = initialSolution;
     LbfMetrics bestMetrics = initialMetrics.Value();
-    const double minimumWidth = CalculateMinimumStripWidth(
-        instance, initialSolution);
+    const float minimumWidth = CalculateMinimumStripWidth(
+        instance, separatorState);
     std::size_t failures = 0U;
     std::size_t iteration = 0U;
     const auto start = std::chrono::steady_clock::now();
@@ -256,13 +287,20 @@ Result<CompressionResult> Compress(
                 0.0F));
         }
 
+        const auto restoredWidth = separator.ChangeStripWidth(width);
+        if (!restoredWidth.HasValue())
+        {
+            return Result<CompressionResult>::FromError(
+                restoredWidth.GetError());
+        }
         const auto rolledBack = separator.Rollback(bestSolution);
         if (!rolledBack.HasValue())
         {
             return Result<CompressionResult>::FromError(
                 rolledBack.GetError());
         }
-        const double split = separator.Random().Uniform01F32() * width;
+        const float split = separator.Random().Uniform01F32()
+            * static_cast<float>(width);
         const auto changed = separator.ChangeStripWidth(nextWidth, split);
         if (!changed.HasValue())
         {

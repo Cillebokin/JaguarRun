@@ -45,7 +45,8 @@ pub fn run() -> Result<()> {
     );
     let instance = jagua_rs::probs::spp::io::import_instance(&importer, &ext_instance)?;
     let initial_solution = ext_solution
-        .map(|solution| jagua_rs::probs::spp::io::import_solution(&instance, &solution)).transpose()?;
+        .map(|solution| jagua_rs::probs::spp::io::import_solution(&instance, &solution))
+        .transpose()?;
 
     let solution = runtime::run(
         instance,

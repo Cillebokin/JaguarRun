@@ -8,6 +8,11 @@ INCLUDEPATH += $$PWD/../Include
 INCLUDEPATH += $$PWD/../../JaguarCore/Include
 INCLUDEPATH += $$PWD/../Tools/SparrowWasm
 
+HEADERS += \
+    $$PWD/../Source/Optimizer/ExplorationNormalSampler.h \
+    $$PWD/../Source/Optimizer/ExplorationTrace.h \
+    $$PWD/../Source/Optimizer/CompressionTrace.h
+
 isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$PWD/../../build-SparrowCore-MSVC2019x64-Debug
 
 CONFIG(debug, debug|release) {

@@ -1,0 +1,15 @@
+{
+  "name": "sparrow-rust-cpp-exploration-oblique-rotation-height-below",
+  "items": [
+    {
+      "id": 924,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [8, 0], [8, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 6.4117823
+}

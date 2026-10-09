@@ -6,11 +6,13 @@
 #include "SparrowCore/ResultAlias.h"
 
 #include "JaguarCore/Problems/Spp.h"
+#include "JaguarCore/IO/Importer.h"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 namespace sparrow
 {
@@ -26,7 +28,7 @@ struct ExplorationConfig
     // Zero means unlimited, matching the Rust phase loop which is bounded by
     // its terminator rather than a second iteration counter.
     std::size_t maxIterations = 0U;
-    std::size_t maxConsecutiveFailures = 0U;
+    std::optional<std::size_t> maxConsecutiveFailures = std::nullopt;
     double shrinkStep = 0.001;
     // Zero keeps the complete failed-solution pool, as in sparrow.
     std::size_t infeasiblePoolSize = 0U;
@@ -74,4 +76,22 @@ struct SparrowConfig
 
     Result<void> Validate() const;
 };
+
+// Builds the JaguarCore import settings used by Rust DEFAULT_SPARROW_CONFIG.
+// Use this before importing an instance when Rust-compatible geometry and
+// collision surrogates are required.
+inline jaguar::ImporterConfig MakeRustDefaultImporterConfig()
+{
+    jaguar::ImporterConfig config;
+    config.cdeConfig.quadtreeDepth = 4U;
+    config.cdeConfig.cdThreshold = 64U;
+    config.cdeConfig.itemSurrogateConfig.poleLimits = {
+        {{64U, 0.0}, {16U, 0.8}, {8U, 0.9}}};
+    config.cdeConfig.itemSurrogateConfig.failFastPoleAreaRatio = 0.5;
+    config.cdeConfig.itemSurrogateConfig.failFastPiers = 0U;
+    config.shapeModifyConfig.simplifyTolerance = 0.001;
+    config.shapeModifyConfig.narrowConcavityCutoff =
+        std::pair<double, double>{0.01, 0.01};
+    return config;
+}
 }

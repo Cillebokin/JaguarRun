@@ -363,7 +363,9 @@ bool TestConfigValidation(std::ostream& output)
 
     sparrow::LbfConfig zeroSamples = defaults;
     zeroSamples.samplesPerItem = 0;
-    if (!ExpectInvalidConfig(zeroSamples, output, "zero sample budget must be invalid"))
+    if (!Expect(zeroSamples.Validate().HasValue(),
+                output,
+                "zero sample budget must represent a search with no sampling iterations"))
     {
         return false;
     }

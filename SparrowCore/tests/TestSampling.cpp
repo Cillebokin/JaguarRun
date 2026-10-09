@@ -32,6 +32,7 @@
 #include <memory>
 #include <ostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -594,11 +595,9 @@ bool TestLocalSearchSampler(std::ostream& output)
     invalidConfig.samplesPerItem = 0U;
     const auto invalidConfigResult = sparrow::LocalSearchSampler::Create(
         continuousItem.Value(), reference, invalidConfig, containerBounds);
-    return Expect(!invalidConfigResult.HasValue()
-                      && invalidConfigResult.GetError().code
-                             == jaguar::ErrorCode::InvalidInput,
+    return Expect(invalidConfigResult.HasValue(),
                   output,
-                  "Invalid LBF config must reject local search sampler creation");
+                  "zero LBF search samples must not invalidate the sampler parameters");
 }
 
 class CoordinateTestEvaluator final : public sparrow::SampleEvaluator
@@ -608,6 +607,7 @@ public:
     {
         Objective,
         Equal,
+        ApproximateTie,
         Worse,
         LongImprovement,
     };
@@ -623,6 +623,10 @@ public:
         if (m_Mode == Mode::Equal)
         {
             return {sparrow::SampleKind::SAMPLE_KIND_CLEAR, 0.0F};
+        }
+        if (m_Mode == Mode::ApproximateTie)
+        {
+            return {sparrow::SampleKind::SAMPLE_KIND_CLEAR, 1.0F};
         }
         if (m_Mode == Mode::Worse)
         {
@@ -685,6 +689,14 @@ float FloatFromBits(std::uint32_t bits) noexcept
     static_assert(sizeof(value) == sizeof(bits), "float trace requires 32-bit floats");
     std::memcpy(&value, &bits, sizeof(value));
     return value;
+}
+
+std::uint32_t FloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    static_assert(sizeof(value) == sizeof(bits), "float trace requires 32-bit floats");
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
 }
 
 bool ReadRustTrace(
@@ -1217,6 +1229,319 @@ bool SameTraceSample(const jaguar::Transform2d& actualTransform,
                    <= LOSS_TOLERANCE);
 }
 
+bool TestUniformSamplerUpperBoundaryRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/UniformSamplerUpperBoundaryRust.tsv",
+             "../SparrowCore/Tests/Fixtures/UniformSamplerUpperBoundaryRust.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/UniformSamplerUpperBoundaryRust.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\UniformSamplerUpperBoundaryRust.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Rust sampler upper-boundary reference must be readable"))
+    {
+        return false;
+    }
+
+    std::uint64_t seed = 0U;
+    std::uint32_t lowBits = 0U;
+    std::uint32_t highBits = 0U;
+    std::uint32_t expectedXBits = 0U;
+    std::string line;
+    bool foundRow = false;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        if (!(row >> seed >> std::hex >> lowBits >> highBits >> expectedXBits))
+        {
+            return Expect(false,
+                          output,
+                          "Rust sampler upper-boundary row must match its schema");
+        }
+        foundRow = true;
+        break;
+    }
+    if (!Expect(foundRow, output, "Rust sampler upper-boundary row must exist"))
+    {
+        return false;
+    }
+
+    const auto item = MakeItem({jaguar::RotationMode::None, {}});
+    if (!Expect(item.HasValue(), output, "Boundary sampler item creation failed"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d sampleBounds{
+        static_cast<double>(FloatFromBits(lowBits)),
+        1.0,
+        static_cast<double>(FloatFromBits(highBits)),
+        2.0};
+    const jaguar::Rect2d containerBounds{0.0, 0.0, 10.0, 10.0};
+    const auto sampler = sparrow::UniformRectSampler::Create(
+        sampleBounds, item.Value(), containerBounds);
+    if (!Expect(sampler.HasValue(),
+                output,
+                "Boundary sampler must be constructible in C++"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowRng rng(seed);
+    const jaguar::Transform2d sample = sampler.Value().Sample(rng);
+    const float x = static_cast<float>(sample.translation.x);
+    std::uint32_t actualXBits = 0U;
+    std::memcpy(&actualXBits, &x, sizeof(x));
+    if (actualXBits != expectedXBits)
+    {
+        output << "boundary sample seed=" << seed << " expected=0x"
+               << std::hex << expectedXBits << " actual=0x" << actualXBits
+               << std::dec << '\n';
+    }
+    return Expect(actualXBits == expectedXBits,
+                  output,
+                  "uniform sampler upper-endpoint rounding differs from Rust");
+}
+
+bool TestUniformSamplerContinuousGridRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/UniformSamplerContinuousGridRust.tsv",
+             "../SparrowCore/Tests/Fixtures/UniformSamplerContinuousGridRust.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/UniformSamplerContinuousGridRust.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\UniformSamplerContinuousGridRust.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Rust continuous-grid reference must be readable"))
+    {
+        return false;
+    }
+
+    const auto item = MakeItem({jaguar::RotationMode::Continuous, {}});
+    if (!Expect(item.HasValue(), output, "Continuous sampler item creation failed"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d bounds{-100.0, -100.0, 100.0, 100.0};
+    const auto sampler = sparrow::UniformRectSampler::Create(
+        bounds, item.Value(), bounds);
+    if (!Expect(sampler.HasValue(),
+                output,
+                "Continuous uniform sampler must be constructible"))
+    {
+        return false;
+    }
+    const auto rotationDistribution =
+        sparrow::RotationDistribution::FromItem(item.Value());
+    if (!Expect(rotationDistribution.HasValue(),
+                output,
+                "Continuous rotation distribution must be constructible"))
+    {
+        return false;
+    }
+
+    std::uint64_t seed = 0U;
+    std::uint32_t expectedRotationBits = 0U;
+    std::string line;
+    std::size_t rows = 0U;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string extra;
+        if (!(row >> seed >> std::hex >> expectedRotationBits)
+            || (row >> extra))
+        {
+            return Expect(false,
+                          output,
+                          "Rust continuous-grid row must match its schema");
+        }
+
+        sparrow::SparrowRng rng(seed);
+        const jaguar::Transform2d sample = sampler.Value().Sample(rng);
+        const float rotation = static_cast<float>(sample.rotationRad);
+        std::uint32_t actualRotationBits = 0U;
+        std::memcpy(&actualRotationBits, &rotation, sizeof(rotation));
+        if (actualRotationBits != expectedRotationBits)
+        {
+            output << "continuous sampler seed=" << seed << " expected=0x"
+                   << std::hex << expectedRotationBits << " actual=0x"
+                   << actualRotationBits << std::dec << '\n';
+            return Expect(false,
+                          output,
+                          "continuous sampler rotation differs from Rust reference");
+        }
+
+        sparrow::SparrowRng distributionRng(seed);
+        const float distributionRotation =
+            rotationDistribution.Value().Sample(distributionRng);
+        std::uint32_t distributionRotationBits = 0U;
+        std::memcpy(&distributionRotationBits,
+                    &distributionRotation,
+                    sizeof(distributionRotation));
+        if (distributionRotationBits != expectedRotationBits)
+        {
+            output << "continuous rotation distribution seed=" << seed
+                   << " expected=0x" << std::hex << expectedRotationBits
+                   << " actual=0x" << distributionRotationBits << std::dec << '\n';
+            return Expect(false,
+                          output,
+                          "continuous rotation distribution differs from Rust reference");
+        }
+        ++rows;
+    }
+
+    return Expect(rows == 16U,
+                  output,
+                  "Rust continuous-grid fixture must cover all 16 rotations");
+}
+
+bool TestUniformSamplerSingletonAxisRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/UniformSamplerSingletonAxisRust.tsv",
+             "../SparrowCore/Tests/Fixtures/UniformSamplerSingletonAxisRust.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/UniformSamplerSingletonAxisRust.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\UniformSamplerSingletonAxisRust.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Rust singleton-axis reference must be readable"))
+    {
+        return false;
+    }
+
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppSingleItem.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "Rust singleton-axis input must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer;
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust singleton-axis input must import in C++"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d sampleBounds{0.0, 0.0, 2.0, 5.0};
+    const jaguar::Rect2d containerBounds{0.0, 0.0, 2.0, 10.0};
+    const auto sampler = sparrow::UniformRectSampler::Create(
+        sampleBounds, instance.Value().GetItem(0U), containerBounds);
+    if (!Expect(sampler.HasValue(),
+                output,
+                "Singleton-axis uniform sampler must be constructible"))
+    {
+        return false;
+    }
+
+    constexpr std::uint64_t SEED = 42U;
+    sparrow::SparrowRng rng(SEED);
+    std::uint64_t seed = 0U;
+    std::size_t sampleIndex = 0U;
+    std::uint32_t expectedXBits = 0U;
+    std::uint32_t expectedYBits = 0U;
+    std::string line;
+    std::size_t rows = 0U;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string extra;
+        if (!(row >> seed >> sampleIndex >> std::hex >> expectedXBits >> expectedYBits)
+            || (row >> extra))
+        {
+            return Expect(false,
+                          output,
+                          "Rust singleton-axis row must match its schema");
+        }
+        if (!Expect(seed == SEED && sampleIndex == rows,
+                    output,
+                    "Rust singleton-axis fixture must be one ordered seed trace"))
+        {
+            return false;
+        }
+
+        const jaguar::Transform2d sample = sampler.Value().Sample(rng);
+        const float x = static_cast<float>(sample.translation.x);
+        const float y = static_cast<float>(sample.translation.y);
+        std::uint32_t actualXBits = 0U;
+        std::uint32_t actualYBits = 0U;
+        std::memcpy(&actualXBits, &x, sizeof(x));
+        std::memcpy(&actualYBits, &y, sizeof(y));
+        if (actualXBits != expectedXBits || actualYBits != expectedYBits)
+        {
+            output << "singleton-axis sample=" << sampleIndex << " expected=(0x"
+                   << std::hex << expectedXBits << ",0x" << expectedYBits
+                   << ") actual=(0x" << actualXBits << ",0x" << actualYBits
+                   << ")" << std::dec << '\n';
+            return Expect(false,
+                          output,
+                          "singleton axis shifted or changed the Rust sampling stream");
+        }
+        ++rows;
+    }
+
+    return Expect(rows == 8U,
+                  output,
+                  "Rust singleton-axis fixture must cover eight consecutive samples");
+}
+
 bool TestRustLbfSearchTrace(std::ostream& output)
 {
     std::vector<sparrow::LbfSearchTraceEvent> expected;
@@ -1583,6 +1908,108 @@ bool TestCoordinateDescentOutcomes(std::ostream& output)
                   "Worse evaluation must keep the current coordinate and loss");
 }
 
+bool TestCoordinateDescentApproximateTieMatchesRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SampleEvalCoordinateDescentRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(), output,
+                "Rust coordinate-descent comparator boundary trace must be readable"))
+    {
+        return false;
+    }
+
+    std::vector<std::string> expectedRows;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            expectedRows.push_back(line);
+        }
+    }
+
+    const jaguar::Transform2d initialTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.5, {2.0, -1.0});
+    const sparrow::SampleEval initialEvaluation{
+        sparrow::SampleKind::SAMPLE_KIND_CLEAR,
+        FloatFromBits(0x3f800004U)};
+    sparrow::CoordinateDescentConfig config;
+    config.translationStepInit = 1.0F;
+    config.translationStepLimit = 0.6F;
+    config.rotationStepInit = 0.0F;
+    config.rotationStepLimit = 0.0F;
+    config.rotationWiggle = false;
+    CoordinateTestEvaluator evaluator(CoordinateTestEvaluator::Mode::ApproximateTie);
+    sparrow::SparrowRng rng(42U);
+    const auto result = sparrow::RefineCoordinateDescent(
+        {initialTransform, initialEvaluation}, evaluator, config, rng);
+    if (!Expect(result.HasValue(),
+                output,
+                "Rust approximate-tie coordinate-descent case must finish"))
+    {
+        return false;
+    }
+
+    std::vector<std::string> actualRows;
+    const auto appendTransform = [&actualRows](
+                                    const char* stage,
+                                    const jaguar::Transform2d& transform) {
+        std::ostringstream row;
+        row << stage << '\t' << std::hex << std::nouppercase << std::setfill('0')
+            << std::setw(8) << FloatBits(static_cast<float>(transform.rotationRad))
+            << '\t' << std::setw(8)
+            << FloatBits(static_cast<float>(transform.translation.x))
+            << '\t' << std::setw(8)
+            << FloatBits(static_cast<float>(transform.translation.y));
+        actualRows.push_back(row.str());
+    };
+    for (const auto& candidate : evaluator.Seen())
+    {
+        appendTransform("candidate", candidate);
+    }
+    const auto& finalTransform = result.Value().first;
+    std::ostringstream finalRow;
+    finalRow << "result\t" << std::hex << std::nouppercase << std::setfill('0')
+             << std::setw(8) << FloatBits(static_cast<float>(finalTransform.rotationRad))
+             << '\t' << std::setw(8)
+             << FloatBits(static_cast<float>(finalTransform.translation.x))
+             << '\t' << std::setw(8)
+             << FloatBits(static_cast<float>(finalTransform.translation.y))
+             << '\t' << std::setw(8) << FloatBits(result.Value().second.loss)
+             << '\t' << std::dec << evaluator.EvaluationCount();
+    actualRows.push_back(finalRow.str());
+
+    if (actualRows != expectedRows)
+    {
+        output << "Rust coordinate-descent rows=" << expectedRows.size()
+               << " C++ rows=" << actualRows.size() << '\n';
+        const std::size_t count = std::min(expectedRows.size(), actualRows.size());
+        for (std::size_t index = 0U; index < count; ++index)
+        {
+            if (expectedRows[index] != actualRows[index])
+            {
+                output << index << " expected: " << expectedRows[index]
+                       << " actual: " << actualRows[index] << '\n';
+            }
+        }
+    }
+    return Expect(actualRows == expectedRows,
+                  output,
+                  "SparrowCore coordinate descent comparator-boundary trace must match Rust");
+}
+
 bool TestCoordinateDescentDefaultBudgetMatchesRust(std::ostream& output)
 {
     sparrow::CoordinateDescentConfig config;
@@ -1930,6 +2357,53 @@ bool TestLbfSearch(std::ostream& output)
 
     jaguar::Layout emptyLayout(container);
     sparrow::SparrowRng firstRng(config.seed);
+
+    sparrow::LbfConfig zeroSampleConfig = config;
+    zeroSampleConfig.samplesPerItem = 0U;
+    sparrow::SparrowRng zeroSampleRng(zeroSampleConfig.seed);
+    const auto zeroSampleResult = sparrow::SearchLbf(
+        emptyLayout, item, zeroSampleConfig, zeroSampleRng, noFilter);
+    if (!Expect(zeroSampleResult.HasValue()
+                    && !zeroSampleResult.Value().has_value(),
+                output,
+                "zero container samples must return no candidate like the Rust search loop"))
+    {
+        return false;
+    }
+
+    sparrow::LbfConfig zeroCapacityConfig = config;
+    zeroCapacityConfig.samplesPerItem = 1U;
+    zeroCapacityConfig.nCoordinateDescents = 0U;
+    sparrow::SparrowRng zeroCapacityRng(zeroCapacityConfig.seed);
+#if !defined(NDEBUG)
+    bool zeroCapacityPanicked = false;
+    try
+    {
+        static_cast<void>(sparrow::SearchLbf(
+            emptyLayout, item, zeroCapacityConfig, zeroCapacityRng, noFilter));
+    }
+    catch (const std::underflow_error&)
+    {
+        zeroCapacityPanicked = true;
+    }
+    if (!Expect(zeroCapacityPanicked,
+                output,
+                "zero coordinate-descent capacity must preserve Rust Debug underflow"))
+    {
+        return false;
+    }
+#else
+    const auto zeroCapacityResult = sparrow::SearchLbf(
+        emptyLayout, item, zeroCapacityConfig, zeroCapacityRng, noFilter);
+    if (!Expect(zeroCapacityResult.HasValue()
+                    && zeroCapacityResult.Value().has_value(),
+                output,
+                "zero coordinate-descent capacity must preserve Rust Release behavior"))
+    {
+        return false;
+    }
+#endif
+
     const auto first = sparrow::SearchLbf(
         emptyLayout, item, config, firstRng, noFilter);
     if (!Expect(first.HasValue() && first.Value().has_value(),
@@ -2187,10 +2661,9 @@ bool TestLbfSearch(std::ostream& output)
     sparrow::SparrowRng invalidRng(config.seed);
     const auto invalid = sparrow::SearchLbf(
         emptyLayout, item, invalidConfig, invalidRng, noFilter);
-    return Expect(!invalid.HasValue()
-                      && invalid.GetError().code == jaguar::ErrorCode::InvalidInput,
+    return Expect(invalid.HasValue() && !invalid.Value().has_value(),
                   output,
-                  "LBF search must reject an invalid configuration");
+                  "LBF search with zero samples must return no candidate without evaluation");
 }
 }
 
@@ -2199,11 +2672,15 @@ bool RunSamplingTests(std::ostream& output)
     return TestRotationModes(output)
         && TestBestSamplesRotationBoundary(output)
         && TestUniformRectSampler(output)
+        && TestUniformSamplerUpperBoundaryRustReference(output)
+        && TestUniformSamplerContinuousGridRustReference(output)
+        && TestUniformSamplerSingletonAxisRustReference(output)
         && TestRustSamplingCoordinateDescentTrace(output)
         && TestLocalSearchSampler(output)
         && TestCoordinateDescentAxesAndBudget(output)
         && TestCoordinateDescentDefaultBudgetMatchesRust(output)
         && TestCoordinateDescentOutcomes(output)
+        && TestCoordinateDescentApproximateTieMatchesRustReference(output)
         && TestLbfEvaluatorBasicCollisionAndLoss(output)
         && TestLbfEvaluatorUsesPointOfInaccessibility(output)
         && TestLbfEvaluatorHoleAndQualityFilter(output)

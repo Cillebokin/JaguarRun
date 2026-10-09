@@ -30,10 +30,6 @@ struct LbfConfig
             return Result<void>::FromError({jaguar::ErrorCode::InvalidInput, message});
         };
 
-        if (samplesPerItem == 0)
-        {
-            return invalid("samplesPerItem must be positive");
-        }
         if (!std::isfinite(localSearchFraction)
             || localSearchFraction < 0.0
             || localSearchFraction > 1.0)
@@ -77,12 +73,6 @@ struct SparrowConstructorConfig
 
     inline Result<void> Validate() const
     {
-        if (nContainerSamples == 0U && nFocussedSamples == 0U)
-        {
-            return Result<void>::FromError(
-                {jaguar::ErrorCode::InvalidInput,
-                 "Sparrow constructor needs a positive sample budget"});
-        }
         if (!std::isfinite(widthGrowthRatio) || widthGrowthRatio <= 1.0)
         {
             return Result<void>::FromError(

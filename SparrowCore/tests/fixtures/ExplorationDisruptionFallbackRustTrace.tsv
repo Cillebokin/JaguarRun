@@ -1,0 +1,28 @@
+# generator=actual Sparrow Rust exploration_phase with pool observer
+# input=ExplorationDisruptionFallback.json; four identical unit squares force an empty distinct-size pool
+# case seed initial_width shrink_step iteration_limit pool_stddev failure_count item_count
+# failure ordinal total_loss item_count
+# pose item_index rotation_rad x y
+# move failure_id kind item_index related_item_index from_rotation from_x from_y to_rotation to_x to_y
+# insert failure_id insertion_index pool_size candidate_failure_ids...
+# sample failure_id raw_normal_bits mapped_sample_bits selected_index consumed_u64_words first_layer next_u64_after_sample[0..3]
+case disruption_fallback 43 8.000000000 0.100000001 4 0.250000000 2 4
+failure 0 1.040105462 4
+pose 0 0.000000000 0.750000000 1.500000000
+pose 1 0.000000000 2.750000000 1.500000000
+pose 2 0.000000000 3.229999542 1.500000000
+pose 3 0.000000000 5.729999542 1.500000000
+failure 1 1.040105462 4
+pose 0 0.000000000 0.750000000 1.500000000
+pose 1 0.000000000 3.229999542 1.500000000
+pose 2 0.000000000 2.750000000 1.500000000
+pose 3 0.000000000 5.729999542 1.500000000
+insert 0 0 1 0
+sample 0 3f1ba8f0 3f1ba8f0 0 1 0f 7970d83eaa9b503c 5682aa8fdce02bb1 03e47536fd1f6125 344c42c715846e50
+move 0 swap 1 2 0.000000000 2.750000000 1.500000000 0.000000000 3.229999542 1.500000000
+move 0 swap 2 1 0.000000000 3.229999542 1.500000000 0.000000000 2.750000000 1.500000000
+insert 1 0 2 1 0
+sample 1 bf103b6d 3f103b6d 1 1 25 344c42c715846e50 f9922ae540d58823 424a7e896af047df b4e5d4f2ac7e00bf
+move 1 swap 1 0 0.000000000 2.750000000 1.500000000 0.000000000 0.750000000 1.500000000
+move 1 swap 0 1 0.000000000 0.750000000 1.500000000 0.000000000 2.750000000 1.500000000
+move 1 contained 2 0 0.000000000 3.229999542 1.500000000 0.000000000 1.229999542 1.500000000

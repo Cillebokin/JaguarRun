@@ -35,7 +35,7 @@ impl Terminator for BasicTerminator {
         self.timeout.is_some_and(|timeout| Instant::now() > timeout)
     }
 
-    fn new_timeout(&mut self, timeout: Duration){
+    fn new_timeout(&mut self, timeout: Duration) {
         self.timeout = Some(Instant::now() + timeout);
     }
 

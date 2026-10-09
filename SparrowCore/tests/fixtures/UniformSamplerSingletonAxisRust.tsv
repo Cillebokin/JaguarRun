@@ -1,0 +1,12 @@
+# generator=Rust rand 0.10.3 UniformBBoxSampler::sample with Xoshiro256++ seed_from_u64
+# input=RustSppSingleItem.json (one discrete 0-rad rotation; item width equals container width)
+# sample_bbox=[0,2]x[0,5]; container_bbox=[0,2]x[0,10]; feasible X is singleton 1.0 and must consume no axis RNG draw
+# seed sample_index x_f32_bits y_f32_bits
+42 0 3f800000 40119e40
+42 1 3f800000 40737d9e
+42 2 3f800000 40568d9e
+42 3 3f800000 405ae94e
+42 4 3f800000 409777eb
+42 5 3f800000 408ccdc7
+42 6 3f800000 3fa3997c
+42 7 3f800000 404bc6e8

@@ -13,8 +13,8 @@ use ratatui::DefaultTerminal;
 use sparrow::EPOCH;
 use sparrow::config::SparrowConfig;
 use sparrow::consts::DRAW_OPTIONS;
-use sparrow::optimizer::optimize;
 use sparrow::optimizer::lbf::ConstructionError;
+use sparrow::optimizer::optimize;
 use sparrow::util::io::{self, ExtSPOutput};
 use sparrow::util::listener::{
     OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
@@ -151,10 +151,7 @@ fn run_dashboard(
     }
 }
 
-fn export_final_solution(
-    solution: &SPSolution,
-    ext_instance: &ExtSPInstance,
-) -> Result<()> {
+fn export_final_solution(solution: &SPSolution, ext_instance: &ExtSPInstance) -> Result<()> {
     let svg_path = format!("{OUTPUT_DIR}/final_{}.svg", ext_instance.name);
     io::write_svg(
         &s_layout_to_svg(&solution.layout_snapshot, DRAW_OPTIONS, "final"),

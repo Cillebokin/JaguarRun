@@ -22,7 +22,7 @@
 - 判定：基本等价（候选收集/洗牌/重扫过滤一致；batch 语义拆分与统计口径差异如下）。
 - 证据与说明：
   1. **候选收集**：Rust `layout.placed_items.keys().filter(|pk| ct.get_loss(*pk) > 0.0).collect_vec()`（worker.rs:36-38）→ C++ `for (index < tracker.ItemCount()) if (tracker.ItemLoss(index) > 0.0F) candidates.push_back(index)`（Separator.cpp:209-217）。判定：一致（loss>0 谓词逐字面；Rust 按 slotmap key、C++ 按 tracker 索引——`IndexForHandle` 建立同构映射，SeparatorWorker.cpp:141-146）。
-  2. **洗牌**：Rust `.tap_mut(|v| v.shuffle(&mut self.rng))`（worker.rs:39，rand 0.10 `SliceRandom::shuffle`）→ C++ `Shuffle(candidates, rng)`（Separator.cpp:218，手写 Fisher-Yates 两通道，:66-145，见 S04 条目）。判定：一致（fixture `SeparatorSearchRustTrace.tsv`/`SeparatorRoundRustTrace.tsv` 的 eval/report 位级序锁定洗牌消耗一致；`SparrowUniformIndexRustReference.tsv` 锁定整数采样映射）。
+  2. **洗牌**：Rust `.tap_mut(|v| v.shuffle(&mut self.rng))`（worker.rs:39，rand 0.10 `SliceRandom::shuffle`）→ C++ `Shuffle(candidates, rng)`（Separator.cpp:218，手写 Fisher-Yates 两通道，:66-145，见 S04 条目）。判定：实现目标对应；固定 separator trace 覆盖特定候选集和 seed 下的后续结果，但不能据此证明所有候选数的 shuffle 随机消耗逐项相同。`SparrowUniformIndexRustReference.tsv` 只验证指定整数 bound/seed 的抽样结果。
   3. **"仍碰撞才动"过滤**：Rust 循环体 `if self.ct.get_loss(pk) > 0.0`（worker.rs:47）→ C++ `if (index >= tracker.ItemCount() || tracker.ItemLoss(index) <= 0.0F) continue`（Separator.cpp:226-229）。判定：一致（本轮早先的移动可能已消除后续项的碰撞，两侧都重查）。
   4. **搜索单项**：Rust `SeparationEvaluator::new(&layout, item, pk, &ct)` + `search_placement(&layout, item, Some(pk), evaluator, sample_config, &mut rng)`（worker.rs:51-55）→ C++ `FindBestSeparatorMove(layout, tracker, previousHandle, config, rng)`（Separator.cpp:237-238），其内部 `SeparationEvaluator(layout, movingItem.GetItem(), movingHandle, tracker)`（SeparatorWorker.cpp:154-155）+ 五相搜索（见下条）。判定：一致（`Some(pk)` = 有参考位形 → C++ 显式 ReferencePlacement 相位；evaluator 本体 S11 已比）。
   5. **best_sample 不变量**：Rust `best_sample.expect("search_placement should always return a sample")`（worker.rs:57）——因为 `ref_pk=Some` 时参考位形必被 report 进 best_samples（search.rs:256-262），永不空。C++ `move.Value().transform` 可空：`if (!move.Value().transform.has_value()) continue`（Separator.cpp:247-250）——**跳过该项且不计 move**。判定：差异（表示层：Rust panic 不变量 → C++ 防御性跳过；正常路径【参考位形必然存在】两侧都不触发。C++ 的可空源于 FindBestSeparatorMoveImpl 内部多处防御失败路径【handle 不在 tracker、快照不一致等】返回无 transform 的 Result 值，SeparatorWorker.cpp:141-151）。
@@ -36,11 +36,11 @@
   1. **参考位形先行**：Rust 将当前位形 `(dt, eval)` 评估并 report 进 best_samples（search.rs:256-262，UpperBound 传入）→ C++ `tracingEvaluator.Evaluate(movingItem.Transform(), std::nullopt)` + `report(...)`（SeparatorWorker.cpp:167-186）。判定：差异（细节：Rust 传 `Some(best_samples.upper_bound())` 给该次评估、C++ 传 `std::nullopt`——对 SeparationEvaluator 的 upper_bound 只影响早停阈值，首个评估时 best_samples 为空、upper_bound=Invalid（对应 f32::INFINITY 早停阈值，sep_evaluator.rs:57-61），nullopt 同为 INFINITY：语义一致）。
   2. **focused sampler**：Rust `UniformBBoxSampler::new(pi_bbox, item, container_bbox)`（search.rs:264-266，围绕当前位形 bbox）+ `n_focussed_samples` 次（:274-282）→ C++ `UniformRectSampler::Create(movingItem.CollisionShape().BoundingBox(), movingItem.GetItem(), bounds)` + `config.nFocussedSamples` 次（SeparatorWorker.cpp:188-208）。判定：一致（25 默认，S01）。
   3. **container sampler**：Rust 同一构造换 container bbox（search.rs:270-271,286-293）→ C++ `UniformRectSampler::Create(bounds, ...)` + `nContainerSamples` 次（SeparatorWorker.cpp:210-222）。判定：一致（50 默认）。Rust 对 sampler=None（放不下）跳过该段（search.rs:286 `if let`）；C++ `if (containerSampler.HasValue())` 同（:210）。
-  4. **BestSamples**：`BestSamples(max(1, nCoordinateDescents), minDim*0.05)`（SeparatorWorker.cpp:164-166）vs Rust `BestSamples::new(n_coord_descents, item_min_dim * UNIQUE_SAMPLE_THRESHOLD)`（search.rs:242-245，0.05）：一致（max(1,·) 为 C++ 防御）。
+  4. **BestSamples**：`BestSamples(max(1, nCoordinateDescents), minDim*0.05)`（SeparatorWorker.cpp:164-166）vs Rust `BestSamples::new(n_coord_descents, item_min_dim * UNIQUE_SAMPLE_THRESHOLD)`（search.rs:242-245，0.05）：一致（max(1,·) 为 C++ 防御；Rust 容量为 0 时 `upper_bound` 在 Debug 下溢 panic，Release wrapping 到 `usize::MAX` 后返回 Invalid；正常配置不会传 0）。
   5. **pre-refine**：每个 best start 跑 `RefineCoordinateDescent(start, ..., preConfig, rng)` 并 report 结果（SeparatorWorker.cpp:224-236）vs Rust `refine_coord_desc(start, ...)` + report（search.rs:298-303）：一致。CD 配置 `MakeRefinementConfig(item, false/true)`（SeparatorWorker.cpp:21-53）= LbfSearch.cpp:31-63 同一函数副本：0.25/0.02/5°/1° 与 0.01/0.001/0.5°/0.05°，与 Rust consts.rs:17-26 一致（S14 详比 CD 内部）。
   6. **final-refine 与结果选择（差异）**：Rust `best_samples.best().map(|s| refine_coord_desc(s, ..., finalConfig, rng))`——返回的是 **refine 后的样本对**，且 refine 的结果**不再 report 回 best_samples**（search.rs:305-309，返回 `(cd.pos, cd.eval)`）。C++ 同样不把 final-refine 结果 report 回 best：`finalSample = refined.Value()`（:239-251），结果选择 `if (finalSample.has_value()) 用之; else if (refinedBest = best.Best()) 用之`（:253-267）。判定：一致（含回退——Rust 侧 `map` 在 best 为 None 时返回 None（最终 expect panic），C++ 的 refinedBest 回退对应 Rust best 必非 None 的不变式，refine 失败回退两路径都存在【Rust refine 永成功，C++ RefineCoordinateDescent 可失败】——同 S03 差异 #4 的防御形态）。
   7. **item min dim 校验**：C++ 额外 `isfinite/<=0` 报错（SeparatorWorker.cpp:157-163）。
-  8. **fixture 锁定**：`SeparatorSearchRustTrace.tsv`（`# generator=Sparrow Rust search_placement with SeparationEvaluator`，seed=42，16 容器/8 focused/2 CD，逐 eval/report/keep 位级）锁定该五相搜索与 Rust 完全一致；`SamplingCoordinateDescentRustReference.tsv` 锁定 CD 采样序。
+  8. **fixture 覆盖**：`SeparatorSearchRustTrace.tsv`（`# generator=Sparrow Rust search_placement with SeparationEvaluator`，seed=42，16 container/8 focused/2 CD）按事件类型、阶段、accepted、retained 数量与 evaluation count 等离散字段精确比较；样本 kind 精确比较，transform 容差 2e-5、非 Invalid loss 容差 2e-3（TestSeparator.cpp:782-799,901-958）。它支持此输入与配置下的五相搜索轨迹，不证明任意输入下完整搜索等价。`SamplingCoordinateDescentRustReference.tsv` 的 8 个 sample、54 个 coordinate 和 1 个 result 按 transform 1e-6/loss 1e-5 容差比较，部分计数字段精确；不验证 shuffle 序。
 
 ### `move_item`（worker.rs:68-91）
 - C++ 对应：并入 `RunWorkerRound` 的 remove/place/UpdateMovedItem（Separator.cpp:253-283，S04 条目 6 已比）。
@@ -54,7 +54,7 @@
 
 ### `SeparatorConfig::Validate`（SeparatorWorker.cpp:109-124）—— C++ 额外
 - Rust 对应：无。
-- 判定：C++ 额外（前置校验：noImprovementLimit/nWorkers>0、采样预算非零）。
+- 判定：C++ 额外（前置校验：nWorkers>0、采样预算非零；`noImprovementLimit=0` 允许，与 Rust 的零迭代配置一致）。
 
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
@@ -66,11 +66,11 @@
 | 5 | surrogateRejectCount/exactCollisionCount 统计 | C++额外 | 观测计数，进 SeparatorResult/最终 LbfMetrics | worker.rs:94-97 vs SeparatorWorker.h:30-37 + Separator.cpp:244-245 |
 | 6 | FindBestSeparatorMoveWithTrace + SeparatorWorkerTrace 五相 | C++额外 | 测试设施（fixture 生成），对齐 search.rs oracle-trace | SeparatorWorker.cpp:298-308 vs worker.rs（无） |
 | 7 | debug_assert 三连（tracker 一致、old_l>0、wl 不增）与 debug 日志 | C++缺失 | debug 层不变式无 C++ 断言 | worker.rs:69-88 vs SeparatorWorker.cpp（无） |
-| 8 | 候选收集/洗牌/重扫/搜索五相/CD 参数/统计口径 | 一致 | 逐项复现且被 SeparatorSearchRustTrace.tsv 等位级锁定 | worker.rs:36-63 vs Separator.cpp:209-251 + SeparatorWorker.cpp:128-284 |
+| 8 | 候选收集/洗牌/重扫/搜索五相/CD 参数/统计口径 | 源码对应，固定路径有 Rust trace | trace 核对指定输入下的阶段/离散事件和容差浮点值；没有任意输入或通用 shuffle 消耗序证明 | worker.rs:36-63 vs Separator.cpp:209-251 + SeparatorWorker.cpp:128-284 |
 | 9 | panic→Result（handle 不在 tracker、快照不一致等防御） | 一致（既定差异） | 错误通道统一 | worker.rs:57,73-74 vs SeparatorWorker.cpp:141-151 |
 
 ## 结论
-Algorithm 5（worker 单轮：随机序处理所有仍碰撞项、为每项跑含参考位形的五相搜索、remove-place-register 移动）在 C++ 侧以"自由函数 + Separator 编排"的形态完整复现，候选择取、洗牌消耗、搜索相位序、CD 参数与统计口径全部一致并被 SeparatorSearchRustTrace/RoundRustTrace 系列位级锁定，判定基本等价。值得注意的差异是 C++ 把 Rust 的 `expect` 不变量（best_sample 必存在）降格为可空+跳过，并以值快照 layout 的每步 Restore 支撑无状态函数式编排；新增的 surrogate/exact 计数与 trace 钩子是纯观测/测试设施。
+Algorithm 5 的候选筛选、仍碰撞项重查、单项五相搜索和移动更新在 C++ 侧由自由函数与 Separator 编排承接，源码流程可对应。固定 Rust search trace 验证一个 seed/config 下的五相事件、报告和保留列表；阶段/离散字段精确比较，变换和 loss 使用容差。固定 round traces 再覆盖指定 worker 数、输入与 seed 的若干整轮结果；它们没有证明所有候选集的 shuffle 消耗序或任意输入下完全等价。C++ 将 Rust `expect` 不变量改成可空结果并跳过失败 move，还以值快照 Restore 支撑无状态编排；surrogate/exact 计数和 trace 钩子是 C++ 额外观测设施。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：118 行逐项覆盖】** worker.rs 全量复核：结构体 4 字段、load、move_items、move_item、SepStats+Sum+AddAssign——主文 5 小节全覆盖无遗漏。

@@ -4,6 +4,7 @@
 #include "SparrowCore/Quantify/PairMatrix.h"
 #include "SparrowCore/ResultAlias.h"
 
+#include "JaguarCore/Collision/Hazard.h"
 #include "JaguarCore/Entities/Layout.h"
 #include "JaguarCore/Entities/PlacedItem.h"
 #include "JaguarCore/Entities/Item.h"
@@ -66,7 +67,13 @@ public:
                        float clearDecay = 0.95F) noexcept;
 
 private:
+    friend class SeparationEvaluator;
+
     Result<void> BuildFromLayout(const jaguar::Layout& layout);
+    Result<float> EvaluateCandidateHazardLoss(
+        const jaguar::SimplePolygon& transformedCandidate,
+        std::size_t movingIndex,
+        const jaguar::HazardEntity& hazard) const;
 
     std::vector<jaguar::PlacedItemHandle> m_Handles;
     std::vector<jaguar::PlacedItem> m_PlacedItems;

@@ -1,0 +1,33 @@
+{
+  "name": "sparrow-rust-cpp-exploration-oblique-contained-relocation",
+  "items": [
+    {
+      "id": 925,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [5, 0], [5, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 926,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [3, 0], [3, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 927,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    }
+  ],
+  "strip_height": 5.5
+}

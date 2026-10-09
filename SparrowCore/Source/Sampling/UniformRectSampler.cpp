@@ -20,12 +20,8 @@ float SampleAxis(float minValue, float maxValue, sparrow::SparrowRng& rng) noexc
     {
         return minValue;
     }
-    const float value = minValue + (maxValue - minValue) * rng.Uniform01F32();
-    if (value >= maxValue)
-    {
-        return std::nextafter(maxValue, minValue);
-    }
-    return value;
+    // Match rand 0.10's sample_single multiply-add, including upper-endpoint rounding.
+    return minValue + (maxValue - minValue) * rng.Uniform01F32();
 }
 }
 

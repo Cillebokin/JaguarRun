@@ -24,14 +24,14 @@
   | 输出路径 | 固定约定 `output/final_{name}.{svg,json}`（cli.rs:88/119） | `--output <solution.json>` + `--svg <layout.svg>`（必填 output） |
   | 采样数 | 无 | `--samples <n>`（默认 1000→constructor.nContainerSamples，Main.cpp:64/144） |
   | 互斥校验 | clap 声明式（conflicts_with/requires） | 手写 if（无 -t/-e/-c 互斥需要） |
-  - 语义要点：Rust `-t 600` 按 0.8/0.2 分摊到两阶段 time_limit（cli.rs:40-41），无 -t/-e/-c 时默认 600s 同分摊（cli.rs:45-48）；C++ `--time-ms` 直接作为**全局**终止器 maxDuration（Main.cpp:157-158），两阶段 timeLimit 保持默认 9min/60s 不动——时间预算模型不同（S02 差异 1 的应用层体现）。无 `--time-ms` 时 C++ 走默认（9min+60s 相位超时，与 Rust 无时限默认 600s 分摊=480s/120s 数值不同：Rust 默认总 600s，C++ 默认总 600s 但分摊方式不同——C++ expl 540s vs Rust 480s）。
+  - 语义要点：Rust `-t 600` 按 0.8/0.2 分摊到两阶段 time_limit（cli.rs:40-41），无 -t/-e/-c 时默认 600s 同分摊（cli.rs:45-48）；C++ `--time-ms` 直接作为**全局**终止器 maxDuration（Main.cpp:157-158），两阶段 timeLimit 保持默认 9min/60s 不动——时间预算模型不同（S02 差异 1 的应用层体现）。无 `--time-ms` 时 C++ 走默认（9min+60s 相位超时，与 Rust 无时限默认 600s 分摊=480s/120s 数值不同：Rust 默认总 600s，C++ 默认总 600s 但分摊方式不同——C++ expl 540s vs Rust 480s）。边界也不同：Rust `-t 0` 会给探索/压缩设置零时长 phase deadline；C++ `--time-ms 0` 将全局 maxDuration 设为零，而 `ShouldTerminate` 只在正值时执行全局时长检查，因此零表示关闭该全局限制，默认阶段时限仍生效。计时起点也不同：C++ `Optimize` 在构造前启动全局 timer，Rust 先完成 LBF 构造/恢复 warm-start，再分别启动探索/压缩 phase timer；故构造耗时在 C++ 全局预算内、Rust CLI 阶段预算外。上述零值与构造计时差异有源码证据，尚无专门 Rust/C++ parity fixture。
   - 返回码：Rust anyhow 错误→exit 1；C++ 细分 2/3/4/5/6/7/8/9（Main.cpp:95-228），诊断更强。
 
 ### `run()` 流程编排（cli.rs:26-127 vs Main.cpp:58-235）
 - 判定：基本等价（主干一致，节点差异如下）。
 - 证据与说明：
   1. 读输入：`read_spp_input`（实例+可选解）vs `ImportSPInstanceJson`（仅实例）——S22 差异 1。
-  2. Importer 参数：Rust `Importer::new(cde_config, poly_simpl_tolerance, narrow_concavity_cutoff_ratio)`（cli.rs:78，配置三参数生效）；C++ `const jaguar::Importer importer;`（Main.cpp:133，无参=JaguarCore 默认）——**C++ CLI 不传多边形简化/窄凹闭合容差**，对应 S01 差异 2 的下沉。
+  2. Importer 参数：Rust `Importer::new(cde_config, poly_simpl_tolerance, narrow_concavity_cutoff_ratio)`（cli.rs:78，Sparrow 配置三参数生效）；C++ CLI 现在显式用 `jaguar::Importer(sparrow::MakeRustDefaultImporterConfig())`（Main.cpp:133-134；配置 helper 在 SparrowConfig.h:80-96）映射 Rust 默认 CDE 与形状修改参数。旧记录所述“无参构造并走 JaguarCore 默认”已过期。C++ CLI 当前默认值路径已映射；但没有 Rust CLI 对应的任意 importer 参数覆盖选项，因而不能把配置 API 的全域行为称作等价。
   3. RNG：Rust `config.rng_seed.map_or_else(rand::random, seed)`（cli.rs:62-72，未指定→真随机+warn 日志）；C++ `seed=0` 默认（确定性重跑）——S01 差异 1。
   4. 监听器：Rust 传 `SvgExporter`（live/intermediate/final 三通道，cli.rs:87-105+109-117）vs C++ `Optimize(instance, config)` 不传 listener（Main.cpp:160），最终 SVG 由 CLI 事后导出（196-229）——S22 差异 4。
   5. 终止器：Rust `CtrlCTerminator::new()`（cli.rs:107，Ctrl-C 可中断）；C++ `Optimize` 内建默认 terminator（SparrowOptimizer.cpp:237-238，`--time-ms`→maxDuration）——S20 差异 2。
@@ -76,8 +76,8 @@
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | CLI 选项集（-t/-e/-c 分摊模型、--workers、warm-start 输入） | 差异 | C++ 无相位级时限/worker 覆盖；`--time-ms` 走全局终止器而非 0.8/0.2 分摊；默认时限数值不同（expl 540s vs 480s） | io.rs:15-43 vs Main.cpp:22-25 |
-| 2 | Importer 参数传递（cde/poly_simpl/narrow_concavity） | 差异 | C++ CLI 无参构造，导入容差走 JaguarCore 默认；Rust 用 sparrow 配置值 | cli.rs:78 vs Main.cpp:133 |
+| 1 | CLI 选项集与时间预算（-t/-e/-c 分摊模型、`--time-ms` 全局时限、--workers、warm-start 输入；零值语义及计时起点） | 差异 | C++ 缺少相位级时限/worker 覆盖；`--time-ms 0` 关闭全局时限而 Rust `-t 0` 设置零时长 phase deadline；C++ 计时包含构造，Rust phase budget 不含构造；默认探索预算为 540s vs Rust 480s | cli.rs:38-55、optimizer/mod.rs:39-57 vs Main.cpp:157-158、SparrowOptimizer.cpp:233-240、OptimizationTerminator.cpp:66-74 |
+| 2 | Importer 默认参数传递 | 【默认路径已映射；配置覆盖面有差异】 | C++ CLI 调用 `MakeRustDefaultImporterConfig()`，不再走 JaguarCore 默认值；仍无 CLI 自定义 importer 配置项 | cli.rs:78 vs Main.cpp:133-134、SparrowConfig.h:80-96 |
 | 3 | RNG 缺省（真随机 vs seed=0） | 差异 | C++ 默认可复现；Rust 默认随机+日志 | cli.rs:62-72 vs Main.cpp:63/143 |
 | 4 | bench 定位：多 run 统计基准 vs 固定回归基准 | 差异 | C++ 无多 run/并行/分布统计（percentile/median/stddev 均缺）；有 checksum 指纹与 surrogate/碰撞计数 | bench.rs:59-128/176-217 vs BenchMain.cpp:127-183 |
 | 5 | bench 场景覆盖（任意实例×N runs vs 2 内置场景） | 差异 | C++ 不能对用户实例跑基准 | bench.rs:32-37 vs BenchMain.cpp:32-47/84-125 |
@@ -85,7 +85,7 @@
 | 7 | 退出码细分 | C++额外 | 9 档退出码 vs anyhow 单档 | Main.cpp:95-228 vs cli.rs（anyhow） |
 
 ## 结论
-CLI 主干（读 JSON 实例→配置覆盖→Optimize→写解 JSON→可选 SVG→版本/指标摘要）两侧一致，早停/种子两选项语义逐项等价，判定基本等价。最大的实质差异在两处：时间预算模型（Rust 的 -t/-e/-c 相位分摊 vs C++ 的全局 --time-ms，默认时限数值也不同）与 bench 的定位分叉（Rust 是任意实例×多 run×并行×分布统计的性能基准，C++ 是双内置场景×固定种子×checksum 的确定性回归基准）——后者覆盖面互补但不重叠，做性能对齐时需另行在 C++ 侧补多 run 统计或用 Rust bench 驱动对照。
+CLI 主干流程形态相似，但当前配置输入仍不能保证同一 Rust 运行预算或结果：显式 seed 选项对应；缺省 seed、worker 覆盖、两阶段时限分配、零时限含义、计时起点及 warm-start 文件输入仍不同。Importer 的当前默认参数已通过 `MakeRustDefaultImporterConfig()` 映射；自定义参数覆盖面仍不同。若 SparrowCli 纳入迁移范围，应先使解析后的有效算法配置与 Rust 一致，再核对最终布局；不能把默认值或时间模型差异归为仅输出层差异。bench 定位另有分叉（Rust 任意实例、多 run、并行分布统计；C++ 固定场景、固定 seed 的确定性回归），要验证算法 parity 应由同一 Rust 输入/seed 驱动并比较结果，性能统计能力另按产品范围补齐。
 
 ### 补充审计（2026-09-29，bench.rs 229 行逐场景复核）
 **【任务指定核对项】bench.rs 的每个基准场景/函数逐项覆盖核对**：

@@ -1,0 +1,24 @@
+{
+  "name": "sparrow-rust-cpp-exploration-equal-loss-pool",
+  "items": [
+    {
+      "id": 912,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 913,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 4
+}

@@ -4,9 +4,9 @@ use crate::quantify::tracker::CollisionTracker;
 use jagua_rs::collision_detection::hazards::collector::BasicHazardCollector;
 use jagua_rs::collision_detection::hazards::{HazKey, HazardEntity};
 use jagua_rs::entities::{Item, Layout, PItemKey};
+use jagua_rs::geometry::DTransformation;
 use jagua_rs::geometry::geo_traits::TransformableFrom;
 use jagua_rs::geometry::primitives::SPolygon;
-use jagua_rs::geometry::DTransformation;
 
 pub struct SeparationEvaluator<'a> {
     layout: &'a Layout,
@@ -49,7 +49,11 @@ impl<'a> SeparationEvaluator<'a> {
 impl<'a> SampleEvaluator for SeparationEvaluator<'a> {
     /// Evaluates a transformation. An upper bound can be provided to early terminate the process.
     /// Algorithm 7 from https://doi.org/10.48550/arXiv.2509.13329
-    fn evaluate_sample(&mut self, dt: DTransformation, upper_bound: Option<SampleEval>) -> SampleEval {
+    fn evaluate_sample(
+        &mut self,
+        dt: DTransformation,
+        upper_bound: Option<SampleEval>,
+    ) -> SampleEval {
         self.n_evals += 1;
         let cde = self.layout.cde();
 
@@ -64,25 +68,20 @@ impl<'a> SampleEvaluator for SeparationEvaluator<'a> {
             .transform_from(self.item.shape_cd.as_ref(), &dt.compose());
         self.collector.clear();
         // Mark the moving item's existing hazard as already collected so traversal skips it.
-        self.collector.insert(self.current_hazard.0, self.current_hazard.1);
+        self.collector
+            .insert(self.current_hazard.0, self.current_hazard.1);
         let n_ignored_hazards = self.collector.len();
         self.loss_evaluator.reload(loss_bound, shape);
 
         let mut should_stop = |hazard| self.loss_evaluator.add(hazard, shape);
-        let stopped_during_surrogate_check = cde.collect_surrogate_collisions_until(
-            shape,
-            &mut self.collector,
-            &mut should_stop,
-        );
+        let stopped_during_surrogate_check =
+            cde.collect_surrogate_collisions_until(shape, &mut self.collector, &mut should_stop);
 
         match stopped_during_surrogate_check {
             true => SampleEval::Invalid,
             false => {
-                let stopped_during_precise_check = cde.collect_poly_collisions_until(
-                    shape,
-                    &mut self.collector,
-                    &mut should_stop,
-                );
+                let stopped_during_precise_check =
+                    cde.collect_poly_collisions_until(shape, &mut self.collector, &mut should_stop);
 
                 match stopped_during_precise_check {
                     true => SampleEval::Invalid,

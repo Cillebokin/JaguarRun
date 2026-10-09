@@ -160,6 +160,7 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     terminator.StartPhase(config.compression.timeLimit);
     const auto compressed = Compress(
         instance,
+        explored.Value().separatorState,
         explored.Value().solution,
         config.compression,
         compressionSeed,

@@ -1,0 +1,42 @@
+{
+  "name": "sparrow-rust-cpp-exploration-disruption-fallback",
+  "items": [
+    {
+      "id": 910,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 911,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 912,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 913,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    }
+  ],
+  "strip_height": 3.0
+}

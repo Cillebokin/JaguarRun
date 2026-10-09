@@ -1,0 +1,28 @@
+# rustc/cargo 1.98.1, x86_64-pc-windows-msvc; oracle-trace enabled, simd disabled
+# A/B/C/D losses are f32 bits 0x3f800000/0x3f800004/0x3f800008/0x3f80000c.
+# Adjacent values compare Equal while A < C and B < D; these sort results are profile-specific evidence, not an Ord guarantee.
+input_order	output_order
+ABCD	ABCD
+ABDC	ABDC
+ACBD	ACBD
+ACDB	ACBD
+ADBC	ABDC
+ADCB	ADCB
+BACD	BACD
+BADC	BADC
+BCAD	BACD
+BCDA	BACD
+BDAC	BADC
+BDCA	BADC
+CABD	ACBD
+CADB	ACBD
+CBAD	CBAD
+CBDA	CBAD
+CDAB	ACBD
+CDBA	CBAD
+DABC	ABDC
+DACB	ADCB
+DBAC	BADC
+DBCA	BADC
+DCAB	ADCB
+DCBA	DCBA

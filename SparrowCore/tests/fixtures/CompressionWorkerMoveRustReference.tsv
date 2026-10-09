@@ -1,0 +1,28 @@
+# generator=Rust sparrow::optimizer::compress::compression_phase with locked RustReference Cargo.lock
+# input=RustSppCompressWorkerMove.json seed=42 warm_start=true initial_width=4.2 feasible_initial_placements=(1.05,0.55),(3.15,0.55)
+# config=failure_based shrink_range=0.2/0.1 workers=1 iter_no_improvement=1 strike_limit=1 samples=8/0/1
+# comparison=attempts, ordered events, report kinds, and placement identities exact; width tolerance=0.000001; density tolerance=0.000005 (Rust f32 vs C++ double); loss tolerance=0.0001; transform tolerance=0.000005
+# case name seed width density placed_count compression_step_count feasible reports
+case compression_worker_move 42 4.199999809 0.634920657 2 2 1 expl_improving,expl_improving,expl_improving,expl_improving,expl_improving
+report_state 0 1.227620244 1.050000000 0.550000000 2.355623700 0.999434050
+report_state 1 1.090779543 1.001210600 0.500102760 2.359159200 0.999698340
+report_state 2 1.090014935 1.001210600 0.500102760 2.359815600 0.999698340
+report_state 3 0.667851985 1.000882400 0.500183600 2.779559100 0.999249940
+report_state 4 0.667851985 1.000882400 0.500183600 2.779559100 0.999249940
+step 0.200000003
+step 0.100000001
+progress 0 3.359999895 79.365081787 2.514279366
+progress 1 3.359999895 79.365081787 1.227620244
+progress 2 3.359999895 79.365081787 1.090779543
+progress 3 3.359999895 79.365081787 1.090015054
+progress 4 3.359999895 79.365081787 1.090015054
+progress 5 3.359999895 79.365081787 1.090015054
+result 0 438 8 5
+progress 0 3.779999733 70.546737671 1.078720212
+progress 1 3.779999733 70.546737671 0.667852044
+progress 2 3.779999733 70.546737671 0.667851985
+progress 3 3.779999733 70.546737671 0.667851985
+progress 4 3.779999733 70.546737671 0.667851985
+result 0 362 6 4
+placement 0 0 0.000000000 1.050000000 0.550000000
+placement 1 0 0.000000000 3.150000000 0.550000000

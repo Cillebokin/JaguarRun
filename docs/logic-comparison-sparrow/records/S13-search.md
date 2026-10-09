@@ -1,10 +1,10 @@
 # S13. search（采样搜索编排）逐文件逻辑比对
 
 **Rust**: `CodeResource/sparrow/src/sample/search.rs`（343 行）
-**C++**: `SparrowCore/Include/SparrowCore/sampling/LocalSearchSampler.h`（50 行）+ `SparrowCore/Source/Sampling/LocalSearchSampler.cpp`（206 行）；搜索编排本身在 `SparrowCore/Source/Optimizer/LbfSearch.cpp`（297 行）与 `SparrowCore/Source/Optimizer/SeparatorWorker.cpp`（FindBestSeparatorMoveImpl，128-280 行）
-**判定**: 基本等价（列差异）
+**C++**: `SparrowCore/Include/SparrowCore/Sampling/LocalSearchSampler.h`（50 行）+ `SparrowCore/Source/Sampling/LocalSearchSampler.cpp`（206 行）；搜索编排本身在 `SparrowCore/Source/Optimizer/LbfSearch.cpp`（296 行）与 `SparrowCore/Source/Optimizer/SeparatorWorker.cpp`（FindBestSeparatorMoveImpl，128-280 行）
+**判定**: 固定 trace 路径及本轮零采样语义基本对应；`n_coord_descents=0` 已将 Rust profile-specific 容量行为带入 C++ 搜索入口，错误机制仍因语言不同而不同，参考轨迹仅覆盖列出的输入。
 
-说明：Rust 的 `search_placement` 是一个"编排函数"，把 UniformBBoxSampler + BestSamples + refine_coord_desc + evaluator 串成 Algorithm 6。C++ 没有单一对应文件，而是拆成两处内联编排（`SearchLbfImpl` 对应 ref_pk=None 的 LBF 构造路径；`FindBestSeparatorMoveImpl` 对应 ref_pk=Some 的分离路径），另提供一个独立的 `LocalSearchSampler`（高斯局部搜索器，Rust sparrow 中不存在，属于 C++ 额外的公共 API，供外部调用方使用，见 S13-4）。两条编排路径分别被 fixture `LbfSearchRustTrace.tsv`（container/prerefine/finalrefine 三阶段 eval 158 条）与 `SeparatorSearchRustTrace.tsv`（reference/focused/container/prerefine/finalrefine 全五阶段，eval 158 条）锁定。
+说明：Rust 的 `search_placement` 是一个"编排函数"，把 UniformBBoxSampler + BestSamples + refine_coord_desc + evaluator 串成 Algorithm 6。C++ 没有单一对应文件，而是拆成两处内联编排（`SearchLbfImpl` 对应 ref_pk=None 的 LBF 构造路径；`FindBestSeparatorMoveImpl` 对应 ref_pk=Some 的分离路径），另提供一个独立的 `LocalSearchSampler`（高斯局部搜索器，Rust sparrow 中不存在，属于 C++ 额外的公共 API，供外部调用方使用，见 S13-4）。`LbfSearchRustTrace.tsv` 有 158 条 trace record，其中 104 条 eval（16 container / 56 prerefine / 32 finalrefine）；`SeparatorSearchRustTrace.tsv` 有 162 条 trace record，其中 81 条 eval（1 reference / 8 focused / 16 container / 38 prerefine / 18 finalrefine）。两者都是指定 seed/config 轨迹；测试精确比较阶段、事件和报告决策等离散字段，浮点样本使用各自容差，具体边界见 S09/S11。该覆盖支持这两条固定路径，不是完整输入域的逐位等价证明。
 
 ## 函数逐条比对
 
@@ -16,7 +16,7 @@
 ### `SearchPhase` 枚举（search.rs:22-29）
 - C++ 对应：`LbfSearchTracePhase`（`LbfSearchTrace.h:28` 起）仅含 ContainerSample/PreRefine/FinalRefine 三值；`SeparatorSearchTracePhase` 含全部五值（ReferencePlacement/FocusedSample/ContainerSample/PreRefine/FinalRefine）。
 - 判定：【一致】（LBF 路径合法地少两个阶段；trace 类型按路径拆分）
-- 证据：Rust search.rs:23-29 五值枚举；C++ `SparrowCore/Source/Optimizer/LbfSearchTrace.h:28`、`SeparatorWorkerTrace.h`（SeparatorSearchTracePhase）。fixture `LbfSearchRustTrace.tsv` 头部 `n_focussed_samples=0` 且 eval 行只有 container/prerefine/finalrefine 三种 phase（`awk '$1=="eval"{print $2}'` 统计：16 container / 56 prerefine / 32 finalrefine），`SeparatorSearchRustTrace.tsv` 则五阶段齐全（3 reference / 32 focused / 64 container / 44 prerefine / 18 finalrefine）——C++ 拆分与 Rust 两条实际执行路径完全一致。
+- 证据：Rust search.rs:23-29 五值枚举；C++ `SparrowCore/Source/Optimizer/LbfSearchTrace.h:28`、`SeparatorWorkerTrace.h`（SeparatorSearchTracePhase）。fixture `LbfSearchRustTrace.tsv` 头部 `n_focussed_samples=0`，104 条 eval 行只有 container/prerefine/finalrefine 三种 phase（16 / 56 / 32）；`SeparatorSearchRustTrace.tsv` 有 81 条 eval 行，五阶段分别为 1 / 8 / 16 / 38 / 18。这里统计的是 eval 记录，不含 report/keep/result 等 trace record。这表明所列 seed/config 的 C++ 阶段切分与 Rust trace 相符；浮点结果按容差比较，不能由此推出其他配置或 evaluator 也完全一致。
 
 ### `SearchObserver` trait + `NoopSearchObserver`（search.rs:31-60）
 - C++ 对应：无 observer 抽象；trace 用裸函数指针 `const LbfSearchTraceCallback* callback`（LbfSearch.cpp:128）与 `const SeparatorSearchTraceCallback* callback`（SeparatorWorker.cpp:134），为空时跳过。
@@ -30,7 +30,7 @@
 
 ### `search_placement` / `search_placement_with_trace`（search.rs:191-229）
 - C++ 对应：`SearchLbf`/`SearchLbfWithTrace`（LbfSearch.cpp:276-295，无参照布局，对应 `ref_pk=None`）与 `FindBestSeparatorMove`/`FindBestSeparatorMoveWithTrace`（SeparatorWorker.cpp，有 movingHandle，对应 `ref_pk=Some`）。泛型 evaluator 参数变成具体类型（LbfEvaluator / SeparationEvaluator），由编排层固定。
-- 判定：【差异】（公共 API 形状：Rust 一个入口接受任意 `impl SampleEvaluator`；C++ 按调用方拆成两个具体入口 + 一个独立 LocalSearchSampler 通用件。行为在已锁定的两条路径上等价）
+- 判定：【差异】（公共 API 形状：Rust 一个入口接受任意 `impl SampleEvaluator`；C++ 按调用方拆成两个具体入口 + 一个独立 LocalSearchSampler 通用件。两条固定输入/seed/config 路径有 Rust trace 对照，不能外推到任意 evaluator 或输入）
 - 证据：search.rs:191-208 签名 `evaluator: impl SampleEvaluator`；LbfSearch.h:41-46 `SearchLbf(layout, item, config, rng, filter)`；fixture LbfSearchRustTrace.tsv 头 `generator=Sparrow Rust search_placement with LBFEvaluator`，SeparatorSearchRustTrace.tsv 头 `generator=Sparrow Rust search_placement with SeparationEvaluator`——即 fixture 生成用的正是同一个 Rust 函数的两条实例化。
 
 ### `search_placement_impl` — 参照布局阶段（search.rs:253-269）
@@ -55,28 +55,33 @@
   3. 最终精化只取 `best_samples.best()`（search.rs:307-309）；C++ `best.Best()` + finalConfig（SeparatorWorker.cpp:238-251）。Rust 返回值直接是最终样本；C++ SeparatorWorker 在 `refined` 失败（HasValue()==false，即预算耗尽）时回退到 `best.Best()`（SeparatorWorker.cpp:253, 264-268），LBF 同样回退（LbfSearch.cpp:248 `final.HasValue() ? final.Value() : *bestSample`）——Rust 无此回退路径（refine_coord_desc 正常终止必返回样本，无预算参数）。【差异】（C++ 额外的防御性回退，仅在 maxEvaluations 预算被触发时偏离 Rust；正常路径等价）
   4. C++ 编排层回退样本没有再 report 进 BestSamples——与 Rust 一致（Rust 最终精化结果也不 report，search.rs:307-309 只 map 不 report）。
 - 判定：【一致】（含一条 C++ 额外的预算耗尽回退）
-- 证据：上述行号；fixture LbfSearchRustTrace.tsv 的 finalrefine eval 共 32 条（2 个 start × 各 16 eval），SeparatorSearchRustTrace.tsv 的 finalrefine eval 18 条 + prerefine 44 条，与两段精化的评估量结构吻合，C++ 侧 TestSampling/TestSeparator 逐位比对通过（TestSampling.cpp:1001 起 `ReadLbfSearchRustTrace`，TestSeparator.cpp:131 起）。
+- 证据：上述行号；fixture `LbfSearchRustTrace.tsv` 的 finalrefine eval 共 32 条（2 个 start × 各 16 eval），`SeparatorSearchRustTrace.tsv` 的 finalrefine eval 18 条 + prerefine 38 条；其余阶段 eval 数为 reference 1、focused 8、container 16。C++ 测试核对完整事件数量/顺序及离散事件字段；transform/loss 按 S09、S11 所列容差比较，不作浮点逐位断言（TestSampling.cpp:1203-1217,1296-1348；TestSeparator.cpp:782-799,901-990）。
 
 ### `prerefine_cd_config` / `final_refine_cd_config`（search.rs:321-343）
 - C++ 对应：两处编排各自的 `MakeRefinementConfig(item, finalRefinement)`（SeparatorWorker.cpp 内定义；LbfSearch.cpp:31-63）。数值核对：PRE_REFINE_CD_TL_RATIOS=(0.25,0.02)（consts.rs:17）↔ LbfSearch.cpp:53-54 `0.25F / 0.02F`；SND=(0.01,0.001)（consts.rs:23）↔ :44-45 `0.01F / 0.001F`；PRE_REFINE_CD_R_STEPS=(5°,1°) ↔ :55-58（`5.0F * π/180`、`1.0F * π/180`）；SND_REFINE_CD_R_STEPS=(0.5°,0.05°) ↔ :46-49；wiggle = `allowed_rotation == Continuous`（search.rs:322-323, 335-336）↔ LbfSearch.cpp:60-61 `rotationWiggle = item.AllowedRotation().mode == Continuous`。【一致】
 - 唯一差别：item 最小维的来源。Rust `item.shape_cd.bbox`（search.rs:240, 322, 334——形状原点 bbox 的 width/height 取 min）；C++ `item.CollisionShape().BoundingBox()`（LbfSearch.cpp:34，SeparatorWorker.cpp:157-158 同）。这是 jagua-rs `shape_cd` ↔ JaguarCore `CollisionShape()` 的既有对应（S03 已记录），此处不再计差异。
-- 判定：【一致】
+- 判定：【参数公式对应；角度字面计算的 ULP 差异详见 S14】
+
+### 配置边界：零 samples / 零坐标下降
+Rust `SampleConfig` 本身没有对应的运行时校验。`n_coord_descents=0` 会原样传给 `BestSamples::new`（search.rs:242-245）；BestSamples 的零容量在 Rust Debug 下触发 size-1 下溢 panic，在 Release 下因 wrapping 使互不相似的样本可能突破容量（S15）。C++ 搜索调用点现也传入原始容量，不再 clamp 至 1；C++ Debug 以 `std::underflow_error` 对应 Rust panic，Release 保留同类超容量行为。`n_container_samples=0` 在 LBF `ref_pk=None` 路径会跳过采样并返回无候选，两侧均不调用 evaluator；在 `ref_pk=Some` 路径，container/focused 零迭代仍先评估 reference placement，随后执行精化。C++ `SeparatorConfig::Validate` 现只限制 worker 数为正，允许两个采样数为零；Rust/C++ 定向用例覆盖空放置、参考放置与无 sample phase 事件。Rust 默认 `n_focussed_samples=0` 也是有效配置。`search_zero_boundary_reference.rs`、`TestSampling.cpp` 与 `TestSeparator.cpp` 覆盖这些指定边界，不能外推到其他 sampler 创建失败、CD 预算或非零采样轨迹。
 
 ## 差异汇总表
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | 编排入口形状：单一泛型 `search_placement` vs 按调用方拆分的 `SearchLbf` + `FindBestSeparatorMove` | 差异 | 无行为影响（fixture 分别锁定两条路径） | search.rs:191 vs LbfSearch.cpp:276 / SeparatorWorker.cpp:128 |
+| 1 | 编排入口形状：单一泛型 `search_placement` vs 按调用方拆分的 `SearchLbf` + `FindBestSeparatorMove` | 差异 | 源码可对应；Rust fixtures 覆盖指定输入路径，离散字段精确比较、浮点用容差，不覆盖完整输入域 | search.rs:191 vs LbfSearch.cpp:276 / SeparatorWorker.cpp:128 |
 | 2 | `LocalSearchSampler`（高斯局部搜索器：ShiftMean/DecayStddev/Normal01 采样） | C++ 额外 | Rust sparrow 无此组件；为 C++ 公共 API 提供的独立采样器，不参与 search_placement 编排，仅 TestSampling.cpp:416 覆盖 | LocalSearchSampler.cpp:152-205 vs search.rs 全文无对应 |
 | 3 | Rust panic/debug_assert → C++ Result 错误通道（容器 bounds、item 最小维、surrogate 缺失等前置校验） | 差异 | 既定形态差异，正常输入不触发 | LbfSearch.cpp:135-167 vs search.rs:239-250 |
 | 4 | 参照阶段 upper_bound：Rust `Some(Invalid)` vs C++ `std::nullopt` | 差异 | 语义等价（两者都解析为无穷损失界，不影响判定） | search.rs:258 + best_samples.rs:81-87 vs SeparatorWorker.cpp:169 |
 | 5 | 最终精化失败的回退（C++ 回退 `best.Best()`） | C++ 额外 | 仅当 maxEvaluations 预算触发时偏离 Rust；默认 max=SIZE_MAX 不触发 | SeparatorWorker.cpp:253,264-268; LbfSearch.cpp:248 vs search.rs:307-318 |
 | 6 | Observer 形式：trait 对象 vs 函数指针 | 差异 | 无行为影响 | search.rs:31-60 vs LbfSearch.cpp:87-103 |
 | 7 | Rust `debug!` 日志 → C++ 无日志 | 差异 | 无行为影响 | search.rs:260,311-315 |
+| 8 | `n_coord_descents=0`：Rust 与 C++ 搜索路径均把原值传给 BestSamples 零容量 | 已按 Rust profile 行为对齐（Debug 异常类型/机制不同） | Debug 两侧在空容量 upper-bound 处失败；Release 两侧均可能接受候选并突破容量。Rust Reference Debug/Release 与 C++ TestSampling profile 分支覆盖 LBF 搜索入口 | search.rs:242-245 vs LbfSearch.cpp、SeparatorWorker.cpp; BestSamples.cpp; `search_zero_boundary_reference.rs`; TestSampling.cpp; S15 |
+| 9 | 样本预算为零：两侧均接受；无 reference 的 LBF 路径返回无候选，有 reference 的 Separator 路径仍评估并精化 reference | 已按列明输入验证 | 零样本不等于零评估：`ref_pk=Some` 时仍有 reference evaluator 调用；Focused/Container 阶段不产生 sample 事件。空放置 LBF 则返回 None/无候选且评估计数为 0 | `search_zero_boundary_reference.rs`; TestSampling.cpp; TestSeparator.cpp::TestZeroSeparatorSampleBudgetUsesReferencePlacement; LbfSearch.cpp; SeparatorWorker.cpp |
 
 ## 结论
 
-Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最终精化）在 C++ 侧被拆为 `SearchLbfImpl`（无参照，三阶段）与 `FindBestSeparatorMoveImpl`（全五阶段）两个内联编排，配合 BestSamples/UniformRectSampler/RefineCoordinateDescent 三个独立组件复现；阶段顺序、上界传递、report 回写、两段精化参数（0.25/0.02、5°/1°、0.01/0.001、0.5°/0.05°）逐项一致，且被 `LbfSearchRustTrace.tsv` 与 `SeparatorSearchRustTrace.tsv` 两个 Rust 参考逐位锁定。C++ 额外提供的 `LocalSearchSampler`（高斯采样 + ShiftMean + DecayStddev）在 Rust sparrow 中没有对应物，属于超出 sparrow 的公共 API 扩展，不参与搜索编排；其余差异均为错误通道与防御性回退等既定形态差异。
+Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最终精化）在 C++ 侧被拆为 `SearchLbfImpl`（无参照，三阶段）与 `FindBestSeparatorMoveImpl`（全五阶段）。固定 seed/config trace 核对了列明路径的事件顺序和离散字段，浮点样本按容差比较；另有零 sample 与零 CD 容量的 Debug/Release 边界 reference。不构成任意输入的位级证明。C++ 额外提供的 `LocalSearchSampler` 不参与这两条搜索编排。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：343 行逐项覆盖】** search.rs 全量复核：SampleConfig、SearchPhase、SearchObserver trait（3 方法默认空体）、NoopSearchObserver、ObservedEvaluator（set_phase/report/evaluate 转发）、SearchTracePhase+SearchTraceEvent+CallbackSearchObserver+From（oracle-trace 门控）、search_placement、search_placement_with_trace、search_placement_impl（五阶段主体）、prerefine_cd_config、final_refine_cd_config——主文 8 小节 + 差异表全覆盖无遗漏。

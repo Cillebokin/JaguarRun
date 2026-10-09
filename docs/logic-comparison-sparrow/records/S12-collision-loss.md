@@ -1,50 +1,53 @@
 # S12. collision_loss（碰撞损失流式评估）+ Quantify 权重接线 逐文件逻辑比对
 
 **Rust**: `CodeResource/sparrow/src/eval/collision_loss.rs`（97 行）+ 权重入口 `quantify/mod.rs`（quantify_collision_poly_poly / quantify_collision_poly_container）+ `quantify/tracker.rs` 的 get_pair_weight/get_container_weight
-**C++**: `SparrowCore/Include/SparrowCore/optimizer/LbfLoss.h`（21 行，仅 LBF 损失，不涉碰撞）+ 实际对应物 `Source/Optimizer/SampleEval.cpp`（1 行，无碰撞逻辑）+ **碰撞损失与权重接线实际落在** `Source/Quantify/CollisionTracker.cpp`（EvaluateCandidateLoss，两重载）+ `Source/Quantify/OverlapProxy.cpp`（CalculatePolygonCollisionLoss / CalculateContainerPenalty / CalculateOverlapProxy）
-**判定**: 基本等价（公式与权重语义等价；流式短路与 SIMD 有界变体为 C++ 缺失/替换项）
+**C++**: `SparrowCore/Include/SparrowCore/Optimizer/LbfLoss.h`（仅 LBF 损失）+ `Source/Quantify/CollisionTracker.cpp`（`EvaluateCandidateHazardLoss` 逐 hazard 损失 helper；另含两个整项 `EvaluateCandidateLoss` API）+ `Source/Quantify/OverlapProxy.cpp`（碰撞量化公式）+ `Source/Eval/SeparationEvaluator.cpp`（CDE 回调、上界累加与早停）
+**判定**: 基本等价（指定多 hazard 顺序与逐 hazard 上界短路已有 Rust/C++ reference；SIMD feature 与异常 hazard 语义仍不同）
 
-归属说明：任务指定"optimizer/LbfLoss.h 的碰撞损失部分"——经核验 `LbfLoss.h/.cpp`（21+57 行）只含 LBF 的 `xMax*10+yMax` 损失与 bbox 收紧，**没有**碰撞损失代码（Rust collision_loss 的对应物不在该文件）。C++ 的碰撞损失接线是 `SeparationEvaluator` 调 `CollisionTracker::EvaluateCandidateLoss`（layout 重载，CollisionTracker.cpp:453-553），权重经 `PairWeight`/`ContainerWeight`（cpp:311-343），量化公式在 `OverlapProxy.cpp`。以下按 Rust 函数为纲比对这条链。
+归属说明：`LbfLoss.h/.cpp` 只含 LBF 的 `xMax*10+yMax` 损失与 bbox 收紧，不含碰撞损失。SparrowCore 分离评估的实际 Rust 对应路径是 `SeparationEvaluator::Evaluate` 逐个调用 `CollisionTracker::EvaluateCandidateHazardLoss`，并将每项与 pair/container weight 相乘；公式位于 `OverlapProxy.cpp`。公开 `EvaluateCandidateLoss` 重载仍供其他调用方使用，但它们不是分离评估器当前的逐 hazard 主路径。
 
 ## 函数逐条比对
 
 ### `CollisionLossEvaluator::new`（collision_loss.rs:25-35）
-- C++ 对应：无独立结构。状态（layout 引用、ct 引用、current_pk、loss、loss_bound）被摊进 `SeparationEvaluator`（m_Layout/m_Tracker/m_MovingIndex，SeparationEvaluator.h:33-36）与 `EvaluateCandidateLoss` 的局部变量。
+- C++ 对应：无独立结构。Rust 辅助状态内联于 `SeparationEvaluator::Evaluate` 的累计变量和 `EvaluateCandidateHazardLoss` 的逐项公式。
 - 判定：【一致】（内联化；Rust 该结构本身是 pub(super) 私有辅助）
-- 证据：collision_loss.rs:14-22 vs SeparationEvaluator.h:32-42、CollisionTracker.cpp:453-462。
+- 证据：collision_loss.rs:14-22 vs SeparationEvaluator.h:32-42、CollisionTracker.cpp:449-488。
 
 ### `reload`（collision_loss.rs:37-42）
-- Rust：每次 evaluate 前重置 `loss=0.0`、设 `loss_bound`、（simd 时）装载 poles SoA。C++ 对应：`EvaluateCandidateLoss` 每次调用从 `result = 0.0F` 重新累加（cpp:526 起），上界不在 tracker 层（在 SeparationEvaluator::Evaluate cpp:188-193 比较）。
-- 判定：【一致】（无状态化差异；上界检查位置不同已在 S11 差异#1 记录）
-- 证据：collision_loss.rs:37-42 vs CollisionTracker.cpp:526。
+- Rust：每次 evaluate 前重置 loss 和 bound；C++ 在 `SeparationEvaluator::Evaluate` 中为每个候选重新初始化累计值，并经 `EvaluateCandidateHazardLoss` 逐 hazard 加和。`simd` 时 Rust 还装载 poles SoA；C++ 没有该 Rust bounded-SIMD 路径。
+- 判定：【一致】（逐候选状态重置一致；上界与 loss 在逐 hazard 路径中联动）
+- 证据：`collision_loss.rs:37-42` vs `SeparationEvaluator.cpp` 的 `Evaluate` 与 `CollisionTracker.cpp` 的 `EvaluateCandidateHazardLoss`。
 
 ### `add`（collision_loss.rs:44-56）— 逐 hazard 累加 + 短路
-- C++ 对应：**没有逐 hazard 的 add 回调**。C++ 在 `EvaluateCandidateLoss(layout, ...)` 中先全量收集碰撞 hazard（cpp:486-514，两段 Collect*Until 且 should_stop 恒 false），再循环累加（cpp:527-548）。
+- C++ 对应：`SeparationEvaluator::Evaluate` 在 CDE 遍历回调中逐项调用 `CollisionTracker::EvaluateCandidateHazardLoss`，按 Rust 的剩余预算和累计上界短路；不再全量收集后统一计算。
 - 语义核对：
-  1. **每项贡献**：Rust PlacedItem hazard → `quantify_collision_poly_poly(other_shape, shape) * pair_weight`（:86-88）；Exterior hazard → `quantify_collision_poly_container(shape, container_bbox) * container_weight`（:90-93）。C++：PlacedItem → `CalculatePolygonCollisionLoss(transformed, other) * PairWeight(movingIndex, otherIndex)`（cpp:539-542）；Exterior → `CalculateContainerPenalty(transformed, m_ContainerBounds) * ContainerWeight(movingIndex)`（cpp:543-547）。逐项对应 ✓。
-  2. **短路条件**：Rust 每 add 后 `self.loss > self.loss_bound` 即返回 true（提前终止遍历，:55）；C++ 无短路，累加完在 SeparationEvaluator 侧比较（S11 差异#1）。接受性结果一致。【差异】
-  3. **`unimplemented!` 分支**（Rust :94，非 PlacedItem/Exterior 的 hazard）：C++ 循环只处理这两种 kind，其他静默跳过（cpp:528-548 的 if/else-if）——Rust panic → C++ 忽略。【差异】（既定 panic→跳过）
-- 判定：【差异】（流式短路缺失；结果等价）
-- 证据：collision_loss.rs:44-56 vs CollisionTracker.cpp:527-548。
+  1. **每项贡献**：Rust PlacedItem → `quantify_collision_poly_poly(other_shape, shape) * pair_weight`（:86-88），Exterior → `quantify_collision_poly_container(shape, container_bbox) * container_weight`（:90-93）。C++ helper 对应使用 `CalculatePolygonCollisionLoss(otherShape, transformedCandidate) * PairWeight(...)` 或 `CalculateContainerPenalty(...) * ContainerWeight(...)`。
+  2. **逐 hazard 短路**：PlacedItem 单项 loss 大于剩余预算时，C++ 回调在累计前返回 stop；其他项加入累计后，以严格 `accumulatedLoss > lossBound` 决定是否停止，与 Rust 的 `calc_weighted_loss_bounded` 加 `add` 组合规则一致。Collision bound 和 Clear bound 均由该路径处理。
+  3. **累加次序**：CDE 的 callback discovery order 决定 f32 累加次序。三项 PlacedItem fixture 的 Rust 顺序 `[0,1,2]` 得到 `0x4ab5c931`，逆序得到 `0x4ab5c932`；C++实际 evaluator raw bits 匹配 Rust 顺序。该证明只覆盖这组权重和几何。
+  4. **`unimplemented!` 分支**（Rust :94，非 PlacedItem/Exterior hazard）：Rust 对 Hole 与 InferiorQualityZone 都 panic。质量区由 jagua-rs CDE 正常注册；导入时 quality=0 的 container holes 会合并进 zone 并变成 Hole（`jagua-rs/src/io/import.rs:175-194`; `entities/container.rs:114-123`），不是被 Rust 上游过滤。C++ 现不再过滤 Hole；对 Hole 和 InferiorQualityZone，`EvaluateCandidateHazardLoss` 均抛出 `std::logic_error("unsupported hazard entity")`，不再忽略或作为零损失碰撞分类。Rust `collision_loss_unsupported_hazard_reference.rs` 对真实导入布局分别断言两类 hazard 触发 panic；C++ `TestUnsupportedContainerHazardsMatchRustPanic` 对应断言异常类型和消息。故成功/忽略路径差异已关闭，语言级 panic 与 exception 机制仍不同。
+- 判定：【PlacedItem 主路径及 Hole/InferiorQualityZone 不支持输入均有定向 Rust/C++ reference；异常机制按各语言表达】。
+- 证据：`collision_loss.rs:44-56,62-96`；`CollisionTracker.cpp` 的 `EvaluateCandidateHazardLoss`；`SeparationEvaluator.cpp` 的 `Evaluate`；`collision_loss_stream_reference.rs`、`collision_loss_unsupported_hazard_reference.rs`、`TestQuantify.cpp`。
 
 ### `calc_weighted_loss_bounded`（collision_loss.rs:62-96）— 量化公式
 - C++ 对应：`CalculatePolygonCollisionLoss`（OverlapProxy.cpp:137-187）与 `CalculateContainerPenalty`（cpp:185-246）。逐公式核对：
   1. **poly-poly**（Rust quantify_collision_poly_poly，mod.rs:15-24）：`epsilon = max(d1,d2) * 0.01`（OVERLAP_PROXY_EPSILON_DIAM_RATIO，consts.rs:7）；`overlap_proxy = overlap_area_proxy(sur1, sur2, eps) + eps²`；`penalty = sqrt(sqrt(hull1) * sqrt(hull2))`（calc_shape_penalty，mod.rs:26-30：`p1=sqrt(ch_area1), p2=sqrt(ch_area2), (p1*p2).sqrt()`）；`loss = sqrt(overlap_proxy) * penalty`。C++ CalculatePolygonCollisionLoss：epsilonDiameterRatio=0.01（cpp:159）✓；`rawProxy = CalculateOverlapProxy(...Identity,Identity,eps)`、`overlapProxy = rawProxy + eps*eps`（cpp:170-171）✓；ShapePenalty = `sqrt(sqrt(a1)*sqrt(a2))`（cpp:98-100）✓；`sqrt(overlapProxy) * shapePenalty`（cpp:180）✓。**注意**：C++ 传给 CalculateOverlapProxy 的是两个 **Identity 变换**（cpp:163-169）——因为两个形状都已变换到世界系（transformed 与 placed 的 CollisionShape），Rust 的 overlap_area_proxy 收到的同样是变换后的 SPolygon 的 surrogate（:86 `quantify_collision_poly_poly(other_shape, shape)`，两形状均为世界系）。等价 ✓。
-  2. **overlap_area_proxy**（overlap_proxy.rs:8-27）：双循环所有 pole 对，`pd = r1+r2-dist`，`pd_decay = pd>=eps ? pd : eps²/(2eps-pd)`，`total += pd_decay * min(r1,r2)`，最后 `* PI`。C++ CirclePairContribution（OverlapProxy.cpp:26-70）：penetration = r1+r2-dist ✓（dx/dy 在 float 上算，center 经 ApplyRustF32 变换——**差异**：Rust 传入的 shape 已是世界系、pole.center 已变换，直接 distance_to；C++ pole 是局部系，靠 firstTransform/secondTransform 变换——但两处调用均传 Identity，故中心不做任何变换，直接差 ✓）；decayedPenalty 三元与 `eps²/(2eps-pd)` 逐字对应（cpp:57-59）✓；`* min(r1,r2)`（cpp:60）✓；total `*= rustPi`（cpp:128，rustPi=3.14159265358979F，f32 位模式与 Rust `PI` 一致）✓。
+  2. **overlap_area_proxy**（overlap_proxy.rs:8-27）：遍历所有 pole 对并累加 `pd_decay * min(r1,r2)`，最后乘 PI。C++ `CirclePairContribution`（OverlapProxy.cpp:26-70）公式相同。Rust `overlap_area_proxy(other_shape, shape)` 以 `other_shape` 的 poles 为外层、候选 `shape` 为内层；对应的 C++ layout 路径由 `EvaluateCandidateHazardLoss` 调用 `CalculatePolygonCollisionLoss(otherShape, transformedCandidate)`（CollisionTracker.cpp:469-472），参数顺序与 Rust 一致。旧 C++ 调用顺序相反；非对称方形/矩形夹具在 0.137 rad 下曾得到 Rust `0x32560315`、旧 C++ `0x32560316`（差 1 ULP）。改为 Rust 参数顺序后，该 pair 的 11 个测试旋转角均逐位相同。此结论限于 layout poly-poly 路径及该单 pair 夹具；三项 hazard 的指定累加顺序另由 `collision_loss_stream_reference.rs` 覆盖，C++ tracker-only 重载仍是额外 API。
   3. **poly-container**（Rust quantify_collision_poly_container，mod.rs:36-55）：有交集 → `(shape_area - inter_area) + 0.0001*shape_area`；无交集 → `shape_area + centroid 距离`；`loss = 2.0 * sqrt(overlap) * penalty(s,s)`。C++ CalculateContainerPenalty（cpp:185-245）：交集条件 `intersectionXMin < intersectionXMax && ...`（严格小于，对应 Rust `Rect::intersection` 的 Some/None——jagua-rs intersection 在退化零面积时返回 None？经核验 Rect::intersection 对零宽/高返回 None，即严格正交集，与 C++ 严格 < 一致）✓；`(shapeArea - intersectionArea) + 0.0001F * shapeArea`（cpp:221-223）✓；无交集 `shapeArea + RectCentroidDistance`（cpp:225-227，中心距离在 f32 上算 ✓）；`2.0F * sqrt(overlap) * shapePenalty`（cpp:239）✓。
-  4. **精度路径**：Rust 全 f32（pole 半径/中心、面积、距离均 f32）；C++ pole 的 center/radius 存 double（Circle2d），差/距离在 cast float 后算（cpp:41-51）、ConvexHullArea/直径 double→float cast（cpp:88-90,141-144）、面积在 float 上算（cpp:196-199）。即 C++ 存储 double、运算 f32——与 RustF32 双轨一致，被 fixture 的 loss 位模式锁定。【一致】
+  4. **精度路径与累加序**：碰撞量化和逐 hazard loss 的计算使用 Rust 对应的 f32 表达式；JaguarCore 几何对象的坐标/变换存储仍含 double 字段，不能据计算中间量就概括整个 geometry 层为 f32。单 pair 非对称 fixture 的 11 个旋转候选逐位一致，三项 hazard 指定次序的加权总损失也逐位一致。普通 trace 的 `loss_f32_bits` 会转为浮点后按容差比较，不能当作位断言；现有 raw-bit 结果不覆盖其他 geometry、pole 集合、hazard 次序或 Exterior hazard。
   5. **C++ 额外的退化防御**：处处 isfinite/<=0 检查返回 0（Rust debug_assert is_normal + 直接算）。【C++ 额外】
 - 判定：【一致】（公式逐字对应；防御差异另计）
-- 证据：collision_loss.rs:62-96 + quantify/mod.rs:15-55 + overlap_proxy.rs:8-27 vs OverlapProxy.cpp:26-70,98-100,108-131,137-187,185-246；`SeparatorSearchRustTrace.tsv` 的 collision loss 位模式（如 reference 首条 `40afead0`≈5.498）逐位匹配锁定此链路。
+- 证据：collision_loss.rs:62-96 + quantify/mod.rs:15-55 + overlap_proxy.rs:8-27 vs OverlapProxy.cpp:26-70,98-100,108-131,137-187,185-246；`SeparatorSearchRustTrace.tsv` 的 `loss_f32_bits` 会被读取为浮点值并按测试容差比较，不是逐位比较。
 
 ### 权重接线 `get_pair_weight` / `get_container_weight`（tracker.rs，经 collision_loss.rs:71,92 调用）
-- C++ 对应：`CollisionTracker::PairWeight(first, second)`（CollisionTracker.cpp:311-329）与 `ContainerWeight(index)`（cpp:331-343），接线点：EvaluateCandidateLoss(layout) 的 cpp:541-542（pair）与 cpp:545-547（container）。权重数值本身（GLS 递增/衰减，GLS_WEIGHT_* 常量，consts.rs:4-6）属 S18（tracker）范围，本记录确认接线方向：Rust poly-poly 项乘 `ct.get_pair_weight(current_pk, other_pk)`、container 项乘 `ct.get_container_weight(current_pk)`；C++ 同乘对应权重 ✓。
+- C++ 对应：`CollisionTracker::PairWeight(first, second)` 与 `ContainerWeight(index)`；当前主路径由 `EvaluateCandidateHazardLoss` 为每个 PlacedItem/Exterior 贡献乘相应权重，再交给 `SeparationEvaluator::Evaluate` callback 累加。tracker 和权重更新公式本身属 S18。
 - 判定：【一致】
-- 证据：collision_loss.rs:70-71,90-92 vs CollisionTracker.cpp:437-442（候选重载）/539-547（layout 重载）。
+- 证据：`collision_loss.rs:70-71,90-92`、`CollisionTracker.cpp` 的 `EvaluateCandidateHazardLoss` 与 `SeparationEvaluator.cpp` 的 `Evaluate`。
 
-### `EvaluateCandidateLoss` 的两个重载（CollisionTracker.cpp:400-452 与 453-553）
-- Rust 对应：无（Rust 是流式：CDE 遍历 + add 回调）。C++ 提供：(a) tracker-only 重载（cpp:400-452）：**遍历所有其它件**（不经 CDE 收集）直接 `CalculateOverlapProxy`（surrogate 级，含变换）——这是"无布局引擎"的近似路径；(b) layout 重载（cpp:453-553）：**经 CDE 精确收集**碰撞对再累加——这是 SeparationEvaluator 实际使用的路径（SeparationEvaluator.cpp:182-183 传 layout）。(b) 与 Rust 语义对应（只有真实碰撞的件才贡献损失）；(a) 是 C++ 额外的公共 API（供无引擎场景/测试），且它不套用 `+eps²`、sqrt、ShapePenalty 的完整 poly-poly 公式而是裸 proxy。【C++ 额外】（路径 (a)；注意 SeparationEvaluator 用的是 (b)，语义与 Rust 对齐）
-- 证据：CollisionTracker.cpp:400-452 vs 453-553；SeparationEvaluator.cpp:182-183。
+### `EvaluateCandidateLoss` 的两个整项 API
+- Rust 的 separation 主路径是 CDE 遍历 + `CollisionLossEvaluator::add` 的逐 hazard callback；C++ 对应 `SeparationEvaluator::Evaluate` + `EvaluateCandidateHazardLoss`。
+- C++ 仍公开两个整项 API：(a) tracker-only overload 遍历其他件并算 overlap proxy；(b) layout overload 先收集再对已发现 hazard 求整项损失。两者是额外接口，不再是 `SeparationEvaluator` 当前使用的实现路径。
+- 判定：【C++ 额外】（接口仍可用；Sparrow 分离主路径走逐 hazard Rust 对应）。
+- 证据：`CollisionTracker.cpp` 的两个 `EvaluateCandidateLoss` overload 与 `EvaluateCandidateHazardLoss`；`SeparationEvaluator.cpp` 的 `Evaluate`。
 
 ### SIMD 有界变体（collision_loss.rs:73-82，`quantify_collision_poly_poly_simd_bounded`）
 - C++ 对应：`CalculatePolygonCollisionLoss` 无 SIMD、无 `max_loss / weight` 的预除界（SIMD 通道见 S19——C++ 的 SoA/AVX2 是双精度独立通道，不是本函数的位等价替换）。即 Rust simd feature 下"先除权重再界后乘回"的有界短路路径在 C++ 侧无对应（C++ 默认对应 Rust 的 `#[cfg(not(simd))]` 标量路径，:84-88）。
@@ -60,20 +63,27 @@
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | 流式短路：Rust 每 hazard 累加后 `loss > bound` 即停；C++ 全量收集后一次性计算与比较 | 差异 | 接受/拒绝结果等价；C++ 无逐项提前终止（性能），碰撞集合收集完整 | collision_loss.rs:44-56 vs CollisionTracker.cpp:527-548 + SeparationEvaluator.cpp:188-193 |
+| 1 | 流式短路与多 hazard 累加顺序：C++ 已经逐 hazard 算 loss、检查剩余上界并在超界时停止；三项 PlacedItem fixture 的顺序 raw bits 匹配 Rust `0x4ab5c931`，逆序 Rust 为 `0x4ab5c932` | 已修复并按固定 fixture 验证 | 不证明其他几何、Exterior hazard、所有 CDE 顺序和 loss bound 邻域 | `collision_loss.rs:44-56`; `EvaluateCandidateHazardLoss`; `collision_loss_stream_reference.rs`; `TestQuantify.cpp` |
 | 2 | SIMD 有界变体（`max_loss/weight` 预除 + bounded SIMD） | C++ 缺失 | Rust 默认构建同用标量路径，等价；simd feature 不对齐 | collision_loss.rs:73-82 vs OverlapProxy.cpp:137-187 |
-| 3 | `unimplemented!`（未知 hazard）→ C++ 静默跳过 | 差异 | 既定 panic→跳过；CDE 只产 PlacedItem/Exterior/Hole，Hole 已被 filter 排除 | collision_loss.rs:94 vs CollisionTracker.cpp:527-548 |
-| 4 | `EvaluateCandidateLoss` tracker-only 重载（不经 CDE，直接全件对 proxy） | C++ 额外 | 公共 API；SeparationEvaluator 未使用（用 layout 重载，语义对齐 Rust） | CollisionTracker.cpp:400-452 vs collision_loss.rs 全文 |
-| 5 | 量化公式退化防御（isnormal 断言 → isfinite/0 检查返回 0） | C++ 额外 | panic→0 化；正常数据不触发 | mod.rs:24,53 + overlap_proxy.rs:24 vs OverlapProxy.cpp 各处 return 0.0F |
-| 6 | pole 中心变换路径：Rust 已是世界系坐标直算；C++ 局部系 + Transform 参数（实际调用传 Identity，等价） | 差异 | 形式差异，实际等价（两调用点均 Identity） | overlap_proxy.rs:13 vs OverlapProxy.cpp:38-45,163-169 |
-| 7 | 候选 loss 下限：SeparationEvaluator 侧 `std::max(loss, 1e-6)`（见 S11）与 tracker 侧 `std::max(result, 0.0F)`（cpp:552） | C++ 额外 | 防 0/负 loss；正常量化值远大于阈值 | CollisionTracker.cpp:552 vs collision_loss.rs:58-60 |
+| 3 | Hole：Rust 收集后在损失匹配中 panic；C++ SeparationEvaluator 过滤掉 | 【高优先级结果差异】 | 质量 0 的导入孔洞会作为 HazardEntity::Hole 进入 Rust CDE；C++ 可能允许穿越孔洞，Rust 则 panic | `collision_loss.rs:68-95`; `container.rs:114-123`; `import.rs:175-194`; `SeparationEvaluator.cpp:114-116` |
+| 4 | InferiorQualityZone：Rust 在损失匹配中 panic；C++ 不过滤且未知 kind 贡献 0，仍按有碰撞分类 | 【高优先级结果差异】 | Rust 输入路径 panic；C++ 返回零损失 Collision，评估结果及后续搜索不同 | `collision_loss.rs:68-95`; `container.rs:114-123`; `SeparationEvaluator.cpp:114-116,222-236`; `CollisionTracker.cpp:449-488` |
+| 5 | 两个 `EvaluateCandidateLoss` 整项重载（tracker-only 与 layout） | C++ 额外 | 作为独立 API 保留；`SeparationEvaluator` 当前使用逐 hazard helper，不使用这两个重载 | `CollisionTracker.cpp`; `SeparationEvaluator.cpp` |
+| 6 | 量化公式退化防御（isnormal 断言 → isfinite/0 检查返回 0） | C++ 额外 | panic→0 化；正常数据不触发 | mod.rs:24,53 + overlap_proxy.rs:24 vs OverlapProxy.cpp 各处 return 0.0F |
+| 7 | layout poly-poly pole 参数顺序和多 hazard 累加顺序：单 pair 11 个旋转候选与三项 hazard 固定顺序的位模式均匹配 Rust | 已修复并由两组 reference 覆盖 | 只证明列出的几何、权重和发现顺序；其他 pole 集合与 hazard kind 仍未验证 | `overlap_proxy.rs:8-27`; `CollisionTracker.cpp`; RustReference collision-loss tests; `TestQuantify.cpp` |
+| 8 | 候选 loss 下限：旧 `std::max(loss, 1e-6)` 已删除，当前返回逐 hazard 累计原值 | 已修复（Rust 原值语义） | 11 个 sub-micro 候选逐位匹配；多 hazard case 另验证累计 raw bits | `SeparationEvaluator.cpp`; `sep_evaluator.rs:92-93`; `collision_loss_floor_reference.rs`; `collision_loss_stream_reference.rs`; `TestQuantify.cpp` |
 
 ## 结论
 
-碰撞损失的量化公式链——`ε=max(d)·0.01`、pole 对累加 `pd_decay·min(r)` 乘 π、`+ε²`、几何均值 ShapePenalty、`sqrt(proxy)·penalty`（件-件）与 bbox 交集/质心距离、`2·sqrt(overlap)·penalty`（件-容器）——在 C++ OverlapProxy/CalculatePolygonCollisionLoss/CalculateContainerPenalty 中逐字复刻（含 f32 运算路径），权重接线（PairWeight/ContainerWeight）与 Rust 的 get_pair_weight/get_container_weight 一一对应，并被 SeparatorSearchRustTrace.tsv 的 loss 位模式锁定。主要结构差异是 Rust 的"流式逐 hazard 累加+上界短路"被替换为"全量收集+整体计算"，接受性结果等价但失去短路；SIMD 有界变体为 C++ 缺失（默认标量路径两侧一致）。任务指定的 LbfLoss.h 经核验仅含 LBF 损失（10x+y），不含碰撞部分。
+碰撞损失公式与权重接线在源码层面对应，且 C++ 分离评估器已用 CDE callback 实现 Rust 的逐 hazard 加和和上界早停。非对称方形/矩形 fixture 的 11 个 sub-micro 候选位模式一致；三项 PlacedItem hazard fixture 证明指定发现顺序 raw loss 为 `0x4ab5c931`，逆序 Rust 累加为 `0x4ab5c932`，C++ 按相同顺序匹配。Clear 上界下的零损失碰撞现已由两侧 reference 确认分类均为 `Collision(0)`。Hole 与 InferiorQualityZone 也由 Rust/C++ 定向用例确认均进入失败通道；Rust panic、C++ `std::logic_error` 属语言机制差异。剩余风险包括其他几何/pole 集合、Exterior hazard 和临界上界。SIMD bounded 仅属于 Rust 可选 feature，目标 feature 集须单独冻结。`LbfLoss.h` 只包含 LBF 目标函数（10x+y），不包含碰撞损失。
 
 ### 补充审计（2026-09-29）
+以下为 2026-09-29 时点的审计补记；其中关于“全量收集后事后比较”的表述已被 2026-10-06 的逐 hazard 实现取代，现行结论以本文主文、差异表和当日实现验证为准。
+
 1. **【遗漏补记：`reload` 的 simd 分支内容】** 主文 reload 条目写"（simd 时）装载 poles SoA"但未展开。现场确认：collision_loss.rs:41 `poles_soa.load(&_shape.surrogate().poles)` 把**候选形状（被评估的移动件候选变换）**的 pole 装入 SoA（p2 方向），与标量路径的 `calc_weighted_loss_bounded`（:73-88 的 `quantify_collision_poly_poly_simd_bounded(other_shape, shape, &poles_soa, max_loss/weight)` 预除界）共同构成 simd feature 的有界短路链——C++ 无对应（归 S19 差异 #2，判定不变），此处补记函数体细节以闭合 reload 条目。
-2. **【遗漏补记：`add` 的 remaining 计算】** 主文 add 条目未记"An unbounded evaluation stays unbounded even if accumulated loss overflows"（collision_loss.rs:47-53）：`loss_bound == INFINITY` 时 remaining 恒 INFINITY（避免溢出后误判超界）、否则 `loss_bound - loss`。C++ 对应物在 SeparationEvaluator 的事后比较（cpp:191 `loss.Value() > upperBound->loss`），无此溢出防御分支——INFINITY 上界在 C++ 由"upperBound 无 COLLISION loss 或非有限"分支（:189-190 `std::isfinite(upperBound->loss)` 前置）等价规避：非有限上界不触发拒绝，语义一致。判定：【一致】（防御形态不同，正常路径等价）。
-3. **【浅覆盖补全：calc_weighted_loss_bounded 的 Exterior 分支无界语义】** Rust Exterior 分支（:90-93）`Some(容器惩罚 * weight)` **不检查 max_loss**（恒 Some，短路仅由 add 层的累计判定）——PlacedItem 分支的 `(loss <= max_loss).then_some(loss)` 才做单项界检查。C++ `EvaluateCandidateLoss`（CollisionTracker.cpp:548-553）对 Exterior 项同样直接累加无单项界——两侧 Exterior 均不做单项界、接受性由总界（Rust：累计后；C++：算完后）决定。判定：【一致】（此不对称性两侧同构，主文未显式记录）。
+2. **【遗漏补记：`add` 的 remaining 计算】** Rust 对无界上界保持 `remaining=INFINITY`；当前 C++ 同样以正无穷作无界 sentinel，并在 callback 的 PlacedItem 单项比较/累计比较中避免将其误当有限预算。等号不触发 stop，超过才 stop。该控制流现位于 `SeparationEvaluator::Evaluate`，不再是事后全量比较。判定：【实现已按当前路径对齐】。
+3. **【浅覆盖补全：calc_weighted_loss_bounded 的 Exterior 分支单项语义】** Rust Exterior 分支生成完整的容器惩罚乘 weight，不做 PlacedItem 专属的单项剩余预算比较，之后由 `add` 的总累计检查早停。当前 C++ `EvaluateCandidateHazardLoss` 也直接返回 Exterior 加权项，由 `SeparationEvaluator::Evaluate` 的累计上界检查决定是否停止；Exterior 专项 parity 仍应补测。
 4. **【核对确认：任务指定项 LbfLoss 归属】** 现场再验 LbfLoss.h（21 行）/LbfLoss.cpp（57 行）全文：`FromBoundingBox/TightenSampleBBox/Cost()/operator<`，无碰撞损失代码——主文归属判定维持（碰撞损失链在 OverlapProxy+CollisionTracker）。
+
+### 实现与回归验证（2026-10-06）
+1. **pole 参数顺序的 RED/GREEN 证据**：保留 Rust reference 的方形/矩形几何，在 0.137 rad 下，Rust 为 `0x32560315`，旧 C++ layout 调用顺序为 `0x32560316`；将 `CalculatePolygonCollisionLoss` 的实参改为 `(otherShape, transformedCandidate)` 后该断言通过。Rust 与 C++ 随后对 0、0.013、0.137、0.281、0.5235988、0.7853982、1.234、2.345、3.1415927、4.712389、5.999 rad 共 11 个候选逐位相同。
+2. **历史 Rust/C++ 回归验证（2026-10-06）**：当日 RustReference 全量 `cargo test --locked` 的 12 个测试函数通过；Rust 两项 multi-hazard 测试核对发现次序、raw loss 和 early-stop；当时新增的 warm-start optimize→explore→compress 参考另见 README。2026-10-07 新增的 worker-move 压缩参考及当前套件 13 项结果记录在 README/S07/S18；本段只记录 10-06 的状态，不代表当前测试总数。以上 fixture 均不覆盖所有配置、几何、终止条件或 cold-start 默认整条 optimize 流程。

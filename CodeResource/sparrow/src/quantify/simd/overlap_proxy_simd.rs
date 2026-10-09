@@ -12,12 +12,17 @@ use std::simd::Simd;
 const SIMD_WIDTH: usize = 4;
 
 #[allow(non_camel_case_types)]
-type f32xN = Simd<f32,SIMD_WIDTH>;
+type f32xN = Simd<f32, SIMD_WIDTH>;
 
 /// SIMD version of [`poles_overlap_area_proxy`] with configurable vector width.
 /// `p2` should match the poles of `sp2`.
 #[inline(always)]
-pub fn poles_overlap_area_proxy_simd(sp1: &SPSurrogate, sp2: &SPSurrogate, epsilon: f32, p2: &CirclesSoA) -> f32 {
+pub fn poles_overlap_area_proxy_simd(
+    sp1: &SPSurrogate,
+    sp2: &SPSurrogate,
+    epsilon: f32,
+    p2: &CirclesSoA,
+) -> f32 {
     poles_overlap_area_proxy_simd_bounded(sp1, sp2, epsilon, p2, f32::INFINITY).unwrap()
 }
 
@@ -29,8 +34,8 @@ pub fn poles_overlap_area_proxy_simd_bounded(
     p2: &CirclesSoA,
     max_unscaled_overlap: f32,
 ) -> Option<f32> {
-    use std::simd::prelude::{SimdFloat, SimdPartialOrd};
     use std::simd::StdFloat;
+    use std::simd::prelude::{SimdFloat, SimdPartialOrd};
 
     let e_n = f32xN::splat(epsilon);
     let e_sq_n = f32xN::splat(epsilon * epsilon);
@@ -75,9 +80,9 @@ pub fn poles_overlap_area_proxy_simd_bounded(
         //process remaining elements with scalar operations
         let remaining_idx = chunks * SIMD_WIDTH;
         for j in remaining_idx..p2.x.len() {
-            let p2 = Circle { 
-                center : Point(p2.x[j], p2.y[j]), 
-                radius: p2.r[j]
+            let p2 = Circle {
+                center: Point(p2.x[j], p2.y[j]),
+                radius: p2.r[j],
             };
 
             //penetration depth between the two poles (circles)
@@ -95,14 +100,19 @@ pub fn poles_overlap_area_proxy_simd_bounded(
             return None;
         }
     }
-    
+
     total_overlap *= PI;
 
     debug_assert!(
-        approx_eq!(f32, total_overlap, overlap_area_proxy(sp1, sp2, epsilon),
-                 epsilon = total_overlap * 1e-3),
-                  "SIMD and SEQ results do not match: {} vs {}", total_overlap,
-                  overlap_area_proxy(sp1, sp2, epsilon)
+        approx_eq!(
+            f32,
+            total_overlap,
+            overlap_area_proxy(sp1, sp2, epsilon),
+            epsilon = total_overlap * 1e-3
+        ),
+        "SIMD and SEQ results do not match: {} vs {}",
+        total_overlap,
+        overlap_area_proxy(sp1, sp2, epsilon)
     );
 
     debug_assert!(total_overlap.is_normal());

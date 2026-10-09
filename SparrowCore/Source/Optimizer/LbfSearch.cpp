@@ -168,7 +168,7 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
     }
 
     BestSamples best(
-        std::max<std::size_t>(1U, config.nCoordinateDescents),
+        config.nCoordinateDescents,
         itemMinimumDimension * 0.05F);
     std::vector<LbfLoss> tighteningHistory;
     std::optional<LbfLoss> bestLoss;

@@ -24,6 +24,9 @@ HEADERS += \
     $$PWD/Include/SparrowCore/Optimizer/OptimizationListener.h \
     $$PWD/Include/SparrowCore/Optimizer/SparrowConfig.h \
     $$PWD/Include/SparrowCore/Optimizer/Exploration.h \
+    $$PWD/Source/Optimizer/ExplorationNormalSampler.h \
+    $$PWD/Source/Optimizer/ExplorationTrace.h \
+    $$PWD/Source/Optimizer/CompressionTrace.h \
     $$PWD/Include/SparrowCore/Optimizer/Compression.h \
     $$PWD/Include/SparrowCore/Optimizer/SeparatorWorker.h \
     $$PWD/Include/SparrowCore/Optimizer/Separator.h \

@@ -1,0 +1,24 @@
+{
+  "name": "sparrow-rust-cpp-lbf-sort-precision",
+  "items": [
+    {
+      "id": 920,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 921,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.50006104, 0], [0.50006104, 1.6449358], [0, 1.6449358]]
+      }
+    }
+  ],
+  "strip_height": 2
+}

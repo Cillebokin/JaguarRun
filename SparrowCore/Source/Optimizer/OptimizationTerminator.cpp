@@ -16,26 +16,30 @@ Result<void> OptimizationTerminatorConfig::Validate() const
 OptimizationTerminator::OptimizationTerminator(
     OptimizationTerminatorConfig config)
     : m_Config(config),
-      m_StartTime(std::chrono::steady_clock::now()),
-      m_PhaseStartTime(m_StartTime)
+      m_StartTime(std::chrono::steady_clock::now())
 {
 }
 
 void OptimizationTerminator::Start() noexcept
 {
     m_StartTime = std::chrono::steady_clock::now();
-    m_PhaseStartTime = m_StartTime;
-    m_PhaseDuration = std::chrono::milliseconds{0};
+    m_PhaseDeadline.reset();
     m_StopRequested.store(false, std::memory_order_relaxed);
+    m_PhaseStopRequested.store(false, std::memory_order_relaxed);
 }
 
 void OptimizationTerminator::StartPhase(
     std::chrono::milliseconds phaseDuration) noexcept
 {
-    m_PhaseStartTime = std::chrono::steady_clock::now();
-    m_PhaseDuration = phaseDuration.count() < 0
-        ? std::chrono::milliseconds{0}
-        : phaseDuration;
+    if (phaseDuration.count() < 0)
+    {
+        m_PhaseDeadline.reset();
+    }
+    else
+    {
+        m_PhaseDeadline = std::chrono::steady_clock::now() + phaseDuration;
+    }
+    m_PhaseStopRequested.store(false, std::memory_order_relaxed);
 }
 
 void OptimizationTerminator::RequestStop() noexcept
@@ -43,9 +47,15 @@ void OptimizationTerminator::RequestStop() noexcept
     m_StopRequested.store(true, std::memory_order_relaxed);
 }
 
+void OptimizationTerminator::RequestPhaseStop() noexcept
+{
+    m_PhaseStopRequested.store(true, std::memory_order_relaxed);
+}
+
 bool OptimizationTerminator::ShouldTerminate(std::size_t iteration) const noexcept
 {
-    if (m_StopRequested.load(std::memory_order_relaxed))
+    if (m_StopRequested.load(std::memory_order_relaxed)
+        || m_PhaseStopRequested.load(std::memory_order_relaxed))
     {
         return true;
     }
@@ -57,12 +67,9 @@ bool OptimizationTerminator::ShouldTerminate(std::size_t iteration) const noexce
     {
         return true;
     }
-    if (m_PhaseDuration.count() > 0)
+    if (m_PhaseDeadline.has_value())
     {
-        const auto phaseElapsed = std::chrono::duration_cast<
-            std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - m_PhaseStartTime);
-        return phaseElapsed.count() >= m_PhaseDuration.count();
+        return std::chrono::steady_clock::now() > *m_PhaseDeadline;
     }
     return false;
 }

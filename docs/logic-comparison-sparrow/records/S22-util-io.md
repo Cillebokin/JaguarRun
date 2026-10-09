@@ -30,9 +30,9 @@
 - 证据与说明：`{true}`=pretty 对应 `serde_json::to_writer_pretty`；序列化字段语义在 JaguarCore 记录 33（ext-repr）。
 
 ### `read_spp_input(path) -> (ExtSPInstance, Option<ExtSPSolution>)`（Rust 135-149）
-- C++ 对应：`jaguar::Importer::ImportSPInstanceJson`（Main.cpp:133-134、SparrowWasm.cpp:63-65、BenchMain.cpp:204-205）。
+- C++ 对应：`jaguar::Importer::ImportSPInstanceJson`，CLI/WASM/Bench 分别使用 `sparrow::MakeRustDefaultImporterConfig()` 构造 importer（Main.cpp:133-134、SparrowWasm.cpp:63-65、BenchMain.cpp:204-205；配置 helper 在 `SparrowConfig.h:80-96`）。该 helper 显式映射 Rust `DEFAULT_SPARROW_CONFIG` 的 CDE 和形状修改默认参数。
 - 判定：差异（双格式回退解析缺失）。
-- 证据与说明：Rust 先试"instance+solution 完整输出"（`ExtSPOutput`），失败再退回"仅 instance"——这让 `-i` 既可接新实例也可接 warm-start 解文件（cli.rs:76-83 据此把 `ext_solution` 传入 `optimize`）。C++ 三个入口全部只调 `ImportSPInstanceJson`，无"先试解文件"的回退：喂给 CLI 一个含解的 JSON，其 `solution` 字段被忽略（或按 JaguarCore 反序列化容错行为处理）。影响：warm-start 的 CLI 入口缺失，与上一条共同构成 C++ 侧"解回读"闭环缺口；库级能力本身在（`config.warmStart` + `MakeWarmStart` 校验链 SparrowOptimizer.cpp:28-87，含剩余需求/ValidateSPSolution/几何可行性三重检查，比 Rust `import_solution` 更严）。
+- 证据与说明：Rust 先试"instance+solution 完整输出"（`ExtSPOutput`），失败再退回"仅 instance"——这让 `-i` 既可接新实例也可接 warm-start 解文件（cli.rs:76-83 据此把 `ext_solution` 传入 `optimize`）。C++ 三个入口全部只调 `ImportSPInstanceJson`，无"先试解文件"的回退：喂给 CLI 一个含解的 JSON，其 `solution` 字段不用于 warm start。实例几何导入的默认 CDE/形状修改参数已由 `MakeRustDefaultImporterConfig()` 映射并接入这三个入口；这不补足解文件回退，也不让 `SparrowConfig` 承载自定义 importer 参数。影响：warm-start 的 CLI 入口缺失，与上一条共同构成 C++ 侧"解回读"闭环缺口；库级能力本身在（`config.warmStart` + `MakeWarmStart` 校验链 SparrowOptimizer.cpp:28-87，含剩余需求/ValidateSPSolution/几何可行性三重检查，比 Rust `import_solution` 更严）。
 
 ## 逐条比对（svg_exporter.rs）
 
@@ -50,7 +50,7 @@
 ### `tracker_matches_layout(ct, l) -> bool`（Rust 12-132）
 - C++ 对应：无逐项对应。
 - 判定：C++ 缺失（debug 断言集）。
-- 证据与说明：该函数是 CollisionTracker 与 Layout CDE 的交叉验证（pk_idx_map 覆盖性、quadtree 一致性、pair loss 与 CDE 检测结果双向对照、container loss 逐项、含非对称碰撞的宽限分支 27-73/104-117），Rust 在 tracker/worker/separator 的 7 处 `debug_assert!` 调用（tracker.rs:42/94/108、worker.rs:69/88、separator.rs:267/294）——仅 debug 构建生效。C++ 侧：(a) `CollisionTracker`（S18）有自己的快照/恢复一致性机制，但无"与 CDE 双向对照"的调试自检；(b) 最终防线是 `jaguar::ValidateSPSolution` + `Layout::IsFeasible` 独立重验（SparrowOptimizer.cpp:177-204，正式 Result 通道而非 debug 断言）。影响：低——该断言是开发期回归哨兵，Rust release 构建同样不执行；C++ 用终态独立校验替代了过程内自检，且 S18 记录确认 tracker 数值已有 Rust fixture 差分锁定。
+- 证据与说明：该函数是 CollisionTracker 与 Layout CDE 的交叉验证（pk_idx_map 覆盖性、quadtree 一致性、pair loss 与 CDE 检测结果双向对照、container loss 逐项、含非对称碰撞的宽限分支 27-73/104-117），Rust 在 tracker/worker/separator 的 7 处 `debug_assert!` 调用（tracker.rs:42/94/108、worker.rs:69/88、separator.rs:267/294）——仅 debug 构建生效。C++ 侧：(a) `CollisionTracker`（S18）有自己的快照/恢复一致性机制，但无"与 CDE 双向对照"的调试自检；(b) 最终防线是 `jaguar::ValidateSPSolution` + `Layout::IsFeasible` 独立重验（SparrowOptimizer.cpp:177-204，正式 Result 通道而非 debug 断言）。影响：低——该断言是开发期回归哨兵，Rust release 构建同样不执行；C++ 用终态独立校验替代了过程内自检。S18 中的 Rust trace 仅对有限输入下的 tracker 字段按容差提供差分证据，不能作为通用数值一致性证明。
 
 ### 其余（无）
 - Rust util/assertions.rs 全文即这一个函数（132 行），无其他条目。
@@ -70,7 +70,7 @@
 | 6 | `tracker_matches_layout` 交叉断言（7 处 debug_assert） | C++缺失 | 开发期哨兵无对应；C++ 以终态 `ValidateSPSolution`+`IsFeasible` 独立重验替代，影响低 | assertions.rs:12-132 vs SparrowOptimizer.cpp:177-204 |
 
 ## 结论
-util/io 与 svg 导出的**序列化语义**（JSON pretty 字段、SVG 内容）全部由 JaguarCore 记录 33/36 锁定，SparrowCore 侧接线（ImportSPInstanceJson→Optimize→SerializeExternalSPSolutionJson→ExportLayoutSvg）与 Rust 主干流程等价，判定基本等价。实质缺口有三：warm-start 的文件级闭环（双格式输入回退 + 实例回写均缺失，库级 `config.warmStart` 路径健全）、监听器形态的 live/intermediate SVG 导出（归宿主 UI，S24）、以及 debug 断言集 tracker_matches_layout（由终态独立校验替代，影响低）。
+util/io 与 svg 导出的**序列化语义**（JSON pretty 字段、SVG 内容）已在 JaguarCore 侧的记录 33/36 核对；SparrowCore 侧接线（ImportSPInstanceJson→Optimize→SerializeExternalSPSolutionJson→ExportLayoutSvg）与 Rust 主干流程可对应，判定基本等价。实质缺口有三：warm-start 的文件级闭环（双格式输入回退 + 实例回写均缺失，库级 `config.warmStart` 路径健全）、监听器形态的 live/intermediate SVG 导出（归宿主 UI，S24）、以及 debug 断言集 tracker_matches_layout（由终态独立校验替代，影响低）。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：io.rs 149 行覆盖完整性】** MainCli 7 字段+apply_config_overrides（归 S23）、ExtSPOutput、init_logger、write_svg、write_json、read_spp_input——主文均有条目；`init_logger` 的 fern 格式串（`[LEVEL][HH:MM:SS]<thread>` + 25 列左对齐前缀）与双通道（stdout+文件）细节、`log!("[EPOCH]: jiff 时间戳")` 首行均为应用层设施，C++ 缺失判定维持。

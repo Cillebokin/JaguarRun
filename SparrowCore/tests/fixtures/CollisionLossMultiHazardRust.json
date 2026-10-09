@@ -1,0 +1,42 @@
+{
+  "name": "sparrow-rust-cpp-collision-loss-multi-hazard",
+  "items": [
+    {
+      "id": 950,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "continuous"}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.0001, 0], [0.0001, 0.0001], [0, 0.0001]]
+      }
+    },
+    {
+      "id": 951,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "continuous"}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.00012, 0], [0.00012, 0.00008], [0, 0.00008]]
+      }
+    },
+    {
+      "id": 952,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "continuous"}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.0002, 0], [0.0002, 0.0001], [0, 0.0001]]
+      }
+    },
+    {
+      "id": 953,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "continuous"}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.00013, 0], [0.00013, 0.00007], [0, 0.00007]]
+      }
+    }
+  ],
+  "strip_height": 1
+}

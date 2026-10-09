@@ -1,0 +1,24 @@
+{
+  "name": "sparrow-rust-cpp-exploration-minimum-width-infinity",
+  "items": [
+    {
+      "id": 910,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 911,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [90]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [8, 0], [8, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 4
+}

@@ -38,6 +38,7 @@ public:
                                 OptimizationPhase phase =
                                     OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION);
     Result<void> RebuildTracker();
+    void ResetWorkerRngs(std::size_t workerCount);
     Result<void> ChangeStripWidth(
         double newWidth,
         std::optional<double> splitPosition = std::nullopt);

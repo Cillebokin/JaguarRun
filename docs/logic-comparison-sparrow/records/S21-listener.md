@@ -43,11 +43,11 @@
 
 ### `OptimizationProgress` + `OnProgress`/`OnImprovement`（h:20-29/104-105）
 - 判定：C++ 额外。
-- 证据与说明：C++ 增设了带 `phase/iteration/stripWidth/density/collisionLoss/isFeasible` 的进度事件，在构造完成、最终完成时上报（SparrowOptimizer.cpp:126-133/209-216），并区分普通进度（OnProgress）与改进（OnImprovement）；Rust 的进度可见性走 `report(ExplImproving, ...)` 与 `report_separation_progress`，无独立"进度/改进"双通道。为 Demo/NestLab 提供更细的 UI 数据源（S24）。
+- 证据与说明：C++ 增设带 `phase/iteration/stripWidth/density/collisionLoss/isFeasible` 的进度事件。除构造完成、最终完成（SparrowOptimizer.cpp:126-133/209-216）外，探索循环在初始解与每轮分离后上报（Exploration.cpp:954-961,1004-1011），压缩循环在尝试开始与指标计算后上报（Compression.cpp:281-288,339-343）；成功改进时另发 `OnImprovement`（Exploration.cpp:1020-1027；Compression.cpp:349-351）。Rust 侧通过 `report(ExplImproving, ...)` 与分离/压缩进度方法公开状态，没有相同的独立 `OnProgress`/`OnImprovement` 双通道。为 Demo/NestLab 提供更细的 UI 数据源（S24）。
 
 ### `OptimizationHistory` + `MakeSolutionReport` + `PublishSolutionReport`（h:54/75-120）
 - 判定：C++ 额外。
-- 证据与说明：C++ 把每个解报告同时落进 `std::vector<OptimizationSolutionReport>` 历史（`PublishSolutionReport` 先 push_back 再回调，h:112-120），随 `SparrowOptimizationResult::history` 返回（SparrowOptimizer.h:11-14）——Rrust 侧监听器自行决定是否留存（SvgExporter 落盘、TUI 推信道），`optimize()` 不返回历史。这是 C++ 把"解的留痕"从监听器职责上移到返回值的设计。
+- 证据与说明：C++ 把每个解报告同时落进 `std::vector<OptimizationSolutionReport>` 历史（`PublishSolutionReport` 先 push_back 再回调，h:112-120），随 `SparrowOptimizationResult::history` 返回（SparrowOptimizer.h:11-14）——Rust 侧监听器自行决定是否留存（SvgExporter 落盘、TUI 推信道），`optimize()` 不返回历史。这是 C++ 把"解的留痕"从监听器职责上移到返回值的设计。
 
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
@@ -58,9 +58,10 @@
 | 4 | `OnProgress`/`OnImprovement` 进度通道 + `OptimizationHistory` 留存 | C++额外 | 给宿主 UI（Demo/NestLab）与调用方提供解历史返回值；Rust 无对应通道 | h:20-29/54/104-105 vs（Rust 无） |
 
 ## 结论
-监听器的事件面（解报告五类型、相位切换、分离进度/结果、压缩进度）与两个进度结构体字段在 C++ 侧一一对应且数值语义一致，默认空实现行为一致，判定基本等价。C++ 的扩展集中在工程形态上：trait→虚基类、二元参数→报告结构体、null 替代 dummy、并额外提供 OnProgress/OnImprovement 通道与解历史返回值，为浏览器 Demo 与 NestLab GUI 的展示需求服务（见 S24）；这些扩展不改变 Rust 侧既有事件流的语义。
+监听器的事件面（解报告五类型、相位切换、分离进度/结果、压缩进度）与两个进度结构体字段在 C++ 侧一一对应且数值语义一致，默认空实现行为一致，判定基本等价。新增 `optimizer_exit_reference.rs` / `TestImmediateStopOptimizeMatchesRustReference` 在探索初始可行报告回调中请求 phase stop，跨语言核对报告与停止后的阶段事件，证明该回调时点会阻止探索 separation，且 phase reset 后压缩仍继续；其他 callback 触发时点仍未覆盖。C++ 的扩展集中在工程形态上：trait→虚基类、二元参数→报告结构体、null 替代 dummy、并额外提供 OnProgress/OnImprovement 通道与解历史返回值，为浏览器 Demo 与 NestLab GUI 的展示需求服务（见 S24）；这些扩展不改变 Rust 侧既有事件流的语义。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：文件覆盖完整性】** listener.rs 62 行全量复核：trait 5 方法（report + 4 默认空实现）、OptimizationPhase 2 值、SeparationProgress 4 字段、SeparationResult 5 字段、ReportType 5 值、DummySolListener——主文均有条目，无遗漏项。
 2. **【遗漏补记：report 方法的必要性与 Dummy 的差异】** Rust trait 中 `report` **无默认实现**（强制实现者处理解事件，listener.rs:5）；其余 4 方法有默认空体。C++ 五个虚函数全部有空默认体（cpp:5-33）——即 C++ 允许全空监听器而 Rust 至少需实现 report（DummySolListener 提供空 report）。纯 API 形态差异，无行为影响，补记闭合。
 3. **【浅覆盖补全：消费方覆盖验证】** 现场核验 Rust 侧全部实现者：SvgExporter（report 实写，svg_exporter.rs:39-65）、DummySolListener（bench.rs:98/105 占位）、TuiListener（runtime.rs:193-227，**五方法全部实写**——report/report_phase/report_separation_progress/report_separation_result/report_compression_progress 经 mpsc 信道推 UI）。C++ 侧消费方：CLI 不传（nullptr）、Bench 不传、Demo 经 WASM 结果 JSON。S24 的"事件面无缺口"判定据此成立（TuiListener 消费的 5 事件在 OptimizationListener 均有对应虚方法）。
+4. **【2026-10-07 执行记录：回调触发 phase stop】** Rust 与 C++ 完整 cold-start 用例在初始 exploration feasible 报告回调里请求 phase stop；Rust 使用 `CtrlCTerminator` 并设置其 Ctrl-C 标志，C++ 使用 `RequestPhaseStop()`。事件 fixture 确认停止发生在首个 separation 之前，随后 compression phase 正常开始。该断言覆盖一个 listener→terminator 控制路径，不证明其他报告类型、progress callback 或错误回调的停止/异常行为。

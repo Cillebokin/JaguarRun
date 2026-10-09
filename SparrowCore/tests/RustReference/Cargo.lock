@@ -953,8 +953,10 @@ dependencies = [
 name = "sparrow-rust-reference"
 version = "0.1.0"
 dependencies = [
+ "itertools",
  "jagua-rs",
  "rand",
+ "rand_distr",
  "sparrow",
 ]
 

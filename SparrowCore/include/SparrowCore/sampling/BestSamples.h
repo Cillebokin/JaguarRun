@@ -23,7 +23,7 @@ public:
     std::size_t Capacity() const noexcept;
     const std::vector<std::pair<jaguar::Transform2d, SampleEval>>& Samples() const noexcept;
     std::optional<std::pair<jaguar::Transform2d, SampleEval>> Best() const;
-    SampleEval UpperBound() const noexcept;
+    SampleEval UpperBound() const;
 
 private:
     static bool IsSimilar(const jaguar::Transform2d& left,

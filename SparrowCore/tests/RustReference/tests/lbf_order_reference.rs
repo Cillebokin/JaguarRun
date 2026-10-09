@@ -49,3 +49,38 @@ fn construction_order_uses_f32_key_and_keeps_input_order_on_ties() {
         .idx;
     assert_eq!(first_placed_item, 0);
 }
+
+#[test]
+fn zero_container_samples_return_the_same_unplaced_item_error() {
+    let (external_instance, _) =
+        sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppSingleItem.json"))
+            .expect("read zero-sample constructor reference instance");
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external_instance)
+        .expect("import zero-sample constructor reference instance");
+    let result = LBFBuilder::new(
+        instance,
+        Xoshiro256PlusPlus::seed_from_u64(42),
+        SampleConfig {
+            n_container_samples: 0,
+            n_focussed_samples: 0,
+            n_coord_descents: 1,
+        },
+    )
+    .construct();
+    let error = match result {
+        Ok(_) => panic!("zero search budget cannot place the demanded item"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.item_idx, 0);
+    assert_eq!(
+        error.to_string(),
+        "could not construct an initial placement for item 0"
+    );
+}

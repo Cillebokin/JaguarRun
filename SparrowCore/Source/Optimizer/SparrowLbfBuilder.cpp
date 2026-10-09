@@ -168,7 +168,8 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
             }
             if (!placement.Value().has_value())
             {
-                if (widthAttempts >= config.maxWidthGrowthAttempts)
+                if (config.maxWidthGrowthAttempts != 0U
+                    && widthAttempts >= config.maxWidthGrowthAttempts)
                 {
                     return InfeasibleConstruction(
                         "could not construct an initial placement for item "

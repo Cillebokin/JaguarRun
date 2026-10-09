@@ -1,0 +1,6 @@
+# generator=Sparrow Rust exploration_phase with a zero-strike separator
+# input=RustSppSingleItem.json item=2x2-square; translation is the Rust centered-item origin
+# case iteration_limit initial_width shrink_step rust_x rust_y failure_limit best_width density feasible bbox_x_min bbox_y_min bbox_x_max bbox_y_max reports progress_count progress_widths...
+case repeated_shrink 2 6.000000000 0.100000001 2.000000000 2.000000000 0 5.399999619 0.185185194 1 1.000000000 1.000000000 3.000000000 3.000000000 expl_feasible,expl_feasible 2 6.000000000 5.399999619
+case minimum_width 2 4.000000000 0.600000024 2.000000000 2.000000000 0 4.000000000 0.250000000 1 1.000000000 1.000000000 3.000000000 3.000000000 expl_feasible 1 4.000000000
+case failure_pool_limit 3 6.000000000 0.416666657 2.900000095 2.000000000 2 6.000000000 0.166666672 1 1.900000095 1.000000000 3.900000095 3.000000000 expl_feasible,expl_infeasible,expl_infeasible 3 6.000000000 3.500000238 3.500000238

@@ -126,6 +126,7 @@ bool ParseSeparatorPhase(const std::string& text,
 
 bool ReadRustSeparatorTrace(
     std::vector<sparrow::SeparatorSearchTraceEvent>& events,
+    std::uint64_t& expectedNextU64AfterSearch,
     std::ostream& output)
 {
     std::ifstream traceFile;
@@ -157,6 +158,7 @@ bool ReadRustSeparatorTrace(
     std::array<std::size_t, 5> evalOrdinals{};
     std::array<std::size_t, 5> reportOrdinals{};
     bool sawResult = false;
+    bool sawRngAfter = false;
     const auto phaseIndex = [](sparrow::SeparatorSearchTracePhase phase) {
         return static_cast<std::size_t>(phase);
     };
@@ -172,6 +174,26 @@ bool ReadRustSeparatorTrace(
         if (!(row >> record))
         {
             continue;
+        }
+        if (record == "rng_after")
+        {
+            std::string unexpected;
+            if (!sawResult || sawRngAfter
+                || !(row >> std::hex >> expectedNextU64AfterSearch)
+                || (row >> unexpected))
+            {
+                return Expect(false,
+                              output,
+                              "malformed Rust separator post-search RNG row");
+            }
+            sawRngAfter = true;
+            continue;
+        }
+        if (sawRngAfter)
+        {
+            return Expect(false,
+                          output,
+                          "Rust separator post-search RNG row must be final");
         }
         if (record != "keep" && lastReport.has_value())
         {
@@ -312,9 +334,9 @@ bool ReadRustSeparatorTrace(
     {
         return false;
     }
-    return Expect(sawResult && !events.empty(),
+    return Expect(sawResult && sawRngAfter && !events.empty(),
                   output,
-                  "Rust separator trace must contain a result event");
+                  "Rust separator trace must contain a result and RNG-after event");
 }
 
 struct SeparatorRoundReference
@@ -534,6 +556,86 @@ public:
     std::vector<sparrow::SeparationProgress> progress;
     std::optional<sparrow::SeparationResult> result;
 };
+
+bool TestInitiallySeparatedRunCompletesEmptyWorkerRound(
+    std::ostream& output)
+{
+    const auto instance = jaguar::SPInstance::Create(
+        {MakeItem(0U)},
+        {1U},
+        4.0,
+        jaguar::CDEConfig{},
+        jaguar::ShapeModifyConfig{});
+    if (!Expect(instance.HasValue(),
+                output,
+                "empty-round separator instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "empty-round separator problem creation failed"))
+    {
+        return false;
+    }
+    auto separatorResult = sparrow::Separator::Create(
+        std::move(problemResult.Value()), 42U);
+    if (!Expect(separatorResult.HasValue(),
+                output,
+                "empty-round separator creation failed"))
+    {
+        return false;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 1U;
+    config.noImprovementLimit = 1U;
+    config.nContainerSamples = 0U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 1U;
+    SeparatorRoundRecordingListener listener;
+    sparrow::OptimizationTerminator terminator({});
+    const auto result = separator.Run(config, terminator, &listener);
+    if (!Expect(result.HasValue(), output, "empty-round separator run failed"))
+    {
+        return false;
+    }
+
+    const std::uint64_t nextRootRandom = separator.Random().NextU64();
+    if (!Expect(listener.reports.empty()
+                    && listener.progress.size() == 2U
+                    && listener.progress[0].iteration == 0U
+                    && listener.progress[1].iteration == 1U
+                    && listener.progress[0].minimumLoss == 0.0F
+                    && listener.progress[1].minimumLoss == 0.0F,
+                output,
+                "an initially separated Rust layout must report one completed empty worker round"))
+    {
+        output << "progress-count=" << listener.progress.size();
+        for (const auto& event : listener.progress)
+            output << " iteration=" << event.iteration
+                   << " loss=" << event.minimumLoss;
+        output << '\n';
+        return false;
+    }
+    const auto& summary = listener.result;
+    const auto& separatorResultValue = result.Value();
+    return Expect(summary.has_value()
+                      && summary->success
+                      && summary->totalEvaluations == 0U
+                      && summary->totalMoves == 0U
+                      && summary->iterations == 0U
+                      && separatorResultValue.totalEvaluationCount == 0U
+                      && separatorResultValue.totalMoveCount == 0U
+                      && separatorResultValue.iterations == 0U
+                      && separator.Problem().PlacedItemCount() == 0U
+                      && separator.Tracker().IsSeparated()
+                      && nextRootRandom == 0x519e4174576f3791ULL,
+                  output,
+                  "empty worker round must preserve the Rust layout, counters, tracker, and root RNG state");
+}
 
 bool TestRustSeparatorRound(std::size_t workerCount,
                             std::uint64_t seed,
@@ -804,7 +906,10 @@ bool SameSeparatorSample(
 bool TestRustSeparatorSearchTrace(std::ostream& output)
 {
     std::vector<sparrow::SeparatorSearchTraceEvent> expected;
-    if (!ReadRustSeparatorTrace(expected, output))
+    std::uint64_t expectedNextU64AfterSearch = 0U;
+    if (!ReadRustSeparatorTrace(expected,
+                                expectedNextU64AfterSearch,
+                                output))
     {
         return false;
     }
@@ -898,6 +1003,14 @@ bool TestRustSeparatorSearchTrace(std::ostream& output)
                 output,
                 "C++ separator trace search must complete"))
     {
+        return false;
+    }
+    if (!Expect(rng.NextU64() == expectedNextU64AfterSearch,
+                output,
+                "Rust/C++ separator search post-call RNG state differs"))
+    {
+        output << std::hex << "expected next_u64=0x"
+               << expectedNextU64AfterSearch << '\n';
         return false;
     }
     const std::size_t sharedCount = std::min(actual.size(), expected.size());
@@ -1077,6 +1190,127 @@ bool TestZeroSeparatorSampleBudgetUsesReferencePlacement(std::ostream& output)
                   "zero sample budgets must not emit focused or container sample events");
 }
 
+bool TestSeparatorSamplerErrorPreservesState(std::ostream& output)
+{
+    const auto polygon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    if (!Expect(polygon.HasValue(), output,
+                "separator sampler-error polygon creation failed"))
+    {
+        return false;
+    }
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.poleLimits = {{{3U, 0.0}, {0U, 0.0}, {0U, 0.0}}};
+    jaguar::OriginalShape original{
+        polygon.Value(),
+        jaguar::Transform2d::Identity(),
+        jaguar::ShapeModifyMode::Inflate,
+        {}};
+    const auto invalidRotationItem = jaguar::Item::Create(
+        0U,
+        9800U,
+        std::move(original),
+        surrogateConfig,
+        std::nullopt,
+        {jaguar::RotationMode::Discrete,
+         {std::numeric_limits<double>::quiet_NaN()}});
+    if (!Expect(invalidRotationItem.HasValue(),
+                output,
+                "separator sampler-error item creation failed"))
+    {
+        return false;
+    }
+    const auto instance = jaguar::SPInstance::Create(
+        {invalidRotationItem.Value()},
+        {1U},
+        4.0,
+        jaguar::CDEConfig{},
+        jaguar::ShapeModifyConfig{});
+    if (!Expect(instance.HasValue(),
+                output,
+                "separator sampler-error instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "separator sampler-error problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "separator sampler-error strip resize failed"))
+    {
+        return false;
+    }
+    const auto moving = problem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0})});
+    if (!Expect(moving.HasValue(),
+                output,
+                "separator sampler-error reference placement failed"))
+    {
+        return false;
+    }
+
+    const jaguar::SPSolution initial = problem.Save();
+    jaguar::Layout layout(initial.layoutSnapshot.container);
+    if (!Expect(layout.Restore(initial.layoutSnapshot).HasValue(),
+                output,
+                "separator sampler-error layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(),
+                output,
+                "separator sampler-error tracker creation failed"))
+    {
+        return false;
+    }
+    const auto before = layout.Save();
+    const float beforeLoss = trackerResult.Value().TotalLoss();
+    sparrow::SeparatorConfig config;
+    config.nFocussedSamples = 1U;
+    config.nContainerSamples = 1U;
+    config.nCoordinateDescents = 1U;
+    sparrow::SparrowRng rng(42U);
+    std::vector<sparrow::SeparatorSearchTraceEvent> events;
+    const auto result = sparrow::FindBestSeparatorMoveWithTrace(
+        layout,
+        trackerResult.Value(),
+        moving.Value(),
+        config,
+        rng,
+        [&events](const auto& event) { events.push_back(event); });
+    const std::uint64_t nextU64AfterError = rng.NextU64();
+    const jaguar::LayoutSnapshot after = layout.Save();
+    const auto& beforeTransform = before.placements.front().placedItem.Transform();
+    const auto& afterTransform = after.placements.front().placedItem.Transform();
+    const bool unchanged = layout.PlacedItemCount() == 1U
+        && beforeTransform.rotationRad == afterTransform.rotationRad
+        && beforeTransform.translation.x == afterTransform.translation.x
+        && beforeTransform.translation.y == afterTransform.translation.y
+        && trackerResult.Value().TotalLoss() == beforeLoss;
+    const bool traceMatches = events.size() == 2U
+        && events[0].type == sparrow::SeparatorSearchTraceEvent::Type::Evaluation
+        && events[0].phase
+               == sparrow::SeparatorSearchTracePhase::ReferencePlacement
+        && events[1].type == sparrow::SeparatorSearchTraceEvent::Type::Report
+        && events[1].phase
+               == sparrow::SeparatorSearchTracePhase::ReferencePlacement;
+    sparrow::SparrowRng untouchedRng(42U);
+    return Expect(!result.HasValue()
+                      && result.GetError().code == jaguar::ErrorCode::InvalidInput
+                      && unchanged && traceMatches
+                      && nextU64AfterError == untouchedRng.NextU64(),
+                  output,
+                  "separator sampler error must propagate after reference events without mutating layout or RNG");
+}
+
 bool TestUnsupportedHazardPropagatesThroughWorkerSearch(std::ostream& output)
 {
     jaguar::Importer importer;
@@ -1234,6 +1468,10 @@ bool TestUnsupportedHazardPropagatesThroughWorkerSearch(std::ostream& output)
 
 bool RunSeparatorTests(std::ostream& output)
 {
+    if (!TestInitiallySeparatedRunCompletesEmptyWorkerRound(output))
+    {
+        return false;
+    }
     if (!TestRustSeparatorRound(
             1U, 42U, "SeparatorRoundRustTrace.tsv", output))
     {
@@ -1254,6 +1492,10 @@ bool RunSeparatorTests(std::ostream& output)
         return false;
     }
     if (!TestZeroSeparatorSampleBudgetUsesReferencePlacement(output))
+    {
+        return false;
+    }
+    if (!TestSeparatorSamplerErrorPreservesState(output))
     {
         return false;
     }

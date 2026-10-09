@@ -512,14 +512,12 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
     reportProgress(0U, minLoss);
 
     while (!terminator.ShouldTerminate(iteration)
-           && !m_Tracker.IsSeparated()
            && strikes < config.strikeLimit)
     {
         const float initialStrikeLoss = m_Tracker.TotalLoss();
         std::size_t noImprovement = 0U;
 
         while (!terminator.ShouldTerminate(iteration)
-               && !m_Tracker.IsSeparated()
                && noImprovement < config.noImprovementLimit)
         {
             const jaguar::SPSolution masterSolution = m_Problem.Save();

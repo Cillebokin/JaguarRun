@@ -349,6 +349,20 @@ bool TestUniformRectSampler(std::ostream& output)
     {
         return false;
     }
+    const auto overflowFloatBounds = sparrow::UniformRectSampler::Create(
+        {0.0,
+         0.0,
+         static_cast<double>(std::numeric_limits<float>::max()) * 2.0,
+         1.0},
+        item.Value(),
+        roomyContainerBounds);
+    if (!Expect(overflowFloatBounds.HasValue()
+                    && !overflowFloatBounds.Value().has_value(),
+                output,
+                "Bounds that become f32 infinity must match Rust no-fit semantics"))
+    {
+        return false;
+    }
     const auto nonFiniteRotationItem = MakeItem({
         jaguar::RotationMode::Discrete,
         {std::numeric_limits<double>::quiet_NaN()}});
@@ -1418,6 +1432,147 @@ bool TestUniformSamplerUpperBoundaryRustReference(std::ostream& output)
     return Expect(actualXBits == expectedXBits,
                   output,
                   "uniform sampler upper-endpoint rounding differs from Rust");
+}
+
+bool TestUniformSamplerNarrowIntervalRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/UniformSamplerNarrowIntervalRust.tsv",
+             "../SparrowCore/Tests/Fixtures/UniformSamplerNarrowIntervalRust.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/UniformSamplerNarrowIntervalRust.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\UniformSamplerNarrowIntervalRust.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Rust one-ULP sampler reference must be readable"))
+    {
+        return false;
+    }
+
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppSingleItem.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "Rust one-ULP sampler input must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer;
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust one-ULP sampler input must import in C++"))
+    {
+        return false;
+    }
+
+    constexpr std::uint64_t SEED = 42U;
+    const float low = FloatFromBits(0x3f800000U);
+    const float high = FloatFromBits(0x3f800001U);
+    const jaguar::Rect2d sampleBounds{
+        static_cast<double>(low), 1.0, static_cast<double>(high), 2.0};
+    const jaguar::Rect2d containerBounds{0.0, 0.0, 10.0, 10.0};
+    const auto sampler = sparrow::UniformRectSampler::Create(
+        sampleBounds, instance.Value().GetItem(0U), containerBounds);
+    if (!Expect(sampler.HasValue() && sampler.Value().has_value(),
+                output,
+                "Rust one-ULP sampler must be constructible in C++"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowRng rng(SEED);
+    std::string line;
+    std::size_t sampleCount = 0U;
+    bool foundRngAfter = false;
+    std::uint64_t expectedNextU64 = 0U;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string record;
+        if (!(row >> record))
+        {
+            continue;
+        }
+        if (record == "sample")
+        {
+            std::uint64_t seed = 0U;
+            std::size_t ordinal = 0U;
+            std::uint32_t expectedX = 0U;
+            std::uint32_t expectedY = 0U;
+            std::string extra;
+            if (foundRngAfter
+                || !(row >> seed >> ordinal >> std::hex >> expectedX >> expectedY)
+                || (row >> extra)
+                || seed != SEED || ordinal != sampleCount)
+            {
+                return Expect(false,
+                              output,
+                              "Rust one-ULP sample row must match its ordered schema");
+            }
+            const auto sample = sampler.Value()->Sample(rng);
+            const float x = static_cast<float>(sample.translation.x);
+            const float y = static_cast<float>(sample.translation.y);
+            if (!Expect(FloatBits(x) == expectedX && FloatBits(y) == expectedY,
+                        output,
+                        "C++ one-ULP sample differs from Rust raw bits"))
+            {
+                output << "sample=" << sampleCount << " expected=(0x"
+                       << std::hex << expectedX << ",0x" << expectedY
+                       << ") actual=(0x" << FloatBits(x) << ",0x" << FloatBits(y)
+                       << ")\n";
+                return false;
+            }
+            ++sampleCount;
+        }
+        else if (record == "rng_after")
+        {
+            std::string extra;
+            if (foundRngAfter || sampleCount != 16U
+                || !(row >> std::hex >> expectedNextU64) || (row >> extra))
+            {
+                return Expect(false,
+                              output,
+                              "Rust one-ULP RNG-after row must be final and well formed");
+            }
+            foundRngAfter = true;
+        }
+        else
+        {
+            return Expect(false, output, "unknown Rust one-ULP sampler row");
+        }
+    }
+    return Expect(sampleCount == 16U && foundRngAfter
+                      && rng.NextU64() == expectedNextU64,
+                  output,
+                  "C++ one-ULP sampler samples or post-sample RNG state differ from Rust");
 }
 
 bool TestUniformSamplerContinuousGridRustReference(std::ostream& output)
@@ -2979,6 +3134,7 @@ bool RunSamplingTests(std::ostream& output)
         && TestBestSamplesRotationBoundary(output)
         && TestUniformRectSampler(output)
         && TestUniformSamplerUpperBoundaryRustReference(output)
+        && TestUniformSamplerNarrowIntervalRustReference(output)
         && TestUniformSamplerContinuousGridRustReference(output)
         && TestUniformSamplerSingletonAxisRustReference(output)
         && TestUniformSamplerDegenerateBboxRustReference(output)

@@ -4,7 +4,7 @@
 **C++**: SparrowCore/Include/SparrowCore/Sampling/BestSamples.h（37 行）+ SparrowCore/Source/Sampling/BestSamples.cpp（178 行）
 **判定**: 接受、正容量淘汰与相似度路径在当前固定参考轨迹上对应；S15 参考覆盖平移 f32 舍入、x/y 的 5% 严格边界、1° 严格边界、NaN/±∞ 平移阈值分类、容量未满/恰满/容量 1 的拒绝与替换，以及 32 项混合非传递插入轨迹。C++ 现先把两个 double 平移坐标各自舍入为 f32，再按 f32 相减，与 Rust `DTransformation` 一致。零容量按 Rust profile 行为处理：Debug 的下溢 panic 对应 C++ `std::underflow_error`；Release 的 wrapping 行为会使集合超过容量，C++ 也保留该结果。当前 LBF 与 Separator 搜索入口都把原始 `nCoordinateDescents` 传给 BestSamples，0 容量会实际触发这些 profile 行为；该基线边界是 Rust 自身的不安全配置，不应将其误写成“正常安全调用点将容量抬至 1”。Rust `sort_by_key` 与 C++ 稳定插入排序在列明的 S10 排列和 S15 32 项序列上逐步匹配；Rust 比较器仍非传递，不能据此保证其他一般序列。正负无穷 loss 可比较；四种固定 BestSamples NaN 比较路径分别验证了失败触发时点或跨 kind 不触发比较，C++ `std::domain_error` 映射 Rust panic。
 
-C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search trace 的 report/keep 行核对 accepted 标志、retained 数量及保留列表，离散字段精确比较，loss/transform 按各自容差比较。S10 通过真实 BestSamples 消费路径比较七组边界输入的全部六种排列，以及四项非传递链的全部 24 种输入排列；S15 再逐步比较一条 32 项混合插入序列。新增 NaN reference 覆盖满容量 upper-bound 比较失败、相似样本比较失败、插入后排序失败三种触发位置，并验证不同 kind 只按 rank 比较时不触发 NaN loss 比较；每步核对失败/接受结果、样本集合与 upper bound。证据限定于锁定 Rust 工具链和列出的输入，不证明任意非传递序列。
+C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search trace 的 report/keep 行核对 accepted 标志、retained 数量及保留列表，离散字段精确比较，loss/transform 按各自容差比较。S10 通过真实 BestSamples 消费路径比较七组边界输入的全部六种排列，以及四项非传递链的全部 24 种输入排列；S15 再逐步比较一条 32 项混合插入序列。新增 NaN reference 覆盖满容量 upper-bound 比较失败、相似样本比较失败、插入后排序失败三种触发位置，并验证不同 kind 只按 rank 比较时不触发 NaN loss 比较；每步核对失败/接受结果、样本集合与 upper bound。BestSamples 及其 S15 直接用例不调用 RNG，因此 RNG-after 不适用；搜索编排的 RNG-after 由 S13 trace 检查。证据限定于锁定 Rust 工具链和列出的输入，不证明任意非传递序列。
 
 ## 函数逐条比对
 

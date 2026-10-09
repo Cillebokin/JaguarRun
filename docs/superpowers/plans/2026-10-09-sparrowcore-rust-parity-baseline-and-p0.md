@@ -91,7 +91,7 @@
 - [x] Add literal small-N pair-index/loss-sum references and a move/update trace that checks every matrix entry and weight.
 - [ ] Add asymmetric collision-discovery, non-finite loss, and out-of-range access references for Debug and Release. Non-finite, stale-key/getter, unsupported-hazard and checked bounds fixtures now pass both profiles; a reproducible asymmetric-discovery fixture remains open.
 - [ ] Confirm tests fail against the pre-fix implementation, then correct pair indexing/iteration and tracker initialization/update at the source. PairMatrix ordering and getter RED evidence exists; the unknown-hazard correction was verified after implementation, and no live asymmetric trigger is available to provide RED evidence for row clearing.
-- [x] Run focused and full C++ Debug/Release tests with Rust reference tests; update S17/S18 and the taxonomy. At Task 3 completion, RustReference had 84 Debug/Release tests passing; after the two S12 oracle tests, the suite had 86 integration tests; after the S14 and S16 reference additions it had 89; the current suite has 91 integration test functions. SparrowCore Debug/Release full runners pass.
+- [x] Run focused and full C++ Debug/Release tests with Rust reference tests; update S17/S18 and the taxonomy. At Task 3 completion, RustReference had 84 Debug/Release tests passing; after the two S12 oracle tests, the suite had 86 integration tests; after the S14 and S16 reference additions it had 89; the current suite has 94 integration test functions. SparrowCore Debug/Release full runners pass.
 
 ### Task 4: Close S12 collision-loss edge and error semantics
 
@@ -131,14 +131,14 @@
 
 - [x] Add the 5-degree/0.05-degree conversion boundary reference and verify consumer paths. Rust locks 5/1/0.5/0.05-degree f32 bits; LBF search and Separator worker Rust traces passed after both production call sites moved to the shared factor-first helper.
 - [x] Extend the seed-42, 16-container-sample LBF trace with a post-search next_u64 marker; the C++ comparator checks the following RNG output after matching the event trace. This proves stream alignment only for this fixed trace.
-- [x] Assert that the zero-budget empty LBF candidate pool leaves the seed-42 next_u64 unchanged in Rust and C++; the broader budget/reference-placement and capacity/similarity matrix remains open.
-- [ ] Add candidate-budget, reference-placement, empty-pool, capacity, and mixed-similarity sequences with explicit seed and RNG-after state.
+- [x] Assert that the zero-budget empty LBF candidate pool leaves the seed-42 next_u64 unchanged in Rust and C++; a separate zero-sample Separator case checks reference-placement events.
+- [x] Compare the fixed LBF and Separator candidate-sample traces, including reference placement and post-search RNG sentinels; S15 directly checks capacity and mixed-similarity sequences. These are bounded fixtures, not every possible sample budget/configuration. BestSamples does not consume RNG, so RNG-after applies to S13 search traces, not S15 insertion cases.
 - [x] Add direct singleton sample-bbox X/Y/both-axis Rust reference cases and C++ raw-bit comparisons (24 samples total, seed 42). The old C++ rejection was reproduced before the minimal validation change; Rust Debug/Release and SparrowCore Debug/Release full profile tests pass.
 - [x] Separate Rust no-fit (`None`) from C++ construction errors by using `Result<std::optional<UniformRectSampler>>`; test spatial no-fit, reversed bounds, and non-finite bounds on both sides, and propagate actual C++ errors through LBF/Separator instead of treating them as no-fit.
 - [x] Verify a non-finite discrete rotation returns a C++ sampler error and that `SearchLbf` propagates it instead of reporting ordinary no-fit.
-- [x] Compare the seed-42 NaN discrete-rotation panic in Rust search with C++ InvalidInput propagation; both stop before callbacks or RNG consumption in Debug and Release.
-- [ ] Compare narrow intervals, failed shape transforms, unrepresentable f64 bounds, and Separator error state against the corresponding Rust paths.
-- [ ] Complete the remaining S13/S15 candidate-budget, reference-placement, empty-pool, capacity, and mixed-similarity sequence matrix with explicit seed and RNG-after state.
+- [x] Compare the seed-42 NaN discrete-rotation panic in Rust LBF search with C++ InvalidInput propagation; compare the Separator reference Evaluation/Report events, post-error layout/Tracker state, and unchanged RNG in Rust/C++ Debug and Release.
+- [x] Add a one-ULP sampler interval with 16 exact sample-bit rows plus RNG-after, and compare finite double bounds that overflow to f32 infinity against Rust no-fit. The general JaguarCore shape-transform Result error branch remains unexercised and is recorded as a residual coverage limit, not as a closed behavior.
+- [x] Close the fixed S13/S15 P0 reference set: S13 traces carry RNG-after state; S15 checks accepted/failure state, capacity, and mixed similarity without RNG because BestSamples is deterministic. Other budgets and arbitrary comparator sequences are outside these fixtures.
 
 ### Task 7: Close S03–S05 LBF, separator, and worker differences
 
@@ -148,10 +148,10 @@
 - Implementation: SparrowCore/Source/Optimizer/SparrowLbfBuilder.cpp, SparrowCore/Source/Optimizer/LbfSearch.cpp, SparrowCore/Source/Optimizer/Separator.cpp, SparrowCore/Source/Optimizer/SeparatorWorker.cpp
 - Records: docs/logic-comparison-sparrow/records/S03-lbf.md through S05-worker.md
 
-- [ ] Compare NoFilter behavior in the presence of InferiorQualityZone, normal and zero budgets, construction failure, and focused-sample settings.
-- [ ] Compare empty initial worker rounds, one/two/multiple workers, missing best samples, callback counts, and post-failure layout.
-- [ ] Preserve Rust construction and worker state transitions; keep unmatched C++-only controls out of parity fixtures.
-- [ ] Run Rust/C++ Debug/Release tests and update S03–S05 plus error classifications.
+- [x] Compare Rust `NoFilter` scope, nonzero/zero LBF sample budgets, construction failure, and focused-sample settings. Sparrow SPP on both sides cannot express quality zones, so BPP quality-zone behavior is explicitly classified as a C++ extension rather than assigned a synthetic Rust fixture.
+- [x] Compare positive-budget empty initial worker rounds, fixed 1/2/3-worker traces, callbacks and single-worker unsupported-hazard failure snapshots. The missing-best path has no legal trigger under the valid finite supported-hazard worker invariant; C++ invalid handle/snapshot paths return `Result` errors and are not the source of an empty transform.
+- [x] Preserve Rust construction and worker state transitions; keep unmatched C++-only controls out of parity fixtures. The C++-only focused field is documented as unmapped by the Rust-compatible Sparrow builder.
+- [x] Run Rust/C++ Debug/Release tests and update S03–S05 plus error classifications. A shared Rust/C++ fixture now proves the default Sparrow builder can grow past 32 failed widths and match the Rust final width/pose bits; explicit positive Sparrow-constructor growth caps remain C++ extensions; the standalone `SolveSppLbf` path still uses generic `LbfConfig` default cap=32, with zero not meaning unbounded, and remains a separate lower-level C++ API difference. Default 1000/0/3 full builder output, other adjacent width inputs, arbitrary shuffle lengths, and multi-worker unsupported-hazard/listener/phase propagation remain explicit P0 coverage gaps; this task closes only the listed observable differences and classifies unreachable or extension-only branches.
 
 ### Task 8: Close S06 Explore differences
 

@@ -67,7 +67,9 @@ struct SparrowConstructorConfig
     std::size_t nContainerSamples = 1000;
     std::size_t nFocussedSamples = 0;
     std::size_t nCoordinateDescents = 3;
-    std::size_t maxWidthGrowthAttempts = 32;
+    // Zero keeps the Rust Sparrow builder's width-only termination behavior.
+    // A positive cap is an optional C++ extension.
+    std::size_t maxWidthGrowthAttempts = 0;
     double widthGrowthRatio = 1.2;
     double widthCeilingFactor = 2.0;
 

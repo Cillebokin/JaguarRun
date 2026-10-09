@@ -42,3 +42,25 @@ fn uniform_sampler_upper_endpoint_rounding_matches_the_rust_reference() {
     assert_eq!(high.to_bits(), expected_x);
     assert_eq!(x.to_bits(), expected_x);
 }
+
+#[test]
+fn bounds_that_overflow_to_f32_infinity_are_no_fit() {
+    let external =
+        sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppSingleItem.json"))
+            .expect("read fixture");
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external.0).expect("import fixture");
+    let sample_bounds = Rect {
+        x_min: 0.0,
+        y_min: 0.0,
+        x_max: f32::INFINITY,
+        y_max: 1.0,
+    };
+    let container_bounds = Rect::try_new(0.0, 0.0, 10.0, 10.0).expect("container bounds");
+    assert!(UniformBBoxSampler::new(sample_bounds, instance.item(0), container_bounds).is_none());
+}

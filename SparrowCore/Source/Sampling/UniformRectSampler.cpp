@@ -76,7 +76,9 @@ Result<std::optional<UniformRectSampler>> UniformRectSampler::Create(
         || !std::isfinite(containerXMin) || !std::isfinite(containerXMax)
         || !std::isfinite(containerYMin) || !std::isfinite(containerYMax))
     {
-        return InvalidSampler("uniform sampler bounds are not representable as float");
+        // Rust receives these bounds as f32; an overflowing f64 -> f32 cast
+        // therefore has the same no-fit result as non-finite Rust bounds.
+        return NoFitSampler();
     }
 
     std::vector<float> rotations;

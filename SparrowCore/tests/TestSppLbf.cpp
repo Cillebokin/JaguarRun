@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -331,6 +333,228 @@ bool TestSparrowBuilderSmallInstance(std::ostream& output)
                       && constructed.Value().metrics.feasible,
                   output,
                   "Sparrow builder must conserve demand and report feasibility");
+}
+
+bool TestSparrowBuilderZeroContainerSamplesMatchesRustError(
+    std::ostream& output)
+{
+    const auto instance = MakeInstance({MakeItem(0U, 594U, 2.0, 2.0)}, {1U});
+    if (!Expect(instance.HasValue(),
+                output,
+                "zero-sample Sparrow builder setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 0U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto constructed =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    return Expect(!constructed.HasValue()
+                      && constructed.GetError().code
+                          == jaguar::ErrorCode::Infeasible
+                      && constructed.GetError().message
+                          == "could not construct an initial placement for item 0",
+                  output,
+                  "zero container samples must match Rust's item-indexed construction failure");
+}
+
+bool TestSparrowBuilderFocusedSamplesStayAtRustZero(std::ostream& output)
+{
+    const auto instance = MakeInstance({MakeItem(0U, 595U, 2.0, 2.0)}, {1U});
+    if (!Expect(instance.HasValue(),
+                output,
+                "focused-sample Sparrow builder setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig rustDefaults;
+    rustDefaults.seed = 42U;
+    rustDefaults.nContainerSamples = 64U;
+    rustDefaults.nFocussedSamples = 0U;
+    rustDefaults.nCoordinateDescents = 1U;
+    sparrow::SparrowConstructorConfig positiveFocusedRequest = rustDefaults;
+    positiveFocusedRequest.nFocussedSamples = 8U;
+
+    const auto rustDefaultResult = sparrow::ConstructSparrowInitialSolution(
+        instance.Value(), rustDefaults);
+    const auto focusedResult = sparrow::ConstructSparrowInitialSolution(
+        instance.Value(), positiveFocusedRequest);
+    if (!Expect(rustDefaultResult.HasValue() && focusedResult.HasValue(),
+                output,
+                "focused-sample builder paths must both construct the item"))
+    {
+        return false;
+    }
+
+    const auto& expected = rustDefaultResult.Value();
+    const auto& actual = focusedResult.Value();
+    const auto& expectedPlacements = expected.solution.layoutSnapshot.placements;
+    const auto& actualPlacements = actual.solution.layoutSnapshot.placements;
+    if (!Expect(expected.metrics.sampleCount == actual.metrics.sampleCount
+                    && expectedPlacements.size() == actualPlacements.size(),
+                output,
+                "Sparrow constructor must keep focused sampling disabled like Rust"))
+    {
+        return false;
+    }
+    for (std::size_t index = 0U; index < expectedPlacements.size(); ++index)
+    {
+        const auto& expectedPlacement = expectedPlacements[index].placedItem;
+        const auto& actualPlacement = actualPlacements[index].placedItem;
+        const jaguar::Transform2d expectedTransform = expectedPlacement.Transform();
+        const jaguar::Transform2d actualTransform = actualPlacement.Transform();
+        if (!Expect(expectedPlacement.GetItemIndex()
+                            == actualPlacement.GetItemIndex()
+                        && expectedTransform.rotationRad
+                            == actualTransform.rotationRad
+                        && expectedTransform.translation.x
+                            == actualTransform.translation.x
+                        && expectedTransform.translation.y
+                            == actualTransform.translation.y,
+                    output,
+                    "focused-sample setting must not change the Rust-compatible placement"))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TestSparrowBuilderGrowthBeyond32AttemptsMatchesRust(
+    std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfGrowthAttempt.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "growth-attempt shared input fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string inputJson{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer;
+    const auto instance = importer.ImportSPInstanceJson(inputJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "growth-attempt shared input must import"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto result =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    if (!Expect(result.HasValue(),
+                output,
+                "Sparrow builder must not stop at the C++-only 32-attempt cap"))
+    {
+        if (!result.HasValue())
+        {
+            output << "growth-attempt error=" << result.GetError().message << '\n';
+        }
+        return false;
+    }
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfGrowthAttemptRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "growth-attempt Rust reference must be readable"))
+    {
+        return false;
+    }
+
+    std::uint64_t expectedSeed = 0U;
+    std::size_t expectedPlaced = 0U;
+    std::size_t expectedRemaining = 0U;
+    std::string fixture;
+    std::uint32_t expectedWidthBits = 0U;
+    std::uint32_t expectedRotationBits = 0U;
+    std::uint32_t expectedXBits = 0U;
+    std::uint32_t expectedYBits = 0U;
+    bool expectedFeasible = false;
+    bool referenceFound = false;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        if (row >> fixture >> expectedSeed >> expectedPlaced
+                >> expectedRemaining >> std::hex >> expectedWidthBits
+                >> expectedRotationBits >> expectedXBits >> expectedYBits
+                >> std::dec >> std::boolalpha >> expectedFeasible
+            && fixture == "growth_limit_38")
+        {
+            referenceFound = true;
+            break;
+        }
+    }
+    if (!Expect(referenceFound,
+                output,
+                "growth-attempt Rust reference row must be present"))
+    {
+        return false;
+    }
+
+    const auto& value = result.Value();
+    const auto& metrics = value.metrics;
+    const auto& placement = value.solution.layoutSnapshot.placements.front().placedItem;
+    const auto transform = placement.Transform();
+    const auto floatBits = [](double input) {
+        const float value = static_cast<float>(input);
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const bool matches = expectedSeed == config.seed
+        && expectedPlaced == metrics.placedItemCount
+        && expectedRemaining == metrics.remainingDemand
+        && expectedFeasible == metrics.feasible
+        && expectedWidthBits == floatBits(metrics.stripWidth)
+        && expectedRotationBits == floatBits(transform.rotationRad)
+        && expectedXBits == floatBits(transform.translation.x)
+        && expectedYBits == floatBits(transform.translation.y);
+    return Expect(matches,
+                  output,
+                  "Sparrow LBF result after more than 32 growth attempts must match Rust bits");
 }
 
 bool TestSparrowBuilderRustF32SortTie(std::ostream& output)
@@ -924,6 +1148,9 @@ bool RunSppLbfTests(std::ostream& output)
         && TestSppDemandAndInvalidInputs(output)
         && TestSppJsonRoundTrip(output)
         && TestSparrowBuilderSmallInstance(output)
+        && TestSparrowBuilderZeroContainerSamplesMatchesRustError(output)
+        && TestSparrowBuilderFocusedSamplesStayAtRustZero(output)
+        && TestSparrowBuilderGrowthBeyond32AttemptsMatchesRust(output)
         && TestSparrowBuilderRustF32SortTie(output)
         && TestSparrowBuilderRejectsWidthCeilingEquality(output)
         && TestLegacyLbfMetricsReferenceFixture(output)

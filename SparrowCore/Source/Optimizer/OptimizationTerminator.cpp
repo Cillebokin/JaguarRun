@@ -29,7 +29,7 @@ void OptimizationTerminator::Start() noexcept
 }
 
 void OptimizationTerminator::StartPhase(
-    std::chrono::milliseconds phaseDuration) noexcept
+    std::chrono::nanoseconds phaseDuration) noexcept
 {
     if (phaseDuration.count() < 0)
     {
@@ -74,10 +74,10 @@ bool OptimizationTerminator::ShouldTerminate(std::size_t iteration) const noexce
     return false;
 }
 
-std::chrono::milliseconds OptimizationTerminator::Elapsed() const noexcept
+std::chrono::nanoseconds OptimizationTerminator::Elapsed() const noexcept
 {
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - m_StartTime);
-    return elapsed.count() < 0 ? std::chrono::milliseconds{0} : elapsed;
+    return elapsed.count() < 0 ? std::chrono::nanoseconds{0} : elapsed;
 }
 }

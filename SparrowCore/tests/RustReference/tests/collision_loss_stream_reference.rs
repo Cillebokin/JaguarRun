@@ -179,6 +179,42 @@ fn collision_upper_bound_rejects_after_the_first_over_budget_hazard() {
 }
 
 #[test]
+fn collision_upper_bound_matches_adjacent_float_neighbors() {
+    let (problem, tracker, keys) = build_multi_hazard_case();
+    let moving_key = keys[3];
+    let moving_item = &problem.layout.placed_items[moving_key].item;
+    let transform = DTransformation::new(0.0, (0.5, 0.5));
+    let mut evaluator =
+        SeparationEvaluator::new(&problem.layout, moving_item, moving_key, &tracker);
+
+    let unbounded = raw_collision_loss(evaluator.evaluate_sample(transform, None));
+    assert_eq!(unbounded.to_bits(), 0x4ab5_c931);
+
+    let below = evaluator.evaluate_sample(
+        transform,
+        Some(SampleEval::Collision {
+            loss: f32::from_bits(0x4ab5_c930),
+        }),
+    );
+    assert!(matches!(below, SampleEval::Invalid));
+
+    let equal =
+        evaluator.evaluate_sample(transform, Some(SampleEval::Collision { loss: unbounded }));
+    assert!(matches!(equal, SampleEval::Invalid));
+
+    let above = evaluator.evaluate_sample(
+        transform,
+        Some(SampleEval::Collision {
+            loss: f32::from_bits(0x4ab5_c932),
+        }),
+    );
+    assert!(matches!(
+        above,
+        SampleEval::Collision { loss } if loss.to_bits() == 0x4ab5_c931
+    ));
+}
+
+#[test]
 fn clear_upper_bound_preserves_a_zero_loss_collision_classification() {
     let (problem, mut tracker, keys) = build_multi_hazard_case();
     let moving_key = keys[3];

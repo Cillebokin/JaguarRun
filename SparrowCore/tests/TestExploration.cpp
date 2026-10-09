@@ -1138,7 +1138,8 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
         "config",
         "exploration",
         {config.exploration.shrinkStep,
-         static_cast<double>(config.exploration.timeLimit.count()) / 1000.0,
+         static_cast<double>(config.exploration.timeLimit.count())
+             / 1000000000.0,
          static_cast<double>(explorationSamples.noImprovementLimit),
          static_cast<double>(explorationSamples.strikeLimit),
          static_cast<double>(explorationSamples.nWorkers),
@@ -1150,7 +1151,8 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
         "compression_time_based",
         {config.compression.shrinkMax,
          config.compression.shrinkMin,
-         static_cast<double>(config.compression.timeLimit.count()) / 1000.0,
+         static_cast<double>(config.compression.timeLimit.count())
+             / 1000000000.0,
          static_cast<double>(compressionSamples.noImprovementLimit),
          static_cast<double>(compressionSamples.strikeLimit),
          static_cast<double>(compressionSamples.nWorkers),
@@ -6394,6 +6396,44 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
 
 bool RunExplorationTests(std::ostream& output)
 {
+    const sparrow::SparrowConfig defaultSparrowConfig;
+    if (!Expect(!defaultSparrowConfig.seed.has_value(),
+                output,
+                "default Sparrow seed must remain absent"))
+    {
+        return false;
+    }
+    sparrow::SparrowConfig explicitZeroSeedConfig;
+    explicitZeroSeedConfig.seed = 0U;
+    if (!Expect(explicitZeroSeedConfig.seed.has_value()
+                    && *explicitZeroSeedConfig.seed == 0U,
+                output,
+                "explicit zero seed must remain distinguishable from absence"))
+    {
+        return false;
+    }
+
+    sparrow::ExplorationConfig subMillisecondExploration;
+    subMillisecondExploration.timeLimit = std::chrono::microseconds{500};
+    sparrow::CompressionConfig subMillisecondCompression;
+    subMillisecondCompression.timeLimit = std::chrono::microseconds{500};
+    sparrow::OptimizationTerminator subMillisecondTerminator({
+        0U,
+        std::chrono::microseconds{500}});
+    subMillisecondTerminator.Start();
+    subMillisecondTerminator.StartPhase(std::chrono::microseconds{500});
+    std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    if (!Expect(subMillisecondExploration.timeLimit
+                        == std::chrono::microseconds{500}
+                    && subMillisecondCompression.timeLimit
+                           == std::chrono::microseconds{500}
+                    && subMillisecondTerminator.ShouldTerminate(0U),
+                output,
+                "sub-millisecond phase durations must be preserved and honored"))
+    {
+        return false;
+    }
+
     if (!TestNormalPoolSamplerMatchesRustReference(output))
     {
         return false;
@@ -7811,6 +7851,30 @@ bool RunExplorationTests(std::ostream& output)
                                     repeated.Value().solution),
                 output,
                 "fixed seed optimization must be deterministic"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig unseededConfig = optimizerConfig;
+    unseededConfig.seed.reset();
+    const auto unseeded = sparrow::Optimize(instance.Value(), unseededConfig);
+    if (!Expect(unseeded.HasValue(),
+                output,
+                "an absent seed must obtain an effective replay seed"))
+    {
+        return false;
+    }
+    sparrow::SparrowConfig replayConfig = unseededConfig;
+    replayConfig.seed = unseeded.Value().metrics.seed;
+    const auto replayedUnseeded =
+        sparrow::Optimize(instance.Value(), replayConfig);
+    if (!Expect(replayedUnseeded.HasValue()
+                    && replayedUnseeded.Value().metrics.seed
+                           == unseeded.Value().metrics.seed
+                    && SameSolution(unseeded.Value().solution,
+                                    replayedUnseeded.Value().solution),
+                output,
+                "the effective seed from an unseeded run must reproduce it"))
     {
         return false;
     }

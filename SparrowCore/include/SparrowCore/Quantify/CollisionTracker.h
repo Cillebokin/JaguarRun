@@ -44,12 +44,12 @@ public:
     std::size_t ItemCount() const noexcept;
     std::optional<std::size_t> IndexForHandle(
         jaguar::PlacedItemHandle handle) const noexcept;
-    float PairLoss(std::size_t first, std::size_t second) const noexcept;
-    float PairWeight(std::size_t first, std::size_t second) const noexcept;
-    float ContainerLoss(std::size_t index) const noexcept;
-    float ContainerWeight(std::size_t index) const noexcept;
-    float ItemLoss(std::size_t index) const noexcept;
-    float WeightedItemLoss(std::size_t index) const noexcept;
+    float PairLoss(std::size_t first, std::size_t second) const;
+    float PairWeight(std::size_t first, std::size_t second) const;
+    float ContainerLoss(std::size_t index) const;
+    float ContainerWeight(std::size_t index) const;
+    float ItemLoss(std::size_t index) const;
+    float WeightedItemLoss(std::size_t index) const;
     float TotalLoss() const noexcept;
     float TotalWeightedLoss() const noexcept;
     bool IsSeparated() const noexcept;

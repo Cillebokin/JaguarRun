@@ -1,6 +1,7 @@
 #include "SparrowCore/Optimizer/OptimizationTerminator.h"
 #include "SparrowCore/Optimizer/Separator.h"
 #include "SparrowCore/Optimizer/SeparatorWorker.h"
+#include "SparrowCore/Sampling/UniformRectSampler.h"
 #include "../Source/Optimizer/SeparatorWorkerTrace.h"
 
 #include "JaguarCore/Entities/Item.h"
@@ -18,6 +19,7 @@
 #include <optional>
 #include <ostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -1074,6 +1076,160 @@ bool TestZeroSeparatorSampleBudgetUsesReferencePlacement(std::ostream& output)
                   output,
                   "zero sample budgets must not emit focused or container sample events");
 }
+
+bool TestUnsupportedHazardPropagatesThroughWorkerSearch(std::ostream& output)
+{
+    jaguar::Importer importer;
+    const auto outerShape = [] {
+        return jaguar::ExternalShape::Polygon({
+            {0.0, 0.0}, {20.0, 0.0}, {20.0, 20.0}, {0.0, 20.0}});
+    };
+    const jaguar::ExternalItem externalItem{
+        9701U,
+        jaguar::RotationPolicy::Continuous(),
+        jaguar::ExternalShape::Rectangle(0.0, 0.0, 1.0, 1.0),
+        std::nullopt};
+    const auto item = importer.ImportItem(externalItem, 0U);
+    if (!Expect(item.HasValue(), output,
+                "worker propagation item import failed"))
+    {
+        return false;
+    }
+
+    const jaguar::ExternalContainer sampleExternal{
+        9700U, outerShape(), {}};
+    const auto sampleContainer = importer.ImportContainer(sampleExternal);
+    if (!Expect(sampleContainer.HasValue(), output,
+                "worker propagation sample container import failed"))
+    {
+        return false;
+    }
+    const auto samplerResult = sparrow::UniformRectSampler::Create(
+        sampleContainer.Value().CollisionShape().BoundingBox(),
+        item.Value(),
+        sampleContainer.Value().CollisionShape().BoundingBox());
+    if (!Expect(samplerResult.HasValue()
+                    && samplerResult.Value().has_value(),
+                output,
+                "worker propagation sampler construction failed"))
+    {
+        return false;
+    }
+    sparrow::SparrowRng expectedRng(42U);
+    const jaguar::Transform2d candidate =
+        samplerResult.Value()->Sample(expectedRng);
+    const std::uint64_t expectedRngAfterSample = expectedRng.NextU64();
+    const auto candidateShape =
+        item.Value().CollisionShape().TransformedRustF32(candidate);
+    if (!Expect(candidateShape.HasValue(), output,
+                "worker propagation candidate transform failed"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d candidateBounds =
+        candidateShape.Value().BoundingBox();
+    jaguar::ExternalContainer hazardExternal{
+        9702U,
+        outerShape(),
+        {{1U,
+          jaguar::ExternalShape::Rectangle(
+              candidateBounds.xMin,
+              candidateBounds.yMin,
+              candidateBounds.Width(),
+              candidateBounds.Height())}}};
+    const auto hazardContainer = importer.ImportContainer(hazardExternal);
+    if (!Expect(hazardContainer.HasValue(), output,
+                "worker propagation hazard container import failed"))
+    {
+        return false;
+    }
+
+    const std::array<jaguar::Point2d, 4> corners{{
+        {2.0, 2.0}, {18.0, 2.0}, {2.0, 18.0}, {18.0, 18.0}}};
+    const auto currentCorner = std::max_element(
+        corners.begin(),
+        corners.end(),
+        [&candidate](const jaguar::Point2d& left,
+                     const jaguar::Point2d& right) {
+            const jaguar::Point2d sample = candidate.translation;
+            return left.SquaredDistanceTo(sample)
+                < right.SquaredDistanceTo(sample);
+        });
+    jaguar::Layout layout(hazardContainer.Value());
+    const auto movingHandle = layout.PlaceItem(
+        item.Value(),
+        jaguar::Transform2d::FromRotationTranslation(0.0, *currentCorner));
+    if (!Expect(movingHandle.HasValue(), output,
+                "worker propagation reference placement failed"))
+    {
+        return false;
+    }
+    const auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output,
+                "worker propagation tracker creation failed"))
+    {
+        return false;
+    }
+
+    const auto before = layout.Save();
+    const auto beforeTransform =
+        before.placements.front().placedItem.Transform();
+    const float beforeLoss = trackerResult.Value().TotalLoss();
+    if (!Expect(beforeLoss == 0.0F, output,
+                "worker propagation reference placement must be clear"))
+    {
+        return false;
+    }
+    sparrow::SeparatorConfig config;
+    config.nFocussedSamples = 0U;
+    config.nContainerSamples = 1U;
+    config.nCoordinateDescents = 1U;
+    sparrow::SparrowRng rng(42U);
+    std::vector<sparrow::SeparatorSearchTraceEvent> events;
+    bool propagated = false;
+    try
+    {
+        (void)sparrow::FindBestSeparatorMoveWithTrace(
+            layout,
+            trackerResult.Value(),
+            movingHandle.Value(),
+            config,
+            rng,
+            [&events](const sparrow::SeparatorSearchTraceEvent& event) {
+                events.push_back(event);
+            });
+    }
+    catch (const std::logic_error& error)
+    {
+        propagated = std::string(error.what()) == "unsupported hazard entity";
+    }
+
+    const auto after = layout.Save();
+    const auto& afterTransform = after.placements.front().placedItem.Transform();
+    const bool sameTransform =
+        beforeTransform.rotationRad == afterTransform.rotationRad
+        && beforeTransform.translation == afterTransform.translation;
+    const std::uint64_t actualRngAfterFailure = rng.NextU64();
+    const bool traceMatches = events.size() == 2U
+        && events[0].type
+               == sparrow::SeparatorSearchTraceEvent::Type::Evaluation
+        && events[0].phase
+               == sparrow::SeparatorSearchTracePhase::ReferencePlacement
+        && events[0].evaluation.kind
+               == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+        && events[1].type
+               == sparrow::SeparatorSearchTraceEvent::Type::Report
+        && events[1].phase
+               == sparrow::SeparatorSearchTracePhase::ReferencePlacement;
+    return Expect(propagated
+                      && actualRngAfterFailure == expectedRngAfterSample
+                      && layout.PlacedItemCount() == 1U
+                      && sameTransform
+                      && trackerResult.Value().TotalLoss() == beforeLoss
+                      && traceMatches,
+                  output,
+                  "unsupported hazard must unwind the worker search after one sample without changing layout or emitting a candidate callback");
+}
 }
 
 bool RunSeparatorTests(std::ostream& output)
@@ -1098,6 +1254,10 @@ bool RunSeparatorTests(std::ostream& output)
         return false;
     }
     if (!TestZeroSeparatorSampleBudgetUsesReferencePlacement(output))
+    {
+        return false;
+    }
+    if (!TestUnsupportedHazardPropagatesThroughWorkerSearch(output))
     {
         return false;
     }

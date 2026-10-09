@@ -15,7 +15,7 @@ public:
     std::uint64_t NextU64() noexcept;
     std::uint32_t NextU32() noexcept;
     // Samples an integer in [0, upperExclusive) using rand 0.10's u32 range mapping.
-    std::uint32_t UniformIndex(std::uint32_t upperExclusive) noexcept;
+    std::uint32_t UniformIndex(std::uint32_t upperExclusive);
     float Uniform01F32() noexcept;
     float Normal01F32();
 

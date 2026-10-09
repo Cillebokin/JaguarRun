@@ -36,7 +36,7 @@ struct ExplorationConfig
     std::size_t containedRelocationCount = 1U;
     double solutionPoolDistributionStddev = 0.25;
     double largeItemChAreaCutoffPercentile = 0.75;
-    std::chrono::milliseconds timeLimit{std::chrono::minutes{9}};
+    std::chrono::nanoseconds timeLimit{std::chrono::minutes{9}};
 
     Result<void> Validate() const;
 };
@@ -60,14 +60,14 @@ struct CompressionConfig
     double shrinkMin = 0.00001;
     double shrinkMax = 0.0005;
     double failureDecay = 0.9;
-    std::chrono::milliseconds timeLimit{std::chrono::seconds{60}};
+    std::chrono::nanoseconds timeLimit{std::chrono::seconds{60}};
 
     Result<void> Validate() const;
 };
 
 struct SparrowConfig
 {
-    std::uint64_t seed = 0U;
+    std::optional<std::uint64_t> seed = std::nullopt;
     std::optional<jaguar::SPSolution> warmStart;
     SparrowConstructorConfig constructor;
     ExplorationConfig exploration;

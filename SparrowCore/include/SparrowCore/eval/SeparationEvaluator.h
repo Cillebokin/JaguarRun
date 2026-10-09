@@ -13,6 +13,8 @@
 
 namespace sparrow
 {
+// The layout, item, and tracker must outlive evaluation and remain unchanged
+// while this evaluator is in use, matching Rust's shared-borrow contract.
 class SPARROWCORE_API SeparationEvaluator final : public SampleEvaluator
 {
 public:

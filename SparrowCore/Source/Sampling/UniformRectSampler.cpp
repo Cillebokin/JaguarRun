@@ -5,10 +5,18 @@
 
 namespace
 {
-sparrow::Result<sparrow::UniformRectSampler> InvalidSampler(const char* message)
+using UniformRectSamplerResult =
+    sparrow::Result<std::optional<sparrow::UniformRectSampler>>;
+
+UniformRectSamplerResult InvalidSampler(const char* message)
 {
-    return sparrow::Result<sparrow::UniformRectSampler>::FromError(
+    return UniformRectSamplerResult::FromError(
         {jaguar::ErrorCode::InvalidInput, message});
+}
+
+UniformRectSamplerResult NoFitSampler()
+{
+    return UniformRectSamplerResult::FromValue(std::nullopt);
 }
 
 constexpr float TWO_PI = 6.28318530717958647692F;
@@ -34,13 +42,13 @@ UniformRectSampler::UniformRectSampler(jaguar::Rect2d bbox,
 {
 }
 
-Result<UniformRectSampler> UniformRectSampler::Create(
+Result<std::optional<UniformRectSampler>> UniformRectSampler::Create(
     jaguar::Rect2d bbox, const jaguar::Item& item)
 {
     return Create(bbox, item, bbox);
 }
 
-Result<UniformRectSampler> UniformRectSampler::Create(
+Result<std::optional<UniformRectSampler>> UniformRectSampler::Create(
     jaguar::Rect2d sampleBbox,
     const jaguar::Item& item,
     jaguar::Rect2d containerBbox)
@@ -48,11 +56,11 @@ Result<UniformRectSampler> UniformRectSampler::Create(
     const auto validRect = [](const jaguar::Rect2d& rect) {
         return std::isfinite(rect.xMin) && std::isfinite(rect.yMin)
             && std::isfinite(rect.xMax) && std::isfinite(rect.yMax)
-            && rect.xMin < rect.xMax && rect.yMin < rect.yMax;
+            && rect.xMin <= rect.xMax && rect.yMin <= rect.yMax;
     };
     if (!validRect(sampleBbox) || !validRect(containerBbox))
     {
-        return InvalidSampler("uniform sampler bbox must be finite and non-degenerate");
+        return NoFitSampler();
     }
 
     const float sampleXMin = static_cast<float>(sampleBbox.xMin);
@@ -100,7 +108,7 @@ Result<UniformRectSampler> UniformRectSampler::Create(
     }
     if (rotations.empty())
     {
-        return InvalidSampler("uniform sampler has no legal rotations");
+        return NoFitSampler();
     }
 
     std::vector<RotationEntry> entries;
@@ -112,7 +120,8 @@ Result<UniformRectSampler> UniformRectSampler::Create(
                 static_cast<double>(rotation), {0.0, 0.0}));
         if (!rotated.HasValue())
         {
-            continue;
+            return Result<std::optional<UniformRectSampler>>::FromError(
+                rotated.GetError());
         }
         const jaguar::Rect2d rotatedBounds = rotated.Value().BoundingBox();
         const float feasibleXMin = containerXMin
@@ -136,10 +145,10 @@ Result<UniformRectSampler> UniformRectSampler::Create(
     }
     if (entries.empty())
     {
-        return InvalidSampler("uniform sampler has no feasible rotation entry");
+        return NoFitSampler();
     }
 
-    return Result<UniformRectSampler>::FromValue(
+    return Result<std::optional<UniformRectSampler>>::FromValue(
         UniformRectSampler{sampleBbox, std::move(entries)});
 }
 

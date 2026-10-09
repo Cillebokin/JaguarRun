@@ -7,6 +7,7 @@
 #include "JaguarCore/Geometry/Rect.h"
 #include "JaguarCore/Geometry/Transformation.h"
 
+#include <optional>
 #include <vector>
 
 namespace sparrow
@@ -14,9 +15,9 @@ namespace sparrow
 class SPARROWCORE_API UniformRectSampler
 {
 public:
-    static Result<UniformRectSampler> Create(
+    static Result<std::optional<UniformRectSampler>> Create(
         jaguar::Rect2d bbox, const jaguar::Item& item);
-    static Result<UniformRectSampler> Create(
+    static Result<std::optional<UniformRectSampler>> Create(
         jaguar::Rect2d sampleBbox,
         const jaguar::Item& item,
         jaguar::Rect2d containerBbox);

@@ -13,9 +13,9 @@ namespace sparrow
 struct OptimizationTerminatorConfig
 {
     // Zero disables the global duration limit. Phase deadlines are independent;
-    // StartPhase(0ms) sets the same phase-start deadline as Rust Duration::ZERO.
+    // StartPhase(0ns) sets the same phase-start deadline as Rust Duration::ZERO.
     std::size_t maxIterations = 0U;
-    std::chrono::milliseconds maxDuration{0};
+    std::chrono::nanoseconds maxDuration{0};
 
     Result<void> Validate() const;
 };
@@ -28,13 +28,13 @@ public:
     void Start() noexcept;
     // Starts a new phase deadline and clears a phase-scoped interrupt request.
     // A zero duration sets a deadline at phase start; a negative duration disables it.
-    void StartPhase(std::chrono::milliseconds phaseDuration) noexcept;
+    void StartPhase(std::chrono::nanoseconds phaseDuration) noexcept;
     // Persistent cancellation, retained across phase transitions.
     void RequestStop() noexcept;
     // Interrupts only the active phase; StartPhase clears this request.
     void RequestPhaseStop() noexcept;
     bool ShouldTerminate(std::size_t iteration) const noexcept;
-    std::chrono::milliseconds Elapsed() const noexcept;
+    std::chrono::nanoseconds Elapsed() const noexcept;
 
 private:
     OptimizationTerminatorConfig m_Config;

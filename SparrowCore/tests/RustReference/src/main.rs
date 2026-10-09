@@ -223,7 +223,8 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
          # eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count\n\
          # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
-         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n",
+         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
+         # rng_after next_u64_after_search_hex\n",
     );
     let mut eval_ordinals = [0_usize; 5];
     let mut report_ordinals = [0_usize; 5];
@@ -303,6 +304,7 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
             },
         },
     );
+    output.push_str(&format!("rng_after {:016x}\n", rng.next_u64()));
     output
 }
 

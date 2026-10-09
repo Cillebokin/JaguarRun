@@ -108,10 +108,10 @@
 - 判定：一致。
 - 证据与说明：取 `NextU64() >> 32` 高 32 位，rand_xoshiro 的 u32 输出同为 u64 高半字。
 
-### `UniformIndex(upperExclusive)`（h:18，cpp:61-81）
+### `UniformIndex(upperExclusive)`（h:18，cpp:61-82）
 - Rust 对应：`Rng::random_range(0..n)` / rand 0.10 的 u32 区间映射。
-- 判定：一致。
-- 证据与说明：对 `upperExclusive > 0`，Lemire 乘法映射 `(u32 * n) >> 32` + 拒绝进位修正（cpp:68-80）与 rand 0.10 的 u32 区间映射对应，并由正 bound fixture 覆盖；边界 `upper==0` 时 C++ 返回 0（cpp:63-66），Rust `random_range(0..0)` 会 panic，因此仅正上界路径可判一致，零上界是错误语义差异，当前 oracle 未覆盖。
+- 判定：有效正上界的映射一致；零上界失败类别已通过语言机制映射。
+- 证据与说明：对 `upperExclusive > 0`，Lemire 乘法映射 `(u32 * n) >> 32` + 拒绝进位修正与 rand 0.10 的 u32 区间映射对应，并由正 bound fixture 覆盖。`upperExclusive==0` 时 Rust `random_range(0..0)` panic；C++ 现在在调用 RNG 前抛 `std::invalid_argument`，不再返回 0。Rust/C++ 测试均比较失败前后 RNG 状态和后续输出。包裹它的 sampler 构造错误仍由 S16 单独核对。
 
 ### `Uniform01F32()`（cpp:83-87）
 - Rust 对应：`Rng::random::<f32>()`（Standard）。
@@ -127,10 +127,10 @@
 - 判定：C++ 额外（可观察状态，用于测试/断言）。
 - 证据与说明：返回 4×u64 状态副本；Rust Xoshiro 无公共状态导出（测试用 `from_seed`）。`TestRng.cpp:258,285,291,318` 用它核对 C++ 同种子实例/状态的一致性，不是 Rust/C++ 状态差分；跨语言 RNG 输出 fixture 在 `TestRng.cpp:132-160`，只验证列明输出，不比较内部状态。
 
-### 种子派生链（SparrowOptimizer.cpp:110/114/135-136）
+### 种子派生链（SparrowOptimizer.cpp:115-139）
 - Rust 对应：optimizer/mod.rs 的子流派生。
-- 判定：一致（S08 记录核对）。
-- 证据与说明：C++ `SparrowRng phaseRng(config.seed)` 后依次 `NextU64()` → constructor/exploration/compression 三子种子，注释明言"reproduce that phase order"。
+- 判定：显式有效 seed 下顺序一致（S08 记录核对）；缺省 seed 入口已恢复非确定性语义。
+- 证据与说明：C++ 用 optional seed 或生成的 `effectiveSeed` 构造根 `SparrowRng`，cold-start 依次 `NextU64()` 派生 construction、exploration、compression 子 seed；warm-start 按 Rust 不消耗 construction RNG 的顺序派生 Explore/Compression。无 seed 运行把 `effectiveSeed` 写入 metrics，并通过 CLI stderr 输出；固定该 seed 重跑可复现。随机熵源本身按语言实现，不比较彼此独立的熵输出。
 
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
@@ -141,10 +141,14 @@
 | 4 | `EPOCH`/`FMT`/SVG 特性开关 | C++缺失 | 应用层设施（日志时间戳、numfmt、live/final-svg 编译开关） | lib.rs:17-39 vs（无） |
 | 5 | `SparrowRng` 内置 RNG 类及额外 `Normal01F32` helper | C++额外 | Xoshiro/SplitMix64/整数区间映射有 Rust reference 覆盖；Box–Muller helper 仅供 C++ LocalSearchSampler，不属于 Rust parity | SparrowRng.h:10-28; SparrowRng.cpp:89-110 vs cli.rs:17 |
 | 6 | PItemId/LItemId 等公共类型 | 不适用 | sparrow 侧不定义此类 ID 类型（属 jagua-rs↔JaguarCore） | lib.rs 全文 vs（无） |
-| 7 | `UniformIndex(0)` 返回 0 vs Rust `random_range(0..0)` panic | 【错误边界差异】 | 正 bound 轨迹不受影响；非法/退化零 bound 调用的结果与错误语义不同，当前 reference 未覆盖 | SparrowRng.cpp:61-66 vs rand 0.10 `Rng::random_range`；`rng_reference.rs:58-79` |
+| 7 | `UniformIndex(0)` vs Rust `random_range(0..0)` | 已对齐（错误类别/副作用） | Rust panic 对应 C++ `invalid_argument`；两边都在状态消耗前失败。语言出口不同，稳定分类一致 | SparrowRng.cpp:61-67; `rng_reference.rs::empty_uniform_range_panics_without_consuming_rng`; `TestRng.cpp::TestUniformIndexRejectsEmptyRangeWithoutConsumingRng` |
 
 ## 结论
-consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 对应实现中等值出现；应用层时间比例、日志级别、SVG 开关与 EPOCH 由调用方/宿主承担。SparrowRng 的 Xoshiro256++、SplitMix64 播种、u32 区间映射与 f32 均匀采样按源码和针对性 Rust reference 测试核对；`Normal01F32` 是 C++ 额外 Box–Muller helper，不能纳入 Rust parity 结论。Rust 探索正态的对应路径单列于 S06。
+consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 对应实现中等值出现；应用层时间比例、日志级别、SVG 开关与 EPOCH 由调用方/宿主承担。SparrowRng 的 Xoshiro256++、SplitMix64 播种、有效 u32 区间映射、零区间失败和 f32 均匀采样按 Rust reference 核对；空区间的 panic/exception 类型不同，但失败前 RNG 状态一致。`Normal01F32` 是 C++ 额外 Box–Muller helper，不能纳入 Rust parity 结论。Rust 探索正态的对应路径单列于 S06。
+
+### P0 闭合记录（2026-10-09）
+
+`UniformIndex(0)` 的 Rust/C++ 对照用例已在 Debug/Release 全量套件通过：Rust `catch_unwind` 捕获空 range panic 后，下一 `next_u64()` 与未触发 panic 的参考 RNG 相同；C++ 捕获 `invalid_argument` 后，状态快照和下一 `NextU64()` 与参考 RNG 相同。固定 seed 的既有 RNG/整数映射 fixture 仍通过。该结果只证明 RNG primitive 的错误时点与副作用，不覆盖 S16 上层构造器如何把无效旋转/空候选转换成错误。
 
 ### 补充审计（2026-09-29）
 本审计对 consts.rs 的**19 个 `pub const` 声明**与 lib.rs 39 行的**全部声明**做逐项覆盖复核（主文已逐条有记录），现场补验两处：

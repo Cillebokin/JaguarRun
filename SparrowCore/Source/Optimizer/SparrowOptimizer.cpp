@@ -7,10 +7,18 @@
 
 #include "JaguarCore/Assertions.h"
 
+#include <random>
 #include <utility>
 
 namespace
 {
+std::uint64_t GenerateRandomSeed()
+{
+    std::random_device entropySource;
+    std::uniform_int_distribution<std::uint64_t> seedDistribution;
+    return seedDistribution(entropySource);
+}
+
 sparrow::OptimizationProgress MakeProgress(
     sparrow::OptimizationPhase phase,
     std::size_t iteration,
@@ -103,18 +111,20 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         return Result<SparrowOptimizationResult>::FromError(
             configResult.GetError());
     }
+    const std::uint64_t effectiveSeed =
+        config.seed.has_value() ? *config.seed : GenerateRandomSeed();
     OptimizationHistory history;
     // sparrow derives independent child streams from one root stream in the
     // order construction, exploration, compression. Keep the public seed as
     // the only root and reproduce that phase order here.
-    SparrowRng phaseRng(config.seed);
+    SparrowRng phaseRng(effectiveSeed);
     SparrowConstructorConfig constructorConfig = config.constructor;
     if (!config.warmStart.has_value())
     {
         constructorConfig.seed = phaseRng.NextU64();
     }
     const auto constructed = config.warmStart.has_value()
-        ? MakeWarmStart(instance, *config.warmStart, config.seed)
+        ? MakeWarmStart(instance, *config.warmStart, effectiveSeed)
         : ConstructSparrowInitialSolution(instance, constructorConfig);
     if (!constructed.HasValue())
     {
@@ -205,7 +215,7 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     }
 
     LbfMetrics finalMetrics = compressed.Value().metrics;
-    finalMetrics.seed = config.seed;
+    finalMetrics.seed = effectiveSeed;
     finalMetrics.sampleCount = constructed.Value().metrics.sampleCount;
     if (listener != nullptr)
     {

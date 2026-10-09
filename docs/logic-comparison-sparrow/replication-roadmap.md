@@ -6,7 +6,9 @@
 
 **实施策略：**按 README 的 Rust→C++ 文件映射逐函数、逐分支对照，实际修改按依赖顺序推进；保留 Rust 的状态转移、浮点运算域、随机数消耗次序、错误出口和停止条件。语法不机械逐行翻译；Rust 所有权、迭代器和错误类型要映射到 C++ 结构，但不能因此改变外部结果。
 
-**技术基线：**以 2026-10-09 当前工作区及 `docs/logic-comparison-sparrow/README.md` 所列 RustReference 为起点：rustc 1.98.1、Cargo.lock 固定依赖（含 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`）、`x86_64-pc-windows-msvc`；oracle 显式关闭路径依赖默认 features，启用 jagua-rs `spp` 和 Sparrow `oracle-trace`，不启用 SIMD。当前工作区描述还不足以独立重建全部源码；阶段 0 必须登记 Sparrow 与 SparrowCore 源码修订号或逐文件清单哈希、Cargo.lock 哈希、rustc/Cargo、MSVC 工具集版本、C++ 构建类型和关键编译选项。基线变化时重跑受影响 oracle 并更新记录日期。
+**技术基线：**以 2026-10-09 当前工作区及 `docs/logic-comparison-sparrow/README.md` 所列 RustReference 为起点：rustc 1.98.1、Cargo.lock 固定依赖（含 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`）、`x86_64-pc-windows-msvc`。RustReference 对路径依赖 `sparrow` 显式关闭默认 features，并启用 `oracle-trace`；它自己的 jagua-rs 依赖边关闭默认 features，但 `CodeResource/sparrow/Cargo.toml` 的传递依赖会重新启用 jagua-rs `default`，实际 feature 合并结果为 `jagua-rs default+spp`、`sparrow oracle-trace`，未启用 Sparrow `simd`（已用 `cargo tree -e features -i jagua-rs` 核对）。SparrowCore 的几何、碰撞和 IO 又委托 JaguarCore，因此可复现基线还必须包含 Rust/C++ 两侧所依赖的 jagua-rs/JaguarCore 源码快照及构建产物。当前工作区描述还不足以独立重建全部源码；阶段 0 必须登记 Sparrow、SparrowCore、JaguarCore 源码修订号或逐文件清单哈希、Cargo.lock 哈希、rustc/Cargo/MSVC 工具集版本、C++ 构建类型、链接的 JaguarCore 版本/构建配置和关键编译选项。基线变化时重跑受影响 oracle 并更新记录日期。
+
+**冻结指针：**进入本轮 P0 源码修复前的不可变快照见 [baseline-2026-10-09.md](baseline-2026-10-09.md) 与 [逐文件 SHA-256 manifest](baseline-2026-10-09.json)，生成器为 [freeze-baseline.ps1](tools/freeze-baseline.ps1)。Rust 侧分别固定工作区 Sparrow 源码与 RustReference 实际解析的 jagua-rs checkout；`CodeResource/jagua-rs` 本地副本单独记录。C++ 侧固定 JaguarCore/SparrowCore 源码、项目配置、测试/fixture，以及当前 Debug/Release 测试运行器和 JaguarCore DLL 的哈希。构建 kit 当前由生成的 Makefile 证实为 Qt 6.5.3、qmake 3.1、`win32-msvc`、C++17；Rust 认证 target 为 `x86_64-pc-windows-msvc`。本基线只认证当前测量的平台和 feature，不能外推到其他平台或 Rust SIMD。
 
 ## 全局约束
 
@@ -18,16 +20,17 @@
 - 目标是对已声明的有效输入域、feature 集和平台建立完整 parity；不把有限样例表述为对数学上所有输入、所有编译器和所有硬件的证明。
 - Rust `Ord` 被非传递比较违反时，必须枚举实际消费者、触发输入和 Debug/Release 行为。不得把有限排列结果推广到任意输入；若合法生产输入能触发且 Rust 行为跨 profile 不稳定，则该域在基线修订前不能声明完成，不能由 C++ 单方面定义替代结果。
 - 所有可观察失败按共用错误分类表比较：触发条件、Rust panic/Result/None 与 C++ exception/Result/optional 的映射、失败前后的布局和计数、捕获边界、listener 事件、线程/进程是否退出及是否继续下一阶段。语言级文本只有在属于公开接口时才要求逐字一致。
+- Sparrow 没有对应配置项的 C++ 扩展（例如额外的迭代上限、失败池容量或独立求解入口）必须与 Rust 可表达的基准配置分开记录；Rust/C++ parity 用例要关闭会改变搜索、停止或输出的扩展选项，扩展功能另行测试，不把扩展路径的结果称为 Sparrow parity。
 
 ## 完整复刻的认证范围
 
-本路线按用户提出的“完整、等价复刻”采用完整外部行为范围，不把已有的 TUI/Demo 或 CLI 差异默认为排除项：S01–S19 的算法与支持 feature、S20–S21 的停止和报告、S22–S23 的文件/CLI/Bench 输入输出、S24 的 TUI/Demo 算法状态和交互控制都要有结论。UI 绘制技术和视觉皮肤可以不同；必须一致的是其传递给算法的输入、seed、运行预算、进度/取消行为和用户可观察的结果。当前 scalar RustReference 是最低认证 profile；若产品支持 Rust opt-in SIMD 或其他 Rust feature，每个受支持 feature 集都要建立独立 oracle 和 C++ 对照。阶段 0 必须逐项标注“必需并验收”或“经用户确认排除”，其余章节统一引用该清单。
+本路线按用户提出的“完整、等价复刻”采用端到端产品范围：S01–S19 的算法与支持 feature、S20–S21 的停止和报告、S22–S23 的文件/CLI/Bench 输入输出，以及 S24 的算法状态、进度、日志、取消和最终结果都要有结论。S24 的 ratatui 绘制不必进入 SparrowCore 库；等价语义应由纳入目标的 C++ 宿主 UI/Demo 承接。README 中“`tui/` 不属于算法核心”描述的是代码归属，不自动等同于从完整产品验收中排除；若最终目标仅限核心库，阶段 0 必须明确把 CLI/Bench/宿主 UI 列为范围排除，并把该裁定反映到验收结论。UI 绘制技术和视觉皮肤可以不同；必须一致的是传递给算法的输入、seed、运行预算、进度/取消行为和用户可观察的结果。当前 scalar RustReference 是最低认证 profile；若产品支持 Rust opt-in SIMD 或其他 Rust feature，每个受支持 feature 集都要建立独立 oracle 和 C++ 对照。阶段 0 必须逐项标注“必需并验收”或“经用户确认排除”，其余章节统一引用该清单。
 
 外部输出的比较口径也要固定：CLI exit code、解析后的有效配置和停止原因必须精确一致；JSON 按解析后的结构、稳定 item ID 和离散字段精确比较，浮点字段沿用预先登记的字段容差，要求位级一致时比较 raw bits，只有序列化字节格式属于公开契约时才要求字节相同；SVG 按几何、ID 和所需标签比较，浮点坐标沿用记录容差，只有格式本身是契约时才要求字节相同；stdout/stderr、错误文本和帮助信息按明确的公开接口逐项比较；TUI/Demo 比较报告、日志、进度、取消和最终状态，不要求像素级一致。
 
 ## 当前完成度与剩余缺口
 
-现有记录已覆盖 Rust Sparrow 的 24 个比对单元和 42 个 `.rs` 文件（40 个实现/应用文件、2 个嵌套 TUI 测试文件），并逐模块记录 C++ 对应路径和差异。RustReference 的 Debug、Release 各运行 72 个集成测试函数，SparrowCore Debug、Release 全量测试程序通过。当前共有 21 条实际 Explore 跨语言轨迹；第一组独立几何和第二组 H/I 几何均覆盖多个 seed，H/I seed=10–14 的 Rust Debug/Release 重复运行共 50/50 匹配 golden。S06 数值边界、随机采样、双侧 contained relocation、Compression 部分路径、worker move 和若干终止交接都有定向证据。四实例 LBF 构造对照中的 64/0/1 指 `nContainerSamples=64`、`nFocussedSamples=0`、`nCoordinateDescents=1`；Rust Sparrow 默认 `LBF_SAMPLE_CONFIG` 为 1000/0/3，即 1000 个 container samples、0 个 focused samples、3 次 coordinate descent。
+现有记录已覆盖 Rust Sparrow 的 24 个比对单元和 42 个 `.rs` 文件（40 个实现/应用文件、2 个嵌套 TUI 测试文件），并逐模块记录 C++ 对应路径和差异。README 记录 RustReference Debug、Release 各 91 个集成测试函数及 SparrowCore Debug、Release 全量测试程序通过；`SparrowCore/Docs/Differential.md` 记录了 C++ 重建与运行命令和最近一次 2026-10-08 通过结果，最终验收仍须按阶段 5 重跑。当前 `TestExploration.cpp` 有 24 个 `TestDisruptionTraceMatchesRust` 轨迹对照调用点；此外还有池采样、数值边界和 RNG 状态用例。第一组独立几何和第二组 H/I 几何均覆盖多个 seed，H/I seed=10–14 的 Rust Debug/Release 重复运行共 50/50 匹配 golden。S06 数值边界、随机采样、双侧 contained relocation、Compression 部分路径、worker move 和若干终止交接都有定向证据。四实例 LBF 构造对照中的 64/0/1 指 `nContainerSamples=64`、`nFocussedSamples=0`、`nCoordinateDescents=1`；Rust Sparrow 默认 `LBF_SAMPLE_CONFIG` 为 1000/0/3，即 1000 个 container samples、0 个 focused samples、3 次 coordinate descent。
 
 这些结果说明核心移植已经广泛落地，不代表完整等价已经完成。主要空缺是：若干已知边界语义仍有差异；很多几何、候选顺序、错误出口和运行预算只测固定夹具；完整自然运行的 `optimize → compress` 覆盖不足；CLI、IO、Demo/TUI 和 opt-in feature 的 parity 尚需按认证范围验收。现有四实例 LBF 对照使用固定的 nContainerSamples=64、nFocussedSamples=0、nCoordinateDescents=1 构造预算，不是完整优化流程；目前也没有代表性实例集的总体宽度、密度或布局差异统计。
 
@@ -48,42 +51,44 @@
 
 | 单元 | 已知差异或证据不足 | 剩余工作与验收结果 | 优先级 |
 |---|---|---|---|
-| [S01 配置](records/S01-config.md)、[S02 常量/RNG](records/S02-consts-lib.md) | `None` seed 与零 seed 不同；sub-ms 时限映射不无损；`UniformIndex(0)` 的失败机制不同；随机流虽有固定 trace，仍需核对入口组合的消耗顺序 | 定义有效 seed 和计时输入的共同映射；对零上界、无 seed、边界 seed、采样调用序分别做 Rust oracle 与 C++ 状态/错误对照 | P0 |
-| [S03 LBF](records/S03-lbf.md)、[S04 Separator](records/S04-separator.md)、[S05 Worker](records/S05-worker.md) | 默认 LBF 1000/0/3（1000 container、0 focused、3 coordinate descents）、累计宽度尝试及 focused 字段仍有差异；初始已分离时空 worker round/progress 不同；C++ best sample 可空并跳过 | 对正常默认、构造失败、零/小预算、初始已分离、无 best 候选、1/2/多 worker 分别比较选择、布局、计数、回调和失败状态 | P0 |
-| [S06 Explore](records/S06-explore.md) | 已有 21 条实际 trace 和多项边界修复，但仍未证明其他几何、候选池长度、随机流、完整默认预算下的 disruption/relocation 与最终布局 | 按 [S06 记录](records/S06-explore.md) 中的状态转移和事件字段清单继续覆盖未测路径；扩展 host/child 形状、离散角、contained 子件数、候选池长度、seed 与失败轮数；逐事件记录 pool、RNG、swap、move、failure snapshot 和最终状态 | P0 |
-| [S07 Compression](records/S07-compress.md)、[S08 编排](records/S08-optimizer-mod.md) | stopwatch 起点、`f32`/`double`、毫秒量化和直接 `timeLimit=0` 仍不同；自然完整时限、一般错误出口和其他配置下完整阶段结果未证 | 对 warm/cold start、各 shrink mode、直接阶段入口、deadline 前后和错误退出分别对照；固定时钟/回调触发时点，并核对当前尝试是否完成、阶段交接、最终布局和报告 | P0 |
-| [S09 LBF evaluator](records/S09-lbf-evaluator.md)、[S10 SampleEval](records/S10-sample-eval.md) | C++ evaluator 使用布局快照，只有生命周期内布局不变才与 Rust live borrow 等价；Rust `Ord` 非传递风险使任意序列不具一般排序保证；NaN 比较的失败机制不同 | 对 evaluator 生命周期内布局变化做用例；枚举所有排序消费者和稳定性要求；在锁定 Rust 工具链下扩展触发序列、相等值和 NaN 错误前后状态。若合法输入下 Rust 跨 profile 不稳定，则先限定可认证输入域或提出共同算法修订，不得只凭有限排列声称一般等价 | P0 |
-| [S11 Separator evaluator](records/S11-sep-evaluator.md)、[S12 Collision loss](records/S12-collision-loss.md) | 指定 hazard、pole 顺序和早停路径已对齐；其他几何/pole 集合、Exterior hazard、上界邻域以及全部 unsupported hazard 组合仍不足 | 建立多 hazard 次序、多个 pole、Exterior、上界相邻浮点值和不支持 hazard 的成对 oracle；核对分类、首个早停项、累计损失、失败状态和 Rust panic/C++ exception 的映射 | P0 |
-| [S13 Search](records/S13-search.md)、[S14 Coordinate descent](records/S14-coord-descent.md)、[S15 BestSamples](records/S15-best-samples.md) | 固定零预算和 32 项非传递序列已覆盖；S14 的 5°、0.05° 转弧度值有 1 ULP 差异且消费者影响未测；其他搜索预算、插入序列和容量/相似度组合未证明 | 用跨边界角度直接比较转换值及选择结果；扩展搜索预算、reference placement、空候选和混合相似度插入序列；每一步比较保留项、状态、loss bits、评估次数和 RNG 状态 | P0 |
-| [S16 Uniform sampler](records/S16-uniform-sampler.md) | Rust 接受 singleton bbox 而 C++ 拒绝；C++ 多类构造错误被折叠为 no-fit；现有 raw-bit 证据只覆盖指定区间、角度和 seed | 覆盖 singleton X/Y/双轴、极窄区间、invalid bbox/rotation/非有限变换、多 seed 和后续搜索消费；分别比较成功样本、错误类别、随机消耗与布局影响 | P0 |
-| [S17 PairMatrix](records/S17-overlap-pair.md)、[S18 Tracker](records/S18-tracker.md) | PairMatrix 遍历/累加次序不同且 C++ overlap API 有默认 epsilon；Rust tracker 初建行清零、C++ 只写命中项，在非对称检测器下可能残留状态；任意移动序列未覆盖 | 穷举小 N 合法 pair 映射与 Rust 逻辑遍历顺序；测试默认/显式 epsilon；以固定随机 move 序列逐步比较全部 loss、weight、weighted loss 和未移动行，覆盖 Debug/Release | P0 |
+| [S01 配置](records/S01-config.md)、[S02 常量/RNG](records/S02-consts-lib.md) | absent/explicit-zero seed、seed 重放信息、phase/global 纳秒时限和 `UniformIndex(0)` 前置失败已于 2026-10-09 实现并通过 Debug/Release 全量回归；S01 更强的非法配置校验边界和 RNG 在所有有效入口的调用序仍须按对应记录审计 | 保留固定有效 seed 的相同子流派生；继续逐字段对照 C++ Validate 与 Rust 可接受配置域，并在 S16/S06 中核对 sampler 与 Explore 调用路径不会把空范围转成 no-fit 或终止 | P0 |
+| [S03 LBF](records/S03-lbf.md)、[S04 Separator](records/S04-separator.md)、[S05 Worker](records/S05-worker.md) | Rust 标准构造预算为 1000/0/3，SparrowCore 构造入口映射该默认值；C++ 另有 `LbfConfig` 直接入口默认 5000（属于扩展入口），并仍有累计宽度尝试、未映射 focused 字段和会过滤低质量区 hazard 的 LBF 搜索路径（Rust evaluator 使用 `NoFilter`）；初始已分离时空 worker round/progress 不同；C++ best sample 可空并跳过 | 对正常默认、带 `InferiorQualityZone` 的候选过滤、构造失败、零/小预算、初始已分离、无 best 候选、1/2/多 worker 分别比较选择、布局、计数、回调和失败状态；C++ 独有构造/求解入口单独标为扩展 | P0 |
+| [S06 Explore](records/S06-explore.md) | 当前 `TestExploration.cpp` 有 24 个实际 disruption Rust trace 对照调用点和多项边界修复，但仍未证明其他几何、候选池长度、随机流、完整默认预算下的 disruption/relocation 与最终布局 | 按 [S06 记录](records/S06-explore.md) 中的状态转移和事件字段清单继续覆盖未测路径；扩展 host/child 形状、离散角、contained 子件数、候选池长度、seed 与失败轮数；逐事件记录 pool、RNG、swap、move、failure snapshot 和最终状态 | P0 |
+| [S07 Compression](records/S07-compress.md)、[S08 编排](records/S08-optimizer-mod.md) | SparrowCore config/deadline/elapsed 的纳秒量化差异已修复；stopwatch 起点、`f32`/`double`、直接 `timeLimit=0` 仍不同；自然完整时限、一般错误出口和其他配置下完整阶段结果未证 | 对 warm/cold start、各 shrink mode、直接阶段入口、deadline 前后和错误退出分别对照；固定时钟/回调触发时点，并核对当前尝试是否完成、阶段交接、最终布局和报告 | P0 |
+| [S09 LBF evaluator](records/S09-lbf-evaluator.md)、[S10 SampleEval](records/S10-sample-eval.md) | S09 的 live-layout mutation 不属于 Rust 安全共享借用可表达输入；C++ evaluator 头文件现记录相同不变性前置条件。S10 的 BestSamples 与 CoordinateDescent 消费点已枚举，有限/无穷、NaN 与固定非传递序列有 profile references；Rust `Ord` 违反传递性使任意排序无通用保证 | 保留 S09 稳定性契约；现有列明固定序列已在 Rust/C++ Debug/Release 对照，任意非传递序列仍属未认证域。后续仅在新增消费者、边界或稳定性证据提出具体缺口时扩充 oracle，不把有限排列推广到任意输入 | P0 |
+| [S11 Separator evaluator](records/S11-sep-evaluator.md)、[S12 Collision loss](records/S12-collision-loss.md) | 多 hazard 顺序、固定多 pole 几何、Exterior raw loss、首个超预算 hazard 与累计上界相邻值均有 Rust/C++ Debug/Release reference；Hole/QZone 候选与 Tracker 核心失败状态已对照；新增单 worker 搜索 QZone 传播夹具核对 RNG-after、布局/Tracker 与 trace cutoff。非有限候选几何、其他 pole/CDE 顺序及多 worker 外层/listener/phase 传播仍开放 | 保留已测 raw-bit 与上界分类；继续补充不同 hazard kind/几何和非有限公式的最小 oracle，并核验 Separator::Run 并发 worker 和 optimizer listener 的错误出口、事件、状态与阶段终止 | P0 |
+| [S13 Search](records/S13-search.md)、[S14 Coordinate descent](records/S14-coord-descent.md)、[S15 BestSamples](records/S15-best-samples.md) | 固定零预算和 32 项非传递序列已覆盖；S14 的 5°/1°/0.5°/0.05° conversion raw bits 已修复并有 Rust/C++ profile 回归；LBF trace 新增搜索后 next_u64 哨兵，但其他搜索预算、参考放置、空候选和容量/相似度组合未证明 | 保留 Rust `f32::to_radians()` 位模式及 LBF/worker 消费轨迹；继续扩展候选预算、参考放置、无候选和混合相似度插入序列；每一步比较保留项、状态、loss bits、评估次数和 RNG 状态 | P0 |
+| [S16 Uniform sampler](records/S16-uniform-sampler.md) | singleton sample bbox 与正常 no-fit/error 分类已在 C++ 分开表示；X/Y/双轴 24 个 raw-bit 样本及 no-fit / 反向 / 非有限 bounds 均有 Rust 对照；NaN 离散角的 Rust panic 与 C++ InvalidInput 已按 LBF 调用路径核对；不可表示 f64 bounds、shape transform、Separator 错误传播及任意几何轨迹仍开放 | 保留 singleton RNG 轨迹；继续核验不可表示 bounds、shape transform 和 Separator error propagation；增加极窄区间、多 seed 和代表性多旋转几何，检查 LBF 扩宽、Separator 阶段与 RNG 状态 | P0 |
+| [S17 PairMatrix](records/S17-overlap-pair.md)、[S18 Tracker](records/S18-tracker.md) | PairMatrix 映射/求和/越界/长度边界已闭合；Tracker raw loss、GLS、moved-row、getter failure 和 Hole/QZone 初始化/搬迁失败状态已有 Rust/C++ Debug/Release reference。唯一未验证的是触发 CDE 单向发现的 live 几何；OverlapProxy 的 midpoint 与退化输入规则留在 S12 | 保留现有 golden；继续最小化搜索 CDE 非对称 fixture，未找到前只把该边界标为开放；S12 已补 Exterior 与上界邻域，剩余非有限候选公式及 unsupported hazard 上层传播另按 S12 记录处理 | P0 |
 | [S19 SIMD](records/S19-simd.md) | 当前 RustReference 固定为不启用 SIMD；Rust SIMD 是 opt-in，C++ AVX2/SoA 路径没有 parity fixture | 阶段 0 列明产品支持的 Rust feature 集；scalar 是最低目标，每个实际支持的 SIMD/其他 feature 集均单独冻结构建条件并比较候选、早停、损失和容差。仅未支持的 feature 可列为经确认的范围排除 | P2 |
 | [S20 Terminator](records/S20-terminator.md)、[S21 Listener](records/S21-listener.md) | 固定交接和 phase-stop 有证据；OS 信号接线、更多报告类型/回调频率/错误出口未覆盖 | 对全局 stop、phase stop、重置、Ctrl-C/宿主取消及每类 listener 事件分别验证顺序、计数、线程可见状态和阶段间传播；确认观察回调不会改变算法结果 | P1 |
-| [S22 IO](records/S22-util-io.md)、[S23 CLI/Bench](records/S23-cli-bench.md)、[S24 TUI/Demo](records/S24-tui.md) | warm-start 文件级闭环缺失；CLI 全局与分阶段时限、零值和计时起点不同；浏览器 Demo 对 JSON/SVG 分别完整运行 Optimize，与 Rust TUI 的交互模型不相同 | 用相同文件和参数完成导入—有效配置—优化—导出—再读回；核对退出码/错误/时限/seed；修正 Demo 重复运行或证明单次算法结果复用；实现语义相同的状态、取消与输出行为 | P1 |
+| [S22 IO](records/S22-util-io.md)、[S23 CLI/Bench](records/S23-cli-bench.md)、[S24 TUI/Demo](records/S24-tui.md) | warm-start 文件级闭环缺失；CLI 全局与分阶段时限、零值和计时起点不同；SVG surrogate 显示选项和目录创建行为不同；Rust Bench 是任意实例、多 run 统计基准，C++ Bench 是固定场景回归基准；浏览器 Demo 对 JSON/SVG 分别完整运行 Optimize，且未覆盖 Rust TUI 的实时状态/日志/交互 | 用相同文件和参数完成导入—有效配置—优化—导出—再读回；核对退出码/错误/时限/seed/SVG 选项；补齐或明确裁定 Bench 的用户实例、多 run 和统计输出范围；修正 Demo 重复运行或证明单次算法结果复用；实现语义相同的状态、日志、取消与输出行为 | P1 |
 
 ## 分阶段执行路线
 
 ### 阶段 0：冻结范围和迁移账本
 
-- 再确认 Rust 源码快照、RustReference 锁、feature、target、C++ 构建配置和实际对外支持平台；把版本信息写入本路线图和 README。
+- 已冻结 Sparrow、Cargo 实际解析的 jagua-rs、jagua-rs 本地镜像、JaguarCore、SparrowCore 和 S01–S24 比较记录的逐文件哈希；基线说明、锁定 feature 图及生成方式见上方冻结指针。后续 P0 修复不得覆盖这个快照。
+- 已建立[共用错误分类表](error-semantics.md)，记录触发条件、Rust/C++ 出口、状态副作用、传播边界及当前未闭合项。jagua-rs 与 JaguarCore 的既有逻辑比对记录只能作为对应依赖路径的证据，阶段 0 仍须确认被 SparrowCore 调用的几何、碰撞、导入和导出 API 落在认证范围内。
+- 继续确认全部 Rust 源码到 C++ 符号/测试的映射、实际对外支持平台及各 feature 的必需/排除状态；不要把本机 x64 基线扩大表述为跨平台保证。
 - 以 README 的 S01–S24 映射为唯一清单，为全部 Rust 函数/测试/公共入口补齐 Rust→C++ 目标、迁移状态、差异 ID、oracle 和调用者。把当前 `records/` 中已闭合与未闭合结论同步到矩阵。
 - 把 parity 输入域分为：有效普通输入、边界/退化输入、非法输入、随机/时限运行、宿主入口；为每类明确需要匹配的输出和错误语义。
-- **验收：**登记 Rust/SparrowCore 源码修订号或逐文件清单哈希、Cargo.lock 哈希、jagua-rs revision、rustc/Cargo/MSVC 版本、C++ build configuration/defines 和 feature 集；所有 42 个 `.rs` 文件均有映射（实现/应用文件对应到 C++ 符号，嵌套测试文件对应到测试覆盖）；认证范围清单对算法模块、CLI、IO、Bench、TUI/Demo、SIMD/其他 feature、平台逐项标记必需或经确认排除；建立共用错误分类表，覆盖 panic/Result/None/exception/optional 映射、状态副作用、捕获边界及线程/进程结果；没有无说明的 orphan 函数、feature 或入口。
+- **验收：**登记 Sparrow、SparrowCore、JaguarCore 源码修订号或逐文件清单哈希、Cargo.lock 哈希、jagua-rs revision 与实际合并 feature、rustc/Cargo/MSVC 版本、C++ build configuration/defines、链接的 JaguarCore 构建和 feature 集；所有 42 个 `.rs` 文件均有映射（实现/应用文件对应到 C++ 符号，嵌套测试文件对应到测试覆盖）；认证范围清单对算法模块、CLI、IO、Bench、宿主 UI、SIMD/其他 feature、平台逐项标记必需或经确认排除；建立共用错误分类表，覆盖 panic/Result/None/exception/optional 映射、状态副作用、捕获边界及线程/进程结果；没有无说明的 orphan 函数、feature 或入口。
 
 ### 阶段 1：按依赖顺序闭合核心语义差异
 
 按 `migration-decision-matrix.md` 的依赖顺序推进，不同时改动互相依赖的算法层：
 
-1. **配置与随机数（S01–S02）。**统一有效 seed、随机数初始化、整数映射、Normal 采样、时限类型和零上界错误；用状态 trace 验证消费量。
+1. **配置与随机数（S01–S02）。**保留 Rust `None` 与 `Some(0)` 的区别，对齐显式有效 seed 下的随机数初始化、整数映射和 Normal 采样；按 Rust 的 `Duration` 语义处理时限精度与零上界失败，不把不同输入压成共同默认值；用状态 trace 验证消费量。
 2. **几何量化与损失状态（S17–S18、S12）。**先闭合 pair 索引、遍历顺序、epsilon、tracker 初始化/移动更新，再扩展 collision loss、hazard 分类、pole 次序和错误出口。
 3. **评估、采样和搜索（S09–S16）。**逐函数闭合 evaluator 快照/lifetime 假设、排序比较、BestSamples 插入、UniformSampler 构造/样本、CoordinateDescent 数值和 Search 预算/空候选。
-4. **LBF、worker、separator、Explore、Compression、编排（S03–S08）。**复现默认构造、worker round、失败回滚与报告、所有 Explore 状态转移、Compression 重试、阶段间 best/separatorState 交接和自然停止。
+4. **LBF、worker、separator、Explore、Compression、编排（S03–S08）。**复现默认构造、`NoFilter` hazard 语义、worker round、失败回滚与报告、所有 Explore 状态转移、Compression 重试、阶段间 best/separatorState 交接和自然停止；不对应 Rust 的 C++ 扩展配置不得进入 parity 夹具。
 - 每个子项独立建立 Rust reference、C++ comparator 和定向实现验证；前序层不通过时不把下游端到端失败归因给更高层。
 - **验收：**已知 P0 差异全部变为通过的 Rust/C++ 定向回归；未稳定的 Rust 行为保留为显式域限制，不以近似相同或偶然 seed 通过关闭。
 
 ### 阶段 2：补齐边界、失败和随机轨迹覆盖
 
-- 为阶段 1 中每个已知差异建立成对用例；每个用例至少包含正常值、阈值两侧、相邻浮点值（适用时）、空/单项/多项集合和失败后状态。
+- 为阶段 1 中每个已知差异建立成对用例；每个用例至少包含正常值、阈值两侧、相邻浮点值（适用时）、空/单项/多项集合和失败后状态。构造与候选过滤用例应包含质量区及不同 `minQuality`，以验证 Rust `NoFilter` 与 C++ hazard filter 的结果差异；Tracker 用例应另覆盖非有限 loss 的权重更新、总损失和失败状态。
 - 为 S06、S10、S15、S17、S18 建立 deterministic differential corpus：覆盖凸/凹宿主、轴对齐/非轴对齐、不同子件数、distinct pool 不同长度、重复/近似相等 loss、移动成功/失败和多轮回滚。用显式 seed 固定，并在首个分歧处缩减为最小 fixture。对 Rust `Ord` 非传递输入，逐消费者确认其是否出现在有效输入域；固定工具链下 Rust Debug/Release 结果如不稳定，则暂停该输入域的 parity 声明并提出共同修订方案。
 - 为 worker 数、搜索预算、压缩模式、终止源和 Debug/Release 建立配置矩阵。对并行行为同时记录调度约束；不能仅因某次运行最终布局相同就断言随机流或回调等价。
 - 每个新发现都必须成为可自动运行的最小 Rust oracle 和 C++ 测试；更新黄金文件时记录工具链、配置、生成方式和 SHA-256。
@@ -91,7 +96,7 @@
 
 ### 阶段 3：完整 optimize → compress 端到端验收
 
-- 当前阶段早停用例之外，建立 Rust/C++ 共享输入集，覆盖冷启动 `initial_solution=None`、warm-start、LBF 构造、可行与不可行初态、单/多 worker、可控时间运行和多种终止源。
+- 当前阶段早停用例之外，建立 Rust/C++ 共享输入集，覆盖冷启动 `initial_solution=None`、warm-start、LBF 构造、质量区过滤边界、可行与不可行初态、单/多 worker、可控时间运行和多种终止源。
 - 每个用例固定输入文件、item ID、显式 seed、有效配置、feature 和终止设置；记录初始化布局、阶段顺序、best 与 separatorState、worker 结果、最终布局和错误出口。
 - 精确 parity 用例使用相同的固定工作步数或测试时钟，比较 placed/remaining item 身份、可行状态、每件 transform/bounds、width、density、loss、停止原因、评估/移动/迭代计数；离散决策要求完全一致，浮点按事先记录的字段容差。
 - 单独做自然时限运行，验证 Rust 9 分钟 Explore、60 秒 Compression 默认预算能正确进入、停止和收尾。自然计时受机器负载与实现速度影响，只比较阶段/停止语义、合法状态和资源边界，不要求迭代数、布局或逐事件 trace 相同；若要比较 time-based 决策轨迹，给两侧注入相同的单调时钟序列。
@@ -100,8 +105,8 @@
 ### 阶段 4：公共入口、文件和产品层完整性
 
 - S20/S21：闭合 OS 信号或宿主取消的接线、listener 所有报告类型的字段/顺序/频率和 phase reset 后状态。
-- S22/S23：闭合文件导入/导出 round-trip、warm-start 文件闭环、CLI 参数到有效算法配置的映射、exit code、stdout/stderr、公开错误文本、帮助信息、零时限和阶段时限语义。JSON/SVG 按认证范围中的外部输出规则比较。
-- S24：将 Rust TUI 暴露的算法状态、进度、日志、取消和最终结果映射到 SparrowCore 的宿主 UI/Demo。界面实现可以不同，但不能重复执行算法、改变 seed/配置或丢失停止语义。若产品不要求迁移 TUI，则把明确排除写进最终认证范围。
+- S22/S23：闭合文件导入/导出 round-trip、warm-start 文件闭环、CLI 参数到有效算法配置的映射、exit code、stdout/stderr、公开错误文本、帮助信息、零时限和阶段时限语义；对照 SVG 的绘制选项（包括 surrogate）、父目录创建和输出结构。Bench 另需明确是否迁移 Rust 的任意实例、多 run/并行、分布统计和逐 run 产物；若纳入，建立 Rust 驱动的结果 parity 与独立的性能统计验收。
+- S24：将 Rust TUI 暴露的算法状态、进度、日志、取消和最终结果映射到纳入目标的 C++ 宿主 UI/Demo；不要求在 SparrowCore 库内复刻 ratatui 绘制。界面实现可以不同，但不能重复执行算法、改变 seed/配置或丢失停止语义。若产品不要求迁移任何宿主 UI，则把明确排除写进最终认证范围。
 - S19：对选定的 Rust feature 集完成 scalar 和 SIMD（如纳入）两套构建/参考/测试矩阵，记录平台与硬件约束。
 - **验收：**对每个纳入范围的用户入口完成输入—运行—取消/失败—输出闭环；没有改变算法输入或终止行为的隐式适配。
 
@@ -118,7 +123,8 @@
 | 交付物 | 位置 | 内容 |
 |---|---|---|
 | 逐函数迁移账本 | `docs/logic-comparison-sparrow/records/S01-S24` 与 README 索引 | Rust 函数/分支到 C++ 符号的映射、语义、已知差异、证据和限制 |
-| 共用错误分类表 | `docs/logic-comparison-sparrow/error-semantics.md` | 对照 Rust panic/Result/None 与 C++ exception/Result/optional，记录触发条件、状态副作用、捕获边界、报告和线程/进程结果 |
+| 基线冻结与源指纹 | `docs/logic-comparison-sparrow/baseline-2026-10-09.md`、`baseline-2026-10-09.json`、`tools/freeze-baseline.ps1` | 记录四组件和实际 Rust 依赖源码、feature、工具链、C++ build kit、现有运行器/DLL 的逐文件哈希与生成口径 |
+| 共用错误分类表 | `docs/logic-comparison-sparrow/error-semantics.md` | 对照 Rust panic/Result/None 与 C++ exception/Result/optional，记录触发条件、状态副作用、捕获边界、报告和线程/进程结果；所有 Sxx 记录和新测试共用稳定错误 ID |
 | Rust oracle | `SparrowCore/Tests/RustReference/tests`、`src/bin`、测试辅助代码 | Rust 实际行为、跨 profile 边界和可复现 trace/golden 生成 |
 | C++ differential 测试 | `SparrowCore/Tests/Test*.cpp` | 读取共同输入与 Rust golden，断言选择、状态、错误和字段容差 |
 | 共享测试输入与 golden | `SparrowCore/Tests/Fixtures` | 输入、有效配置、显式 seed、预期事件/状态和生成来源 |
@@ -129,7 +135,7 @@
 
 只有同时满足以下条件，才把结论写成“在声明范围内完整、等价复刻”：
 
-- `CodeResource/sparrow/src` 的每个实现文件、公开入口、feature 和会影响算法的分支都有 SparrowCore 对应实现或明确的范围裁定；没有仅凭历史计划状态标为完成的项。
+- `CodeResource/sparrow/src` 的每个实现文件、公开入口、feature 和会影响算法的分支都有 SparrowCore 对应实现或明确的范围裁定；SparrowCore 委托的 JaguarCore API 也有固定源码/构建基线及适用的跨语言证据；没有仅凭历史计划状态标为完成的项。
 - 共用错误分类表覆盖全部公开失败路径及记录到的退化输入，且每个映射都有 Rust/C++ 对照用例或明确的范围限制。
 - 每一项已知行为差异均已修复并由 Rust oracle + C++ 对照测试验证，或被明示为不属于当前认证范围。Rust 自身不稳定的行为按锁定工具链实测结果限定结论。
 - 已验证定向边界、随机/worker/错误出口、完整 `optimize → compress`、文件/CLI/宿主入口，以及纳入范围的 SIMD/平台构建；全部 Rust/C++ Debug 与 Release 套件通过。

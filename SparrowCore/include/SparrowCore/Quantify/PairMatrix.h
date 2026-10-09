@@ -25,15 +25,15 @@ public:
 
     std::size_t Size() const noexcept;
     bool Contains(std::size_t first, std::size_t second) const noexcept;
-    CollisionEntry& At(std::size_t first, std::size_t second) noexcept;
-    const CollisionEntry& At(std::size_t first, std::size_t second) const noexcept;
+    CollisionEntry& At(std::size_t first, std::size_t second);
+    const CollisionEntry& At(std::size_t first, std::size_t second) const;
     float TotalLoss() const noexcept;
     float TotalWeightedLoss() const noexcept;
 
 private:
     PairMatrix(std::size_t size, std::size_t entryCount);
 
-    std::size_t Index(std::size_t first, std::size_t second) const noexcept;
+    std::size_t Index(std::size_t first, std::size_t second) const;
 
     std::size_t m_Size = 0U;
     std::vector<CollisionEntry> m_Entries;

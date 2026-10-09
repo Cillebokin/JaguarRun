@@ -250,7 +250,7 @@ Result<CompressionResult> Compress(
             if (config.timeLimit.count() > 0)
             {
                 const auto elapsed = std::chrono::duration_cast<
-                    std::chrono::milliseconds>(
+                    std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - start);
                 ratio = static_cast<double>(elapsed.count())
                     / static_cast<double>(config.timeLimit.count());

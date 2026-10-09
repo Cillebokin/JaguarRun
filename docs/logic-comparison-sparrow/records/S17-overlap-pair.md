@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/sparrow/src/quantify/mod.rs`（53 行）+ `quantify/overlap_proxy.rs`（27 行）+ `quantify/pair_matrix.rs`（49 行）
 **C++**: `SparrowCore/Include/SparrowCore/Quantify/OverlapProxy.h`（29 行）+ `Source/Quantify/OverlapProxy.cpp`（245 行）+ `Include/SparrowCore/Quantify/PairMatrix.h`（41 行）+ `Source/Quantify/PairMatrix.cpp`（120 行）
-**判定**: 基本等价（公式与矩阵布局逐项对应；C++ 以 noexcept+0.0F 防御替代 Rust 的 panic/debug_assert，另新增 Result 溢出检查与 Rust 无对应的公共 API 形态差异）
+**判定**: 已闭合 PairMatrix 的索引映射、遍历/累加次序、profile-specific 越界与长度溢出语义；有效几何输入下的量化公式仍有独立的 midpoint/防御策略差异，不能据此宣称整体逐位等价
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### `overlap_area_proxy`（overlap_proxy.rs:7-27）
 - C++ 对应：`CalculateOverlapProxy`（OverlapProxy.cpp:108-135）+ 匿名空间 `CirclePairContribution`（cpp:20-66）。
-- API 边界：C++ 公共声明 `CalculateOverlapProxy` 为 `epsilon` 提供默认实参 `0.01F`（OverlapProxy.h:12-17）；Rust `overlap_area_proxy` 要求调用方显式传入 epsilon（overlap_proxy.rs:7-8）。因此省略参数的 C++ 调用方式没有 Rust 对应调用；这是公开 API/default 行为差异，不改变当前 poly-poly 主路径（两侧均显式计算并传入 epsilon）。
+- API 边界：C++ 公共声明现在要求调用方显式传入 `epsilon`（OverlapProxy.h:12-17），与 Rust `overlap_area_proxy` 的调用契约一致。C++ tracker-only 扩展仍用裸代理值，但其 `0.01F` 已在调用点显式指定，不再靠 API 默认值。
 - 逐项核对：
   1. 双循环：Rust `for p1 in &sp1.poles { for p2 in &sp2.poles }`（overlap_proxy.rs:10-11）。C++ `for (firstPole : first.Poles()) { for (secondPole : second.Poles()) }`（cpp:115-117）✓（同为行主序 p1 外层）。
   2. pd：Rust `(p1.radius + p2.radius) - p1.center.distance_to(&p2.center)`（f32 全程）。C++ `penetration = firstRadius + secondRadius - distance`；`dx/dy = float(firstCenter.x) - float(secondCenter.x)`（cpp:42-49），center 先经 `firstTransform.ApplyRustF32` / `secondTransform.ApplyRustF32`（cpp:35-36，见差异 a）。
@@ -60,27 +60,28 @@
 
 ### `PairMatrix::new`（pair_matrix.rs:12-20）
 - C++ 对应：`PairMatrix::Create`（PairMatrix.cpp:26-57）+ 私有构造（cpp:20-24）。
-- 长度：Rust `len = size * (size + 1) / 2`（pair_matrix.rs:14，usize 直接乘，溢出时 debug 溢出 panic / release 回绕）。C++ 同公式但带**溢出防护**：size==SIZE_MAX 直接报错，`(size & 1) ? size*(size+1)/2` 之前先做 `first > SIZE_MAX / second` 检查，返回 `Result<PairMatrix>` 错误（cpp:33-54）——既定 panic→Result 差异 ✓。
+- 长度：Rust `len = size * (size + 1) / 2`（pair_matrix.rs:14，usize 直接乘，Debug 溢出 panic / Release 回绕）。C++ 现在按同一乘法顺序计算：Debug 对溢出抛 `std::overflow_error`，Release 使用 `size_t` 回绕后分配相应长度；`SIZE_MAX` 在 Release 得到 `size=SIZE_MAX`、空 entries。可观察失败/结果与 Rust 对齐，异常类型按语言映射。
 - 初始值：Rust `vec![CTEntry { weight: 1.0, loss: 0.0 }; len]`。C++ `m_Entries(entryCount)` 用 `CollisionEntry` 默认成员 `{loss=0.0F, weight=1.0F}`（PairMatrix.h:11-14）✓。
 - 差异：Rust `new(0)` 得到空矩阵（len=0）合法；C++ `size==0` 走早退分支返回默认 PairMatrix（cpp:28-31），行为一致 ✓。
-- 判定：【一致】（含既定 panic→Result 转换）
+- 判定：【profile 行为一致】（Debug 是 panic→`std::overflow_error` 映射；Release 的 `SIZE_MAX` 回绕结果相同）
 - 证据：pair_matrix.rs:12-20 vs PairMatrix.cpp:20-57、PairMatrix.h:11-14。
 
 ### `Index<(usize,usize)>` / `IndexMut`（pair_matrix.rs:22-34）
-- C++ 对应：`At(first, second)` / `At` const（PairMatrix.cpp:69-78，PairMatrix.h:28-29）。C++ 用引用返回的 `At` 替代 Rust 的 `Index/IndexMut` 运算符重载，调用点写 `matrix.At(i,j).loss = ...`。语义一致 ✓。
-- 判定：【一致】（语法形态差异，无行为差异）
+- C++ 对应：`At(first, second)` / const `At`。C++ 用引用返回替代 Rust 的 `Index/IndexMut` 运算符重载；`At` 现在可抛出 bounds exception，不再声明 `noexcept`，并通过 `vector::at` 消除越界 UB。
+- 判定：【一致映射】（语法形态不同，越界 profile 语义按下一节实现）
 
 ### `calc_idx`（pair_matrix.rs:36-49）
-- Rust：对 `row <= col` 使用 `row*size + col - row*(row+1)/2`，反向时交换 row/col（pair_matrix.rs:44-48）。C++ `Index`（PairMatrix.cpp:103-119）使用 `larger*(larger+1)/2 + smaller`。映射不同：size=4 时 `(0,3)` Rust 得 3、C++ 得 6；两侧 `At`/迭代都使用本地映射，因此各自读写闭合，但物理遍历顺序不同，可能改变 f32 全量求和结果。
-- Rust 有 `debug_assert!(row < size && col < size)`，且 `Vec` 索引在 debug/release 都进行边界检查并 panic；C++ `At` 经 `std::vector::operator[]` 不做边界检查，越界属于未定义行为，调用方需遵守 `Contains` 前置条件（PairMatrix.h:27）。
-- 判定：【差异】（布局顺序及越界错误语义不同；正常本地访问保持一致）
-- 证据：pair_matrix.rs:36-49 vs PairMatrix.cpp:103-119；size=4 的 `(0,3)` 手算。
+- Rust：对 `row <= col` 使用 `row*size + col - row*(row+1)/2`，反向时交换 row/col（pair_matrix.rs:44-48）。C++ 对合法索引使用等价的 row-start 计算，避免中间乘法不必要的溢出。size=4 的物理顺序为 `(0,0),(0,1),(0,2),(0,3),(1,1)...`，与 Rust 完全一致。
+- 边界：Rust Debug 先由 `debug_assert!` 检查逻辑坐标；Release 去掉断言后仍按原公式索引 `Vec`，所以某些逻辑越界坐标可能别名到现有元素（size=4 的 `(4,0)` 读到 `(1,1)`），再由 Vec 长度检查剩余越界。C++ Debug 在逻辑越界时抛 `std::out_of_range`；Release 对逻辑越界坐标执行 Rust 的无符号展平公式并用 `vector::at` 检查 backing length，保留同一别名与最终越界边界。对 `(4,0)` 和 `(10,0)` 的 Debug/Release Rust/C++ 参考已覆盖。
+- 总损失：C++ `TotalLoss`/`TotalWeightedLoss` 现在按 Rust data 顺序直接累加 loss 与 `weight * loss`，不再过滤 NaN/Inf/负值，也不再将非有限总和折成 0；float cancellation case 固定验证总和位于 Rust 行顺序。
+- 判定：【已闭合】
+- 证据：pair_matrix.rs:36-49 vs PairMatrix.cpp；Rust `pair_matrix_reference.rs` 与 C++ `TestQuantify.cpp` 的 N=4 累加、profile bounds 与 max-size case。
 
 ### `PairMatrix` 的 Rust 私有辅助 vs C++ 公共 API（pair_matrix.rs 全文件）
-- C++ 额外公共方法：`Size()`（cpp:59-62）、`Contains()`（cpp:64-67）、`TotalLoss()`（cpp:80-91）、`TotalWeightedLoss()`（cpp:93-101）。Rust 侧 `size` 字段与求和逻辑在 tracker.rs 内联实现（get_total_loss 等直接 `pair_collisions.data.iter().sum()`，tracker.rs:179-199）。C++ 把这些求和下沉到 PairMatrix 层并在 `TotalLoss` 中过滤 `isfinite && >0`（cpp:85-89）——Rust 不过滤直接 sum。【C++ 额外】（防御性过滤；正常数据全为非负有限值时等价）
-- `CollisionEntry::WeightedLoss`（cpp:9-18）带 isfinite/正数防御；Rust `CTEntry::weighted_loss`（tracker.rs:209-211）直接 `weight * loss`。【C++ 额外】
-- 判定：【一致】（结构归位差异 + 防御差异）
-- 证据：PairMatrix.cpp:80-101 vs tracker.rs:179-199、tracker.rs:209-211。
+- C++ 额外公共方法：`Size()`、`Contains()`、`TotalLoss()`、`TotalWeightedLoss()`。Rust 在 tracker 内联求和；C++ 下沉到 PairMatrix，但求和次序和 IEEE 非有限值传播现与 Rust 对齐。
+- `CollisionEntry::WeightedLoss` 现在直接返回 `weight * loss`，与 Rust `CTEntry::weighted_loss` 一致。
+- 判定：【接口额外、有效运算语义一致】
+- 证据：PairMatrix.cpp 与 tracker.rs:179-199,209-211。
 
 ---
 
@@ -88,25 +89,29 @@
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | pair_matrix 物理布局：Rust `row*size+col-row(row+1)/2` vs C++ `larger(larger+1)/2+smaller`，(0,3) 分别映射 3 与 6 | 【差异】 | 本地访问自洽；全量求和遍历顺序不同，可能产生浮点差异 | pair_matrix.rs:44-48 vs PairMatrix.cpp:106-118 |
+| 1 | pair_matrix 物理布局与总和次序：C++ 已改为 Rust 上三角行顺序；N=4 cancellation case 精确得到 Rust `16,777,218` | 【已闭合】 | tracker 全量求和不再因布局改变舍入 | pair_matrix.rs:36-49; pair_matrix_reference.rs; TestQuantify.cpp |
 | 2 | overlap_area_proxy 的变换入口：Rust 收已变换 surrogate 无变换；C++ 带 Transform 参数经 ApplyRustF32（当前调用全 Identity 或已变换对） | 【差异】 | 结果等价（Identity 恒等、f32 路径） | overlap_proxy.rs:8 vs OverlapProxy.cpp:12-17,35-36 |
 | 3 | C++ 全面的退化防御（isfinite/<=0 返回 0）vs Rust debug_assert/panic | 【C++ 额外】 | 正常输入无影响；异常输入 C++ 容错返回 0，Rust panic | OverlapProxy.cpp:26-64,125-134,150-181 vs mod.rs:20,48、overlap_proxy.rs:24 |
-| 4 | PairMatrix::Create 溢出防护（Result 错误）vs Rust usize 溢出 panic | 【差异】 | 既定 panic→Result 转换 | PairMatrix.cpp:33-54 vs pair_matrix.rs:14 |
-| 5 | TotalLoss 求和过滤非有限/非正值 vs Rust 直接 sum | 【C++ 额外】 | 正常数据等价 | PairMatrix.cpp:84-89 vs tracker.rs:179-187 |
+| 4 | PairMatrix 长度溢出：Debug 失败边界与 Release 回绕结果均按 Rust 算术复现，语言异常类型映射 | 【已闭合】 | SIZE_MAX Debug 抛出边界异常；Release 产生空 backing Vec，后续访问再 bounds-fail | PairMatrix.cpp; pair_matrix_reference.rs; TestQuantify.cpp |
+| 5 | TotalLoss/TotalWeightedLoss 与 `WeightedLoss` 的非有限值过滤 | 【已闭合】 | NaN、±Inf 按 Rust 的原始浮点加法/乘法传播 | PairMatrix.cpp; tracker_weight_reference.rs; TestQuantify.cpp |
 | 6 | container centroid：Rust `f32::midpoint` vs C++ `(min+max)*0.5F` | 【差异】 | 亚 ulp 级，仅极值可见 | jagua-rs rect.rs:262-267 vs OverlapProxy.cpp:92-99 |
 | 7 | 0.01/PI 等常量：Rust consts.rs 集中定义 vs C++ 逐处硬编码（PI 的 f32 数值相同） | 【一致】 | 常量值对应；没有由此推导整段计算位级相同 | consts.rs:7 vs OverlapProxy.cpp:18,155 |
 | 8 | epsilon 使用 `powi(2)`（Rust）vs `epsilon*epsilon`（C++） | 【源码对应】 | 都表示 f32 平方；未做跨工具链逐位断言 | mod.rs:18 vs OverlapProxy.cpp:169 |
 | 9 | 精度路径：C++ 存储 double、部分运算前转 f32；Rust 量化使用 f32 | 【源码对应】 | trace 中虽存有 `loss_f32_bits` 字段，消费测试按容差比较，不能据此称为位级锁定 | OverlapProxy.cpp:42-50,77-78,147-149,196-200 vs overlap_proxy.rs/mod.rs |
-| 10 | C++ `CalculateOverlapProxy` 的 epsilon 有默认实参，Rust 对应函数要求显式传参 | 【API 差异】 | 当前主路径两侧都显式传 epsilon；仅省略参数的 C++ 调用没有 Rust 等价形式 | OverlapProxy.h:12-17 vs overlap_proxy.rs:7-8 |
+| 10 | `CalculateOverlapProxy` epsilon 调用契约 | 【已闭合】 | C++ 现在要求显式 epsilon；扩展调用点显式传 `0.01F` | OverlapProxy.h:12-17 vs overlap_proxy.rs:7-8 |
 
-Fixture 与断言：`TestQuantify.cpp` 的 `TestOverlapProxy`（:92-166）以 `1e-5` 容差比较 C++ 计算；其中预期 pair loss 从同一 C++ 计算链派生，不能视作独立 Rust oracle。`TestPairMatrix`（:57-90）验证本地对称访问与 totals。`SeparatorSearchRustTrace.tsv` 虽含 `loss_f32_bits` 文本字段，TestSampling 消费时对变换/loss 使用容差；`SeparatorRoundRustTrace.tsv` 的 pair loss/weight 也按 2e-2/5e-2 容差比较（TestSeparator.cpp:757-776）。离散事件、计数与部分类型字段按测试中的精确比较验证；浮点链路未被这些 fixture 逐位锁定。
+Fixture 与断言：Rust `pair_matrix_reference.rs` 直接编译锁定的 Sparrow `pair_matrix.rs`，验证 N=4 物理顺序、loss fold、Debug/Release 越界和 `usize::MAX` 算术；C++ `TestQuantify.cpp` 验证 N=4 顺序敏感总和、profile-specific 越界、溢出和 NaN/Inf 传播。`TestOverlapProxy` 的几何损失仍是 C++ 侧容差断言，不是 Rust oracle；其他现有 separator trace 仍按原记录的容差比较。
 
 ## 结论
 
-quantify 公式在正常输入的源码级计算结构上对应；fixture 支持特定配置、按容差验证浮点结果，不构成逐位 parity。PairMatrix 两侧布局不同但本地读写自洽，遍历顺序可能影响浮点累加；极端中心值的 midpoint 路径也不同。C++ 另有非有限值防御和 Result 溢出检查。移植验收应将数值容差、PairMatrix 遍历次序与异常输入语义分别规定。
+PairMatrix 的合法索引映射、物理遍历顺序、总损失 fold、profile-specific 越界和长度溢出行为已按当前锁定 Rust 基线对齐并有 Debug/Release 参考。量化几何仍不是逐位闭合：容器 centroid 的 `f32::midpoint` 与 C++ 算术路径不同，Rust debug assertion 与 C++ 退化防御也不同；这些剩余项应在 S12/数值边界工作中单独收敛。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：53+27+49 行逐项覆盖】** quantify/mod.rs（3 pub fn + 2 模块声明 + calc_shape_penalty）、overlap_proxy.rs（overlap_area_proxy 单函数）、pair_matrix.rs（结构/new/Index/IndexMut/calc_idx）——主文 7 小节全覆盖；`#[inline(always)]` 属性能标注。
 2. **【浅覆盖补全：mod.rs 的 debug_assert 位置与 release 行为】** `debug_assert!(overlap_proxy.is_normal())`（mod.rs:20/:48）与 `debug_assert!(total_overlap.is_normal())`（overlap_proxy.rs:24）——**is_normal 含下溢/零/inf/NaN 检查**，release 构建静默跳过；C++ 以 isfinite/<=0 检查返回 0 替代（主文差异 #3 已记方向，此处补 release 差异：release 下 Rust 对异常值继续参与运算（可能产 NaN loss → 上层 FPA panic 链），C++ 恒 0——即 C++ 的防御在 release 也生效，比 Rust debug-only 更强。判定维持【C++ 额外】，影响面精确化）。
 3. **【2026-10-06 更正：越界访问语义】** 先前把 Rust release 越界索引写成未定义读，这是错误的：`Vec` 索引在 release 仍做边界检查并 panic，即使 `debug_assert!` 被移除。C++ `std::vector::operator[]` 越界则未定义行为；主文已区分两者。
 4. **【核对确认：布局映射手算复核】** size=4 的 `(0,3)` 在 Rust 映射到 3、C++ 映射到 6；两种索引均由各自矩阵的本地访问函数闭合使用。区别是物理排列及遍历顺序，不共享内存布局。
+
+### P0 复核更正（2026-10-09）
+
+本节 2026-09-29 的第 3、4 条记录的是当时实现，不是当前状态：PairMatrix 现在采用 Rust 的上三角行顺序，size=4 的 `(0,3)` 两侧均落在物理槽位 3；Release 的非法逻辑坐标按 Rust unsigned flatten 算式访问并保留 alias，backing 越界由 checked access 失败；Debug 非法逻辑坐标由 Rust `debug_assert!` 与 C++ `std::out_of_range` 退出。`usize::MAX` 长度运算也有 Debug/Release Rust/C++ reference。当前结论以主文 PairMatrix 小节和 [共用错误分类表](../error-semantics.md) 为准，不能继续引用旧审计行作为现状差异。

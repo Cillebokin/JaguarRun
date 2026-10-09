@@ -35,3 +35,26 @@ fn discrete_rotation_uses_normalized_delta_absolute_value() {
         "Rust must choose 350 degrees over 1 degree for a 359 degree sample",
     );
 }
+
+#[test]
+fn coordinate_descent_degree_constants_match_rust_f32_to_radians() {
+    let expected = [
+        5.0_f32.to_radians(),
+        1.0_f32.to_radians(),
+        0.5_f32.to_radians(),
+        0.05_f32.to_radians(),
+    ];
+    let actual = [
+        sparrow::consts::PRE_REFINE_CD_R_STEPS.0,
+        sparrow::consts::PRE_REFINE_CD_R_STEPS.1,
+        sparrow::consts::SND_REFINE_CD_R_STEPS.0,
+        sparrow::consts::SND_REFINE_CD_R_STEPS.1,
+    ];
+    let expected_bits = expected.map(f32::to_bits);
+    let actual_bits = actual.map(f32::to_bits);
+    assert_eq!(
+        actual_bits,
+        [0x3db2_b8c2, 0x3c8e_fa35, 0x3c0e_fa35, 0x3a64_c388]
+    );
+    assert_eq!(actual_bits, expected_bits);
+}

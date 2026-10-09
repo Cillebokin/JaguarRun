@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/sparrow/src/sample/coord_descent.rs`（180 行）
 **C++**: `SparrowCore/Include/SparrowCore/Sampling/CoordinateDescent.h`（32 行）+ `SparrowCore/Source/Sampling/CoordinateDescent.cpp`（239 行）
-**判定**: 候选方向、状态更新和随机轴映射结构对应；CD 角度常量的计算表达式有 1 ULP 源码差异，尚无临界轨迹验证
+**判定**: 候选方向、状态更新和随机轴映射结构对应；CD 角度常量已改为 Rust 等价的 factor-first `f32` 换算，并以位模式和实际 LBF/worker 消费路径回归核验
 
 C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/State` 辅助类型，与 Rust 的 `refine_coord_desc` + `CoordinateDescent`/`CDAxis` 结构一一对应。fixture `SamplingCoordinateDescentRustReference.tsv` 含 8 条 sample、54 条 coordinate 和 1 条 result；测试对候选与结果按数值容差比较（变换 1e-6、loss 1e-5），不做逐位相等断言。该 fixture 覆盖当前 seed/config 路径，但未构造并列候选来验证 tie-break。
 
@@ -56,11 +56,16 @@ C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/S
 | 2 | 两候选 loss 并列时的选择：Rust `min_by_key` 与 C++ 严格优胜比较均保留第一个候选 | 一致 | tie-break 方向相同；当前 fixture 未专门构造并列输入 | coord_descent.rs:50-52 vs cpp:218-219 |
 | 3 | Rust `debug_assert!`（1000 eval 上限）→ C++ Result 错误通道 | 差异 | 既定形态差异（panic→Result） | coord_descent.rs:57 vs cpp:198-201 |
 | 4 | Rust `trace!` 日志 → C++ 无 | 差异 | 无行为影响 | coord_descent.rs:56,59 |
-| 5 | 角度步长常量：Rust f32 `to_radians()` vs C++ f32 `degrees * PI / 180` | 【源码数值差异，影响未测试】 | 5° 与 0.05° 在当前构建下相差 1 ULP；CD 起始/限值步长可能影响候选位置和停止轮次，现有容差 fixture 未隔离验证 | consts.rs:20,26; LbfSearch.cpp:46-58; SeparatorWorker.cpp:36-48 |
+| 5 | 角度步长常量：Rust f32 `to_radians()` vs C++ conversion | 已修复（factor-first `f32` 计算） | 旧 C++ `degrees * PI / 180` 对 5° 得 `0x3db2b8c3`，Rust 为 `0x3db2b8c2`；共享 `RustF32DegreesToRadians` 后，5°/1°/0.5°/0.05° 四项 raw bits 精确匹配。LBF search 与 Separator worker 的 Rust reference traces 继续验证实际候选/结果 | `consts.rs:20,26`; `CoordinateDescent.h::RustF32DegreesToRadians`; `LbfSearch.cpp`; `SeparatorWorker.cpp`; `TestSampling.cpp`; `rotation_reference.rs` |
 
 ## 结论
 
-坐标下降的状态机和五轴候选公式可对应，Rust/C++ 固定 fixture 的 54 条候选及终态按容差比较；但旋转步长常量的计算表达式在 5° 和 0.05° 上有 1 ULP 差，不能把整个算法标作无条件行为等价。现有 fixture 未隔离该常量差的轨迹影响，也未专门覆盖并列边界。已确认 `min_by_key` 与 C++ 比较器在并列时都选第一个候选。C++ 另有评估预算/配置校验，且 C++ 搜索调用点对零坐标下降数 clamp 至 1，而 Rust 原样传递（S13/S15）。
+坐标下降的状态机和五轴候选公式可对应。旧角度常量表达式在 5° 下曾稳定复现 1 ULP 差异；当前 LBF 与 Separator worker 共用 factor-first `f32` 转换，5°/1°/0.5°/0.05° 分别与 Rust `to_radians()` raw bits 一致。现有 LBF search 与 worker Rust reference traces 的候选和结果比较通过 Debug/Release。并列边界仍主要依赖源码及固定消费者规则；C++ 另有评估预算/配置校验，且 C++ 搜索调用点对零坐标下降数 clamp 至 1，而 Rust 原样传递（S13/S15）。
+
+### 实现与回归验证（2026-10-09）
+1. RustReference `coordinate_descent_degree_constants_match_rust_f32_to_radians` 锁定 `[5°, 1°, 0.5°, 0.05°]` 的位模式 `[0x3db2b8c2, 0x3c8efa35, 0x3c0efa35, 0x3a64c388]`。
+2. C++ RED 在旧表达式下首项为 `0x3db2b8c3`，证明 1 ULP 差异；改用 `RustF32DegreesToRadians(degrees)` 后四项与 Rust 相同。LBF Search 和 SeparatorWorker 两个生产配置入口都调用该 helper。
+3. RustReference 全量 87 个 integration tests 的 Debug/Release 均通过；SparrowCore Debug/Release 全量 runner 均通过，包含 LBF search trace 与 separator worker 对照。证据限于当前 Windows x64 MSVC/Rust 1.98.1 scalar profile。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：180 行逐项覆盖】** coord_descent.rs 全量复核：CDConfig（5 字段）、refine_coord_desc、CoordinateDescent 结构（8 字段）、ask、tell、CDAxis（5 变体+random）——主文 5 小节全覆盖无遗漏。

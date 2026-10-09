@@ -6,6 +6,16 @@
 
 这是 eval 层的基础类型：枚举 `SampleEval {Clear{loss}, Collision{loss}, Invalid}` + `SampleEvaluator` trait。比较语义（含 FPA 容差）直接决定 BestSamples 的接受/淘汰与坐标下降的 better/worse 判定。相关 fixtures 精确比较 kind/accepted 等离散字段，浮点 loss/transform 按各测试容差比较；保存 `loss_f32_bits` 文本不代表测试逐位比较。
 
+## `SampleEval` 排序消费者清单
+
+| Rust 消费点 | C++ 对应 | 操作与覆盖 |
+|---|---|---|
+| `sample/best_samples.rs::report` | `BestSamples::Report` | 先比较 upper bound 与相似项，再按 `sort_by_key` 稳定排序；C++ 使用 Rust 近似相等比较与稳定插入，不调用 `std::sort` |
+| `sample/coord_descent.rs::refine_coord_desc` / `CoordinateDescent::tell` | `RefineCoordinateDescent` | 两候选以 `min_by_key` 选首个最小项，随后比较新旧 loss 更新 pose、步长和随机轴 |
+| `sample/uniform_sampler.rs::new` 的 `min_by_key` | `UniformRectSampler::Create` | 排序 key 是旋转几何 bbox 高度，不是 `SampleEval`；不消费 SampleEval comparator |
+
+直接 `cmp`/排序消费者为 BestSamples 和 CoordinateDescent 两类；Rust/C++ 其余 `SampleEval` 使用是字段分类或 loss 传递。当前 golden 覆盖七组有限/无穷边界、四样本非传递链、BestSamples 32 项插入轨迹、NaN 同 kind 失败与 coordinate-descent 近似并列轨迹。由于 Rust `Ord` 比较关系本身不满足传递性，有限夹具不能证明任意序列上的稳定排序结果。
+
 ## 函数逐条比对
 
 ### `SampleEval` 枚举（sample_eval.rs:8-13）
@@ -58,3 +68,7 @@ SampleEval 的三态单次比较规则（Clear < Collision < Invalid，同态按
 ### 补充审计（2026-10-07）
 4. **【此前的 Rust 边界与消费路径扩展（2026-10-07）】** 初版 SampleEvalComparatorBoundaryRustReference.tsv 固定五组各六种排序排列；Rust tests/sample_eval_boundary_reference.rs 另固定近似并列 coordinate descent 的 6 个候选、终值和评估数。C++ TestLbfLoss.cpp 实际 BestSamples 顺序与 TestSampling.cpp 的 RefineCoordinateDescent 路径通过固定 fixture 对照。NaN 比较改为抛 std::domain_error、相等判断改为 false，与 Rust 的失败/PartialEq 语义对应；异常类型仍不同。后续扩展见下项。
 5. **【扩展非传递边界与更长插入序列（2026-10-07）】** 比较器 fixture 增至七组三样本×六排列（42 行），新增负 epsilon 链和 2.0 附近 ULP 链；另将 BestSamples 真实消费序列从 3 项扩为 4 项，并固定 A/B/C/D 的 24 种排列。Rust 1.98.1 Debug/Release 轨迹一致，C++ BestSamples Debug/Release 逐行匹配。此证据仍不覆盖一般长度或任意 non-transitive 输入。
+
+### P0 顺序核验（2026-10-09）
+
+现有证据足以闭合计划中“列明合法输入序列”的工作项：RustReference 的 `sample_eval_boundary_reference.rs` 固定七组比较边界的 42 种排列，`sample_eval_order_reference.rs` 固定四项非传递链的 24 种排列，`best_samples_sequence_reference.rs` 固定 32 次 BestSamples 插入及四种 NaN 失败状态，`sample_eval_boundary_reference.rs` 另有近似并列 CoordinateDescent 消费轨迹。`TestLbfLoss.cpp` 与 `TestSampling.cpp` 在 SparrowCore Debug/Release 中消费对应 golden；2026-10-09 锁定 Rust 验证脚本的 Debug/Release 全量运行通过。该项只关闭这些固定用例；Rust `Ord` 对非传递比较仍违反排序合同，任意序列继续标为未定义/未认证域。

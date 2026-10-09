@@ -1,0 +1,59 @@
+# Sparrow / SparrowCore 共用错误与控制结果分类表
+
+**用途：**为 Rust Sparrow 到 C++ SparrowCore 的逐路径迁移提供统一的失败比较口径。每个记录都要区分“正常无结果”“输入拒绝”“算法失败”“内部异常”和“停止控制”；不能把不同出口统称为失败，也不能仅因两侧错误文本不同就认定算法行为不同。
+
+**基线与状态：**Rust Sparrow 语义以 `SparrowCore/Tests/RustReference/Cargo.lock` 固定的解析结果为准；锁定 jagua-rs revision 为 `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。源码与构建环境指纹见 [2026-10-09 冻结前基线](baseline-2026-10-09.md) 和逐文件 [JSON 指纹](baseline-2026-10-09.json)。该 manifest 固定的是本轮 P0 修复前源码；本表中的 C++ 当前行为和闭合状态按下方日期记录，不能把修复后源码误读成冻结内容。
+
+## 判定规则
+
+1. Rust `Option::None`、C++ `std::optional` 空值和 `Result` 中携带的“没有可行项”只有在调用方后续状态相同的情况下才算等价；普通 no-fit 不能伪装成 invalid-input 或内部错误。
+2. Rust panic 与 C++ exception 可以是语言层映射，但必须核对触发条件、抛出/捕获边界、失败前后布局与计数、回调顺序、线程/进程退出以及是否继续下一阶段。仅把 panic 改成错误返回并继续运行，不自动等价。
+3. Rust Debug-only assertion、Release 行为以及无条件 `unwrap`/`expect`/`unimplemented!` 分开记录；不得把 Debug 的失败语义推广成 Release 结论。
+4. C++ 未定义行为不是可接受的 Rust panic 映射。越界或无效状态必须有明确的 C++ 可观察出口，之后才能讨论与 Rust 的触发和状态对应。
+5. 错误文本、错误码和 CLI exit code 只有在公开接口契约中才逐字比较；否则比较稳定错误类别和状态影响，并在记录中保留语言层原始出口。
+
+## 分类表
+
+| ID | 类别与触发 | Rust Sparrow 可观察行为 | SparrowCore 当前行为 | 状态副作用与传播要求 | 关联记录与结论 |
+|---|---|---|---|---|---|
+| CTRL-NOFIT | 搜索/采样在当前几何和旋转集合下没有可行候选 | 以 `Option::None` 或零次循环表示普通无候选；LBF 构造可据此扩宽条带 | 用 `Result` 携带 `std::optional`，或在搜索层转换成空候选 | 必须保留当前布局、候选和 RNG 消耗；调用方继续扩宽/回退的时点要一致。此类不是错误 | S03、S13、S16；常规扩宽语义有记录；非法旋转 panic/error 按 ERR-SAMPLER-INPUT 单列 |
+| CTRL-STOP | 用户请求停止、phase stop、运行时限到期或迭代上限到达 | terminator 控制循环结束，可能完成当前尝试后交接到下一阶段 | `OptimizationTerminator` 返回 stop/timeout 状态 | 比较停止源、当前尝试是否收尾、阶段交接、最终布局和报告；超时本身不是失败 | S07、S08、S20、S21；已有若干定向路径，其余入口未完整覆盖 |
+| CTRL-LOSS-PRUNE | 有界分离评估发现碰撞损失超过当前 `SampleEval` 上界 | evaluator 返回 `SampleEval::Invalid`，并停止当前 hazard 遍历；分项剩余预算以 `loss_bound - accumulated_loss` 的 `f32` 结果计算 | C++ evaluator 返回 `SAMPLE_KIND_INVALID` 并停止对应 CDE callback | 比较首个停止 hazard、surrogate/exact 收集阶段和评估计数。三项 fixture 的无界结果为 `0x4ab5c931`；上界为 `0x4ab5c930` 或恰等于结果时均 Invalid，增加 1 ULP 至 `0x4ab5c932` 后为 Collision，Rust/C++ Debug/Release 一致 | S11、S12；该邻域仅认证列出的几何、权重、hazard 顺序，不能外推为所有累计值的通用容差 |
+| ERR-CONFIG | 非法配置值、负时限或无效搜索参数 | Rust 多由调用方约束；具体路径可能断言、panic 或把值直接传入算法 | 多个 `Validate()` 返回 JaguarCore `InvalidInput` | 逐字段比较拒绝时点和是否创建 RNG/worker/布局；额外防御要单独标明 | S01、S03、S14；C++ 校验范围比 Rust 更强，逐入口映射未闭合 |
+| ERR-SEED-ABSENT | seed 未提供 | `rng_seed: None` 时由 CLI 生成随机根 seed；显式 `Some(0)` 是确定的零 seed | `SparrowConfig.seed` 为 optional；缺省时生成随机 seed，写入最终 metrics 并由 SparrowCli 报告；显式 0 保持固定 | Rust `rand::random()` 与 C++ `std::random_device` 是不同熵源，独立运行不比较生成值；固定有效 seed 后应可重放。C++ 无 seed运行→metrics seed→显式 seed 重跑已比较解 | S01、S02、S08；P0 seed 语义与重放信息已验证（2026-10-09），熵源等价限定为非确定性语义 |
+| ERR-RNG-EMPTY-RANGE | 对空整数范围执行均匀抽取，例如 `UniformIndex(0)` | `rand 0.10` 空范围触发 panic | C++ 在 `UniformIndex(0)` 抛 `std::invalid_argument` | Rust/C++ 都在消耗 RNG 前失败；测试比较状态快照与下一输出。具体上层调用包装及 S16 输入分类仍单独核对 | S02、S16；primitive 层语义已验证（2026-10-09），语言级 panic/exception 类型不同 |
+| ERR-CONSTRUCTION | LBF 启发式到达最大宽度仍无法构造完整布局 | 返回 `ConstructionError { item_idx }`，不产生完整结果 | 返回 JaguarCore `Infeasible` 和包含 item index 的相同 Display 文本 | 公共结果都无完整布局；比较 item index、listener 是否触发、部分构造状态是否逃逸。错误类型/错误码映射仍不同 | S03、S08；主路径结果有 reference，类型映射作为已知接口差异记录 |
+| ERR-UNSUPPORTED-HAZARD | 碰撞损失或 Tracker 初始化/更新遇到 `Hole` 或 `InferiorQualityZone` | `unimplemented!` panic | 候选损失分派、Tracker 初建和 moved-row collector 循环都抛 `std::logic_error("unsupported hazard entity")` | 候选分派与 Tracker 初始化 Hole/QZone、moved-row Hole 有 Rust/C++ trigger test；另有 seed=42 单 worker 搜索夹具证明 QZone 异常冒泡、RNG-after、布局/Tracker 不变及失败候选不触发 trace callback。多 worker 任务、optimizer listener 与 phase 传播仍需逐调用边界核验 | S12 与 S18；核心分派、Tracker 初建/移动和单 worker 搜索调用链已闭合；外层并发与 listener/phase 仍开放 |
+| ERR-WORKER-INVARIANT | worker 期望 `search_placement` 一定产生参考样本，但样本缺失 | `expect` panic，当前 worker 调用不返回 | C++ 对缺失 transform 执行 `continue`，跳过该项 | 这是状态转移差异而非简单 panic→Result：比较后续 item、move 计数、layout、报告和 worker 继续状态 | S03–S05；P0 开放项 |
+| ERR-NUMERIC-ORDER | `SampleEval` 同 kind 的 loss 为 NaN，比较器要求全序 | `partial_cmp(...).unwrap()` 在实际比较时 panic | C++ 对同 kind NaN 比较抛 `std::domain_error`；不同 kind 先按 kind rank 比较 | 按触发路径比较集合在异常前是否已插入候选、排序状态和异常后容器内容；不能声称任意序列等价 | S09、S10、S15；固定触发顺序有 profile fixture，任意序列仍受 Rust `Ord` 非传递限制 |
+| ERR-PAIR-INDEX | PairMatrix 逻辑索引越界或 backing storage 越界 | Debug 逻辑索引先由 `debug_assert!` panic；Release 移除断言后按 Rust 展平公式访问，部分逻辑坐标会 alias，最终 `Vec` 越界仍 panic | Debug 对逻辑坐标显式抛 `std::out_of_range`；Release 复现 Rust 展平/alias，再由 `vector::at` 在 backing 越界时抛 `std::out_of_range` | 已消除 C++ UB；Rust panic 与 C++ exception 的语言映射有 Debug/Release 定向 fixture。PairMatrix 的安全访问边界已闭合 | S17；已闭合（2026-10-09），不代表 Tracker 所有高层 getter 越界已闭合 |
+| ERR-PAIR-ALLOC | PairMatrix 三角存储大小溢出 | `size * (size + 1) / 2`：Debug 加法/乘法溢出 panic；Release `usize` 回绕，某些超大值会得到空/异常长度并在后续访问或分配时失败 | Debug 检测算术溢出并抛 `std::overflow_error`；Release 使用 `size_t` 回绕，`SIZE_MAX` 得到空 backing entries，后续 checked access 抛 `std::out_of_range` | `SIZE_MAX` Debug/Release 行为有实际 Rust/C++ 参考。只认证该边界 fixture，不把分配器 OOM 文本或任意超大容量推广为等价 | S17；已闭合（2026-10-09），容量域限定于已测 profile 边界 |
+| ERR-TRACKER-STALE | move/update 使用旧 handle、旧布局快照或不一致 placement | Rust 多数路径信任调用者；部分 Debug 断言失败 | C++ 前置对账并以 `InvalidInput` 返回 | 比较 Tracker 与 Layout 是否发生任何部分改写，以及上层是回滚、重建还是终止 | S04、S18；C++ 防御性行为更强，调用点语义需逐项确认 |
+| ERR-TRACKER-INDEX | Tracker getter 使用 stale handle/key 或非法 numeric index | Rust 通过 `SecondaryMap` 用 stale `PItemKey` 查询时 panic | C++ 六类数值 getter 现在经 PairMatrix/vector checked access 抛 `std::out_of_range`，不再返回 0；`IndexForHandle` 的 optional 是内部校验接口 | 双方均以异常退出 getter 且不修改 tracker；Rust stale-key Debug/Release 和 C++ invalid-index Debug/Release reference 已加入 | S18；已闭合（2026-10-09，错误类别/状态对应，语言异常不同） |
+| ERR-NONFINITE-LOSS | loss/weight 含 NaN 或 ±Inf，或计算产生非有限值 | Rust tracker getter、乘法、fold 和 GLS 更新保留 IEEE 值；几何公式在 Debug 另有 `debug_assert!`，Release 继续运算 | PairMatrix/Tracker 状态层现直接传播 raw loss/weighted loss；GLS 用 `fmax` 对齐 Rust `f32::max` 的 NaN 规则和 1.0 floor。候选几何评估仍会过滤/拒绝非有限结果 | Tracker restore/getter/totals/weights 有 Debug/Release 直接 oracle；候选几何及碰撞量化的失败时点、layout/listener 副作用仍按 S12 逐入口闭合 | S17、S18 状态层已闭合（2026-10-09）；S12 几何/候选出口仍开放 |
+| ERR-SAMPLER-INPUT | 非有限/反向 bounds、旋转配置或数值转换失败 | `UniformBBoxSampler` 普通 no-fit、无可行旋转、无序/非有限区间返回 `None`；公开 `Rect` 字段可构造单点轴且能采样（`Rect::try_new` 自身仍拒绝退化矩形）；空离散角最终也是 `None`，NaN 离散角已在真实 Search 入口实测为变换处 panic | `Result<std::optional<UniformRectSampler>>` 把 no-fit 表示为空 optional；有限/有序单点轴可采样；bounds 转换、非有限角和 shape transform 失败作为 error 传播，LBF/Separator 不再把 error 吞成 no-fit | singleton X/Y/XY 坐标、普通 no-fit、反向/非有限 bounds 的分类已由 Rust/C++ 测试比较。seed=42 NaN 离散角已核对 Rust panic/C++ InvalidInput，均无 trace callback 且 RNG 未变；其他变换失败、Separator 传播及不可表示 f64 bounds 仍需对照 | S16；no-fit/error 分类和 singleton bbox 已修复（2026-10-09），其他非法旋转/浮点表示边界仍开放 |
+| ERR-CD-BUDGET | Coordinate Descent 显式 evaluation budget 耗尽 | Sparrow 正常路径无该预算；Debug 仅有 1000 次评估 `debug_assert!`，Release 继续运行 | C++ 扩展的 `maxEvaluations` 返回 `TimeLimit` | Rust-parity 夹具必须禁用 C++ 独有预算；扩展接口单独验收，不得把此错误称为 Sparrow 等价 | S13、S14；按路线图属于 C++ 扩展范围 |
+| ERR-IO | 文件导入、导出或写入失败 | 可能返回库错误或在调用点 `expect`/panic | JaguarCore/SparrowCore 以 Result/ErrorCode 返回，部分 CLI 转换为退出码 | 记录 path、已写字节/文件、临时文件、错误流和进程继续状态；写失败不能伪装为成功 | S22；完整文件级失败闭环未完成 |
+| ERR-CLI | CLI 参数解析、配置映射、算法或导出失败 | Rust `anyhow` 错误当前统一以 exit 1 结束 | C++ CLI 使用分类型 exit code 2–9 | 比较解析后的有效配置、阶段是否启动、stdout/stderr、文件副作用和 exit code；公开接口纳入范围时精确比较 | S23；P1，尚未完成 |
+
+## 用例与记录模板
+
+每新增一种失败路径，在对应 Sxx 记录和 RustReference/C++ 测试中采用同一输入，并补齐下面字段。若某字段不适用，写明原因；若尚未观测，状态写“未测”，不能按“无副作用”处理。
+
+| 字段 | 记录内容 |
+|---|---|
+| Error ID | 本表稳定 ID；新类先分配唯一 ID |
+| Input and trigger | 完整 fixture、有效配置、feature、profile、触发条件 |
+| Rust outcome | `Ok(value)`、`Ok(None)`、错误值、panic 类型/位置、Debug/Release 差异 |
+| C++ outcome | `Result`/optional/exception/error code/exit code 及捕获位置 |
+| State before/after | 布局与 placement、Tracker/PairMatrix、RNG、计数、best/worker 状态 |
+| Events and propagation | listener 事件、worker/线程退出、阶段交接、进程退出或继续 |
+| Evidence | Rust oracle 测试、C++ 测试、fixture/golden、运行 profile |
+| Status and limit | 已闭合、部分闭合、开放；明确只能外推到的输入域 |
+
+## 当前闭合规则
+
+- `Result<T>` 中的正常 no-fit 必须有单独的 optional 状态，且调用方不能吞掉 invalid-input 或内部错误。
+- 任何 `operator[]` 越界、整数溢出 UB 或未捕获的异常跨 C ABI 边界，都不能以“行为未定义”作为 parity 结论；先为 C++ 定义稳定边界，再比较 Rust。
+- `panic → exception` 仅在 trigger、状态快照和传播/终止行为一致时记为语言机制映射。`panic → 返回错误后继续`、`panic → 跳过当前 worker 项`、`NaN → 0` 都是控制/结果语义差异。
+- 本表覆盖当前 S01–S24 记录中已明确的失败与控制出口。逐函数审计发现的新路径必须同时更新本表、对应 Sxx 记录与回归测试；未审计路径保持未知。

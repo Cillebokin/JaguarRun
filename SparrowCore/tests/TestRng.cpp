@@ -12,6 +12,7 @@
 #include <limits>
 #include <ostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace
@@ -251,6 +252,28 @@ bool TestUniformIndexRustReference(std::ostream& output)
                   "Rust uniform-index reference fixture must end with a complete group");
 }
 
+bool TestUniformIndexRejectsEmptyRangeWithoutConsumingRng(
+    std::ostream& output)
+{
+    sparrow::SparrowRng actual(42U);
+    sparrow::SparrowRng expected(42U);
+    const auto initialState = actual.State();
+    bool threwInvalidArgument = false;
+    try
+    {
+        static_cast<void>(actual.UniformIndex(0U));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threwInvalidArgument = true;
+    }
+    return Expect(threwInvalidArgument
+                      && actual.State() == initialState
+                      && actual.NextU64() == expected.NextU64(),
+                  output,
+                  "empty uniform-index range must fail before consuming RNG");
+}
+
 bool TestStateAndIntegerDeterminism(std::ostream& output)
 {
     sparrow::SparrowRng first(42U);
@@ -446,6 +469,7 @@ bool TestMetricsValueType(std::ostream& output)
 bool RunRngTests(std::ostream& output)
 {
     return TestSeed42Reference(output)
+        && TestUniformIndexRejectsEmptyRangeWithoutConsumingRng(output)
         && TestUniformIndexRustReference(output)
         && TestStateAndIntegerDeterminism(output)
         && TestNormalCacheAndDeterminism(output)

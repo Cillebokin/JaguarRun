@@ -4,9 +4,13 @@
 **C++**: `SparrowCore/Include/SparrowCore/Sampling/LocalSearchSampler.h`（50 行）+ `SparrowCore/Source/Sampling/LocalSearchSampler.cpp`（206 行）；搜索编排本身在 `SparrowCore/Source/Optimizer/LbfSearch.cpp`（296 行）与 `SparrowCore/Source/Optimizer/SeparatorWorker.cpp`（FindBestSeparatorMoveImpl，128-280 行）
 **判定**: 固定 trace 路径及本轮零采样语义基本对应；`n_coord_descents=0` 已将 Rust profile-specific 容量行为带入 C++ 搜索入口，错误机制仍因语言不同而不同，参考轨迹仅覆盖列出的输入。
 
-说明：Rust 的 `search_placement` 是一个"编排函数"，把 UniformBBoxSampler + BestSamples + refine_coord_desc + evaluator 串成 Algorithm 6。C++ 没有单一对应文件，而是拆成两处内联编排（`SearchLbfImpl` 对应 ref_pk=None 的 LBF 构造路径；`FindBestSeparatorMoveImpl` 对应 ref_pk=Some 的分离路径），另提供一个独立的 `LocalSearchSampler`（高斯局部搜索器，Rust sparrow 中不存在，属于 C++ 额外的公共 API，供外部调用方使用，见 S13-4）。`LbfSearchRustTrace.tsv` 有 158 条 trace record，其中 104 条 eval（16 container / 56 prerefine / 32 finalrefine）；`SeparatorSearchRustTrace.tsv` 有 162 条 trace record，其中 81 条 eval（1 reference / 8 focused / 16 container / 38 prerefine / 18 finalrefine）。两者都是指定 seed/config 轨迹；测试精确比较阶段、事件和报告决策等离散字段，浮点样本使用各自容差，具体边界见 S09/S11。该覆盖支持这两条固定路径，不是完整输入域的逐位等价证明。
+说明：Rust 的 `search_placement` 是一个"编排函数"，把 UniformBBoxSampler + BestSamples + refine_coord_desc + evaluator 串成 Algorithm 6。C++ 没有单一对应文件，而是拆成两处内联编排（`SearchLbfImpl` 对应 ref_pk=None 的 LBF 构造路径；`FindBestSeparatorMoveImpl` 对应 ref_pk=Some 的分离路径），另提供一个独立的 `LocalSearchSampler`（高斯局部搜索器，Rust sparrow 中不存在，属于 C++ 额外的公共 API，供外部调用方使用，见 S13-4）。`LbfSearchRustTrace.tsv` 有 159 条数据记录：104 条 eval（16 container / 56 prerefine / 32 finalrefine），另有一条末尾 RNG 哨兵；`SeparatorSearchRustTrace.tsv` 有 162 条 trace record，其中 81 条 eval（1 reference / 8 focused / 16 container / 38 prerefine / 18 finalrefine）。两者都是指定 seed/config 轨迹；测试精确比较阶段、事件和报告决策等离散字段，浮点样本使用各自容差，具体边界见 S09/S11。该覆盖支持这两条固定路径，不是完整输入域的逐位等价证明。
 
 ## 函数逐条比对
+
+### P0 顺序核验（2026-10-09）
+
+LbfSearchRustTrace.tsv 现由锁定 Rust 生成器在搜索完成后额外输出 rng_after <next_u64>。C++ reader 要求该行恰好出现一次、位于最终 Result 之后，并比较同一搜索调用后 C++ RNG 的下一 uint64 输出；这补上了既有 eval 与 BestSamples report/keep 事件之外的后续随机流核对。另有零预算空候选搜索对照 Rust/C++ seed=42 的未消费 next_u64（15021278609987233951）。这些证据分别限定于固定 16 个 container samples 的 LBF trace 和零预算空布局路径；参考放置、其他预算、无候选构造失败与多种 BestSamples 容量/相似度组合仍须各自建立序列和 RNG-after 对照。
 
 ### `SampleConfig`（search.rs:15-20）
 - C++ 对应：`SparrowCore/Include/SparrowCore/LbfConfig.h` 的 `LbfConfig`（samplesPerItem/nCoordinateDescents，见 S01）与 `SeparatorConfig`（nContainerSamples/nFocussedSamples/nCoordinateDescents，见 S04）。Rust 单一 `SampleConfig{n_container_samples, n_focussed_samples, n_coord_descents}` 按 LBF（n_focussed_samples=0，见 consts.rs:51-55 `LBF_SAMPLE_CONFIG`）与 Separator 两种配置拆为两个结构。
@@ -77,7 +81,7 @@ Rust `SampleConfig` 本身没有对应的运行时校验。`n_coord_descents=0` 
 | 6 | Observer 形式：trait 对象 vs 函数指针 | 差异 | 无行为影响 | search.rs:31-60 vs LbfSearch.cpp:87-103 |
 | 7 | Rust `debug!` 日志 → C++ 无日志 | 差异 | 无行为影响 | search.rs:260,311-315 |
 | 8 | `n_coord_descents=0`：Rust 与 C++ 搜索路径均把原值传给 BestSamples 零容量 | 已按 Rust profile 行为对齐（Debug 异常类型/机制不同） | Debug 两侧在空容量 upper-bound 处失败；Release 两侧均可能接受候选并突破容量。Rust Reference Debug/Release 与 C++ TestSampling profile 分支覆盖 LBF 搜索入口 | search.rs:242-245 vs LbfSearch.cpp、SeparatorWorker.cpp; BestSamples.cpp; `search_zero_boundary_reference.rs`; TestSampling.cpp; S15 |
-| 9 | 样本预算为零：两侧均接受；无 reference 的 LBF 路径返回无候选，有 reference 的 Separator 路径仍评估并精化 reference | 已按列明输入验证 | 零样本不等于零评估：`ref_pk=Some` 时仍有 reference evaluator 调用；Focused/Container 阶段不产生 sample 事件。空放置 LBF 则返回 None/无候选且评估计数为 0 | `search_zero_boundary_reference.rs`; TestSampling.cpp; TestSeparator.cpp::TestZeroSeparatorSampleBudgetUsesReferencePlacement; LbfSearch.cpp; SeparatorWorker.cpp |
+| 9 | 样本预算为零：两侧均接受；无 reference 的 LBF 路径返回无候选，有 reference 的 Separator 路径仍评估并精化 reference | 已按列明输入验证 | 零样本不等于零评估：`ref_pk=Some` 时仍有 reference evaluator 调用；Focused/Container 阶段不产生 sample 事件。空放置 LBF 则返回 None/无候选、评估计数为 0，且 seed=42 的下一 RNG 输出保持初始值 15021278609987233951 | `search_zero_boundary_reference.rs`; TestSampling.cpp; TestSeparator.cpp::TestZeroSeparatorSampleBudgetUsesReferencePlacement; LbfSearch.cpp; SeparatorWorker.cpp |
 
 ## 结论
 

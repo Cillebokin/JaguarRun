@@ -1,4 +1,5 @@
 use jagua_rs::Instant;
+use jagua_rs::collision_detection::hazards::HazardEntity;
 use jagua_rs::geometry::DTransformation;
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem, SPSolution};
@@ -11,6 +12,7 @@ use sparrow::util::listener::{ReportType, SolutionListener};
 use sparrow::util::terminator::Terminator;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Default)]
@@ -259,4 +261,88 @@ fn warm_start_rejection_boundaries_match_observed_rust_profiles() {
     }));
     assert!(partial_optimized.is_err());
     assert!(partial_optimize_listener.reports.is_empty());
+
+    // A snapshot can be internally consistent while its item index is out of
+    // range for the problem receiving it. Restore installs the layout and
+    // strip before indexing the target demand vector, so the panic leaves that
+    // restored state visible in both profiles.
+    let mut out_of_range_source =
+        SPProblem::new(partial_base.clone()).expect("create out-of-range source");
+    out_of_range_source
+        .change_strip_width(8.0)
+        .expect("set out-of-range snapshot width");
+    out_of_range_source.place_item(SPPlacement {
+        item_idx: 2,
+        d_transf: DTransformation::new(0.0, (4.5, 2.5)),
+    });
+    let mut out_of_range_solution = out_of_range_source.save();
+    let out_of_range_item_idx = partial_base.items.len();
+    assert_eq!(out_of_range_solution.layout_snapshot.placed_items.len(), 1);
+    for placed_item in out_of_range_solution
+        .layout_snapshot
+        .placed_items
+        .values_mut()
+    {
+        Arc::make_mut(&mut placed_item.item).idx = out_of_range_item_idx;
+    }
+    for hazard in &mut out_of_range_solution
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+    {
+        hazard.entity = match hazard.entity {
+            HazardEntity::PlacedItem { dt, pk, .. } => HazardEntity::PlacedItem {
+                id: out_of_range_item_idx,
+                dt,
+                pk,
+            },
+            other => other,
+        };
+    }
+
+    let mut out_of_range_target =
+        SPProblem::new(partial_base.clone()).expect("create out-of-range target");
+    let out_of_range_initial_width = out_of_range_target.strip.width;
+    let out_of_range_initial_demands = out_of_range_target.item_demand_qtys.clone();
+    let out_of_range_restore = catch_unwind(AssertUnwindSafe(|| {
+        out_of_range_target.restore(&out_of_range_solution);
+    }));
+    assert!(out_of_range_restore.is_err());
+    assert_eq!(out_of_range_target.layout.placed_items.len(), 1);
+    assert_eq!(
+        out_of_range_target
+            .layout
+            .placed_items
+            .values()
+            .next()
+            .unwrap()
+            .item
+            .idx,
+        out_of_range_item_idx
+    );
+    assert_eq!(
+        out_of_range_target.item_demand_qtys,
+        out_of_range_initial_demands
+    );
+    assert_eq!(
+        out_of_range_target.strip.width,
+        out_of_range_solution.strip.width
+    );
+    assert_ne!(out_of_range_target.strip.width, out_of_range_initial_width);
+
+    let mut out_of_range_optimize_listener = RecordingListener::default();
+    let mut out_of_range_optimize_terminator = StopImmediately;
+    let out_of_range_optimized = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            partial_base,
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut out_of_range_optimize_listener,
+            &mut out_of_range_optimize_terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&out_of_range_solution),
+        )
+    }));
+    assert!(out_of_range_optimized.is_err());
+    assert!(out_of_range_optimize_listener.reports.is_empty());
 }

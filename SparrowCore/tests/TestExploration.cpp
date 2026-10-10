@@ -5580,12 +5580,141 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
     {
         partialOptimizePanicked = true;
     }
-    return Expect(partialOptimizePanicked && !partialOptimizeReturned
-                      && partialListener.progressCount == 0U
-                      && partialListener.improvementCount == 0U
-                      && partialListener.solutionCount == 0U,
+    if (!Expect(partialOptimizePanicked && !partialOptimizeReturned
+                    && partialListener.progressCount == 0U
+                    && partialListener.improvementCount == 0U
+                    && partialListener.solutionCount == 0U,
+                output,
+                "partial CDE warm start must fail before callbacks as Rust does"))
+    {
+        return false;
+    }
+
+    auto outOfRangeSourceResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(outOfRangeSourceResult.HasValue(),
+                output,
+                "out-of-range source problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem outOfRangeSource =
+        std::move(outOfRangeSourceResult).Value();
+    if (!Expect(outOfRangeSource.ChangeStripWidth(8.0).HasValue()
+                    && outOfRangeSource.PlaceItem(
+                           {2U, {0.0, {4.5, 2.5}}}).HasValue(),
+                output,
+                "out-of-range source snapshot must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution outOfRangeSourceSolution = outOfRangeSource.Save();
+    const jaguar::Item& itemTemplate = baseInstance.Value().GetItem(2U);
+    const jaguar::ItemIndex outOfRangeItemIndex =
+        baseInstance.Value().ItemCount();
+    const auto outOfRangeItemResult = jaguar::Item::Create(
+        outOfRangeItemIndex,
+        itemTemplate.ExternalId(),
+        itemTemplate.GetOriginalShape(),
+        itemTemplate.GetSurrogateConfig(),
+        itemTemplate.MinQuality(),
+        itemTemplate.AllowedRotation());
+    if (!Expect(outOfRangeItemResult.HasValue(),
+                output,
+                "out-of-range snapshot item must be constructible"))
+    {
+        return false;
+    }
+    jaguar::Layout outOfRangeLayout(
+        outOfRangeSourceSolution.layoutSnapshot.container);
+    if (!Expect(outOfRangeLayout
+                    .PlaceItem(outOfRangeItemResult.Value(),
+                               {0.0, {4.5, 2.5}})
+                    .HasValue(),
+                output,
+                "internally consistent out-of-range layout must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPSolution outOfRangeSolution = outOfRangeSourceSolution;
+    outOfRangeSolution.layoutSnapshot = outOfRangeLayout.Save();
+
+    auto outOfRangeTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(outOfRangeTargetResult.HasValue(),
+                output,
+                "out-of-range target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem outOfRangeTarget =
+        std::move(outOfRangeTargetResult).Value();
+    const double outOfRangeInitialWidth = outOfRangeTarget.StripWidth();
+    std::vector<std::size_t> outOfRangeInitialDemands;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < baseInstance.Value().ItemCount();
+         ++itemIndex)
+    {
+        outOfRangeInitialDemands.push_back(
+            baseInstance.Value().ItemDemand(itemIndex));
+    }
+    bool outOfRangeRestoreThrew = false;
+    bool outOfRangeRestoreSucceeded = false;
+    try
+    {
+        outOfRangeRestoreSucceeded =
+            outOfRangeTarget.Restore(outOfRangeSolution).HasValue();
+    }
+    catch (const std::out_of_range&)
+    {
+        outOfRangeRestoreThrew = true;
+    }
+    std::vector<std::size_t> outOfRangeRestoredDemands;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < baseInstance.Value().ItemCount();
+         ++itemIndex)
+    {
+        outOfRangeRestoredDemands.push_back(
+            outOfRangeTarget.RemainingDemand(itemIndex));
+    }
+    const auto outOfRangeRestoredSnapshot = outOfRangeTarget.Save();
+    if (!Expect(outOfRangeRestoreThrew && !outOfRangeRestoreSucceeded
+                    && outOfRangeTarget.PlacedItemCount() == 1U
+                    && outOfRangeRestoredSnapshot.layoutSnapshot.placements[0]
+                           .placedItem.GetItemIndex()
+                           == outOfRangeItemIndex
+                    && outOfRangeRestoredDemands == outOfRangeInitialDemands
+                    && outOfRangeTarget.StripWidth()
+                           == outOfRangeSolution.StripWidth()
+                    && outOfRangeTarget.StripWidth() != outOfRangeInitialWidth,
+                output,
+                "out-of-range restore must match Rust's post-layout partial state"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig outOfRangeConfig;
+    outOfRangeConfig.seed = 42U;
+    outOfRangeConfig.warmStart = outOfRangeSolution;
+    outOfRangeConfig.exploration.timeLimit = std::chrono::nanoseconds{0};
+    outOfRangeConfig.compression.timeLimit = std::chrono::nanoseconds{0};
+    RecordingListener outOfRangeListener;
+    bool outOfRangeOptimizeThrew = false;
+    bool outOfRangeOptimizeReturned = false;
+    try
+    {
+        const auto outOfRangeOptimized = sparrow::Optimize(
+            baseInstance.Value(), outOfRangeConfig, &outOfRangeListener);
+        outOfRangeOptimizeReturned = outOfRangeOptimized.HasValue();
+    }
+    catch (const std::out_of_range&)
+    {
+        outOfRangeOptimizeThrew = true;
+    }
+    return Expect(outOfRangeOptimizeThrew && !outOfRangeOptimizeReturned
+                      && outOfRangeListener.progressCount == 0U
+                      && outOfRangeListener.improvementCount == 0U
+                      && outOfRangeListener.solutionCount == 0U,
                   output,
-                  "partial CDE warm start must fail before callbacks as Rust does");
+                  "out-of-range warm start must fail before callbacks as Rust does");
 }
 
 bool TestEmptyLargeAndPartialWarmStartMatchRust(

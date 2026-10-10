@@ -1,6 +1,7 @@
 use jagua_rs::entities::Layout;
 use jagua_rs::geometry::DTransformation;
 use jagua_rs::geometry::geo_enums::RotationRange;
+use jagua_rs::geometry::geo_traits::CollidesWith;
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem, SPSolution};
 use jagua_rs::probs::spp::io::import_instance;
@@ -81,6 +82,8 @@ const SECOND_INDEPENDENT_GEOMETRY_SEED14_LIMIT6_REFERENCE: &str = include_str!(
 );
 const CONTINUOUS_ROTATION_REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationObliqueContainedRelocationContinuousRustTrace.tsv");
+const CONTAINED_COLLECTOR_FILTER_REFERENCE: &str =
+    include_str!("../../Fixtures/ExplorationContainedCollectorFilterRustTrace.tsv");
 
 #[derive(Clone)]
 struct PlacementTrace {
@@ -386,6 +389,108 @@ fn actual_trace_with_width(
         )?;
     }
     Ok((output, first_failure_contained_moves))
+}
+
+fn assert_contained_collector_filter_witness() -> Result<(), Box<dyn Error>> {
+    use jagua_rs::collision_detection::hazards::HazardEntity;
+    use jagua_rs::collision_detection::hazards::collector::BasicHazardCollector;
+
+    let (external, _) = sparrow::util::io::read_spp_input(Path::new(
+        "../Fixtures/ExplorationContainedCollectorFilter.json",
+    ))?;
+    let defaults = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        defaults.cde_config,
+        defaults.poly_simpl_tolerance,
+        defaults.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external)?;
+    let mut problem = SPProblem::new(instance)?;
+    problem.change_strip_width(8.91_f32)?;
+    let post_swap_poses = [
+        (6.61_f32, 2.75_f32),
+        (2.8_f32, 4.2_f32),
+        (8.51_f32, 2.75_f32),
+        (4.0_f32, 2.75_f32),
+    ];
+    let mut handles = Vec::with_capacity(post_swap_poses.len());
+    for (item_idx, (x, y)) in post_swap_poses.into_iter().enumerate() {
+        handles.push(problem.place_item(SPPlacement {
+            item_idx,
+            d_transf: DTransformation::new(0.0, (x, y)),
+        }));
+    }
+
+    let host = &problem.layout.placed_items[handles[0]];
+    let mut collector = BasicHazardCollector::new();
+    problem
+        .layout
+        .cde()
+        .collect_poly_collisions(&host.shape, &mut collector);
+    let raw_collision_ids = collector
+        .iter()
+        .filter_map(|(_, entity)| match entity {
+            HazardEntity::PlacedItem { id, .. } => Some(*id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        raw_collision_ids.contains(&1),
+        "swapped counterpart must be a raw collision"
+    );
+    assert!(
+        raw_collision_ids.contains(&2),
+        "contained child must be a raw collision"
+    );
+    assert!(
+        raw_collision_ids.contains(&3),
+        "boundary child must be a raw collision"
+    );
+    assert!(
+        collector
+            .iter()
+            .any(|(_, entity)| matches!(entity, HazardEntity::Exterior)),
+        "out-of-strip exterior hazard must be ignored by the placed-item filter"
+    );
+
+    let contained_child = &problem.layout.placed_items[handles[2]];
+    let boundary_child = &problem.layout.placed_items[handles[3]];
+    assert!(host.shape.collides_with(&contained_child.shape.poi.center));
+    assert!(!host.shape.collides_with(&boundary_child.shape.poi.center));
+    Ok(())
+}
+
+#[test]
+fn contained_collector_filters_noncontained_collision_but_relocates_survivor() {
+    assert_contained_collector_filter_witness()
+        .expect("construct post-swap collision collector filter witness");
+
+    let initial_poses = [
+        (0.0, 2.8, 4.2),
+        (0.0, 7.6, 2.75),
+        (0.0, 9.5, 2.75),
+        (0.0, 4.0, 2.75),
+    ];
+    let (actual, first_failure_moves) = actual_trace(
+        "ExplorationContainedCollectorFilter.json",
+        "contained_collector_filter",
+        43,
+        0.9,
+        4,
+        &initial_poses,
+    )
+    .expect("generate actual Rust contained-collector filtering trace");
+    assert_eq!(
+        first_failure_moves,
+        [(2, 0)],
+        "only the POI-contained child should be relocated: {actual}"
+    );
+    assert_eq!(
+        actual.lines().collect::<Vec<_>>(),
+        CONTAINED_COLLECTOR_FILTER_REFERENCE
+            .lines()
+            .collect::<Vec<_>>(),
+    );
 }
 
 #[test]

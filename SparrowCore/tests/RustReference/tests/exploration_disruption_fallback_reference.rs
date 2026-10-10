@@ -168,6 +168,23 @@ fn trace() -> Result<String, Box<dyn Error>> {
     assert_ne!(first_failure_swaps[0].0, first_failure_swaps[0].1);
     assert_eq!(first_failure_swaps[0].0, first_failure_swaps[1].1);
     assert_eq!(first_failure_swaps[0].1, first_failure_swaps[1].0);
+    let first_failure_contained_moves = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                ExplorationTraceEvent::DisruptionMove {
+                    failure_id: 0,
+                    kind: DisruptionMoveKind::ContainedRelocation,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        first_failure_contained_moves, 0,
+        "empty post-filter collection must not emit a contained relocation"
+    );
 
     let mut output = String::from(
         "# generator=actual Sparrow Rust exploration_phase with pool observer\n\

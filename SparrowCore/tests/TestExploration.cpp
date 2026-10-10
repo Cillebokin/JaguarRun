@@ -12,6 +12,7 @@
 
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/Assertions.h"
+#include "JaguarCore/Collision/CollisionEngine.h"
 #include "JaguarCore/IO/Importer.h"
 
 #include <algorithm>
@@ -4285,7 +4286,8 @@ bool TestDisruptionTraceMatchesRust(
     const std::vector<double>& expectedSortedHullAreas = {},
     std::optional<std::size_t> maxConsecutiveFailures = std::nullopt,
     bool verifyReportHistory = false,
-    std::optional<jaguar::RotationMode> expectedRotationMode = std::nullopt)
+    std::optional<jaguar::RotationMode> expectedRotationMode = std::nullopt,
+    bool verifyFirstFailureContainedOrder = false)
 {
     std::ifstream traceInput;
     for (const char* prefix : {
@@ -4808,7 +4810,8 @@ bool TestDisruptionTraceMatchesRust(
                       "C++ disruption choices and subsequent pool/RNG trace differ from Rust");
     }
 
-    if (!expectedFirstContainedOrder.empty())
+    if (verifyFirstFailureContainedOrder
+        || !expectedFirstContainedOrder.empty())
     {
         std::vector<std::pair<std::size_t, std::size_t>> actualFirstContainedOrder;
         for (const auto& event : actualEvents)
@@ -4823,8 +4826,7 @@ bool TestDisruptionTraceMatchesRust(
                     event.itemIndex, event.relatedItemIndex);
             }
         }
-        if (!Expect(expectedFirstContainedOrder.size() >= 2U
-                        && actualFirstContainedOrder == expectedFirstContainedOrder,
+        if (!Expect(actualFirstContainedOrder == expectedFirstContainedOrder,
                     output,
                     "first failure contained-collection/move order differs from Rust"))
         {
@@ -5050,7 +5052,164 @@ bool TestDisruptionFallbackMatchesRust(std::ostream& output)
         {0U, 0U, 0U, 0U},
         0U,
         {},
-        output);
+        output,
+        false,
+        4U,
+        {},
+        {},
+        std::nullopt,
+        false,
+        std::nullopt,
+        true);
+}
+
+bool TestContainedCollectorFilterGeometryWitness(std::ostream& output)
+{
+    std::ifstream instanceInput;
+    for (const char* prefix : {
+             "SparrowCore/Tests/Fixtures/",
+             "../SparrowCore/Tests/Fixtures/",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/",
+             "..\\SparrowCore\\Tests\\Fixtures\\"})
+    {
+        instanceInput.open(
+            std::string(prefix) + "ExplorationContainedCollectorFilter.json");
+        if (instanceInput.is_open())
+        {
+            break;
+        }
+        instanceInput.clear();
+    }
+    if (!Expect(instanceInput.is_open(),
+                output,
+                "contained-collector witness fixture cannot be opened"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceInput),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue() && instance.Value().ItemCount() == 4U,
+                output,
+                "contained-collector witness fixture must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "contained-collector witness problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.91).HasValue(),
+                output,
+                "contained-collector witness width must be accepted"))
+    {
+        return false;
+    }
+
+    const std::array<jaguar::Point2d, 4U> postSwapTranslations{{
+        {6.61, 2.75}, {2.8, 4.2}, {8.51, 2.75}, {4.0, 2.75}}};
+    std::vector<jaguar::PlacedItemHandle> handles;
+    handles.reserve(postSwapTranslations.size());
+    for (std::size_t itemIndex = 0U;
+         itemIndex < postSwapTranslations.size();
+         ++itemIndex)
+    {
+        const auto placed = problem.PlaceItem({
+            itemIndex,
+            jaguar::Transform2d::FromRotationTranslation(
+                0.0, postSwapTranslations[itemIndex])});
+        if (!Expect(placed.HasValue(),
+                    output,
+                    "contained-collector witness placement must succeed"))
+        {
+            return false;
+        }
+        handles.push_back(placed.Value());
+    }
+
+    const jaguar::SPSolution state = problem.Save();
+    const auto hostPlacement = std::find_if(
+        state.layoutSnapshot.placements.begin(),
+        state.layoutSnapshot.placements.end(),
+        [&handles](const auto& placement) {
+            return placement.handle == handles[0];
+        });
+    if (!Expect(hostPlacement != state.layoutSnapshot.placements.end(),
+                output,
+                "contained-collector witness host must be present"))
+    {
+        return false;
+    }
+    auto engine = state.layoutSnapshot.container.CreateCollisionEngine();
+    if (!Expect(engine != nullptr
+                    && engine->Restore(state.layoutSnapshot.cdeSnapshot).HasValue(),
+                output,
+                "contained-collector witness collision engine must restore"))
+    {
+        return false;
+    }
+    jaguar::HazardFilter filter;
+    filter.irrelevant = [hostHandle = handles[0]](
+                            const jaguar::HazardEntity& entity) {
+        return entity.kind == jaguar::HazardKind::PlacedItem
+            && entity.placedItemHandle == hostHandle;
+    };
+    jaguar::HazardCollector collector;
+    engine->CollectPolygonCollisionsUntil(
+        hostPlacement->placedItem.CollisionShape(),
+        collector,
+        filter,
+        [](const jaguar::HazardEntity&) { return false; });
+
+    const auto hasRawPlacedItem = [&collector](std::size_t itemIndex) {
+        return std::any_of(
+            collector.Entries().begin(),
+            collector.Entries().end(),
+            [itemIndex](const auto& entry) {
+                return entry.second.kind == jaguar::HazardKind::PlacedItem
+                    && entry.second.itemIndex == itemIndex;
+            });
+    };
+    const bool rawExterior = std::any_of(
+        collector.Entries().begin(),
+        collector.Entries().end(),
+        [](const auto& entry) {
+            return entry.second.kind == jaguar::HazardKind::Exterior;
+        });
+    const auto containedPlacement = std::find_if(
+        state.layoutSnapshot.placements.begin(),
+        state.layoutSnapshot.placements.end(),
+        [&handles](const auto& placement) {
+            return placement.handle == handles[2];
+        });
+    const auto boundaryPlacement = std::find_if(
+        state.layoutSnapshot.placements.begin(),
+        state.layoutSnapshot.placements.end(),
+        [&handles](const auto& placement) {
+            return placement.handle == handles[3];
+        });
+    const bool geometryMatches =
+        containedPlacement != state.layoutSnapshot.placements.end()
+        && boundaryPlacement != state.layoutSnapshot.placements.end()
+        && hostPlacement->placedItem.CollisionShape().ContainsRustF32(
+            containedPlacement->placedItem.CollisionShape()
+                .PointOfInaccessibility().center)
+        && !hostPlacement->placedItem.CollisionShape().ContainsRustF32(
+            boundaryPlacement->placedItem.CollisionShape()
+                .PointOfInaccessibility().center);
+    return Expect(hasRawPlacedItem(1U)
+                      && hasRawPlacedItem(2U)
+                      && hasRawPlacedItem(3U)
+                      && rawExterior
+                      && geometryMatches,
+                  output,
+                  "raw collisions must include exterior, counterpart, contained child, and filtered boundary child");
 }
 
 bool TestDisruptionPoolResetAfterRecoveryMatchesRust(std::ostream& output)
@@ -5908,6 +6067,27 @@ bool TestMultipleContainedRelocationsMatchRust(std::ostream& output)
         0U,
         {{2U, 0U}, {3U, 0U}},
         output);
+}
+
+bool TestContainedCollectorFiltersNoncontainedCollisionMatchesRust(
+    std::ostream& output)
+{
+    if (!TestContainedCollectorFilterGeometryWitness(output))
+    {
+        return false;
+    }
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationContainedCollectorFilterRustTrace.tsv",
+        "ExplorationContainedCollectorFilter.json",
+        "contained_collector_filter",
+        43U,
+        0.9,
+        {{2.8, 4.2}, {7.6, 2.75}, {9.5, 2.75}, {4.0, 2.75}},
+        {3U, 3U, 2U, 2U},
+        3U,
+        {{2U, 0U}},
+        output,
+        true);
 }
 
 bool TestBothSidesContainedRelocationsMatchRust(std::ostream& output)
@@ -7435,6 +7615,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestMultipleContainedRelocationsMatchRust(output))
+    {
+        return false;
+    }
+    if (!TestContainedCollectorFiltersNoncontainedCollisionMatchesRust(output))
     {
         return false;
     }

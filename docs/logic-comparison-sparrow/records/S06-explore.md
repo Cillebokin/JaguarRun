@@ -5,7 +5,7 @@
 
 **本轮新增核验**：已补“失败→disruption 恢复→成功收缩/清池→再次失败”Rust/C++ 实际 Explore 轨迹。正上限为 2 时，第二次失败以新池 `[1]` 插入并发生 `PoolSample(failure_id=1)`；这同时验证清池、连续失败计数重置和 failure ID 单调递增。详细输入、loss、报告和 profile 结果见文末补充审计。
 
-**旋转模式状态（2026-10-10）**：已补 `RotationRange::None` 与 `RotationRange::Continuous` 两条实际 Explore Rust/C++ 对照轨迹，并补了由底层 API 构造 `Discrete([])` 的实际 Explore 错误路径。空离散角列表会被两侧 importer 拒绝；新增用例验证的是低层可构造的非法状态，Rust 在旋转合法化处 panic，C++ 返回对应 `Infeasible`，并核对错误前的池/RNG trace 和未移动的失败布局。证据不外推到所有旋转角、连续采样分布、任意几何或所有 contained 收集分支；contained collector 的空池/过滤分支仍待专项覆盖。
+**旋转模式状态（2026-10-10）**：已补 `RotationRange::None` 与 `RotationRange::Continuous` 两条实际 Explore Rust/C++ 对照轨迹，并补了由底层 API 构造 `Discrete([])` 的实际 Explore 错误路径；非空离散集合已有 37° 双侧实际轨迹及角度合法化 reference。空离散角列表会被两侧 importer 拒绝；新增用例验证的是低层可构造的非法状态，Rust 在旋转合法化处 panic，C++ 返回对应 `Infeasible`，并核对错误前的池/RNG trace 和未移动的失败布局。contained collector 的有效结果为空和 POI 过滤现各有实际 Explore 对照；固定夹具不外推到其他旋转角、连续采样分布、任意几何或所有收集器状态。
 
 > **2026-09-29 实现记录**：扰动搬迁的长变换链改为调用 `InverseRustF32().FollowedByRustF32()`（4 处，Exploration.cpp）。这表明当前代码选择了 RustF32 helper 路径，不等于所有输入都已通过逐位差分测试。该轮还记录了 Separator 私有 hazard 元数据、C++ 自参考 fixture、TestBppJsonRoundTrip 与空离散旋转验证路径的改动，并记载当时 Debug/Release 测试及六个 oracle 通过；此处保留为历史验证记录，不代表本次文档审查重新运行了这些测试。
 ## 函数逐条比对
@@ -111,10 +111,10 @@
 | 正态采样、绝对值/上限截断、pool index 和 RNG 后续状态 | 2,560 项正态样本指纹；真实 Explore pool/sample traces；empty fallback 与 1–10 个非空 distinct 候选池 | 固定 seed/标准差/轨迹中样本位模式和 RNG 后续状态已核对；恰有 10 个候选现有独立轨迹，11 个及以上候选规模及所有 seed 的组合仍未覆盖。无效标准差的 `Normal::new(...).unwrap()` 与 C++ `Validate()` 错误路径也未配对验证 |
 | convex-hull cutoff 的严格 `cumulative > cutoff`、large 候选与 second-choice distinct/fallback | f32 area-boundary fixture、percentile 实际 Explore traces、空 distinct fallback、1–10 候选 traces、`ExplorationEmptyLarge` | 等值边界、实际候选过滤、第二件空 distinct fallback 和第一件 empty-large 出口均有证据。新 fixture 核对 Rust panic 与 C++ `Infeasible` 同文案返回、相同 pool/RNG trace、无 disruption move 和相同失败布局；两侧语言/API 出口仍不同。达到至少两件前置条件后，second-pool fallback 应非空。不能把固定候选数的抽选结果推广到任意几何或 RNG 流 |
 | swap 旋转合法化与执行 | 359°/允许角 `{1°,350°}` 的实际 Explore 回归；0°/37° 离散旋转及双侧 host trace；`None`、`Continuous` 与内部构造 `Discrete([])` 的实际 Explore 路径 | Rust/C++ Explore trace 覆盖 `None`/`Continuous`；空离散集合下 Rust unwrap panic、C++ 映射为同文案 `Infeasible`，错误发生在首个 move 前。外部 importer 拒绝空角列表；本用例只覆盖低层可构造状态。C++ MoveItem 错误传播为 Result 路径，尚无故障注入用例 |
-| contained collector 过滤、POI 命中、hazard 顺序、双宿主搬迁 | 单子件、多子件、轴对齐双侧和 37° 双侧 traces；新宿主轮廓 limit=2–6/不同 seed traces | POI-contained 真分支、多个子件的 collector 顺序、两侧顺序与非轴对齐变换均有固定轨迹。非 PlacedItem hazard、POI 未命中、缺失 handle、对侧 host 排除、某一侧为空等过滤/防御条件没有逐分支隔离用例；C++ layout/collector/MoveItem 错误返回路径也未覆盖 |
+| contained collector 过滤、POI 命中、hazard 顺序、双宿主搬迁 | 单子件、多子件、轴对齐双侧和 37° 双侧 traces；新宿主轮廓 limit=2–6/不同 seed traces；`ExplorationDisruptionFallback` 与 `ExplorationContainedCollectorFilter` | 新增实际轨迹覆盖有效搬迁列表为空，以及混合 hazard 中跳过 `Exterior`、排除交换对侧、按 POI 过滤边界相交但 POI 在外的候选，并只搬迁 POI-contained survivor；多子件收集顺序、两侧顺序与非轴对齐变换也有固定轨迹。缺失 handle、某一侧为空及 C++ layout/collector/MoveItem 错误返回仍无定向用例；结论限于这些固定输入与轨迹 |
 | `disrupt_solution` 前置与 C++ 配置分支 | 已有实际 traces 均走默认一次交换/搬迁；`ExplorationEmptyLarge` | Rust `<2 placed items` 返回分支未被 disruption trace 单独覆盖。C++ `disruptionCount==0 && containedRelocationCount==0` 早退及单侧配置组合是 C++ 扩展分支，Rust 没有对应语义。第一件 empty-large 分支已通过最小 fixture 对齐失败出口和布局副作用；Rust panic 与 C++ Result/ErrorCode 映射不同 |
 
-**审计结论**：核心常规分支已有广泛定向证据，尤其是成功/失败、池排序、distinct 空池 fallback、empty-large 失败出口、恢复后清池/计数重置、1–10 个候选和双侧多子件轨迹；但这不是“源码分支全部覆盖”。empty-large 与恢复后清池算法分支均已有定向 reference；部分初始布局的报告分类差异仍单独开放。恰有 10 个候选的固定轨迹已补齐；更高候选规模仍须按单个用例限定结论。下一步优先补无旋转/连续旋转及 contained 空/过滤边界。非法配置、NaN、失效快照及其他 C++ Result 错误路径应作为错误语义审计，不与有效排料输入的算法 parity 混算。
+**审计结论**：核心常规分支已有广泛定向证据，尤其是成功/失败、池排序、distinct 空池 fallback、empty-large 失败出口、恢复后清池/计数重置、1–10 个候选、旋转模式和 contained collector 空结果/混合过滤及双侧多子件轨迹；但这不是“源码分支全部覆盖”。empty-large、恢复后清池和本次 contained collector 边界均有定向 reference；部分初始布局的报告分类差异仍单独开放。更高候选规模、其他 hazard 排列和一般几何仍须按单个用例限定结论。下一步优先闭合部分初始布局的报告分类与输入契约；非法配置、NaN、失效句柄/快照及其他 C++ Result 错误路径应作为错误语义审计，不与有效排料输入的算法 parity 混算。
 
 ### 补充审计（2026-09-29）
 1. **【2026-10-06 更正：变换链证据强度】** 2026-09-29 的修复记录把 helper 路径对应关系写成“位级锁定”。当前源码确实使用 RustF32 helper；相关 fixtures 按容差比较特定轨迹，不能证明任意输入逐位相等。主文与差异表已改为“源码路径对应”，并标出尚未覆盖的输入类型。
@@ -358,7 +358,7 @@ Rust `nonempty_distinct_pool_with_ten_candidates_matches_rust_trace` 与 C++ `Te
 
 **Continuous 轨迹**：`ExplorationObliqueContainedRelocationContinuous.json` 含 5×2、3×2、1×1 三个矩形且全部导入为连续旋转。Rust 以可行的 37° 初始宿主姿态和与该姿态一致计算出的子件平移开始；seed=43、宽度 9.9、条带高 5.5、shrink step 0.1、cutoff percentile 0.75、pool stddev 0.25、iteration limit 3。Rust `continuous_rotation_disruption_and_contained_relocation_match_rust_trace` 及 C++ `TestContinuousRotationDisruptionAndContainedRelocationMatchesRust` 对照两份 failure 快照、池插入、正态 sample bits/u64 消耗/后续 RNG、swap/relocation 顺序和最终状态，并分别断言所有条目导入为 Continuous。首轮宿主 swap 保留 `0.645771801` rad（37°）；contained 子件从 0° relocation 到 `-0.645771801` rad，证明这条路径没有把变换角度限制到 `{0°,37°}` 的离散集合。两份 failure loss 为 `1.949251175` 与 `10.502827644`，最终 loss 为 `10.502827644`，仍非可行排料结果。Golden SHA-256：`E82A80B3615128C28E9AFF98CD37745145DC8C929A4AED1B1A940EBF613AADE0`。
 
-Rust `verify-rust-reference.ps1`（格式检查及 Debug/Release 全量测试）通过；两个 profile 各运行 111 个集成测试函数。SparrowCore Debug、Release 全量 runner 均通过。旋转模式证据限于记录中的固定夹具和锁定工具链；不证明连续角采样分布、其他角度/几何、更多 contained 子件或 collector 空/过滤分支的普遍等价。后续 S06 应专项补 contained collector 的空候选与过滤边界，并单独裁定 partial initial solution 的初始报告分类。
+Rust `verify-rust-reference.ps1`（格式检查及 Debug/Release 全量测试）通过；两个 profile 各运行 112 个集成测试函数。SparrowCore Debug、Release 全量 runner 均通过。新增 collector 轨迹覆盖交换对侧排除后无 contained move，以及 raw collision 中含 `Exterior`、交换对侧、POI-contained 子件和 POI-outside 边界子件时只搬迁幸存子件。证据仍限于记录中的固定夹具和锁定工具链，不证明任意几何、其他 hazard 组合或所有 collector 状态的普遍等价。后续 S06 应单独裁定 partial initial solution 的初始报告分类。
 
 ## 补充审计（2026-10-10）：空离散角集合的实际 Explore 路径
 
@@ -369,3 +369,13 @@ Rust `verify-rust-reference.ps1`（格式检查及 Debug/Release 全量测试）
 首轮 failure loss 为 `2.602527618`，failure pool 为 `[0]`；pool sample raw/mapped bits 为 `be03d49c/3e03d49c`，选中索引 0，消耗 1 个 `u64`，first-layer byte 为 `91`，后续四个 `u64` 为 `fbe07cfb0c24ed8c b37d9f600cd835b8 cb231c3874846a73 968d9f004e50de7d`。随后 Rust `convert_sample_to_closest_feasible` 对空向量 `.unwrap()` 并 panic；没有发出 disruption move。C++ 过去将空集合静默设为 0° 并继续移动；现 `LegalizeTransform` 返回 `Infeasible`，消息与 Rust panic payload 一致（``called `Option::unwrap()` on a `None` value``），错误在首个 move 前向上返回。Rust/C++ 逐项核对 pool/sample/RNG trace、失败宽度与 poses；最终仍为两个 rotation=0、translation=`(2.5,1.0)` 的重叠 item。
 
 Rust `empty_discrete_rotation_panics_in_actual_explore_before_moves` 与 C++ `TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary` 对照同一 trace。Golden SHA-256：`2BE6E8DC6E61F0C936013190506ED8FCC72E9D4D91EDAEF4AAE2792F008E7AA5`。Rust `verify-rust-reference.ps1` 的格式检查及 Debug/Release 全量 111 个集成测试函数通过；SparrowCore Debug/Release 全量 runner 通过。该用例只证明低层非法状态下的 Explore 失败边界和错误适配；外部空角列表被拒绝的 importer 契约不变。由于 seed 初始布局刻意重叠，初始报告分类仍受已有 partial/invalid initial report 差异影响，本用例不将该报告分类宣称为跨语言一致。
+
+## 补充审计（2026-10-10）：contained-item collector 空结果与过滤
+
+**空结果路径**：沿用 `ExplorationDisruptionFallback.json` 的实际 Explore fallback 轨迹。Rust oracle 现显式断言 failure 0 的有效 contained-relocation 列表为空；该次收集唯一可能的 POI-contained 放置件是本次 swap 的对侧，随后按 Rust `filter(|key| key != pk2)` 排除，因此只出现两个 swap move。C++ 对照也显式核对 failure 0 的 contained move 列表为空；failure 1 后续存在的 item 2 搬迁保持在同一 golden trace 中，不把“首轮为空”误写为整个轨迹没有 contained move。
+
+**过滤路径**：`ExplorationContainedCollectorFilter.json` 有四个矩形/方形需求。seed=43、初始宽度 9.9、条带高 5.5、shrink step 0.1、large-item cutoff 0.9、iteration limit 4、pool stddev 0.25；初始中心依次为 item 0 `(2.8,4.2)`、item 1 `(7.6,2.75)`、item 2 `(9.5,2.75)`、item 3 `(4.0,2.75)`。首轮 failure loss 为 `1.604002953`，failure 后布局为 item 0 `(2.8,4.2)`、item 1 `(6.61,2.75)`、item 2 `(8.51,2.75)`、item 3 `(4.0,2.75)`；swap 0/1 后查询 item 0 的碰撞集。
+
+Rust 与 C++ 的直接几何见证均确认查询原始 hazard 中有 `Exterior`、交换对侧 item 1、POI 在宿主内的 item 2，以及形状与宿主边界相交但 POI 在外的 item 3。Rust 先略过非 `PlacedItem` 并按 POI 判定，再由 disruption 循环排除 swap 对侧；C++ 对应地忽略非放置件、以 `ContainsRustF32` 过滤 POI，并排除对侧 handle。最终两侧 failure 0 都只发出 `contained 2 0`，不搬迁 item 3；其后两轮 failure、pool/sample/RNG、move 顺序和最终状态均逐行匹配。
+
+Rust `contained_collector_filters_noncontained_collision_but_relocates_survivor` 与 C++ `TestContainedCollectorFiltersNoncontainedCollisionMatchesRust` 对照完整实际 Explore trace；空结果还由 Rust `empty_distinct_pool_uses_rust_fallback_and_preserves_rng_trace` 与 C++ fallback 对照显式检查。Golden SHA-256：`CBDC99ED0F594E338299ADEF964641DD80771AD0FB57941FBA06AD008F61746B`。Rust Debug/Release reference 全量验证各 112 个集成测试函数通过；SparrowCore Debug/Release 全量 runner 通过。该结论闭合的是上述有效空结果和混合候选过滤用例；C++ 无效句柄/碰撞引擎不可用等额外防御出口、其他 hazard 排列和 partial initial solution 报告分类仍单独记录。

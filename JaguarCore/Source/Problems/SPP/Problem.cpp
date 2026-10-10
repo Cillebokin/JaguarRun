@@ -1,39 +1,11 @@
 #include "JaguarCore/Problems/Spp.h"
 #include "JaguarCore/Assertions.h"
-#include "JaguarCore/NumericPolicy.h"
 
-#include <cmath>
+#include <stdexcept>
 #include <utility>
 
 namespace jaguar
 {
-namespace
-{
-bool near(double first, double second) noexcept
-{
-    return std::abs(first - second) <=
-           NumericPolicy::DefaultEqualityTolerance();
-}
-
-bool sameItemDefinition(const Item& expected, const PlacedItem& actual) noexcept
-{
-    if (expected.Index() != actual.GetItemIndex() ||
-        expected.ExternalId() != actual.GetItem().ExternalId() ||
-        expected.CollisionShape().VertexCount() !=
-            actual.GetItem().CollisionShape().VertexCount())
-        return false;
-    for (std::size_t i = 0; i < expected.CollisionShape().VertexCount(); ++i)
-    {
-        if (!near(expected.CollisionShape().Vertices()[i].x,
-                  actual.GetItem().CollisionShape().Vertices()[i].x) ||
-            !near(expected.CollisionShape().Vertices()[i].y,
-                  actual.GetItem().CollisionShape().Vertices()[i].y))
-            return false;
-    }
-    return true;
-}
-}
-
 SPProblem::SPProblem(SPInstance instance, Strip strip, Layout layout)
     : m_Instance(std::move(instance)),
       m_Strip(strip),
@@ -145,38 +117,43 @@ JAGUARCORE_API SPSolution SPProblem::Save() const
 
 JAGUARCORE_API Result<void> SPProblem::Restore(const SPSolution& solution)
 {
-    // jagua-rs restore() accepts any strip configuration/width and only falls
-    // back to a full rebuild when the layout snapshot does not match.
-    std::vector<std::size_t> remaining(m_Instance.ItemCount(), 0);
-    for (std::size_t i = 0; i < remaining.size(); ++i)
-        remaining[i] = m_Instance.ItemDemand(i);
+    // Rust first attempts to restore the existing layout and rebuilds it only
+    // when the snapshot belongs to another static container base.
+    if (m_Layout.GetContainer().SameBase(solution.layoutSnapshot.container))
+    {
+        const auto restored = m_Layout.Restore(solution.layoutSnapshot);
+        if (!restored.HasValue())
+            return restored;
+    }
+    else
+    {
+        Layout restored(solution.layoutSnapshot.container);
+        const auto restoredResult = restored.Restore(solution.layoutSnapshot);
+        if (!restoredResult.HasValue())
+            return restoredResult;
+        m_Layout = std::move(restored);
+    }
+
+    m_Strip = solution.strip;
+    for (std::size_t i = 0; i < m_RemainingDemand.size(); ++i)
+        m_RemainingDemand[i] = m_Instance.ItemDemand(i);
 
     for (const LayoutPlacementSnapshot& placement :
          solution.layoutSnapshot.placements)
     {
         const ItemIndex itemIndex = placement.placedItem.GetItemIndex();
-        if (itemIndex >= remaining.size() || remaining[itemIndex] == 0 ||
-            !sameItemDefinition(m_Instance.GetItem(itemIndex), placement.placedItem))
-        {
-            return Result<void>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "SPP solution contains an item beyond demand"});
-        }
-        --remaining[itemIndex];
+        if (itemIndex >= m_RemainingDemand.size())
+            throw std::out_of_range("SPP restored item index is out of range");
+#ifndef NDEBUG
+        if (m_RemainingDemand[itemIndex] == 0U)
+            throw std::underflow_error("attempt to subtract with overflow");
+#endif
+        --m_RemainingDemand[itemIndex];
     }
 
-    Layout restored(solution.layoutSnapshot.container);
-    const auto restoredResult = restored.Restore(solution.layoutSnapshot);
-    if (!restoredResult.HasValue())
-        return restoredResult;
-
-    const auto restoredInPlace = m_Layout.Restore(solution.layoutSnapshot);
-    if (!restoredInPlace.HasValue())
-        m_Layout = std::move(restored);
-
-    m_Strip = solution.strip;
-    m_RemainingDemand = std::move(remaining);
-    DebugAssertSPSolution(*this);
+    // Rust's restore assertion checks snapshot/layout consistency but does not
+    // require the snapshot's item definition to equal the current instance.
+    DebugAssertLayout(m_Layout);
     return Result<void>::FromValue();
 }
 

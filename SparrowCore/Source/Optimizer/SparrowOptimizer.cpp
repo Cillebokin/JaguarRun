@@ -8,6 +8,7 @@
 #include "JaguarCore/Assertions.h"
 
 #include <random>
+#include <stdexcept>
 #include <utility>
 
 namespace
@@ -64,6 +65,14 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
     {
         return sparrow::Result<sparrow::SppLbfResult>::FromError(
             layoutRestored.GetError());
+    }
+    if (!solution.layoutSnapshot.placements.empty() &&
+        solution.layoutSnapshot.cdeSnapshot.dynamicHazards.size()
+            < solution.layoutSnapshot.placements.size())
+    {
+        // Rust's next warm-start step constructs its collision tracker from
+        // the restored CDE and panics when a placed item has no own hazard.
+        throw std::logic_error("HazardEntity not found in collector");
     }
     sparrow::LbfMetrics metrics;
     metrics.seed = seed;

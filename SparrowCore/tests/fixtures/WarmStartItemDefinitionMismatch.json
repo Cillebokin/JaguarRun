@@ -1,0 +1,33 @@
+{
+  "name": "sparrow-warm-start-item-definition-mismatch",
+  "items": [
+    {
+      "id": 920,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [4, 0], [4, 4], [0, 4]]
+      }
+    },
+    {
+      "id": 921,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1.25, 0], [1.25, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 922,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    }
+  ],
+  "strip_height": 5.0
+}

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <utility>
 
 namespace jaguar
@@ -260,8 +261,11 @@ JAGUARCORE_API LayoutSnapshot Layout::Save() const
 
 JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
 {
+    const bool dynamicHazardsIncomplete =
+        !snapshot.placements.empty() &&
+        snapshot.cdeSnapshot.dynamicHazards.size() < snapshot.placements.size();
     if (!m_Container.SameBase(snapshot.container) ||
-        snapshot.cdeSnapshot.dynamicHazards.size() != snapshot.placements.size())
+        snapshot.cdeSnapshot.dynamicHazards.size() > snapshot.placements.size())
     {
         return Result<void>::FromError(
             {ErrorCode::SnapshotMismatch,
@@ -410,6 +414,8 @@ JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
         const auto cdeHandle = m_Cde->FindHazardHandle(hazard.entity);
         if (!cdeHandle.has_value())
         {
+            if (dynamicHazardsIncomplete)
+                continue;
             return Result<void>::FromError(
                 {ErrorCode::SnapshotMismatch,
                  "restored collision hazard is missing"});
@@ -420,6 +426,10 @@ JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
     m_Container = snapshot.container;
     m_Slots = std::move(newSlots);
     m_FreeSlotIndices = std::move(newFreeSlotIndices);
+#ifndef NDEBUG
+    if (dynamicHazardsIncomplete)
+        throw std::logic_error("layout quadtree does not match placed items");
+#endif
     return Result<void>::FromValue();
 }
 

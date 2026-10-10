@@ -12,10 +12,10 @@
 
 ### 初始解分支（mod.rs:40-52）
 - C++ 对应：`MakeWarmStart`/`ConstructSparrowInitialSolution`（SparrowOptimizer.cpp:116-123,28-88）。
-- 判定：基本等价（warm start 的校验深度不同）。
+- 判定：partial/重叠 warm start 与三条已测 Restore 边界按列明 profile 结果定向对齐；其他快照形状未定论。
 - 证据与说明：
   - None 分支：Rust `LBFBuilder::new(instance, next_rng(), LBF_SAMPLE_CONFIG).construct()?`（:42）→ C++ `ConstructSparrowInitialSolution(instance, constructorConfig)`（:118，构造流程=LbfBuilder，见第三节）。
-  - Some 分支：Rust `SPProblem::new(instance).expect(...); prob.restore(init_sol)`（:47-49）——**无校验**。C++ `MakeWarmStart`：Restore + remainingDemand==0 检查（:51-56）+ `ValidateSPSolution`（:57-62）+ layout 可行性（:63-75），任一失败报 Infeasible。判定：差异（C++ 额外校验，属防御；Rust 假定调用方给合法解）。
+  - Some 分支：Rust `SPProblem::new(instance).expect(...); prob.restore(init_sol)`（:47-49）；Rust Restore 仍执行布局/CDE 一致性断言，但 optimize 不额外要求完整需求、当前实例中的同索引 item 定义或无碰撞布局。C++ `MakeWarmStart` 调用 `SPProblem::Restore`：布局结构错误可返回 Result，需求扣减的 Debug 下溢与越界 item index 走 C++ exception；随后将 `remainingDemand`、`ValidateSPSolution` 与 `layout.IsFeasible()` 合并计算 `metrics.feasible`，这些指标条件本身不会拒绝 warm start。已核验的超量需求、同索引替代轮廓及动态 hazard 全空/部分缺失快照的 Debug/Release 状态和失败时点见 [S06 Restore 调用链对照](S06-explore.md#restore-调用链对照与实现2026-10-10)。C++ 对全空或部分缺失 hazard 的 Release tracker 初始化失败在 warm-start 预检处抛 `logic_error`，对应 Rust 后续 tracker panic；这只是该固定快照的映射，不概括其他损坏快照。判定：列出的 Restore 边界已定向对齐，未审计快照形状仍未定论。
   - C++ 额外：构造成功的 `OnProgress/OnImprovement`（CONSTRUCTION 相位，:124-133）。
 
 ### 探索阶段（mod.rs:55-59）
@@ -31,8 +31,8 @@
 
 ### 最终报告与返回（mod.rs:77-80）
 - C++ 对应：SparrowOptimizer.cpp:177-228。
-- 判定：基本等价（C++ 额外最终校验）。
-- 证据与说明：Rust `report(ReportType::Final, &cmpr_sol)`（:77）→ C++ `PublishSolutionReport(OPTIMIZATION_REPORT_FINAL, COMPLETE 相位)`（:217-226）+ `OnProgress(COMPLETE)`（:209-216，C++ 额外）。C++ 额外：**最终解合法性双重校验**（Restore + ValidateSPSolution + layout.IsFeasible，:177-204，失败报 Infeasible "produced an invalid final solution"）——Rust 无最终校验（信任构造不变式）。返回：Rust `Ok(cmpr_sol)`（SPSolution）→ C++ `SparrowOptimizationResult{solution, metrics, history}`（:227-228，metrics.sampleCount 取构造阶段计数 :208，reject/exact 取两阶段聚合，S06/S07）。
+- 判定：基本等价（C++ 额外最终快照恢复检查；质量状态由 metrics 表达）。
+- 证据与说明：Rust `report(ReportType::Final, &cmpr_sol)`（:77）→ C++ `PublishSolutionReport(OPTIMIZATION_REPORT_FINAL, COMPLETE 相位)`（:217-226）+ `OnProgress(COMPLETE)`（:209-216，C++ 额外）。C++ 在返回前重建 `SPProblem` 并恢复 solution，再用 `Layout::Restore` 重建布局（SparrowOptimizer.cpp:188-210）；这验证快照可恢复/结构一致，不调用 `ValidateSPSolution` 或 `Layout::IsFeasible`，不会因剩余需求或几何碰撞本身拒绝结果。若结构恢复返回错误，C++ 转成 `Infeasible`；Rust 此处直接报告并返回内部压缩结果。该额外出口目前没有独立的终态损坏快照 reference。返回：Rust `Ok(cmpr_sol)`（SPSolution）→ C++ `SparrowOptimizationResult{solution, metrics, history}`（:227-228，metrics.sampleCount 取构造阶段计数 :208，reject/exact 取两阶段聚合，S06/S07）。
 - C++ 额外：无终止器重载入口 `Optimize(instance, config, listener)`（:232-240，自建 terminator+Start）——Rust 侧对应 bench/cli 的用法；既定差异：Rust `Terminator` 是 trait（util/terminator.rs:5-14），C++ 是具体类（OptimizationTerminator.h:22-40，S20）。
 
 ### `minimum_strip_width`（mod.rs:85-122）
@@ -67,9 +67,9 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | 三阶段编排与子 rng 派生顺序（构造→探索→压缩） | 源码对应；seed=3 warm-start、seed=42 受控/default-stage cold-start、构造失败、两种探索停止时点、零时限与正时限到期均有 Rust reference | default-stage fixture 锁定默认阶段配置并比较到每阶段首个 separation result；exit fixtures 覆盖 phase reset、最小宽度退出、零时限跳过 separation，以及 250 ms positive-timeout 下探索跳过分离、压缩当前尝试收尾；未覆盖自然完整阶段时限、deadline 瞬间轮询或所有输入域 | mod.rs:37-75 vs SparrowOptimizer.cpp:110-167; optimizer_compress_reference.rs; optimizer_cold_start_reference.rs; optimizer_cold_start_default_reference.rs; optimizer_termination_handoff_reference.rs; optimizer_exit_reference.rs; TestExploration.cpp |
-| 2 | warm start 无校验 vs Restore+demand+validate+feasible 四重校验 | 差异（防御） | 合法输入一致 | mod.rs:45-51 vs SparrowOptimizer.cpp:28-88 |
+| 2 | Warm-start Restore 与 `MakeWarmStart` 指标：Rust 恢复布局/CDE 快照；C++ `Restore` 对照布局结构，`remainingDemand`/`ValidateSPSolution`/`IsFeasible` 仅参与 metrics | 列明的三条 Restore 边界按 Debug/Release 定向对齐；其他损坏快照未认证 | partial/重叠输入与已测替代定义均接受；hazard 缺失时的后续 tracker 失败见固定映射；不得把 `metrics.feasible` 当拒绝条件 | mod.rs:43-51 vs SparrowOptimizer.cpp:28-88; S06 Restore reference |
 | 3 | 阶段间 separator：Rust 移交内部 `prob`，并另传 best 解；C++ `ExploreResult` 分开保留 `separatorState` 与 best 快照并双状态调用 `Compress` | 已对齐（2026-10-07）；固定 handoff reference 通过 | 探索终止后的 separator 状态与 best 解可以不同；C++ 现按 Rust 语义分别计算压缩阈值并维护 best。证据只覆盖一次 `ExplInfeas` 后中断 | mod.rs:57,59,64-67 vs separator.rs:179-198; SparrowOptimizer.cpp:161-167; Compression.cpp 双状态重载; `OptimizerTerminationHandoffRustReference.tsv` |
-| 4 | 最终解双重校验（ValidateSPSolution+IsFeasible） | C++额外 | 失败报 Infeasible；Rust 无最终校验 | mod.rs:77-80 vs SparrowOptimizer.cpp:177-204 |
+| 4 | 最终报告/返回：Rust 直接发布压缩结果；C++ 先以 `SPProblem::Restore` 和 `Layout::Restore` 复核快照结构，不重验需求完整性或碰撞可行性 | C++ 多一个结构恢复错误出口；partial/重叠结果仍可由 metrics 表达并返回 | 一般终态损坏快照尚未建立跨语言 reference；不得把结构可恢复等同于可行 | mod.rs:77-80 vs SparrowOptimizer.cpp:188-210 |
 | 5 | minimum_strip_width 的面积/离散旋转/容差/inset 公式 | Compression 的 f32/f64 次序与 Explore 的全离散角 `INFINITY` 下界、合法轴对齐和 37° 非轴对齐旋转高度容差临界边界均已按 Rust 定向对齐 | Compression 单件方形 fixture 核对最小宽度 bits 与阈值两侧 progress count；Explore fixtures 核对正无穷下界，以及合法 0° 初始解下 90°/37° 替代姿态的相邻 f32 高度位模式。Infinity fixture 的非法角不用于比较初始报告分类；一般上游几何输入仍未整体证明 | mod.rs:85-122 vs Exploration.cpp:61-144; Compression.cpp:56-127; `CompressionMinimumWidthRustReference.tsv`; `ExplorationMinimumWidthInfinityRustReference.tsv`; `ExplorationMinimumWidthRotationHeightRustReference.tsv`; `TestCompressionMinimumWidthMatchesRustBoundary`; `TestExploreMinimumWidthInfinityMatchesRust`; `TestExploreRotationHeightBoundaryMatchesRust` |
 | 6 | SppLbfOptimizer：排序键二态 + 无 2×Σ 上限 + 增长比默认 1.1 | 差异 | 独立入口，非 optimize 路径；1.1≠Rust 1.2，且无 Rust 的宽度上限 | lbf.rs:58-111 vs SppLbfOptimizer.cpp:52-136 + LbfConfig.h:24 |
 | 7 | sampleCount 统计口径（localSearchFraction 折算） | 差异（观测） | 失败轮计 0.8×samplesPerItem，与 Rust 的 n_evals 累计口径不同 | mod.rs（无）vs SppLbfOptimizer.cpp:121-124 |

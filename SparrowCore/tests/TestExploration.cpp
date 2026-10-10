@@ -29,6 +29,7 @@
 #include <ostream>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -5233,6 +5234,360 @@ bool TestDisruptionPoolResetAfterRecoveryMatchesRust(std::ostream& output)
         true);
 }
 
+bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
+{
+    const auto readFixture = [](const char* fixtureName,
+                                std::string& contents) {
+        for (const std::string& path : {
+                 std::string("SparrowCore/Tests/Fixtures/") + fixtureName,
+                 std::string("../SparrowCore/Tests/Fixtures/") + fixtureName,
+                 std::string("../JaguarRun/SparrowCore/Tests/Fixtures/")
+                     + fixtureName,
+                 std::string("..\\SparrowCore\\Tests\\Fixtures\\")
+                     + fixtureName})
+        {
+            std::ifstream file(path);
+            if (file.is_open())
+            {
+                contents.assign(std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>());
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::string baseJson;
+    std::string alternateJson;
+    if (!Expect(readFixture("ExplorationEmptyLarge.json", baseJson)
+                    && readFixture("WarmStartItemDefinitionMismatch.json",
+                                   alternateJson),
+                output,
+                "warm-start boundary fixtures must be readable"))
+    {
+        return false;
+    }
+
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto baseInstance = importer.ImportSPInstanceJson(baseJson);
+    const auto alternateInstance = importer.ImportSPInstanceJson(alternateJson);
+    if (!Expect(baseInstance.HasValue() && alternateInstance.HasValue(),
+                output,
+                "warm-start boundary instances must import"))
+    {
+        return false;
+    }
+
+    auto sourceResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(sourceResult.HasValue(),
+                output,
+                "warm-start boundary source problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem source = std::move(sourceResult).Value();
+    if (!Expect(source.ChangeStripWidth(8.0).HasValue()
+                    && source.PlaceItem({1U, {0.0, {1.5, 2.5}}}).HasValue(),
+                output,
+                "valid warm-start source must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution valid = source.Save();
+
+    // Layout permits direct snapshot construction beyond SPProblem demand;
+    // this mirrors the Rust reference's low-level fixture construction.
+    jaguar::Layout overDemandLayout(valid.layoutSnapshot.container);
+    if (!Expect(overDemandLayout.PlaceItem(
+                    baseInstance.Value().GetItem(1U), {0.0, {1.5, 2.5}})
+                    .HasValue()
+                    && overDemandLayout.PlaceItem(
+                           baseInstance.Value().GetItem(1U),
+                           {0.0, {4.5, 2.5}})
+                           .HasValue(),
+                output,
+                "over-demand snapshot layout must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPSolution overDemand = valid;
+    overDemand.layoutSnapshot = overDemandLayout.Save();
+    auto overDemandTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(overDemandTargetResult.HasValue(),
+                output,
+                "over-demand target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem overDemandTarget =
+        std::move(overDemandTargetResult).Value();
+    const double originalOverDemandWidth = overDemandTarget.StripWidth();
+    bool overDemandPanicked = false;
+    bool overDemandRestoreSucceeded = false;
+    try
+    {
+        overDemandRestoreSucceeded =
+            overDemandTarget.Restore(overDemand).HasValue();
+    }
+    catch (const std::underflow_error&)
+    {
+        overDemandPanicked = true;
+    }
+#ifndef NDEBUG
+    if (!Expect(overDemandPanicked
+                    && overDemandTarget.PlacedItemCount() == 2U
+                    && overDemandTarget.RemainingDemand(1U) == 0U
+                    && overDemandTarget.StripWidth() == overDemand.StripWidth(),
+                output,
+                "Debug restore must match Rust's partial state before demand underflow"))
+#else
+    if (!Expect(!overDemandPanicked && overDemandRestoreSucceeded
+                    && overDemandTarget.PlacedItemCount() == 2U
+                    && overDemandTarget.RemainingDemand(1U)
+                           == std::numeric_limits<std::size_t>::max()
+                    && overDemandTarget.StripWidth() == overDemand.StripWidth(),
+                output,
+                "Release restore must match Rust's wrapping over-demand count"))
+#endif
+    {
+        return false;
+    }
+
+    auto alternateProblemResult =
+        jaguar::SPProblem::Create(alternateInstance.Value());
+    if (!Expect(alternateProblemResult.HasValue(),
+                output,
+                "alternate warm-start problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem alternateProblem =
+        std::move(alternateProblemResult).Value();
+    if (!Expect(alternateProblem
+                    .PlaceItem({1U, {0.0, {1.5, 2.5}}})
+                    .HasValue(),
+                output,
+                "alternate-definition warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution alternateDefinition = alternateProblem.Save();
+    const double alternateItemArea =
+        alternateDefinition.layoutSnapshot.placements[0].placedItem.Area();
+
+    auto identityTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(identityTargetResult.HasValue(),
+                output,
+                "item-definition target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem identityTarget = std::move(identityTargetResult).Value();
+    const auto identityRestore = identityTarget.Restore(alternateDefinition);
+    if (!Expect(identityRestore.HasValue()
+                    && identityTarget.PlacedItemCount() == 1U
+                    && identityTarget.RemainingDemand(1U) == 0U
+                    && identityTarget.Save().layoutSnapshot.placements[0]
+                           .placedItem.Area()
+                           == alternateItemArea,
+                output,
+                "restore must accept same-index Rust item-definition mismatch"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    config.warmStart = alternateDefinition;
+    config.exploration.timeLimit = std::chrono::nanoseconds{0};
+    config.compression.timeLimit = std::chrono::nanoseconds{0};
+    RustOptimizeReferenceListener listener;
+    const auto optimized = sparrow::Optimize(
+        baseInstance.Value(), config, &listener);
+    if (!Expect(optimized.HasValue()
+                    && listener.reports
+                           == std::vector<std::string>{"expl_feas", "final"}
+                    && optimized.Value().solution.layoutSnapshot.placements.size()
+                           == 1U
+                    && optimized.Value().solution.layoutSnapshot.placements[0]
+                           .placedItem.Area()
+                           == alternateItemArea,
+                output,
+                "optimize must preserve and report Rust's alternate definition warm start"))
+    {
+        return false;
+    }
+
+    jaguar::SPSolution malformedStructure = valid;
+    malformedStructure.layoutSnapshot.cdeSnapshot.dynamicHazards.clear();
+    auto malformedTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(malformedTargetResult.HasValue(),
+                output,
+                "malformed-snapshot target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem malformedTarget =
+        std::move(malformedTargetResult).Value();
+    const double originalMalformedWidth = malformedTarget.StripWidth();
+    bool malformedPanicked = false;
+    bool malformedRestoreSucceeded = false;
+    try
+    {
+        malformedRestoreSucceeded =
+            malformedTarget.Restore(malformedStructure).HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        malformedPanicked = true;
+    }
+#ifndef NDEBUG
+    if (!Expect(malformedPanicked
+                    && malformedTarget.PlacedItemCount() == 0U
+                    && malformedTarget.RemainingDemand(1U) == 1U
+                    && malformedTarget.StripWidth() == originalMalformedWidth,
+                output,
+                "Debug restore must panic while rebuilding inconsistent CDE without replacing target"))
+#else
+    if (!Expect(!malformedPanicked && malformedRestoreSucceeded
+                    && malformedTarget.PlacedItemCount() == 1U
+                    && malformedTarget.RemainingDemand(1U) == 0U
+                    && malformedTarget.StripWidth()
+                           == malformedStructure.StripWidth()
+                    && malformedTarget.Save().layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.empty(),
+                output,
+                "Release restore must preserve Rust's accepted incomplete CDE snapshot"))
+#endif
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig malformedConfig;
+    malformedConfig.seed = 42U;
+    malformedConfig.warmStart = malformedStructure;
+    malformedConfig.exploration.timeLimit = std::chrono::nanoseconds{0};
+    malformedConfig.compression.timeLimit = std::chrono::nanoseconds{0};
+    RecordingListener malformedListener;
+    bool malformedOptimizePanicked = false;
+    bool malformedOptimizeReturned = false;
+    try
+    {
+        const auto malformedOptimized = sparrow::Optimize(
+            baseInstance.Value(), malformedConfig, &malformedListener);
+        malformedOptimizeReturned = malformedOptimized.HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        malformedOptimizePanicked = true;
+    }
+    if (!Expect(malformedOptimizePanicked && !malformedOptimizeReturned
+                    && malformedListener.progressCount == 0U
+                    && malformedListener.improvementCount == 0U
+                    && malformedListener.solutionCount == 0U,
+                output,
+                "inconsistent CDE warm start must fail before callbacks as Rust does"))
+    {
+        return false;
+    }
+
+    auto partialSourceResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(partialSourceResult.HasValue(),
+                output,
+                "partial-hazard source problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem partialSource = std::move(partialSourceResult).Value();
+    if (!Expect(partialSource.ChangeStripWidth(8.0).HasValue()
+                    && partialSource.PlaceItem(
+                           {1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && partialSource.PlaceItem(
+                           {2U, {0.0, {4.5, 2.5}}}).HasValue(),
+                output,
+                "partial-hazard source placements must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPSolution partialHazard = partialSource.Save();
+    if (!Expect(partialHazard.layoutSnapshot.placements.size() == 2U
+                    && partialHazard.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.size() == 2U,
+                output,
+                "partial-hazard source snapshot must contain two placements and hazards"))
+    {
+        return false;
+    }
+    partialHazard.layoutSnapshot.cdeSnapshot.dynamicHazards.erase(
+        partialHazard.layoutSnapshot.cdeSnapshot.dynamicHazards.begin());
+
+    auto partialTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(partialTargetResult.HasValue(),
+                output,
+                "partial-hazard target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem partialTarget = std::move(partialTargetResult).Value();
+    const double partialOriginalWidth = partialTarget.StripWidth();
+    bool partialRestorePanicked = false;
+    bool partialRestoreSucceeded = false;
+    try
+    {
+        partialRestoreSucceeded = partialTarget.Restore(partialHazard).HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        partialRestorePanicked = true;
+    }
+#ifndef NDEBUG
+    if (!Expect(partialRestorePanicked
+                    && partialTarget.PlacedItemCount() == 0U
+                    && partialTarget.RemainingDemand(1U) == 1U
+                    && partialTarget.RemainingDemand(2U) == 1U
+                    && partialTarget.StripWidth() == partialOriginalWidth,
+                output,
+                "Debug partial-hazard restore must fail before replacing target as Rust does"))
+#else
+    if (!Expect(!partialRestorePanicked && partialRestoreSucceeded
+                    && partialTarget.PlacedItemCount() == 2U
+                    && partialTarget.RemainingDemand(1U) == 0U
+                    && partialTarget.RemainingDemand(2U) == 0U
+                    && partialTarget.Save().layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.size() == 1U,
+                output,
+                "Release partial-hazard restore must preserve Rust's incomplete CDE snapshot"))
+#endif
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig partialConfig;
+    partialConfig.seed = 42U;
+    partialConfig.warmStart = partialHazard;
+    partialConfig.exploration.timeLimit = std::chrono::nanoseconds{0};
+    partialConfig.compression.timeLimit = std::chrono::nanoseconds{0};
+    RecordingListener partialListener;
+    bool partialOptimizePanicked = false;
+    bool partialOptimizeReturned = false;
+    try
+    {
+        const auto partialOptimized = sparrow::Optimize(
+            baseInstance.Value(), partialConfig, &partialListener);
+        partialOptimizeReturned = partialOptimized.HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        partialOptimizePanicked = true;
+    }
+    return Expect(partialOptimizePanicked && !partialOptimizeReturned
+                      && partialListener.progressCount == 0U
+                      && partialListener.improvementCount == 0U
+                      && partialListener.solutionCount == 0U,
+                  output,
+                  "partial CDE warm start must fail before callbacks as Rust does");
+}
+
 bool TestEmptyLargeAndPartialWarmStartMatchRust(
     std::ostream& output)
 {
@@ -7670,6 +8025,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestDisruptionPoolResetAfterRecoveryMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestWarmStartRejectionBoundariesMatchRust(output))
     {
         return false;
     }

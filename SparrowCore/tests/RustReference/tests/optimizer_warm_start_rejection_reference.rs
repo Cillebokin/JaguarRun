@@ -334,7 +334,7 @@ fn warm_start_rejection_boundaries_match_observed_rust_profiles() {
     let mut out_of_range_optimize_terminator = StopImmediately;
     let out_of_range_optimized = catch_unwind(AssertUnwindSafe(|| {
         optimize(
-            partial_base,
+            partial_base.clone(),
             Xoshiro256PlusPlus::seed_from_u64(42),
             &mut out_of_range_optimize_listener,
             &mut out_of_range_optimize_terminator,
@@ -345,4 +345,76 @@ fn warm_start_rejection_boundaries_match_observed_rust_profiles() {
     }));
     assert!(out_of_range_optimized.is_err());
     assert!(out_of_range_optimize_listener.reports.is_empty());
+
+    // If an earlier placement is valid, Restore must keep its demand
+    // decrement when a later placement index panics.
+    let mut ordered_source =
+        SPProblem::new(partial_base.clone()).expect("create ordered source problem");
+    ordered_source
+        .change_strip_width(8.0)
+        .expect("set ordered snapshot width");
+    ordered_source.place_item(SPPlacement {
+        item_idx: 1,
+        d_transf: DTransformation::new(0.0, (1.5, 2.5)),
+    });
+    ordered_source.place_item(SPPlacement {
+        item_idx: 2,
+        d_transf: DTransformation::new(0.0, (4.5, 2.5)),
+    });
+    let mut ordered_solution = ordered_source.save();
+    assert_eq!(ordered_solution.layout_snapshot.placed_items.len(), 2);
+    for placed_item in ordered_solution.layout_snapshot.placed_items.values_mut() {
+        if placed_item.item.idx == 2 {
+            Arc::make_mut(&mut placed_item.item).idx = out_of_range_item_idx;
+        }
+    }
+    for hazard in &mut ordered_solution
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+    {
+        hazard.entity = match hazard.entity {
+            HazardEntity::PlacedItem { id: 2, dt, pk } => HazardEntity::PlacedItem {
+                id: out_of_range_item_idx,
+                dt,
+                pk,
+            },
+            other => other,
+        };
+    }
+
+    let mut ordered_target =
+        SPProblem::new(partial_base.clone()).expect("create ordered target problem");
+    let ordered_initial_width = ordered_target.strip.width;
+    let ordered_restore = catch_unwind(AssertUnwindSafe(|| {
+        ordered_target.restore(&ordered_solution);
+    }));
+    assert!(ordered_restore.is_err());
+    assert_eq!(ordered_target.layout.placed_items.len(), 2);
+    let ordered_restored_indices: Vec<_> = ordered_target
+        .layout
+        .placed_items
+        .values()
+        .map(|placed_item| placed_item.item.idx)
+        .collect();
+    assert_eq!(ordered_restored_indices, vec![1, out_of_range_item_idx]);
+    assert_eq!(ordered_target.item_demand_qtys, vec![1, 0, 1]);
+    assert_eq!(ordered_target.strip.width, ordered_solution.strip.width);
+    assert_ne!(ordered_target.strip.width, ordered_initial_width);
+
+    let mut ordered_optimize_listener = RecordingListener::default();
+    let mut ordered_optimize_terminator = StopImmediately;
+    let ordered_optimized = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            partial_base,
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut ordered_optimize_listener,
+            &mut ordered_optimize_terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&ordered_solution),
+        )
+    }));
+    assert!(ordered_optimized.is_err());
+    assert!(ordered_optimize_listener.reports.is_empty());
 }

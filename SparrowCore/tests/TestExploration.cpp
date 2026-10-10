@@ -5709,12 +5709,119 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
     {
         outOfRangeOptimizeThrew = true;
     }
-    return Expect(outOfRangeOptimizeThrew && !outOfRangeOptimizeReturned
-                      && outOfRangeListener.progressCount == 0U
-                      && outOfRangeListener.improvementCount == 0U
-                      && outOfRangeListener.solutionCount == 0U,
+    if (!Expect(outOfRangeOptimizeThrew && !outOfRangeOptimizeReturned
+                    && outOfRangeListener.progressCount == 0U
+                    && outOfRangeListener.improvementCount == 0U
+                    && outOfRangeListener.solutionCount == 0U,
+                output,
+                "out-of-range warm start must fail before callbacks as Rust does"))
+    {
+        return false;
+    }
+
+    auto orderedSourceResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(orderedSourceResult.HasValue(),
+                output,
+                "ordered out-of-range source problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem orderedSource = std::move(orderedSourceResult).Value();
+    if (!Expect(orderedSource.ChangeStripWidth(8.0).HasValue()
+                    && orderedSource.PlaceItem(
+                           {1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && orderedSource.PlaceItem(
+                           {2U, {0.0, {4.5, 2.5}}}).HasValue(),
+                output,
+                "ordered out-of-range source placements must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution orderedSourceSolution = orderedSource.Save();
+    jaguar::Layout orderedLayout(
+        orderedSourceSolution.layoutSnapshot.container);
+    if (!Expect(orderedLayout
+                    .PlaceItem(baseInstance.Value().GetItem(1U),
+                               {0.0, {1.5, 2.5}})
+                    .HasValue()
+                    && orderedLayout
+                           .PlaceItem(outOfRangeItemResult.Value(),
+                                      {0.0, {4.5, 2.5}})
+                           .HasValue(),
+                output,
+                "ordered layout must place valid item before rogue item"))
+    {
+        return false;
+    }
+    jaguar::SPSolution orderedSolution = orderedSourceSolution;
+    orderedSolution.layoutSnapshot = orderedLayout.Save();
+
+    auto orderedTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(orderedTargetResult.HasValue(),
+                output,
+                "ordered out-of-range target problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem orderedTarget = std::move(orderedTargetResult).Value();
+    const double orderedInitialWidth = orderedTarget.StripWidth();
+    bool orderedRestoreThrew = false;
+    bool orderedRestoreSucceeded = false;
+    try
+    {
+        orderedRestoreSucceeded = orderedTarget.Restore(orderedSolution).HasValue();
+    }
+    catch (const std::out_of_range&)
+    {
+        orderedRestoreThrew = true;
+    }
+    std::vector<std::size_t> orderedRestoredDemands;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < baseInstance.Value().ItemCount();
+         ++itemIndex)
+    {
+        orderedRestoredDemands.push_back(orderedTarget.RemainingDemand(itemIndex));
+    }
+    const auto orderedRestoredSnapshot = orderedTarget.Save();
+    if (!Expect(orderedRestoreThrew && !orderedRestoreSucceeded
+                    && orderedTarget.PlacedItemCount() == 2U
+                    && orderedRestoredSnapshot.layoutSnapshot.placements[0]
+                           .placedItem.GetItemIndex()
+                           == 1U
+                    && orderedRestoredSnapshot.layoutSnapshot.placements[1]
+                           .placedItem.GetItemIndex()
+                           == outOfRangeItemIndex
+                    && orderedRestoredDemands
+                           == std::vector<std::size_t>{1U, 0U, 1U}
+                    && orderedTarget.StripWidth() == orderedSolution.StripWidth()
+                    && orderedTarget.StripWidth() != orderedInitialWidth,
+                output,
+                "ordered restore must retain earlier demand decrement before out-of-range failure"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig orderedConfig = outOfRangeConfig;
+    orderedConfig.warmStart = orderedSolution;
+    RecordingListener orderedListener;
+    bool orderedOptimizeThrew = false;
+    bool orderedOptimizeReturned = false;
+    try
+    {
+        const auto orderedOptimized = sparrow::Optimize(
+            baseInstance.Value(), orderedConfig, &orderedListener);
+        orderedOptimizeReturned = orderedOptimized.HasValue();
+    }
+    catch (const std::out_of_range&)
+    {
+        orderedOptimizeThrew = true;
+    }
+    return Expect(orderedOptimizeThrew && !orderedOptimizeReturned
+                      && orderedListener.progressCount == 0U
+                      && orderedListener.improvementCount == 0U
+                      && orderedListener.solutionCount == 0U,
                   output,
-                  "out-of-range warm start must fail before callbacks as Rust does");
+                  "ordered out-of-range warm start must fail before callbacks as Rust does");
 }
 
 bool TestEmptyLargeAndPartialWarmStartMatchRust(

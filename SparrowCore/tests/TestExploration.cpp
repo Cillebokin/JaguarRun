@@ -5233,7 +5233,7 @@ bool TestDisruptionPoolResetAfterRecoveryMatchesRust(std::ostream& output)
         true);
 }
 
-bool TestEmptyLargeCandidatesReturnRustEquivalentFailure(
+bool TestEmptyLargeAndPartialWarmStartMatchRust(
     std::ostream& output)
 {
     std::ifstream instanceFile;
@@ -5367,15 +5367,22 @@ bool TestEmptyLargeCandidatesReturnRustEquivalentFailure(
                << " message=" << result.GetError().message << '\n';
         return false;
     }
-    if (!Expect(listener.reports.size() == 2U
-                    && listener.reports[0].type
-                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE
-                    && listener.reports[1].type
-                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE,
-                output,
-                "C++ partial-initial report must retain its separate incomplete-demand classification"))
+    const bool initialReportsMatchRust = Expect(
+        listener.reports.size() == 2U
+            && listener.reports[0].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+            && !listener.reports[0].isFeasible
+            && listener.reports[1].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE,
+        output,
+        "partial initial report type must match Rust while retaining C++ demand feasibility");
+    if (!initialReportsMatchRust)
     {
-        return false;
+        for (const auto& report : listener.reports)
+        {
+            output << "  report type=" << static_cast<int>(report.type)
+                   << " isFeasible=" << report.isFeasible << '\n';
+        }
     }
     if (!Expect(events.size() == 2U
                     && events[0].type
@@ -5468,7 +5475,7 @@ bool TestEmptyLargeCandidatesReturnRustEquivalentFailure(
         const auto& translation = placement.placedItem.Transform().translation;
         failurePoses[itemIndex] = {translation.x, translation.y};
     }
-    return Expect(
+    const bool failureSnapshotMatches = Expect(
         failurePoses.size() == 2U
             && std::abs(failurePoses[1U].first - 1.5) < 1.0e-6
             && std::abs(failurePoses[1U].second - 2.5) < 1.0e-6
@@ -5476,6 +5483,111 @@ bool TestEmptyLargeCandidatesReturnRustEquivalentFailure(
             && std::abs(failurePoses[2U].second - 2.5) < 1.0e-6,
         output,
         "C++ failure snapshot must match Rust before the empty-pool error");
+
+    sparrow::SparrowConfig warmStartConfig;
+    warmStartConfig.seed = 42U;
+    warmStartConfig.warmStart = initial;
+    sparrow::OptimizationTerminator warmStartTerminator;
+    warmStartTerminator.RequestStop();
+    listener.reports.clear();
+    const auto warmStarted = sparrow::Optimize(
+        instance.Value(),
+        warmStartConfig,
+        warmStartTerminator,
+        &listener);
+    if (!Expect(warmStarted.HasValue(),
+                output,
+                "top-level optimizer must accept Rust-compatible partial warm starts"))
+    {
+        if (!warmStarted.HasValue())
+        {
+            output << "  error=" << warmStarted.GetError().message << '\n';
+        }
+        return false;
+    }
+    const auto& warmStartResult = warmStarted.Value();
+    const bool warmStartMatchesRust = Expect(
+        warmStartResult.metrics.placedItemCount == 2U
+            && warmStartResult.metrics.remainingDemand == 1U
+            && !warmStartResult.metrics.feasible
+            && warmStartResult.solution.layoutSnapshot.placements.size() == 2U
+            && listener.reports.size() == 2U
+            && listener.reports[0].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+            && !listener.reports[0].isFeasible
+            && listener.reports[1].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
+            && !listener.reports[1].isFeasible,
+        output,
+        "partial warm-start metrics, report types, and final layout must match Rust");
+    if (!warmStartMatchesRust)
+    {
+        return false;
+    }
+
+    auto overlappingProblemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(overlappingProblemResult.HasValue(),
+                output,
+                "overlapping warm-start problem must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPProblem overlappingProblem =
+        std::move(overlappingProblemResult.Value());
+    if (!Expect(overlappingProblem.ChangeStripWidth(8.0).HasValue()
+                    && overlappingProblem.PlaceItem(
+                           {1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && overlappingProblem.PlaceItem(
+                           {2U, {0.0, {1.5, 2.5}}}).HasValue(),
+                output,
+                "overlapping warm-start layout must be restorable"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution overlapping = overlappingProblem.Save();
+    sparrow::SparrowConfig overlappingConfig;
+    overlappingConfig.seed = 42U;
+    overlappingConfig.warmStart = overlapping;
+    sparrow::OptimizationTerminator overlappingTerminator;
+    overlappingTerminator.RequestStop();
+    listener.reports.clear();
+    const auto overlappingResult = sparrow::Optimize(
+        instance.Value(),
+        overlappingConfig,
+        overlappingTerminator,
+        &listener);
+    if (!Expect(overlappingResult.HasValue(),
+                output,
+                "top-level optimizer must accept a restorable overlapping warm start"))
+    {
+        if (!overlappingResult.HasValue())
+        {
+            output << "  error=" << overlappingResult.GetError().message << '\n';
+        }
+        return false;
+    }
+    const auto& overlappingSolution = overlappingResult.Value().solution;
+    jaguar::Layout finalOverlappingLayout(
+        overlappingSolution.layoutSnapshot.container);
+    const auto restoredFinalLayout =
+        finalOverlappingLayout.Restore(overlappingSolution.layoutSnapshot);
+    const bool overlappingWarmStartMatchesRust = Expect(
+        restoredFinalLayout.HasValue()
+            && !finalOverlappingLayout.IsFeasible()
+            && overlappingResult.Value().metrics.placedItemCount == 2U
+            && overlappingResult.Value().metrics.remainingDemand == 1U
+            && !overlappingResult.Value().metrics.feasible
+            && listener.reports.size() == 2U
+            && listener.reports[0].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+            && !listener.reports[0].isFeasible
+            && listener.reports[1].type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
+            && !listener.reports[1].isFeasible,
+        output,
+        "restorable overlapping warm start must retain its layout and actual infeasibility");
+    return initialReportsMatchRust && failureSnapshotMatches
+        && warmStartMatchesRust && overlappingWarmStartMatchesRust;
 }
 
 bool TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary(
@@ -5665,6 +5777,9 @@ bool TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary(
         return false;
     }
     if (!Expect(listener.reports.size() == 2U
+                    && listener.reports[0].type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+                    && !listener.reports[0].isFeasible
                     && listener.reports[1].type
                         == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE
                     && !listener.reports[1].isFeasible,
@@ -7558,7 +7673,7 @@ bool RunExplorationTests(std::ostream& output)
     {
         return false;
     }
-    if (!TestEmptyLargeCandidatesReturnRustEquivalentFailure(output))
+    if (!TestEmptyLargeAndPartialWarmStartMatchRust(output))
     {
         return false;
     }

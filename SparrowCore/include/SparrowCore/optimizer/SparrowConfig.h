@@ -68,6 +68,8 @@ struct CompressionConfig
 struct SparrowConfig
 {
     std::optional<std::uint64_t> seed = std::nullopt;
+    // Like Rust, a restorable warm start may be incomplete or geometrically
+    // infeasible; its actual feasibility is reflected in LbfMetrics.
     std::optional<jaguar::SPSolution> warmStart;
     SparrowConstructorConfig constructor;
     ExplorationConfig exploration;

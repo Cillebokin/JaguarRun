@@ -983,9 +983,7 @@ Result<ExplorationResult> ExploreImpl(
         history,
         listener,
         MakeSolutionReport(
-            bestMetrics.feasible
-                ? OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
-                : OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE,
+            OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE,
             OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
             0U,
             bestSolution,

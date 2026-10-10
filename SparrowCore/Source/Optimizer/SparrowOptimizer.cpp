@@ -56,18 +56,8 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
     {
         remainingDemand += problem.RemainingDemand(index);
     }
-    if (remainingDemand != 0U)
-    {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            {jaguar::ErrorCode::Infeasible,
-             "warm-start solution does not satisfy item demand"});
-    }
-    const auto validation = jaguar::ValidateSPSolution(problem, solution);
-    if (!validation.HasValue())
-    {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            validation.GetError());
-    }
+    // Rust restores warm starts without requiring complete demand or a
+    // collision-free layout; keep those facts in metrics instead of rejecting.
     jaguar::Layout layout(solution.layoutSnapshot.container);
     const auto layoutRestored = layout.Restore(solution.layoutSnapshot);
     if (!layoutRestored.HasValue())
@@ -75,21 +65,16 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
         return sparrow::Result<sparrow::SppLbfResult>::FromError(
             layoutRestored.GetError());
     }
-    if (!layout.IsFeasible())
-    {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            {jaguar::ErrorCode::Infeasible,
-             "warm-start solution is geometrically infeasible"});
-    }
-
     sparrow::LbfMetrics metrics;
     metrics.seed = seed;
     metrics.sampleCount = 0U;
     metrics.placedItemCount = problem.PlacedItemCount();
-    metrics.remainingDemand = 0U;
+    metrics.remainingDemand = remainingDemand;
     metrics.stripWidth = solution.StripWidth();
     metrics.density = solution.Density();
-    metrics.feasible = true;
+    metrics.feasible = remainingDemand == 0U
+        && jaguar::ValidateSPSolution(problem, solution).HasValue()
+        && layout.IsFeasible();
     return sparrow::Result<sparrow::SppLbfResult>::FromValue(
         {solution, metrics});
 }
@@ -194,10 +179,9 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     jaguar::SPProblem validationProblem =
         std::move(validationProblemResult.Value());
     const auto restored = validationProblem.Restore(compressed.Value().solution);
-    if (!restored.HasValue()
-        || !jaguar::ValidateSPSolution(
-                validationProblem, compressed.Value().solution)
-                .HasValue())
+    // A stopped Rust run may return its restorable partial/infeasible seed.
+    // Validate snapshot structure here and leave solution quality in metrics.
+    if (!restored.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
             {jaguar::ErrorCode::Infeasible,
@@ -207,7 +191,7 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         compressed.Value().solution.layoutSnapshot.container);
     const auto finalLayoutRestored = finalLayout.Restore(
         compressed.Value().solution.layoutSnapshot);
-    if (!finalLayoutRestored.HasValue() || !finalLayout.IsFeasible())
+    if (!finalLayoutRestored.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
             {jaguar::ErrorCode::Infeasible,

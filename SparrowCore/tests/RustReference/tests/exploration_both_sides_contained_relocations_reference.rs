@@ -1,5 +1,6 @@
 use jagua_rs::entities::Layout;
 use jagua_rs::geometry::DTransformation;
+use jagua_rs::geometry::geo_enums::RotationRange;
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem, SPSolution};
 use jagua_rs::probs::spp::io::import_instance;
@@ -78,6 +79,8 @@ const SECOND_INDEPENDENT_GEOMETRY_SEED13_LIMIT6_REFERENCE: &str = include_str!(
 const SECOND_INDEPENDENT_GEOMETRY_SEED14_LIMIT6_REFERENCE: &str = include_str!(
     "../../Fixtures/ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed14Limit6RustTrace.tsv"
 );
+const CONTINUOUS_ROTATION_REFERENCE: &str =
+    include_str!("../../Fixtures/ExplorationObliqueContainedRelocationContinuousRustTrace.tsv");
 
 #[derive(Clone)]
 struct PlacementTrace {
@@ -1555,6 +1558,74 @@ fn second_independent_geometry_oblique_bilateral_seed_fourteen_limit_six_trace_m
             .lines()
             .collect::<Vec<_>>(),
         "second independent geometry seed=14 limit=6 Rust trace changed"
+    );
+    Ok(())
+}
+
+#[test]
+fn continuous_rotation_disruption_and_contained_relocation_match_rust_trace()
+-> Result<(), Box<dyn Error>> {
+    let input_filename = "ExplorationObliqueContainedRelocationContinuous.json";
+    let input_path = Path::new("../Fixtures").join(input_filename);
+    let (external, _) = sparrow::util::io::read_spp_input(&input_path)?;
+    let defaults = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        defaults.cde_config,
+        defaults.poly_simpl_tolerance,
+        defaults.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external)?;
+    assert!(
+        instance
+            .items
+            .iter()
+            .all(|(item, _)| item.allowed_rotation == RotationRange::Continuous),
+        "continuous input must import as RotationRange::Continuous"
+    );
+
+    let oblique = 37.0_f32.to_radians();
+    let (sin_oblique, cos_oblique) = oblique.sin_cos();
+    let initial_poses = [
+        (0.0, 2.8, 2.75),
+        (oblique, 7.6, 2.75),
+        (
+            0.0,
+            7.6 + (2.3 * cos_oblique - 0.2 * sin_oblique),
+            2.75 + (2.3 * sin_oblique + 0.2 * cos_oblique),
+        ),
+    ];
+    let (actual, first_failure_moves) = actual_trace_with_width(
+        input_filename,
+        "continuous_oblique_contained",
+        43,
+        0.75,
+        3,
+        9.9,
+        &initial_poses,
+    )?;
+    assert_eq!(
+        first_failure_moves,
+        [(2, 0)],
+        "continuous Explore should relocate the contained child with its host: {actual}"
+    );
+    assert!(
+        actual.lines().any(|line| {
+            line.starts_with("move 0 swap 0 1 ")
+                && line.split_whitespace().nth(8) == Some("0.645771801")
+        }),
+        "Continuous rotation must preserve the 37-degree swapped pose: {actual}"
+    );
+    assert!(
+        actual.lines().any(|line| {
+            line.starts_with("move 0 contained 2 0 ")
+                && line.split_whitespace().nth(8) == Some("-0.645771801")
+        }),
+        "Continuous relocation must preserve the observed negative 37-degree child pose: {actual}"
+    );
+    assert_eq!(
+        actual.lines().collect::<Vec<_>>(),
+        CONTINUOUS_ROTATION_REFERENCE.lines().collect::<Vec<_>>(),
+        "actual Rust Explore Continuous-rotation trace changed"
     );
     Ok(())
 }

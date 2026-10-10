@@ -1,0 +1,60 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-eight-candidates",
+  "items": [
+    {
+      "id": 951,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [1, 0], [1, 1], [0, 1]]}
+    },
+    {
+      "id": 952,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [2, 0], [2, 2], [0, 2]]}
+    },
+    {
+      "id": 953,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [4, 0], [4, 4], [0, 4]]}
+    },
+    {
+      "id": 954,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [8, 0], [8, 8], [0, 8]]}
+    },
+    {
+      "id": 955,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [16, 0], [16, 16], [0, 16]]}
+    },
+    {
+      "id": 956,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [32, 0], [32, 32], [0, 32]]}
+    },
+    {
+      "id": 957,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [64, 0], [64, 64], [0, 64]]}
+    },
+    {
+      "id": 958,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [128, 0], [128, 128], [0, 128]]}
+    },
+    {
+      "id": 959,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [256, 0], [256, 256], [0, 256]]}
+    }
+  ],
+  "strip_height": 260.0
+}

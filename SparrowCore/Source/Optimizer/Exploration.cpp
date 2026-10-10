@@ -150,7 +150,7 @@ double NormalizeRotation(double value) noexcept
     return normalized < 0.0 ? normalized + twoPi : normalized;
 }
 
-jaguar::Transform2d LegalizeTransform(
+sparrow::Result<jaguar::Transform2d> LegalizeTransform(
     jaguar::Transform2d transform,
     const jaguar::Item& item)
 {
@@ -160,35 +160,36 @@ jaguar::Transform2d LegalizeTransform(
         transform.rotationRad = 0.0;
         break;
     case jaguar::RotationMode::Discrete:
-        if (!item.AllowedRotation().radians.empty())
+    {
+        if (item.AllowedRotation().radians.empty())
         {
-            double nearest = std::numeric_limits<double>::infinity();
-            double selected = item.AllowedRotation().radians.front();
-            for (const double allowed : item.AllowedRotation().radians)
+            return sparrow::Result<jaguar::Transform2d>::FromError(
+                {jaguar::ErrorCode::Infeasible,
+                 "called `Option::unwrap()` on a `None` value"});
+        }
+        double nearest = std::numeric_limits<double>::infinity();
+        double selected = item.AllowedRotation().radians.front();
+        for (const double allowed : item.AllowedRotation().radians)
+        {
+            if (!std::isfinite(allowed))
             {
-                if (!std::isfinite(allowed))
-                {
-                    continue;
-                }
-                const double distance = std::abs(
-                    NormalizeRotation(transform.rotationRad - allowed));
-                if (distance < nearest)
-                {
-                    nearest = distance;
-                    selected = allowed;
-                }
+                continue;
             }
-            transform.rotationRad = selected;
+            const double distance = std::abs(
+                NormalizeRotation(transform.rotationRad - allowed));
+            if (distance < nearest)
+            {
+                nearest = distance;
+                selected = allowed;
+            }
         }
-        else
-        {
-            transform.rotationRad = 0.0;
-        }
+        transform.rotationRad = selected;
         break;
+    }
     case jaguar::RotationMode::Continuous:
         break;
     }
-    return transform;
+    return sparrow::Result<jaguar::Transform2d>::FromValue(transform);
 }
 
 std::size_t LeadingZeroes(std::size_t value) noexcept
@@ -678,7 +679,9 @@ sparrow::Result<void> DisruptSolution(
     }
     if (large.empty())
     {
-        large = all;
+        return sparrow::Result<void>::FromError(
+            {jaguar::ErrorCode::Infeasible,
+             "[DSRP] failed to choose first item"});
     }
 
     const auto firstChoice = ChooseFromRustFilteredRange(
@@ -733,10 +736,20 @@ sparrow::Result<void> DisruptSolution(
     const auto& secondPlacement = solution.layoutSnapshot.placements[secondIndex];
     const jaguar::Transform2d firstOld = firstPlacement.placedItem.Transform();
     const jaguar::Transform2d secondOld = secondPlacement.placedItem.Transform();
-    const jaguar::Transform2d firstNew = LegalizeTransform(
+    const auto firstNewResult = LegalizeTransform(
         secondOld, firstPlacement.placedItem.GetItem());
-    const jaguar::Transform2d secondNew = LegalizeTransform(
+    if (!firstNewResult.HasValue())
+    {
+        return sparrow::Result<void>::FromError(firstNewResult.GetError());
+    }
+    const jaguar::Transform2d firstNew = firstNewResult.Value();
+    const auto secondNewResult = LegalizeTransform(
         firstOld, secondPlacement.placedItem.GetItem());
+    if (!secondNewResult.HasValue())
+    {
+        return sparrow::Result<void>::FromError(secondNewResult.GetError());
+    }
+    const jaguar::Transform2d secondNew = secondNewResult.Value();
     const std::size_t firstItemIndex =
         firstPlacement.placedItem.GetItemIndex();
     const std::size_t secondItemIndex =
@@ -794,9 +807,14 @@ sparrow::Result<void> DisruptSolution(
             continue;
         }
         const jaguar::Transform2d from = placement->placedItem.Transform();
-        const jaguar::Transform2d to = LegalizeTransform(
+        const auto toResult = LegalizeTransform(
             from.FollowedByRustF32(firstConversion),
             placement->placedItem.GetItem());
+        if (!toResult.HasValue())
+        {
+            return sparrow::Result<void>::FromError(toResult.GetError());
+        }
+        const jaguar::Transform2d to = toResult.Value();
         const std::size_t itemIndex = placement->placedItem.GetItemIndex();
         const auto moved = separator.MoveItem(handle, to);
         if (!moved.HasValue())
@@ -836,9 +854,14 @@ sparrow::Result<void> DisruptSolution(
             continue;
         }
         const jaguar::Transform2d from = placement->placedItem.Transform();
-        const jaguar::Transform2d to = LegalizeTransform(
+        const auto toResult = LegalizeTransform(
             from.FollowedByRustF32(secondConversion),
             placement->placedItem.GetItem());
+        if (!toResult.HasValue())
+        {
+            return sparrow::Result<void>::FromError(toResult.GetError());
+        }
+        const jaguar::Transform2d to = toResult.Value();
         const std::size_t itemIndex = placement->placedItem.GetItemIndex();
         const auto moved = separator.MoveItem(handle, to);
         if (!moved.HasValue())

@@ -1,0 +1,17 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-ten-candidates",
+  "items": [
+    {"id": 971, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [1, 0], [1, 1], [0, 1]]}},
+    {"id": 972, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [2, 0], [2, 2], [0, 2]]}},
+    {"id": 973, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [4, 0], [4, 4], [0, 4]]}},
+    {"id": 974, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [8, 0], [8, 8], [0, 8]]}},
+    {"id": 975, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [16, 0], [16, 16], [0, 16]]}},
+    {"id": 976, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [32, 0], [32, 32], [0, 32]]}},
+    {"id": 977, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [64, 0], [64, 64], [0, 64]]}},
+    {"id": 978, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [128, 0], [128, 128], [0, 128]]}},
+    {"id": 979, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [256, 0], [256, 256], [0, 256]]}},
+    {"id": 980, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [512, 0], [512, 512], [0, 512]]}},
+    {"id": 981, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [1024, 0], [1024, 1024], [0, 1024]]}}
+  ],
+  "strip_height": 1028.0
+}

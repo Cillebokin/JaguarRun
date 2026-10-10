@@ -4281,7 +4281,11 @@ bool TestDisruptionTraceMatchesRust(
     std::ostream& output,
     bool requireFinalState = false,
     std::size_t expectedIterationLimit = 4U,
-    const std::vector<double>& initialRotations = {})
+    const std::vector<double>& initialRotations = {},
+    const std::vector<double>& expectedSortedHullAreas = {},
+    std::optional<std::size_t> maxConsecutiveFailures = std::nullopt,
+    bool verifyReportHistory = false,
+    std::optional<jaguar::RotationMode> expectedRotationMode = std::nullopt)
 {
     std::ifstream traceInput;
     for (const char* prefix : {
@@ -4330,12 +4334,24 @@ bool TestDisruptionTraceMatchesRust(
     double poolStddev = 0.0;
     std::size_t failureCount = 0U;
     std::size_t itemCount = 0U;
-    if (!Expect(static_cast<bool>(caseRow >> record >> caseName >> seed
-                                  >> initialWidth >> shrinkStep >> iterationLimit
-                                  >> poolStddev >> failureCount >> itemCount)
+    const bool baseHeaderParsed = static_cast<bool>(
+        caseRow >> record >> caseName >> seed >> initialWidth >> shrinkStep
+                >> iterationLimit >> poolStddev >> failureCount >> itemCount);
+    std::size_t traceMaxConsecutiveFailuresValue = 0U;
+    const bool hasTraceMaxConsecutiveFailures =
+        static_cast<bool>(caseRow >> traceMaxConsecutiveFailuresValue);
+    const std::optional<std::size_t> traceMaxConsecutiveFailures =
+        hasTraceMaxConsecutiveFailures
+            ? std::optional<std::size_t>{traceMaxConsecutiveFailuresValue}
+            : std::nullopt;
+    std::string unexpectedCaseValue;
+    const bool noUnexpectedCaseValues = !(caseRow >> unexpectedCaseValue);
+    if (!Expect(baseHeaderParsed
                     && record == "case" && caseName == expectedCaseName
                     && seed == expectedSeed
                     && iterationLimit == expectedIterationLimit
+                    && traceMaxConsecutiveFailures == maxConsecutiveFailures
+                    && noUnexpectedCaseValues
                     && failureCount > 0U
                     && itemCount == initialTranslations.size()
                     && (initialRotations.empty()
@@ -4361,8 +4377,15 @@ bool TestDisruptionTraceMatchesRust(
         double loss = 0.0;
         std::vector<ExpectedPose> poses;
     };
+    struct ExpectedReport
+    {
+        bool feasible = false;
+        double stripWidth = 0.0;
+        double loss = 0.0;
+    };
     std::vector<ExpectedFailure> expectedFailures;
     std::optional<ExpectedFailure> expectedFinalState;
+    std::vector<ExpectedReport> expectedReports;
     std::vector<std::string> expectedEvents;
     std::size_t recordIndex = 1U;
     for (std::size_t failureIndex = 0U;
@@ -4430,6 +4453,30 @@ bool TestDisruptionTraceMatchesRust(
     }
     while (recordIndex < records.size())
     {
+        if (records[recordIndex].compare(0U, 7U, "report ") == 0)
+        {
+            std::istringstream reportRow(records[recordIndex++]);
+            std::string reportRecord;
+            std::string reportType;
+            std::size_t feasible = 0U;
+            ExpectedReport report;
+            if (!Expect(static_cast<bool>(reportRow >> reportRecord >> reportType
+                                          >> report.stripWidth >> report.loss
+                                          >> feasible)
+                            && reportRecord == "report"
+                            && (reportType == "feasible"
+                                || reportType == "infeasible")
+                            && feasible <= 1U
+                            && ((reportType == "feasible") == (feasible == 1U)),
+                        output,
+                        "malformed Rust exploration report row"))
+            {
+                return false;
+            }
+            report.feasible = feasible == 1U;
+            expectedReports.push_back(report);
+            continue;
+        }
         if (records[recordIndex].compare(0U, 6U, "final ") != 0)
         {
             expectedEvents.push_back(records[recordIndex++]);
@@ -4523,6 +4570,22 @@ bool TestDisruptionTraceMatchesRust(
     {
         return false;
     }
+    if (expectedRotationMode.has_value())
+    {
+        bool allRotationModesMatch = true;
+        for (std::size_t itemIndex = 0U; itemIndex < itemCount; ++itemIndex)
+        {
+            allRotationModesMatch = allRotationModesMatch
+                && instance.Value().GetItem(itemIndex).AllowedRotation().mode
+                    == *expectedRotationMode;
+        }
+        if (!Expect(allRotationModesMatch,
+                    output,
+                    "Rust disruption fixture items must import with the expected rotation mode"))
+        {
+            return false;
+        }
+    }
 
     auto problemResult = jaguar::SPProblem::Create(instance.Value());
     if (!Expect(problemResult.HasValue(),
@@ -4561,7 +4624,7 @@ bool TestDisruptionTraceMatchesRust(
     {
         return false;
     }
-    if (largeItemChAreaCutoffPercentile == 1.0)
+    if (!expectedSortedHullAreas.empty())
     {
         std::vector<double> hullAreas;
         for (const auto& placement : initial.layoutSnapshot.placements)
@@ -4570,25 +4633,30 @@ bool TestDisruptionTraceMatchesRust(
                 placement.placedItem.CollisionShape().GetSurrogate();
             if (!Expect(surrogate != nullptr,
                         output,
-                        "distinct-pool fixture items must have convex-hull surrogates"))
+                    "Rust disruption fixture items must have convex-hull surrogates"))
             {
                 return false;
             }
             hullAreas.push_back(surrogate->ConvexHullArea());
         }
         std::sort(hullAreas.begin(), hullAreas.end(), std::greater<double>());
-        if (!Expect(hullAreas.size() == 4U
-                        && std::abs(hullAreas[0] - 16.0) < 1.0e-5
-                        && std::abs(hullAreas[1] - 4.0) < 1.0e-5
-                        && std::abs(hullAreas[2] - 1.0) < 1.0e-5
-                        && std::abs(hullAreas[3] - 1.0) < 1.0e-5,
+        bool hullAreasMatch = hullAreas.size() == expectedSortedHullAreas.size();
+        for (std::size_t areaIndex = 0U;
+             hullAreasMatch && areaIndex < hullAreas.size();
+             ++areaIndex)
+        {
+            hullAreasMatch = std::abs(hullAreas[areaIndex]
+                                      - expectedSortedHullAreas[areaIndex])
+                             < 1.0e-5;
+        }
+        if (!Expect(hullAreasMatch,
                     output,
-                    "100% cutoff fixture must retain the duplicate small-square hull areas"))
+                    "Rust disruption fixture hull areas must match the expected descending sequence"))
         {
             return false;
         }
-        // The descending cumulative area is exactly the total (22), so the
-        // Rust strict `cumulative > cutoff` branch leaves cutoffArea at zero.
+        // These fixtures' descending hull areas sum exactly to the 100% cutoff,
+        // so Rust's strict `cumulative > cutoff` branch leaves cutoffArea at zero.
     }
     for (const auto& firstPlacement : initial.layoutSnapshot.placements)
     {
@@ -4644,7 +4712,7 @@ bool TestDisruptionTraceMatchesRust(
     config.largeItemChAreaCutoffPercentile =
         largeItemChAreaCutoffPercentile;
     config.solutionPoolDistributionStddev = poolStddev;
-    config.maxConsecutiveFailures = std::nullopt;
+    config.maxConsecutiveFailures = maxConsecutiveFailures;
     config.separator.strikeLimit = 0U;
     config.separator.nWorkers = 1U;
     config.separator.nContainerSamples = 0U;
@@ -4828,6 +4896,54 @@ bool TestDisruptionTraceMatchesRust(
         }
     }
 
+    if (verifyReportHistory)
+    {
+        std::vector<const sparrow::OptimizationSolutionReport*> actualReports;
+        for (const auto& report : result.Value().history)
+        {
+            if (report.phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION
+                && (report.type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+                    || report.type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE))
+            {
+                actualReports.push_back(&report);
+            }
+        }
+        if (!Expect(actualReports.size() == expectedReports.size()
+                        && !expectedReports.empty(),
+                    output,
+                    "C++ exploration report count differs from Rust"))
+        {
+            return false;
+        }
+        for (std::size_t reportIndex = 0U;
+             reportIndex < expectedReports.size();
+             ++reportIndex)
+        {
+            const auto& expected = expectedReports[reportIndex];
+            const auto& actual = *actualReports[reportIndex];
+            const bool actualFeasible = actual.type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE;
+            if (!Expect(actualFeasible == expected.feasible
+                            && actual.isFeasible == expected.feasible
+                            && std::abs(actual.stripWidth - expected.stripWidth) < 1.0e-5
+                            && std::abs(static_cast<double>(actual.collisionLoss)
+                                        - expected.loss) < 1.0e-3,
+                        output,
+                        "C++ recovery/shrink report sequence differs from Rust"))
+            {
+                output << std::setprecision(12)
+                       << "report=" << reportIndex
+                       << " actual width=" << actual.stripWidth
+                       << " loss=" << actual.collisionLoss
+                       << " expected width=" << expected.stripWidth
+                       << " loss=" << expected.loss << '\n';
+                return false;
+            }
+        }
+    }
+
     if (expectedFinalState.has_value())
     {
         const auto& finalSnapshot = result.Value().separatorState.layoutSnapshot;
@@ -4937,6 +5053,551 @@ bool TestDisruptionFallbackMatchesRust(std::ostream& output)
         output);
 }
 
+bool TestDisruptionPoolResetAfterRecoveryMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationPoolResetRustTrace.tsv",
+        "ExplorationPoolReset.json",
+        "pool_reset_after_recovery",
+        42U,
+        0.473,
+        {{6.6, 2.0}, {4.5, 4.1}, {1.5, 2.0}},
+        {1U, 2U, 1U},
+        1U,
+        {},
+        output,
+        true,
+        4U,
+        {},
+        {},
+        2U,
+        true);
+}
+
+bool TestEmptyLargeCandidatesReturnRustEquivalentFailure(
+    std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyLarge.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "empty-large Rust/C++ fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "empty-large fixture must import"))
+    {
+        return false;
+    }
+
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "empty-large problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue()
+                    && problem.PlaceItem({1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && problem.PlaceItem({2U, {0.0, {6.5, 2.5}}}).HasValue(),
+                output,
+                "empty-large partial layout must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initial = problem.Save();
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyLargeRustTrace.tsv",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyLargeRustTrace.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyLargeRustTrace.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyLargeRustTrace.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "empty-large Rust trace must be readable"))
+    {
+        return false;
+    }
+    std::vector<std::string> expectedTrace;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            expectedTrace.push_back(line);
+        }
+    }
+
+    sparrow::ExplorationConfig config;
+    config.maxIterations = 2U;
+    config.shrinkStep = 0.5;
+    config.largeItemChAreaCutoffPercentile = 0.75;
+    config.maxConsecutiveFailures = std::nullopt;
+    config.separator.strikeLimit = 0U;
+    config.separator.nWorkers = 1U;
+    config.separator.nContainerSamples = 0U;
+    config.separator.nFocussedSamples = 0U;
+    config.separator.nCoordinateDescents = 0U;
+    sparrow::OptimizationTerminator terminator({
+        32U, std::chrono::milliseconds{2000}});
+    std::vector<sparrow::detail::ExplorationTraceEvent> events;
+    class ReportCapture final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport& report) override
+        {
+            reports.push_back(report);
+        }
+
+        std::vector<sparrow::OptimizationSolutionReport> reports;
+    } listener;
+    const auto result = sparrow::detail::ExploreWithTrace(
+        instance.Value(),
+        initial,
+        config,
+        42U,
+        terminator,
+        &listener,
+        [&events](const auto& event) { events.push_back(event); });
+
+    if (!Expect(!result.HasValue(),
+                output,
+                "empty large-item pool must fail instead of disrupting all placed items"))
+    {
+        output << "C++ returned a value and recorded " << events.size()
+               << " trace events\n";
+        return false;
+    }
+    if (!Expect(result.GetError().code == jaguar::ErrorCode::Infeasible
+                    && result.GetError().message
+                        == "[DSRP] failed to choose first item",
+                output,
+                "empty large-item pool must preserve the Rust disruption failure"))
+    {
+        output << "error code=" << static_cast<int>(result.GetError().code)
+               << " message=" << result.GetError().message << '\n';
+        return false;
+    }
+    if (!Expect(listener.reports.size() == 2U
+                    && listener.reports[0].type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE
+                    && listener.reports[1].type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE,
+                output,
+                "C++ partial-initial report must retain its separate incomplete-demand classification"))
+    {
+        return false;
+    }
+    if (!Expect(events.size() == 2U
+                    && events[0].type
+                        == sparrow::detail::ExplorationTraceEvent::Type::PoolInsert
+                    && events[1].type
+                        == sparrow::detail::ExplorationTraceEvent::Type::PoolSample,
+                output,
+                "failure and pool sampling must occur before the empty-pool error"))
+    {
+        return false;
+    }
+
+    std::vector<std::string> actualTrace;
+    for (const auto& event : events)
+    {
+        std::ostringstream row;
+        if (event.type
+            == sparrow::detail::ExplorationTraceEvent::Type::PoolInsert)
+        {
+            row << "insert " << event.failureId << ' '
+                << event.insertionIndex << ' ' << event.poolOrder.size();
+            for (const std::size_t candidateId : event.poolOrder)
+            {
+                row << ' ' << candidateId;
+            }
+        }
+        else if (event.type
+                 == sparrow::detail::ExplorationTraceEvent::Type::PoolSample)
+        {
+            std::uint32_t rawSampleBits = 0U;
+            std::uint32_t mappedSampleBits = 0U;
+            std::memcpy(&rawSampleBits, &event.rawSample, sizeof(rawSampleBits));
+            std::memcpy(&mappedSampleBits,
+                        &event.mappedSample,
+                        sizeof(mappedSampleBits));
+            row << "sample " << event.failureId << ' ' << std::hex
+                << std::setw(8) << std::setfill('0') << rawSampleBits << ' '
+                << std::setw(8) << std::setfill('0') << mappedSampleBits
+                << std::dec << ' ' << event.selectedIndex << ' '
+                << event.consumedU64Words << ' ' << std::hex << std::setw(2)
+                << std::setfill('0') << event.firstLayerIndex;
+            for (const std::uint64_t value : event.followingU64)
+            {
+                row << ' ' << std::setw(16) << std::setfill('0') << value;
+            }
+        }
+        else
+        {
+            row << "move " << event.failureId;
+        }
+        actualTrace.push_back(row.str());
+    }
+    if (!Expect(actualTrace == expectedTrace,
+                output,
+                "C++ pre-error pool/RNG trace differs from Rust"))
+    {
+        for (const auto& row : actualTrace)
+        {
+            output << "  actual " << row << '\n';
+        }
+        for (const auto& row : expectedTrace)
+        {
+            output << "expected " << row << '\n';
+        }
+        return false;
+    }
+
+    const auto failureReport = std::find_if(
+        listener.reports.begin(), listener.reports.end(),
+        [](const sparrow::OptimizationSolutionReport& report) {
+            return report.type
+                       == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE
+                && report.collisionLoss > 0.0F;
+        });
+    if (!Expect(failureReport != listener.reports.end()
+                    && std::abs(failureReport->stripWidth - 4.0) < 1.0e-6
+                    && !failureReport->isFeasible
+                    && failureReport->solution.layoutSnapshot.placements.size()
+                        == 2U,
+                output,
+                "C++ must report the narrowed failed snapshot before disruption"))
+    {
+        return false;
+    }
+    std::map<std::size_t, std::pair<double, double>> failurePoses;
+    for (const auto& placement :
+         failureReport->solution.layoutSnapshot.placements)
+    {
+        const std::size_t itemIndex = placement.placedItem.GetItemIndex();
+        const auto& translation = placement.placedItem.Transform().translation;
+        failurePoses[itemIndex] = {translation.x, translation.y};
+    }
+    return Expect(
+        failurePoses.size() == 2U
+            && std::abs(failurePoses[1U].first - 1.5) < 1.0e-6
+            && std::abs(failurePoses[1U].second - 2.5) < 1.0e-6
+            && std::abs(failurePoses[2U].first - 2.5) < 1.0e-6
+            && std::abs(failurePoses[2U].second - 2.5) < 1.0e-6,
+        output,
+        "C++ failure snapshot must match Rust before the empty-pool error");
+}
+
+bool TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary(
+    std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotation.json",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotation.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotation.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyDiscreteRotation.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "empty-discrete fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(imported.HasValue(),
+                output,
+                "valid singleton-zero fixture must import before internal mutation"))
+    {
+        return false;
+    }
+
+    std::vector<jaguar::Item> items;
+    items.reserve(imported.Value().ItemCount());
+    for (std::size_t index = 0U;
+         index < imported.Value().ItemCount();
+         ++index)
+    {
+        const jaguar::Item& source = imported.Value().GetItem(index);
+        jaguar::RotationRange rotation = source.AllowedRotation();
+        if (index == 0U)
+        {
+            rotation = {jaguar::RotationMode::Discrete, {}};
+        }
+        const auto item = jaguar::Item::Create(
+            source.Index(),
+            source.ExternalId(),
+            source.GetOriginalShape(),
+            source.GetSurrogateConfig(),
+            source.MinQuality(),
+            std::move(rotation));
+        if (!Expect(item.HasValue(),
+                    output,
+                    "internal empty-discrete item must be constructible"))
+        {
+            return false;
+        }
+        items.push_back(item.Value());
+    }
+    const auto instance = jaguar::SPInstance::Create(
+        std::move(items), {1U, 1U}, imported.Value().BaseStrip());
+    if (!Expect(instance.HasValue(),
+                output,
+                "internal empty-discrete instance must be constructible"))
+    {
+        return false;
+    }
+    if (!Expect(instance.Value().GetItem(0U).AllowedRotation().mode
+                        == jaguar::RotationMode::Discrete
+                    && instance.Value().GetItem(0U).AllowedRotation().radians.empty(),
+                output,
+                "test setup must reach Explore with an empty discrete rotation set"))
+    {
+        return false;
+    }
+
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "empty-discrete problem must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(5.0).HasValue()
+                    && problem.PlaceItem({0U, {0.0, {2.5, 1.0}}}).HasValue()
+                    && problem.PlaceItem({1U, {0.0, {2.5, 1.0}}}).HasValue(),
+                output,
+                "overlapping seed layout must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initial = problem.Save();
+    jaguar::Layout initialLayout(initial.layoutSnapshot.container);
+    if (!Expect(initialLayout.Restore(initial.layoutSnapshot).HasValue()
+                    && !initialLayout.IsFeasible(),
+                output,
+                "overlapping seed layout must force Explore into disruption"))
+    {
+        return false;
+    }
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotationRustTrace.tsv",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotationRustTrace.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyDiscreteRotationRustTrace.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyDiscreteRotationRustTrace.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "empty-discrete Rust trace must be readable"))
+    {
+        return false;
+    }
+    std::vector<std::string> expectedTrace;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            expectedTrace.push_back(line);
+        }
+    }
+
+    sparrow::ExplorationConfig config;
+    config.maxIterations = 2U;
+    config.shrinkStep = 0.1;
+    config.largeItemChAreaCutoffPercentile = 0.75;
+    config.maxConsecutiveFailures = std::nullopt;
+    config.separator.strikeLimit = 0U;
+    config.separator.nWorkers = 1U;
+    config.separator.nContainerSamples = 0U;
+    config.separator.nFocussedSamples = 0U;
+    config.separator.nCoordinateDescents = 0U;
+    sparrow::OptimizationTerminator terminator({
+        32U, std::chrono::milliseconds{2000}});
+    std::vector<sparrow::detail::ExplorationTraceEvent> events;
+    class ReportCapture final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport& report) override
+        {
+            reports.push_back(report);
+        }
+
+        std::vector<sparrow::OptimizationSolutionReport> reports;
+    } listener;
+    const auto result = sparrow::detail::ExploreWithTrace(
+        instance.Value(),
+        initial,
+        config,
+        42U,
+        terminator,
+        &listener,
+        [&events](const auto& event) { events.push_back(event); });
+
+    if (!Expect(!result.HasValue(),
+                output,
+                "empty discrete rotation must fail during actual Explore disruption"))
+    {
+        output << "C++ returned a value and recorded " << events.size()
+               << " trace events\n";
+        return false;
+    }
+    if (!Expect(result.GetError().code == jaguar::ErrorCode::Infeasible
+                    && result.GetError().message
+                        == "called `Option::unwrap()` on a `None` value",
+                output,
+                "empty rotation legalization must map the Rust panic to an explicit error"))
+    {
+        output << "error code=" << static_cast<int>(result.GetError().code)
+               << " message=" << result.GetError().message << '\n';
+        return false;
+    }
+    if (!Expect(listener.reports.size() == 2U
+                    && listener.reports[1].type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE
+                    && !listener.reports[1].isFeasible,
+                output,
+                "failed layout must be reported before empty-angle legalization fails"))
+    {
+        return false;
+    }
+    if (!Expect(events.size() == 2U
+                    && events[0].type
+                        == sparrow::detail::ExplorationTraceEvent::Type::PoolInsert
+                    && events[1].type
+                        == sparrow::detail::ExplorationTraceEvent::Type::PoolSample,
+                output,
+                "failure-pool sampling must precede the rotation failure, with no moves"))
+    {
+        return false;
+    }
+
+    std::vector<std::string> actualTrace;
+    for (const auto& event : events)
+    {
+        std::ostringstream row;
+        if (event.type
+            == sparrow::detail::ExplorationTraceEvent::Type::PoolInsert)
+        {
+            row << "insert " << event.failureId << ' '
+                << event.insertionIndex << ' ' << event.poolOrder.size();
+            for (const std::size_t candidateId : event.poolOrder)
+            {
+                row << ' ' << candidateId;
+            }
+        }
+        else if (event.type
+                 == sparrow::detail::ExplorationTraceEvent::Type::PoolSample)
+        {
+            std::uint32_t rawSampleBits = 0U;
+            std::uint32_t mappedSampleBits = 0U;
+            std::memcpy(&rawSampleBits, &event.rawSample, sizeof(rawSampleBits));
+            std::memcpy(&mappedSampleBits,
+                        &event.mappedSample,
+                        sizeof(mappedSampleBits));
+            row << "sample " << event.failureId << ' ' << std::hex
+                << std::setw(8) << std::setfill('0') << rawSampleBits << ' '
+                << std::setw(8) << std::setfill('0') << mappedSampleBits
+                << std::dec << ' ' << event.selectedIndex << ' '
+                << event.consumedU64Words << ' ' << std::hex << std::setw(2)
+                << std::setfill('0') << event.firstLayerIndex;
+            for (const std::uint64_t value : event.followingU64)
+            {
+                row << ' ' << std::setw(16) << std::setfill('0') << value;
+            }
+        }
+        else
+        {
+            row << "move " << event.failureId;
+        }
+        actualTrace.push_back(row.str());
+    }
+    if (!Expect(actualTrace == expectedTrace,
+                output,
+                "pre-error pool and RNG trace must match the Rust oracle"))
+    {
+        for (const auto& row : actualTrace)
+        {
+            output << "  actual " << row << '\n';
+        }
+        for (const auto& row : expectedTrace)
+        {
+            output << "expected " << row << '\n';
+        }
+        return false;
+    }
+
+    const auto& failure = listener.reports.back();
+    std::map<std::size_t, jaguar::Transform2d> poses;
+    for (const auto& placement : failure.solution.layoutSnapshot.placements)
+    {
+        poses.emplace(placement.placedItem.GetItemIndex(),
+                      placement.placedItem.Transform());
+    }
+    return Expect(failure.stripWidth == 5.0
+                      && failure.collisionLoss == 2.602527618F
+                      && poses.size() == 2U
+                      && poses[0U].rotationRad == 0.0
+                      && poses[1U].rotationRad == 0.0
+                      && poses[0U].translation == jaguar::Point2d{2.5, 1.0}
+                      && poses[1U].translation == jaguar::Point2d{2.5, 1.0},
+                  output,
+                  "failure snapshot must remain unchanged because legalization fails before moves");
+}
+
 bool TestDisruptionDistinctPoolMatchesRust(std::ostream& output)
 {
     return TestDisruptionTraceMatchesRust(
@@ -4949,7 +5610,31 @@ bool TestDisruptionDistinctPoolMatchesRust(std::ostream& output)
         {2U, 2U, 3U, 3U},
         2U,
         {},
-        output);
+        output,
+        false,
+        4U,
+        {},
+        {16.0, 4.0, 1.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolSingleCandidateMatchesRust(
+    std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolSingleCandidateRustTrace.tsv",
+        "ExplorationDistinctPoolSingleCandidate.json",
+        "distinct_pool_single",
+        43U,
+        1.0,
+        {{6.0, 2.5}, {3.5, 2.5}},
+        {1U, 1U},
+        1U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {9.0, 1.0});
 }
 
 bool TestDisruptionDistinctPoolThreeCandidatesMatchesRust(std::ostream& output)
@@ -4964,7 +5649,250 @@ bool TestDisruptionDistinctPoolThreeCandidatesMatchesRust(std::ostream& output)
         {2U, 2U, 3U, 3U},
         3U,
         {},
-        output);
+        output,
+        false,
+        4U,
+        {},
+        {16.0, 4.0, 1.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolFourCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolFourCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolFourCandidates.json",
+        "distinct_pool_four",
+        0U,
+        1.0,
+        {{1.0, 9.0}, {2.75, 9.0}, {6.0, 9.0}, {12.25, 9.0}, {24.5, 9.0}},
+        {4U, 4U, 4U, 4U, 4U},
+        4U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolFourCandidatesNoneRotationMatchesRust(
+    std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolFourCandidatesNoneRotationRustTrace.tsv",
+        "ExplorationDistinctPoolFourCandidatesNoneRotation.json",
+        "distinct_pool_four_none_rotation",
+        0U,
+        1.0,
+        {{1.0, 9.0}, {2.75, 9.0}, {6.0, 9.0}, {12.25, 9.0}, {24.5, 9.0}},
+        {4U, 4U, 4U, 4U, 4U},
+        4U,
+        {{0U, 3U}, {2U, 3U}},
+        output,
+        false,
+        4U,
+        {},
+        {256.0, 64.0, 16.0, 4.0, 1.0},
+        std::nullopt,
+        false,
+        jaguar::RotationMode::None);
+}
+
+bool TestContinuousRotationDisruptionAndContainedRelocationMatchesRust(
+    std::ostream& output)
+{
+    constexpr float obliqueRotation = 0.645771801F;
+    const float sinOblique = std::sin(obliqueRotation);
+    const float cosOblique = std::cos(obliqueRotation);
+    const float childX = 7.6F + (2.3F * cosOblique - 0.2F * sinOblique);
+    const float childY = 2.75F + (2.3F * sinOblique + 0.2F * cosOblique);
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationObliqueContainedRelocationContinuousRustTrace.tsv",
+        "ExplorationObliqueContainedRelocationContinuous.json",
+        "continuous_oblique_contained",
+        43U,
+        0.75,
+        {{2.8, 2.75}, {7.6, 2.75}, {childX, childY}},
+        {2U, 2U, 2U},
+        2U,
+        {},
+        output,
+        true,
+        3U,
+        {0.0, static_cast<double>(obliqueRotation), 0.0},
+        {},
+        std::nullopt,
+        false,
+        jaguar::RotationMode::Continuous);
+}
+
+bool TestDisruptionDistinctPoolFiveCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolFiveCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolFiveCandidates.json",
+        "distinct_pool_five",
+        0U,
+        1.0,
+        {{1.0, 18.0},
+         {2.75, 18.0},
+         {6.0, 18.0},
+         {12.25, 18.0},
+         {24.5, 18.0},
+         {48.75, 18.0}},
+        {5U, 5U, 5U, 5U, 5U, 5U},
+        5U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {1024.0, 256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolSixCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolSixCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolSixCandidates.json",
+        "distinct_pool_six",
+        0U,
+        1.0,
+        {{1.0, 34.0},
+         {2.75, 34.0},
+         {6.0, 34.0},
+         {12.25, 34.0},
+         {24.5, 34.0},
+         {48.75, 34.0},
+         {97.0, 34.0}},
+        {6U, 6U, 6U, 6U, 6U, 6U, 6U},
+        6U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {4096.0, 1024.0, 256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolSevenCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolSevenCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolSevenCandidates.json",
+        "distinct_pool_seven",
+        0U,
+        1.0,
+        {{1.0, 66.0},
+         {2.75, 66.0},
+         {6.0, 66.0},
+         {12.25, 66.0},
+         {24.5, 66.0},
+         {48.75, 66.0},
+         {97.0, 66.0},
+         {193.25, 66.0}},
+        {7U, 7U, 7U, 7U, 7U, 7U, 7U, 7U},
+        7U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {16384.0, 4096.0, 1024.0, 256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolEightCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolEightCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolEightCandidates.json",
+        "distinct_pool_eight",
+        0U,
+        1.0,
+        {{1.0, 130.0},
+         {2.75, 130.0},
+         {6.0, 130.0},
+         {12.25, 130.0},
+         {24.5, 130.0},
+         {48.75, 130.0},
+         {97.0, 130.0},
+         {193.25, 130.0},
+         {385.5, 130.0}},
+        {8U, 8U, 8U, 8U, 8U, 8U, 8U, 8U, 8U},
+        8U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+         {65536.0, 16384.0, 4096.0, 1024.0, 256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolNineCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolNineCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolNineCandidates.json",
+        "distinct_pool_nine",
+        0U,
+        1.0,
+        {{1.0, 258.0},
+         {2.75, 258.0},
+         {6.0, 258.0},
+         {12.25, 258.0},
+         {24.5, 258.0},
+         {48.75, 258.0},
+         {97.0, 258.0},
+         {193.25, 258.0},
+         {385.5, 258.0},
+         {769.75, 258.0}},
+        {9U, 9U, 9U, 9U, 9U, 9U, 9U, 9U, 9U, 9U},
+        9U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {262144.0, 65536.0, 16384.0, 4096.0, 1024.0, 256.0, 64.0, 16.0, 4.0, 1.0});
+}
+
+bool TestDisruptionDistinctPoolTenCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolTenCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolTenCandidates.json",
+        "distinct_pool_ten",
+        0U,
+        1.0,
+        {{1.0, 514.0},
+         {2.75, 514.0},
+         {6.0, 514.0},
+         {12.25, 514.0},
+         {24.5, 514.0},
+         {48.75, 514.0},
+         {97.0, 514.0},
+         {193.25, 514.0},
+         {385.5, 514.0},
+         {769.75, 514.0},
+         {1538.0, 514.0}},
+        {10U, 10U, 10U, 10U, 10U, 10U, 10U, 10U, 10U, 10U, 10U},
+        10U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {1048576.0,
+         262144.0,
+         65536.0,
+         16384.0,
+         4096.0,
+         1024.0,
+         256.0,
+         64.0,
+         16.0,
+         4.0,
+         1.0});
 }
 
 bool TestMultipleContainedRelocationsMatchRust(std::ostream& output)
@@ -6446,11 +7374,63 @@ bool RunExplorationTests(std::ostream& output)
     {
         return false;
     }
+    if (!TestDisruptionPoolResetAfterRecoveryMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestEmptyLargeCandidatesReturnRustEquivalentFailure(output))
+    {
+        return false;
+    }
+    if (!TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary(output))
+    {
+        return false;
+    }
     if (!TestDisruptionDistinctPoolMatchesRust(output))
     {
         return false;
     }
+    if (!TestDisruptionDistinctPoolSingleCandidateMatchesRust(output))
+    {
+        return false;
+    }
     if (!TestDisruptionDistinctPoolThreeCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolFourCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolFourCandidatesNoneRotationMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestContinuousRotationDisruptionAndContainedRelocationMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolFiveCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolSixCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolSevenCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolEightCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolNineCandidatesMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolTenCandidatesMatchesRust(output))
     {
         return false;
     }

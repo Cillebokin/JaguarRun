@@ -1,0 +1,16 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-nine-candidates",
+  "items": [
+    {"id": 961, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [1, 0], [1, 1], [0, 1]]}},
+    {"id": 962, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [2, 0], [2, 2], [0, 2]]}},
+    {"id": 963, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [4, 0], [4, 4], [0, 4]]}},
+    {"id": 964, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [8, 0], [8, 8], [0, 8]]}},
+    {"id": 965, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [16, 0], [16, 16], [0, 16]]}},
+    {"id": 966, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [32, 0], [32, 32], [0, 32]]}},
+    {"id": 967, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [64, 0], [64, 64], [0, 64]]}},
+    {"id": 968, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [128, 0], [128, 128], [0, 128]]}},
+    {"id": 969, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [256, 0], [256, 256], [0, 256]]}},
+    {"id": 970, "demand": 1, "orientation": {"rotation": {"mode": "discrete", "angles": [0]}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [512, 0], [512, 512], [0, 512]]}}
+  ],
+  "strip_height": 516.0
+}

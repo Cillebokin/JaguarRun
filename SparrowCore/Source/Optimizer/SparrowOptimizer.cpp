@@ -7,6 +7,7 @@
 
 #include "JaguarCore/Assertions.h"
 
+#include <algorithm>
 #include <random>
 #include <stdexcept>
 #include <utility>
@@ -66,13 +67,27 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
         return sparrow::Result<sparrow::SppLbfResult>::FromError(
             layoutRestored.GetError());
     }
-    if (!solution.layoutSnapshot.placements.empty() &&
-        solution.layoutSnapshot.cdeSnapshot.dynamicHazards.size()
-            < solution.layoutSnapshot.placements.size())
+    const auto restoredHazards =
+        layout.Save().cdeSnapshot.dynamicHazards;
+    for (const jaguar::LayoutPlacementSnapshot& placement :
+         solution.layoutSnapshot.placements)
     {
-        // Rust's next warm-start step constructs its collision tracker from
-        // the restored CDE and panics when a placed item has no own hazard.
-        throw std::logic_error("HazardEntity not found in collector");
+        jaguar::HazardEntity expectedHazard;
+        expectedHazard.kind = jaguar::HazardKind::PlacedItem;
+        expectedHazard.itemIndex = placement.placedItem.GetItemIndex();
+        expectedHazard.placedItemHandle = placement.handle;
+        expectedHazard.transform = placement.placedItem.Transform();
+        const bool hasOwnHazard = std::any_of(
+            restoredHazards.begin(), restoredHazards.end(),
+            [&expectedHazard](const jaguar::Hazard& hazard) {
+                return hazard.entity == expectedHazard;
+            });
+        if (!hasOwnHazard)
+        {
+            // Rust's next warm-start step constructs its collision tracker
+            // from the restored CDE and panics when an item has no own hazard.
+            throw std::logic_error("HazardEntity not found in collector");
+        }
     }
     sparrow::LbfMetrics metrics;
     metrics.seed = seed;
@@ -210,14 +225,6 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     LbfMetrics finalMetrics = compressed.Value().metrics;
     finalMetrics.seed = effectiveSeed;
     finalMetrics.sampleCount = constructed.Value().metrics.sampleCount;
-    if (listener != nullptr)
-    {
-        listener->OnProgress(MakeProgress(
-            OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE,
-            0U,
-            finalMetrics,
-            0.0F));
-    }
     PublishSolutionReport(
         history,
         listener,

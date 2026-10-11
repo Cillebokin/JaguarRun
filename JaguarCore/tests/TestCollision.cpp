@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -724,8 +725,9 @@ void runCollisionTests()
     jaguar::CollisionSnapshot nonDynamicSnapshot = snapshot;
     nonDynamicSnapshot.dynamicHazards.front().dynamic = false;
     const auto nonDynamicRestore = engine.Restore(nonDynamicSnapshot);
-    assert(!nonDynamicRestore.HasValue());
-    assert(nonDynamicRestore.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
+    assert(nonDynamicRestore.HasValue());
+    assert(engine.Save().dynamicHazards.size() ==
+           snapshot.dynamicHazards.size());
     assert(engine.DetectPolygonCollision(colliding.Value(), jaguar::NoFilter{}));
 
     jaguar::CollisionSnapshot invalidSnapshot = engine.Save();
@@ -764,10 +766,28 @@ void runCollisionTests()
     assert(!staticHazardAsDynamic.dynamicHazards.empty());
     staticHazardAsDynamic.dynamicHazards.front().entity.kind =
         jaguar::HazardKind::Exterior;
+#ifdef JAGUARCORE_TEST_RELEASE
     const auto staticHazardRestore = engine.Restore(staticHazardAsDynamic);
-    assert(!staticHazardRestore.HasValue());
-    assert(staticHazardRestore.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
+    assert(staticHazardRestore.HasValue());
+    assert(engine.Save().dynamicHazards.front().entity.kind ==
+           jaguar::HazardKind::Exterior);
+#else
+    bool staticHazardRestoreThrew = false;
+    try
+    {
+        (void)engine.Restore(staticHazardAsDynamic);
+    }
+    catch (const std::logic_error&)
+    {
+        staticHazardRestoreThrew = true;
+    }
+    assert(staticHazardRestoreThrew);
+    assert(engine.Save().dynamicHazards.empty());
+    assert(!engine.DetectPolygonCollision(colliding.Value(), jaguar::NoFilter{}));
+#endif
+#ifdef JAGUARCORE_TEST_RELEASE
     assert(engine.DetectPolygonCollision(colliding.Value(), jaguar::NoFilter{}));
+#endif
 
     // Fixed-seed larger differential: a deeply subdivided tree must agree
     // with a deliberately non-subdivided index before and after atomic

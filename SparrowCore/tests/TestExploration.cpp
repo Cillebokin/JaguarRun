@@ -532,9 +532,13 @@ class PhaseTimeoutReferenceListener final : public sparrow::OptimizationListener
 public:
     explicit PhaseTimeoutReferenceListener(
         std::chrono::milliseconds explorationTimeoutCallbackDelay = {},
-        std::chrono::milliseconds compressionTimeoutCallbackDelay = {})
+        std::chrono::milliseconds compressionTimeoutCallbackDelay = {},
+        sparrow::OptimizationTerminator* finalCallbackTerminator = nullptr,
+        bool throwFromFinalCallback = false)
         : explorationTimeoutCallbackDelay(explorationTimeoutCallbackDelay)
         , compressionTimeoutCallbackDelay(compressionTimeoutCallbackDelay)
+        , finalCallbackTerminator(finalCallbackTerminator)
+        , throwFromFinalCallback(throwFromFinalCallback)
     {
     }
 
@@ -547,8 +551,25 @@ public:
         events.push_back({"phase", currentPhase, {}});
     }
 
+    void OnProgress(const sparrow::OptimizationProgress& progress) override
+    {
+        if (progress.phase
+            == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE)
+        {
+            ++completeProgressCount;
+            completionBoundaryEvents.emplace_back("complete_progress");
+        }
+    }
+
     void OnSolution(const sparrow::OptimizationSolutionReport& report) override
     {
+        if (report.type
+            == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL)
+        {
+            ++finalReportCount;
+            finalReport = report;
+            completionBoundaryEvents.emplace_back("final_report");
+        }
         const std::string label = ColdStartReportName(report.type);
         events.push_back({"report",
                           label,
@@ -585,6 +606,18 @@ public:
             explorationTimeoutCallbackDelayed = true;
             std::this_thread::sleep_for(explorationTimeoutCallbackDelay);
         }
+        if (report.type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
+            && finalCallbackTerminator != nullptr)
+        {
+            finalCallbackTerminator->RequestStop();
+        }
+        if (report.type
+                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
+            && throwFromFinalCallback)
+        {
+            throw std::runtime_error("final solution callback failure");
+        }
     }
 
     void OnSeparationResult(const sparrow::SeparationResult& result) override
@@ -613,10 +646,16 @@ public:
 
     std::string currentPhase;
     std::vector<ColdStartTraceEvent> events;
+    std::vector<std::string> completionBoundaryEvents;
     std::size_t separationResultCount = 0U;
     std::size_t compressionStepCount = 0U;
+    std::size_t completeProgressCount = 0U;
+    std::size_t finalReportCount = 0U;
+    std::optional<sparrow::OptimizationSolutionReport> finalReport;
     bool explorationTimeoutCallbackDelayed = false;
     bool compressionTimeoutCallbackDelayed = false;
+    sparrow::OptimizationTerminator* finalCallbackTerminator = nullptr;
+    bool throwFromFinalCallback = false;
 
 private:
     std::chrono::milliseconds explorationTimeoutCallbackDelay;
@@ -1593,7 +1632,7 @@ bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
     config.compression.timeLimit = std::chrono::milliseconds{0};
     sparrow::OptimizationTerminator terminator(config.terminator);
     terminator.Start();
-    PhaseTimeoutReferenceListener listener;
+    PhaseTimeoutReferenceListener listener({}, {}, &terminator);
     const auto actual = sparrow::Optimize(
         instance.Value(), config, terminator, &listener);
     if (!Expect(actual.HasValue()
@@ -1604,6 +1643,36 @@ bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
                 output,
                 "zero-duration exploration and compression must skip separator work"))
     {
+        return false;
+    }
+    const std::vector<std::string> expectedCompletionBoundary{
+        "final_report"};
+    if (!Expect(listener.completionBoundaryEvents
+                    == expectedCompletionBoundary
+                    && listener.completeProgressCount == 0U
+                    && listener.finalReportCount == 1U
+                    && listener.finalReport.has_value()
+                    && listener.finalReport->phase
+                        == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE
+                    && listener.finalReport->iteration == 0U
+                    && listener.finalReport->isFeasible
+                        == actual.Value().metrics.feasible
+                    && listener.finalReport->stripWidth
+                        == actual.Value().solution.StripWidth()
+                    && listener.finalReport->density
+                        == actual.Value().solution.Density()
+                    && listener.finalReport->collisionLoss == 0.0F
+                    && SameSolution(listener.finalReport->solution,
+                                    actual.Value().solution),
+                output,
+                "Rust completion boundary must publish only the final solution report with COMPLETE metadata"))
+    {
+        output << "completion callback events:";
+        for (const auto& event : listener.completionBoundaryEvents)
+        {
+            output << ' ' << event;
+        }
+        output << '\n';
         return false;
     }
     listener.events.push_back({"separation_count",
@@ -1682,9 +1751,30 @@ bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
             }
         }
     }
-    return Expect(traceMatches,
+    if (!Expect(traceMatches,
+                output,
+                "zero-timeout phase, report, and final-layout trace must match Rust"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator throwingTerminator(config.terminator);
+    throwingTerminator.Start();
+    PhaseTimeoutReferenceListener throwingListener({}, {}, nullptr, true);
+    bool finalCallbackThrew = false;
+    try
+    {
+        (void)sparrow::Optimize(
+            instance.Value(), config, throwingTerminator, &throwingListener);
+    }
+    catch (const std::runtime_error&)
+    {
+        finalCallbackThrew = true;
+    }
+    return Expect(finalCallbackThrew
+                      && throwingListener.finalReportCount == 1U,
                   output,
-                  "zero-timeout phase, report, and final-layout trace must match Rust");
+                  "final solution callback exceptions must propagate after the final report");
 }
 
 bool TestPositiveTimeoutOptimizeMatchesRustReference(std::ostream& output)
@@ -5816,12 +5906,459 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
     {
         orderedOptimizeThrew = true;
     }
-    return Expect(orderedOptimizeThrew && !orderedOptimizeReturned
-                      && orderedListener.progressCount == 0U
-                      && orderedListener.improvementCount == 0U
-                      && orderedListener.solutionCount == 0U,
+    if (!Expect(orderedOptimizeThrew && !orderedOptimizeReturned
+                    && orderedListener.progressCount == 0U
+                    && orderedListener.improvementCount == 0U
+                    && orderedListener.solutionCount == 0U,
+                output,
+                "ordered out-of-range warm start must fail before callbacks as Rust does"))
+    {
+        return false;
+    }
+
+    jaguar::SPSolution wrongIdentity = valid;
+    wrongIdentity.layoutSnapshot.cdeSnapshot.dynamicHazards[0]
+        .entity.itemIndex = 2U;
+    auto wrongIdentityTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(wrongIdentityTargetResult.HasValue(),
+                output,
+                "wrong-identity hazard target must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem wrongIdentityTarget =
+        std::move(wrongIdentityTargetResult).Value();
+    const double wrongIdentityInitialWidth = wrongIdentityTarget.StripWidth();
+    bool wrongIdentityRestoreThrew = false;
+    bool wrongIdentityRestoreSucceeded = false;
+    try
+    {
+        wrongIdentityRestoreSucceeded =
+            wrongIdentityTarget.Restore(wrongIdentity).HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        wrongIdentityRestoreThrew = true;
+    }
+    const auto wrongIdentityAfter = wrongIdentityTarget.Save();
+#ifndef NDEBUG
+    if (!Expect(wrongIdentityRestoreThrew && !wrongIdentityRestoreSucceeded
+                    && wrongIdentityTarget.PlacedItemCount() == 0U
+                    && wrongIdentityTarget.RemainingDemand(1U) == 1U
+                    && wrongIdentityTarget.StripWidth() == wrongIdentityInitialWidth
+                    && wrongIdentityAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.empty(),
+                output,
+                "Debug wrong-identity restore must fail before replacing the target"))
+#else
+    if (!Expect(!wrongIdentityRestoreThrew && wrongIdentityRestoreSucceeded
+                    && wrongIdentityTarget.PlacedItemCount() == 1U
+                    && wrongIdentityTarget.RemainingDemand(1U) == 0U
+                    && wrongIdentityTarget.StripWidth() == wrongIdentity.StripWidth()
+                    && wrongIdentityAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.size() == 1U
+                    && wrongIdentityAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards[0].entity.itemIndex == 2U,
+                output,
+                "Release wrong-identity restore must preserve Rust's accepted snapshot"))
+#endif
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig wrongIdentityConfig = config;
+    wrongIdentityConfig.warmStart = wrongIdentity;
+    RustOptimizeReferenceListener wrongIdentityListener;
+    sparrow::OptimizationTerminator wrongIdentityTerminator(
+        wrongIdentityConfig.terminator);
+    wrongIdentityTerminator.Start();
+    wrongIdentityTerminator.RequestStop();
+    bool wrongIdentityOptimizeThrew = false;
+    bool wrongIdentityOptimizeReturned = false;
+    try
+    {
+        const auto optimized = sparrow::Optimize(
+            baseInstance.Value(), wrongIdentityConfig,
+            wrongIdentityTerminator, &wrongIdentityListener);
+        wrongIdentityOptimizeReturned = optimized.HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        wrongIdentityOptimizeThrew = true;
+    }
+    if (!Expect(wrongIdentityOptimizeThrew
+                    && !wrongIdentityOptimizeReturned
+                    && wrongIdentityListener.reports.empty(),
+                output,
+                "wrong-identity warm start must fail before solution reports"))
+    {
+        return false;
+    }
+
+    jaguar::SPSolution extraHazard = valid;
+    jaguar::Hazard ghostHazard =
+        extraHazard.layoutSnapshot.cdeSnapshot.dynamicHazards[0];
+    ghostHazard.entity.itemIndex = 101U;
+    extraHazard.layoutSnapshot.cdeSnapshot.dynamicHazards.push_back(ghostHazard);
+    auto extraHazardTargetResult = jaguar::SPProblem::Create(baseInstance.Value());
+    if (!Expect(extraHazardTargetResult.HasValue(),
+                output,
+                "extra-hazard target must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem extraHazardTarget =
+        std::move(extraHazardTargetResult).Value();
+    const double extraHazardInitialWidth = extraHazardTarget.StripWidth();
+    bool extraHazardRestoreThrew = false;
+    bool extraHazardRestoreSucceeded = false;
+    try
+    {
+        extraHazardRestoreSucceeded = extraHazardTarget.Restore(extraHazard).HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        extraHazardRestoreThrew = true;
+    }
+    const auto extraHazardAfter = extraHazardTarget.Save();
+#ifndef NDEBUG
+    if (!Expect(extraHazardRestoreThrew && !extraHazardRestoreSucceeded
+                    && extraHazardTarget.PlacedItemCount() == 0U
+                    && extraHazardTarget.RemainingDemand(1U) == 1U
+                    && extraHazardTarget.StripWidth() == extraHazardInitialWidth
+                    && extraHazardAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.empty(),
+                output,
+                "Debug extra-hazard restore must fail before replacing the target"))
+#else
+    if (!Expect(!extraHazardRestoreThrew && extraHazardRestoreSucceeded
+                    && extraHazardTarget.PlacedItemCount() == 1U
+                    && extraHazardTarget.RemainingDemand(1U) == 0U
+                    && extraHazardTarget.StripWidth() == extraHazard.StripWidth()
+                    && extraHazardAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards.size() == 2U
+                    && extraHazardAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards[0].entity.itemIndex == 1U
+                    && extraHazardAfter.layoutSnapshot.cdeSnapshot
+                           .dynamicHazards[1].entity.itemIndex == 101U,
+                output,
+                "Release extra-hazard restore must preserve Rust's accepted snapshot"))
+#endif
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig extraHazardConfig = config;
+    extraHazardConfig.warmStart = extraHazard;
+    RustOptimizeReferenceListener extraHazardListener;
+    sparrow::OptimizationTerminator extraHazardTerminator(
+        extraHazardConfig.terminator);
+    extraHazardTerminator.Start();
+    extraHazardTerminator.RequestStop();
+    bool extraHazardOptimizeThrew = false;
+    bool extraHazardOptimizeReturned = false;
+    try
+    {
+        const auto optimized = sparrow::Optimize(
+            baseInstance.Value(), extraHazardConfig,
+            extraHazardTerminator, &extraHazardListener);
+        extraHazardOptimizeReturned = optimized.HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        extraHazardOptimizeThrew = true;
+    }
+#ifndef NDEBUG
+    if (!Expect(extraHazardOptimizeThrew && !extraHazardOptimizeReturned
+                    && extraHazardListener.reports.empty(),
+                output,
+                "Debug extra-hazard warm start must fail before solution reports"))
+#else
+    if (!Expect(!extraHazardOptimizeThrew && extraHazardOptimizeReturned
+                    && extraHazardListener.reports
+                           == std::vector<std::string>{"expl_feas", "final"},
+                output,
+                "Release extra-hazard warm start must retain Rust's report sequence"))
+#endif
+    {
+        return false;
+    }
+
+    jaguar::Layout invalidGenerationTarget(valid.layoutSnapshot.container);
+    jaguar::LayoutSnapshot invalidGeneration = valid.layoutSnapshot;
+    invalidGeneration.slotGenerations[1U] += 2U;
+    const auto invalidGenerationRestore = invalidGenerationTarget.Restore(
+        invalidGeneration);
+    if (!Expect(!invalidGenerationRestore.HasValue()
+                    && invalidGenerationTarget.PlacedItemCount() == 0U
+                    && invalidGenerationTarget.Save().cdeSnapshot
+                           .dynamicHazards.empty(),
+                output,
+                "invalid placement generation metadata must be rejected atomically"))
+    {
+        return false;
+    }
+
+    jaguar::Layout sparseLayout(valid.layoutSnapshot.container);
+    const auto sparseFirst = sparseLayout.PlaceItem(
+        baseInstance.Value().GetItem(1U), {0.0, {1.5, 2.5}});
+    const auto sparseSecond = sparseLayout.PlaceItem(
+        baseInstance.Value().GetItem(2U), {0.0, {4.5, 2.5}});
+    if (!Expect(sparseFirst.HasValue() && sparseSecond.HasValue()
+                    && sparseLayout.RemoveItem(sparseFirst.Value()).HasValue(),
+                output,
+                "sparse slot metadata fixture must be constructible"))
+    {
+        return false;
+    }
+    jaguar::LayoutSnapshot missingFreeSlot = sparseLayout.Save();
+    jaguar::Layout sparseRestoreTarget(missingFreeSlot.container);
+    if (!Expect(missingFreeSlot.freeSlotIndices.size() == 1U
+                    && sparseRestoreTarget.Restore(missingFreeSlot).HasValue()
+                    && sparseRestoreTarget.PlacedItemCount() == 1U
+                    && sparseRestoreTarget.Save().freeSlotIndices
+                           == missingFreeSlot.freeSlotIndices
+                    && sparseRestoreTarget.Save().slotGenerations
+                           == missingFreeSlot.slotGenerations,
+                output,
+                "valid sparse slot metadata must survive restore like Rust's slot map"))
+    {
+        return false;
+    }
+    missingFreeSlot.freeSlotIndices.clear();
+    jaguar::Layout incompleteMetadataTarget(missingFreeSlot.container);
+    const auto incompleteMetadataRestore =
+        incompleteMetadataTarget.Restore(missingFreeSlot);
+    return Expect(!incompleteMetadataRestore.HasValue()
+                      && incompleteMetadataTarget.PlacedItemCount() == 0U
+                      && incompleteMetadataTarget.Save().cdeSnapshot
+                             .dynamicHazards.empty(),
                   output,
-                  "ordered out-of-range warm start must fail before callbacks as Rust does");
+                  "incomplete free-slot metadata must be rejected atomically");
+}
+
+bool TestWarmStartCdeHazardCorruptionMatchesRust(std::ostream& output)
+{
+    std::string instanceJson;
+    bool fixtureRead = false;
+    for (const std::string& path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyLarge.json"})
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+            continue;
+        instanceJson.assign(std::istreambuf_iterator<char>(file),
+                            std::istreambuf_iterator<char>());
+        fixtureRead = true;
+        break;
+    }
+    if (!Expect(fixtureRead, output,
+                "hazard-corruption warm-start fixture must be readable"))
+    {
+        return false;
+    }
+
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(), output,
+                "hazard-corruption warm-start fixture must import"))
+    {
+        return false;
+    }
+
+    auto sourceResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(sourceResult.HasValue(), output,
+                "hazard-corruption source problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem source = std::move(sourceResult).Value();
+    if (!Expect(source.ChangeStripWidth(8.0).HasValue()
+                    && source.PlaceItem({1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && source.PlaceItem({2U, {0.0, {4.5, 2.5}}}).HasValue(),
+                output,
+                "two-item hazard-corruption source must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution valid = source.Save();
+    auto findHazard = [](jaguar::SPSolution& solution,
+                         jaguar::ItemIndex itemIndex) -> jaguar::Hazard* {
+        auto& hazards = solution.layoutSnapshot.cdeSnapshot.dynamicHazards;
+        const auto found = std::find_if(
+            hazards.begin(), hazards.end(), [itemIndex](const jaguar::Hazard& hazard) {
+                return hazard.entity.kind == jaguar::HazardKind::PlacedItem
+                       && hazard.entity.itemIndex == itemIndex;
+            });
+        return found == hazards.end() ? nullptr : &*found;
+    };
+
+    jaguar::SPSolution duplicateEntity = valid;
+    const jaguar::Hazard* firstValidHazard = findHazard(duplicateEntity, 1U);
+    if (!Expect(firstValidHazard != nullptr, output,
+                "first placed-item hazard must be available for duplication"))
+    {
+        return false;
+    }
+    duplicateEntity.layoutSnapshot.cdeSnapshot.dynamicHazards.push_back(
+        *firstValidHazard);
+
+    jaguar::SPSolution wrongShape = valid;
+    jaguar::Hazard* wrongShapeFirst = findHazard(wrongShape, 1U);
+    jaguar::Hazard* wrongShapeSecond = findHazard(wrongShape, 2U);
+    if (!Expect(wrongShapeFirst != nullptr && wrongShapeSecond != nullptr,
+                output,
+                "both placed-item hazards must be available for shape mutation"))
+    {
+        return false;
+    }
+    wrongShapeFirst->shape = wrongShapeSecond->shape;
+
+    jaguar::SPSolution wrongPlacedKey = valid;
+    jaguar::Hazard* wrongKeyFirst = findHazard(wrongPlacedKey, 1U);
+    jaguar::Hazard* wrongKeySecond = findHazard(wrongPlacedKey, 2U);
+    if (!Expect(wrongKeyFirst != nullptr && wrongKeySecond != nullptr,
+                output,
+                "both placed-item hazards must be available for key mutation"))
+    {
+        return false;
+    }
+    wrongKeyFirst->entity.placedItemHandle =
+        wrongKeySecond->entity.placedItemHandle;
+
+    jaguar::SPSolution wrongTransform = valid;
+    jaguar::Hazard* wrongTransformFirst = findHazard(wrongTransform, 1U);
+    if (!Expect(wrongTransformFirst != nullptr, output,
+                "first placed-item hazard must be available for transform mutation"))
+    {
+        return false;
+    }
+    wrongTransformFirst->entity.transform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {12.5, 2.5});
+
+    jaguar::SPSolution nonDynamicHazard = valid;
+    jaguar::Hazard* nonDynamicFirst = findHazard(nonDynamicHazard, 1U);
+    if (!Expect(nonDynamicFirst != nullptr, output,
+                "first placed-item hazard must be available for dynamic-flag mutation"))
+    {
+        return false;
+    }
+    nonDynamicFirst->dynamic = false;
+
+    jaguar::SPSolution staticIdentityCollision = valid;
+    jaguar::Hazard* staticIdentityFirst = findHazard(staticIdentityCollision, 1U);
+    if (!Expect(staticIdentityFirst != nullptr, output,
+                "first placed-item hazard must be available for static-identity mutation"))
+    {
+        return false;
+    }
+    staticIdentityFirst->entity.kind = jaguar::HazardKind::Exterior;
+
+    jaguar::Layout directStaticIdentityLayout(
+        staticIdentityCollision.layoutSnapshot.container);
+    bool directStaticIdentityThrew = false;
+    bool directStaticIdentitySucceeded = false;
+    try
+    {
+        directStaticIdentitySucceeded = directStaticIdentityLayout
+                                            .Restore(staticIdentityCollision.layoutSnapshot)
+                                            .HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+        directStaticIdentityThrew = true;
+    }
+    const jaguar::LayoutSnapshot directStaticIdentityAfter =
+        directStaticIdentityLayout.Save();
+#ifndef NDEBUG
+    if (!Expect(directStaticIdentityThrew && !directStaticIdentitySucceeded
+                    && directStaticIdentityLayout.PlacedItemCount() == 2U
+                    && directStaticIdentityAfter.cdeSnapshot.dynamicHazards.empty(),
+                output,
+                "Debug static-identity collision must retain the Rust partial Layout state"))
+    {
+        return false;
+    }
+#else
+    if (!Expect(!directStaticIdentityThrew && directStaticIdentitySucceeded
+                    && directStaticIdentityLayout.PlacedItemCount() == 2U
+                    && directStaticIdentityAfter.cdeSnapshot.dynamicHazards.size() == 2U,
+                output,
+                "Release static-identity collision must retain both Rust dynamic hazards"))
+    {
+        return false;
+    }
+#endif
+
+    struct MalformedCase
+    {
+        const char* name;
+        jaguar::SPSolution solution;
+        std::size_t releaseDynamicHazardCount;
+    };
+    const std::vector<MalformedCase> cases{
+        {"duplicate entity", std::move(duplicateEntity), 3U},
+        {"wrong shape", std::move(wrongShape), 2U},
+        {"wrong placed-item key", std::move(wrongPlacedKey), 2U},
+        {"wrong transform", std::move(wrongTransform), 2U},
+        {"non-dynamic hazard in dynamic list", std::move(nonDynamicHazard), 1U},
+        {"dynamic entity collides with static exterior",
+         std::move(staticIdentityCollision), 2U},
+    };
+
+    for (const MalformedCase& malformed : cases)
+    {
+        auto targetResult = jaguar::SPProblem::Create(instance.Value());
+        if (!Expect(targetResult.HasValue(), output,
+                    "hazard-corruption target problem must be created"))
+        {
+            return false;
+        }
+        jaguar::SPProblem target = std::move(targetResult).Value();
+        const double originalWidth = target.StripWidth();
+        bool restoreThrew = false;
+        bool restoreSucceeded = false;
+        try
+        {
+            restoreSucceeded = target.Restore(malformed.solution).HasValue();
+        }
+        catch (const std::logic_error&)
+        {
+            restoreThrew = true;
+        }
+        const jaguar::SPSolution after = target.Save();
+
+#ifndef NDEBUG
+        if (!Expect(restoreThrew && !restoreSucceeded
+                        && target.PlacedItemCount() == 0U
+                        && target.RemainingDemand(1U) == 1U
+                        && target.RemainingDemand(2U) == 1U
+                        && target.StripWidth() == originalWidth
+                        && after.layoutSnapshot.cdeSnapshot.dynamicHazards.empty(),
+                    output,
+                    malformed.name))
+        {
+            return false;
+        }
+#else
+        if (!Expect(!restoreThrew && restoreSucceeded
+                        && target.PlacedItemCount() == 2U
+                        && target.RemainingDemand(1U) == 0U
+                        && target.RemainingDemand(2U) == 0U
+                        && target.StripWidth() == 8.0
+                        && after.layoutSnapshot.cdeSnapshot.dynamicHazards.size()
+                               == malformed.releaseDynamicHazardCount,
+                    output,
+                    malformed.name))
+        {
+            return false;
+        }
+#endif
+    }
+    return true;
 }
 
 bool TestEmptyLargeAndPartialWarmStartMatchRust(
@@ -8248,6 +8785,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
 
+    if (!TestZeroTimeoutOptimizeMatchesRustReference(output))
+    {
+        return false;
+    }
     if (!TestNormalPoolSamplerMatchesRustReference(output))
     {
         return false;
@@ -8265,6 +8806,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestWarmStartRejectionBoundariesMatchRust(output))
+    {
+        return false;
+    }
+    if (!TestWarmStartCdeHazardCorruptionMatchesRust(output))
     {
         return false;
     }
@@ -8453,10 +8998,6 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestZeroPhaseTimeoutSemantics(output))
-    {
-        return false;
-    }
-    if (!TestZeroTimeoutOptimizeMatchesRustReference(output))
     {
         return false;
     }

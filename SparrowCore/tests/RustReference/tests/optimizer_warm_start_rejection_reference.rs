@@ -1,5 +1,6 @@
 use jagua_rs::Instant;
-use jagua_rs::collision_detection::hazards::HazardEntity;
+use jagua_rs::collision_detection::hazards::{Hazard, HazardEntity};
+use jagua_rs::entities::Layout;
 use jagua_rs::geometry::DTransformation;
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem, SPSolution};
@@ -51,6 +52,21 @@ fn read_instance(name: &str) -> jagua_rs::probs::spp::entities::SPInstance {
     );
     import_instance(&importer, &external)
         .unwrap_or_else(|error| panic!("import warm-start fixture {name}: {error}"))
+}
+
+fn placed_item_hazard(solution: &SPSolution, item_idx: usize) -> &Hazard {
+    solution
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter()
+        .find(|hazard| {
+            matches!(
+                hazard.entity,
+                HazardEntity::PlacedItem { id, .. } if id == item_idx
+            )
+        })
+        .expect("placed-item hazard exists")
 }
 
 #[test]
@@ -417,4 +433,314 @@ fn warm_start_rejection_boundaries_match_observed_rust_profiles() {
     }));
     assert!(ordered_optimized.is_err());
     assert!(ordered_optimize_listener.reports.is_empty());
+
+    let probe_base = read_instance("../Fixtures/ExplorationEmptyLarge.json");
+    let mut probe_source = SPProblem::new(probe_base.clone()).expect("create restore probe source");
+    probe_source
+        .change_strip_width(8.0)
+        .expect("set restore probe width");
+    probe_source.place_item(SPPlacement {
+        item_idx: 1,
+        d_transf: DTransformation::new(0.0, (1.5, 2.5)),
+    });
+    let probe_solution = probe_source.save();
+
+    let mut wrong_identity = probe_solution.clone();
+    let wrong_identity_hazard = &mut wrong_identity.layout_snapshot.cde_snapshot.dynamic_hazards[0];
+    wrong_identity_hazard.entity = match wrong_identity_hazard.entity {
+        HazardEntity::PlacedItem { id, dt, pk } => HazardEntity::PlacedItem { id: id + 1, dt, pk },
+        other => other,
+    };
+    let mut wrong_identity_target =
+        SPProblem::new(probe_base.clone()).expect("create wrong-identity target");
+    let wrong_identity_initial_width = wrong_identity_target.strip.width;
+    let wrong_identity_result = catch_unwind(AssertUnwindSafe(|| {
+        wrong_identity_target.restore(&wrong_identity);
+    }));
+    let wrong_identity_after = wrong_identity_target.layout.save();
+    if cfg!(debug_assertions) {
+        assert!(wrong_identity_result.is_err());
+        assert!(wrong_identity_after.placed_items.is_empty());
+        assert!(wrong_identity_after.cde_snapshot.dynamic_hazards.is_empty());
+        assert_eq!(wrong_identity_target.item_demand_qtys, vec![1, 1, 1]);
+        assert_eq!(
+            wrong_identity_target.strip.width,
+            wrong_identity_initial_width
+        );
+    } else {
+        assert!(wrong_identity_result.is_ok());
+        assert_eq!(wrong_identity_after.placed_items.len(), 1);
+        assert_eq!(wrong_identity_after.cde_snapshot.dynamic_hazards.len(), 1);
+        assert!(matches!(
+            wrong_identity_after.cde_snapshot.dynamic_hazards[0].entity,
+            HazardEntity::PlacedItem { id: 2, .. }
+        ));
+        assert_eq!(wrong_identity_target.item_demand_qtys, vec![1, 0, 1]);
+        assert_eq!(wrong_identity_target.strip.width, 8.0);
+    }
+    let mut wrong_identity_listener = RecordingListener::default();
+    let mut wrong_identity_terminator = StopImmediately;
+    let wrong_identity_optimized = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            probe_base.clone(),
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut wrong_identity_listener,
+            &mut wrong_identity_terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&wrong_identity),
+        )
+    }));
+    assert!(wrong_identity_optimized.is_err());
+    assert!(wrong_identity_listener.reports.is_empty());
+
+    let mut extra_hazard = probe_solution;
+    extra_hazard
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .push(extra_hazard.layout_snapshot.cde_snapshot.dynamic_hazards[0].clone());
+    let extra_hazard_entity =
+        &mut extra_hazard.layout_snapshot.cde_snapshot.dynamic_hazards[1].entity;
+    *extra_hazard_entity = match *extra_hazard_entity {
+        HazardEntity::PlacedItem { id, dt, pk } => HazardEntity::PlacedItem {
+            id: id + 100,
+            dt,
+            pk,
+        },
+        other => other,
+    };
+    let mut extra_hazard_target =
+        SPProblem::new(probe_base.clone()).expect("create extra-hazard target");
+    let extra_hazard_initial_width = extra_hazard_target.strip.width;
+    let extra_hazard_result = catch_unwind(AssertUnwindSafe(|| {
+        extra_hazard_target.restore(&extra_hazard);
+    }));
+    let extra_hazard_after = extra_hazard_target.layout.save();
+    if cfg!(debug_assertions) {
+        assert!(extra_hazard_result.is_err());
+        assert!(extra_hazard_after.placed_items.is_empty());
+        assert!(extra_hazard_after.cde_snapshot.dynamic_hazards.is_empty());
+        assert_eq!(extra_hazard_target.item_demand_qtys, vec![1, 1, 1]);
+        assert_eq!(extra_hazard_target.strip.width, extra_hazard_initial_width);
+    } else {
+        assert!(extra_hazard_result.is_ok());
+        assert_eq!(extra_hazard_after.placed_items.len(), 1);
+        assert_eq!(extra_hazard_after.cde_snapshot.dynamic_hazards.len(), 2);
+        assert!(matches!(
+            extra_hazard_after.cde_snapshot.dynamic_hazards[0].entity,
+            HazardEntity::PlacedItem { id: 1, .. }
+        ));
+        assert!(matches!(
+            extra_hazard_after.cde_snapshot.dynamic_hazards[1].entity,
+            HazardEntity::PlacedItem { id: 101, .. }
+        ));
+        assert_eq!(extra_hazard_target.item_demand_qtys, vec![1, 0, 1]);
+        assert_eq!(extra_hazard_target.strip.width, 8.0);
+    }
+    let mut extra_hazard_listener = RecordingListener::default();
+    let mut extra_hazard_terminator = StopImmediately;
+    let extra_hazard_optimized = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            probe_base.clone(),
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut extra_hazard_listener,
+            &mut extra_hazard_terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&extra_hazard),
+        )
+    }));
+    if cfg!(debug_assertions) {
+        assert!(extra_hazard_optimized.is_err());
+        assert!(extra_hazard_listener.reports.is_empty());
+    } else {
+        assert!(matches!(extra_hazard_optimized, Ok(Ok(_))));
+        assert_eq!(
+            extra_hazard_listener.reports,
+            vec![ReportType::ExplFeas, ReportType::Final]
+        );
+    }
+
+    let mut sparse_source = SPProblem::new(probe_base.clone()).expect("create sparse-slot source");
+    sparse_source
+        .change_strip_width(8.0)
+        .expect("set sparse-slot strip width");
+    let removed_key = sparse_source.place_item(SPPlacement {
+        item_idx: 1,
+        d_transf: DTransformation::new(0.0, (1.5, 2.5)),
+    });
+    let retained_key = sparse_source.place_item(SPPlacement {
+        item_idx: 2,
+        d_transf: DTransformation::new(0.0, (4.5, 2.5)),
+    });
+    sparse_source.layout.remove_item(removed_key);
+    let sparse_solution = sparse_source.save();
+    assert_eq!(
+        sparse_solution
+            .layout_snapshot
+            .placed_items
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![retained_key]
+    );
+    let mut sparse_target = SPProblem::new(probe_base).expect("create sparse-slot target");
+    let sparse_restore = catch_unwind(AssertUnwindSafe(|| {
+        sparse_target.restore(&sparse_solution);
+    }));
+    assert!(sparse_restore.is_ok());
+    assert_eq!(
+        sparse_target.layout.placed_items.keys().collect::<Vec<_>>(),
+        vec![retained_key]
+    );
+    assert_eq!(sparse_target.item_demand_qtys, vec![1, 1, 0]);
+    assert_eq!(sparse_target.strip.width, 8.0);
+}
+
+#[test]
+fn restore_snapshot_cde_hazard_corruption_matches_observed_rust_profiles() {
+    let base = read_instance("../Fixtures/ExplorationEmptyLarge.json");
+    let mut source = SPProblem::new(base.clone()).expect("create hazard source");
+    source
+        .change_strip_width(8.0)
+        .expect("set hazard snapshot width");
+    source.place_item(SPPlacement {
+        item_idx: 1,
+        d_transf: DTransformation::new(0.0, (1.5, 2.5)),
+    });
+    source.place_item(SPPlacement {
+        item_idx: 2,
+        d_transf: DTransformation::new(0.0, (4.5, 2.5)),
+    });
+    let valid = source.save();
+    let mut duplicate_entity = valid.clone();
+    duplicate_entity
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .push(placed_item_hazard(&valid, 1).clone());
+
+    let mut wrong_shape = valid.clone();
+    let second_shape = placed_item_hazard(&valid, 2).shape.clone();
+    let first_hazard = wrong_shape
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter_mut()
+        .find(|hazard| matches!(hazard.entity, HazardEntity::PlacedItem { id: 1, .. }))
+        .expect("first placed-item hazard exists");
+    first_hazard.shape = second_shape;
+
+    let second_key = match placed_item_hazard(&valid, 2).entity {
+        HazardEntity::PlacedItem { pk, .. } => pk,
+        other => panic!("unexpected second hazard entity: {other:?}"),
+    };
+    let mut wrong_placed_key = valid.clone();
+    let first_key_hazard = wrong_placed_key
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter_mut()
+        .find(|hazard| matches!(hazard.entity, HazardEntity::PlacedItem { id: 1, .. }))
+        .expect("first placed-item hazard exists");
+    first_key_hazard.entity = match first_key_hazard.entity {
+        HazardEntity::PlacedItem { id, dt, .. } => HazardEntity::PlacedItem {
+            id,
+            dt,
+            pk: second_key,
+        },
+        other => panic!("unexpected first hazard entity: {other:?}"),
+    };
+
+    let mut wrong_transform = valid.clone();
+    let first_transform_hazard = wrong_transform
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter_mut()
+        .find(|hazard| matches!(hazard.entity, HazardEntity::PlacedItem { id: 1, .. }))
+        .expect("first placed-item hazard exists");
+    first_transform_hazard.entity = match first_transform_hazard.entity {
+        HazardEntity::PlacedItem { id, pk, .. } => HazardEntity::PlacedItem {
+            id,
+            dt: DTransformation::new(0.0, (12.5, 2.5)),
+            pk,
+        },
+        other => panic!("unexpected first hazard entity: {other:?}"),
+    };
+
+    let mut non_dynamic_hazard = valid.clone();
+    let first_hazard = non_dynamic_hazard
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter_mut()
+        .find(|hazard| matches!(hazard.entity, HazardEntity::PlacedItem { id: 1, .. }))
+        .expect("first placed-item hazard exists");
+    first_hazard.dynamic = false;
+
+    let mut static_identity_collision = valid.clone();
+    let first_hazard = static_identity_collision
+        .layout_snapshot
+        .cde_snapshot
+        .dynamic_hazards
+        .iter_mut()
+        .find(|hazard| matches!(hazard.entity, HazardEntity::PlacedItem { id: 1, .. }))
+        .expect("first placed-item hazard exists");
+    first_hazard.entity = HazardEntity::Exterior;
+
+    let mut direct_layout =
+        Layout::new(static_identity_collision.layout_snapshot.container.clone());
+    let direct_restore = catch_unwind(AssertUnwindSafe(|| {
+        direct_layout.restore(&static_identity_collision.layout_snapshot)
+    }));
+    if cfg!(debug_assertions) {
+        assert!(direct_restore.is_err());
+        assert_eq!(direct_layout.placed_items.len(), 2);
+        assert!(direct_layout.save().cde_snapshot.dynamic_hazards.is_empty());
+    } else {
+        assert!(direct_restore.is_ok());
+        assert_eq!(direct_layout.placed_items.len(), 2);
+        assert_eq!(direct_layout.save().cde_snapshot.dynamic_hazards.len(), 2);
+    }
+
+    let malformed_cases = [
+        ("duplicate entity", duplicate_entity, 3),
+        ("wrong shape", wrong_shape, 2),
+        ("wrong placed-item key", wrong_placed_key, 2),
+        ("wrong transform", wrong_transform, 2),
+        ("non-dynamic hazard in dynamic list", non_dynamic_hazard, 1),
+        (
+            "dynamic entity collides with static exterior",
+            static_identity_collision,
+            2,
+        ),
+    ];
+    for (name, malformed, expected_release_dynamic_hazards) in malformed_cases {
+        let mut target = SPProblem::new(base.clone()).expect("create hazard target");
+        let original_width = target.strip.width;
+        let original_demand = target.item_demand_qtys.clone();
+        let restored = catch_unwind(AssertUnwindSafe(|| target.restore(&malformed)));
+
+        if cfg!(debug_assertions) {
+            assert!(restored.is_err(), "{name} must fail in Rust Debug");
+            assert!(target.layout.placed_items.is_empty(), "{name}");
+            assert!(
+                target.layout.save().cde_snapshot.dynamic_hazards.is_empty(),
+                "{name}"
+            );
+            assert_eq!(target.item_demand_qtys, original_demand, "{name}");
+            assert_eq!(target.strip.width, original_width, "{name}");
+        } else {
+            assert!(restored.is_ok(), "{name} must restore in Rust Release");
+            assert_eq!(target.layout.placed_items.len(), 2, "{name}");
+            assert_eq!(target.item_demand_qtys, vec![1, 0, 0], "{name}");
+            assert_eq!(target.strip.width, 8.0, "{name}");
+            assert_eq!(
+                target.layout.save().cde_snapshot.dynamic_hazards.len(),
+                expected_release_dynamic_hazards,
+                "{name}"
+            );
+        }
+    }
 }

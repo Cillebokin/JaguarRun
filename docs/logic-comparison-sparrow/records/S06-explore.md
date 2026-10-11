@@ -392,7 +392,7 @@ Rust `contained_collector_filters_noncontained_collision_but_relocates_survivor`
 
 `optimizer_warm_start_rejection_reference.rs::warm_start_rejection_boundaries_match_observed_rust_profiles` 现在同时检查直接 `SPProblem::restore` 与可到达的顶层 `optimize` 路径；C++ 对照位于 `TestExploration.cpp::TestWarmStartRejectionBoundariesMatchRust`。Rust Debug/Release 和 C++ Debug/Release 均由独立 profile 运行。
 
-源码顺序是行为差异的根源：Rust `SPProblem::restore` 先尝试原 `Layout` 恢复，静态容器基不匹配时才调用 `Layout::from_snapshot`；布局和 strip 更新后再逐 placement 重置、扣减需求。C++ 原实现先扫描全量需求和 item 定义，再用临时布局事务式恢复，因此错误会在目标状态变更前返回。当前最小改动让 C++ 按 Rust 的顺序恢复；对于 placement 对应的动态 hazard 缺失（全空或非空子集）按 profile 复现 Rust 状态，其余错误 hazard、额外 hazard 和 slot 元数据仍走既有校验。
+源码顺序是行为差异的根源：Rust `SPProblem::restore` 先尝试原 `Layout` 恢复，静态容器基不匹配时才调用 `Layout::from_snapshot`；布局和 strip 更新后再逐 placement 重置、扣减需求。C++ 现按同一顺序恢复。对非空形状但内容损坏的 CDE 快照，Debug 断言可能在临时 Layout 完成前抛出；顶层 restore 的临时对象失败后，外层目标保持原状态。直接 `Layout::Restore` 则会先安装容器和 placements，再进入 CDE restore，Debug 失败会留下 Rust 同序的部分状态；Release 保留 Rust Release 可接受的快照状态。顶层 warm-start 仍逐 placement 检查自身 hazard：缺失或错身份会在首次回调前失败；额外实体若保留每个 placement 自身 hazard，则可继续运行。C++ 在改变布局状态前额外拒绝空 shape，并校验显式 slot 元数据；Rust 的 `Arc<SPolygon>` 与 `SlotMap` 安全 API 无法构造这两类表示。
 
 | 输入边界 | Rust Sparrow | SparrowCore | 结论 |
 |---|---|---|---|
@@ -400,8 +400,27 @@ Rust `contained_collector_filters_noncontained_collision_but_relocates_survivor`
 | item 定义不匹配：dense index 与 external ID 相同，轮廓宽度由 1 改为 1.25 | Debug/Release 顶层 `optimize` 均接受，报告顺序 `[ExplFeas, Final]`，最终快照保留替代轮廓 | Debug/Release 的直接 `Restore` 和顶层 `Optimize` 均接受，报告顺序及最终轮廓与 Rust 对照一致 | 此边界已对齐；C++ 不再以当前实例轮廓相同作为恢复前置条件 |
 | 碰撞快照结构不一致：保留一个 placement，清空 `cde_snapshot.dynamic_hazards` | Debug 在布局 quadtree 一致性断言处 panic，外层目标问题未替换；Release 直接恢复接受 1 个 placement、0 个动态 hazard。继续运行 `optimize` 时，Release 在 `CollisionTracker::new` 收集自身 hazard 时 panic，尚未发出 solution report | Debug 在临时 `Layout::Restore` 中抛 `std::logic_error`，外层目标问题未替换；Release 直接恢复保留 1 个 placement、0 个动态 hazard。顶层 `Optimize` 在 warm-start 预检处抛同消息的 `std::logic_error`，回调前失败 | 直接恢复状态和顶层失败/报告边界已对齐；C++ Release 在预检处提前映射 Rust tracker panic。该结论覆盖“动态 hazard 全空”夹具 |
 | 碰撞快照结构不一致：2 个 placement 仅保留其中 1 个匹配的动态 hazard | Debug 在 `Layout::from_snapshot` 的 quadtree 一致性断言处 panic，外层目标问题未替换；Release 直接恢复接受 2 个 placement、1 个动态 hazard。顶层 `optimize` 在构造 tracker 时 panic，尚未发出 solution report | Debug 在临时 `Layout::Restore` 中抛 `std::logic_error`，外层目标问题未替换；Release 直接恢复保留 2 个 placement、1 个动态 hazard。顶层 `Optimize` 在 warm-start 预检处抛 `std::logic_error`，回调前失败 | 该部分缺失子集已按 profile 对齐；Release 的顶层 tracker 失败映射发生在 C++ 预检处。夹具只删去一个可匹配 hazard，不涵盖错误或额外 hazard |
+| placement hazard 数量不变但实体身份错配：将一个 hazard 的 `id` 改为另一个 item index | Debug 在 `layout_qt_matches_fresh_qt` 断言处 panic，因目标宽度不同而走临时布局，外层目标保持原布局/strip/需求；Release 接受 1 个 placement 和 1 个身份错误 hazard，扣减 item 1 后需求为 `[1,0,1]`、strip 宽为 8。顶层 `optimize` 在 Debug restore 断言或 Release tracker collector 查找自身 hazard 时 panic，solution report 为空 | Debug 在临时 `Layout::Restore` 完成安装后抛 `std::logic_error`，外层目标不变；Release 直接 Restore 接受相同 placement/hazard/需求/strip 状态。顶层 `Optimize` 在 Debug restore 或 Release warm-start 自身 hazard 预检处抛 `std::logic_error`，solution report/回调前失败 | 直接恢复的 Debug/Release 状态及顶层失败/回调边界已对齐；Release 错误身份只验证 `id` 错配这一形态，C++ 在 tracker 前检查，其他字段错配不外推 |
+| placements 有对应 hazard，另附一个身份不同的额外动态 hazard | Debug 在布局/四叉树一致性断言处 panic，临时目标外层保持不变；Release 接受 1 个 placement 和 2 个动态 hazard，需求为 `[1,0,1]`、strip 宽为 8。立即停止的顶层 `optimize` 成功并报告 `[ExplFeas, Final]` | Debug 在临时 `Layout::Restore` 完成安装后抛 `std::logic_error`，外层目标不变；Release 直接 Restore 保留 1 个 placement、2 个动态 hazard，并在立即停止配置下报告 `[ExplFeas, Final]` | 该独立额外实体已按 profile 对齐；结论限定为额外 hazard identity 唯一且现有 placement 自身 hazard 仍存在，不覆盖重复实体或错误 shape |
 | placement 的 `item_idx` 越过目标实例需求向量边界：保留单 placement 越界夹具，并新增先有效 item_idx=1、后越界 item_idx=`item_count` 的两项快照，布局与 CDE hazards 均自洽 | 单 placement 情形在需求扣减前 panic；两项顺序情形在第二个 placement 访问 `item_demand_qtys[pi.item.idx]` 时 panic，布局/strip 已恢复，前序 item 1 已扣减，需求为 `[1,0,1]`，越界项未扣减。顶层 `optimize` 均在首次 solution report 前 panic | 单 placement 情形在需求扣减前抛 `std::out_of_range`；两项顺序情形在第二项边界检查处抛异常，布局/strip 已恢复，前序 item 1 已扣减，需求为 `[1,0,1]`，越界项未扣减。顶层 `Optimize` 均在首次回调前抛出 | 两个越界夹具确认单项失败状态及“前序有效 placement 扣减保留、后续越界项不扣减”的顺序；panic 与 exception 仍为语言出口映射，不外推到其他 placement 排序或任意损坏快照 |
 
-本轮实现：`SPProblem::Restore` 取消 item-definition 预拒绝，先恢复布局/strip 再逐项扣减需求；Debug 下溢抛异常，Release 保留 `size_t` 无符号回绕。越界 `item_idx` 的现有 C++ 异常路径现由 Rust/C++ reference 固定其 Debug/Release 失败后状态和顶层回调边界。`Layout::Restore` 对缺少 placement hazard 的快照在 Debug 完成临时恢复后抛异常，在 Release 保留 Rust 接受的不完整状态；顶层 warm-start 对全空和已测部分缺失快照均在回调前复现 Rust 后续 tracker 初始化失败。C++ 只允许快照 hazard 为匹配 placement 的子集；错误/额外 hazard 仍拒绝。错误类别及语言出口映射见 [ERR-WARMSTART-RESTORE](../error-semantics.md#err-warmstart-restore)。
+#### CDE hazard 快照字段损坏（新增跨 profile 用例）
 
-这四类已确认边界以六个 fixture case 覆盖状态、接受/失败结果及 solution-report 时点；hazard 缺失类有全空与非空部分缺失两个夹具，越界索引类同时覆盖单项越界和前序有效 placement 后越界的顺序状态。panic 与 C++ exception 的类型不相同。此结论不覆盖其他 placement 排序、错误/额外 hazard、任意无效 slot metadata，也不保证任意损坏快照的行为相同。partial/重叠输入的报告类别也仍不代表完整需求或无碰撞布局。`verify-rust-reference.ps1` 已通过，Rust Debug/Release 各 114 个集成测试函数通过；SparrowCore Debug/Release 全量 runner 均以 exit code 0 结束。完整阶段验收仍见 `replication-roadmap.md`。
+`optimizer_warm_start_rejection_reference.rs::restore_snapshot_cde_hazard_corruption_matches_observed_rust_profiles` 与 `TestExploration.cpp::TestWarmStartCdeHazardCorruptionMatchesRust` 使用同一两 placement 快照，分别突变一个字段；源快照宽度为 8，目标使用原容器，因此失败发生在新建的临时 Layout 内。六种突变均在 Debug panic/throw 后保留外层目标的原布局、strip 和需求；Release 均接受两项 placement、宽度 8、需求 `[1,0,0]`，动态 hazard 数量按实际 CDE state 如下：
+
+| 快照突变 | Rust Debug / SparrowCore Debug | Rust Release / SparrowCore Release |
+|---|---|---|
+| 在动态 hazard 列表中重复加入 item 1 的相同 entity | 临时 CDE 注册重复 entity 时失败；外层目标未替换 | 接受，动态 hazard 数为 3 |
+| item 1 hazard 改用 item 2 的 shape | Layout/CDE 一致性断言失败；外层目标未替换 | 接受，动态 hazard 数为 2 |
+| item 1 hazard 的 `pk` 改为 item 2 的 key | Layout/CDE 一致性断言失败；外层目标未替换 | 接受，动态 hazard 数为 2 |
+| item 1 hazard 的 `dt` 改为另一平移 | Layout/CDE 一致性断言失败；外层目标未替换 | 接受，动态 hazard 数为 2 |
+| 动态列表中的 item 1 hazard 标为 `dynamic=false` | 恢复后动态数量断言失败；外层目标未替换 | 接受，`Save()` 只返回仍为 dynamic 的 item 2，数量为 1 |
+| item 1 entity 改为静态 Exterior 的 entity | 注册时与现有静态 Exterior 重复，Debug 断言失败；外层目标未替换 | 接受，动态列表含 Exterior 与 item 2，数量为 2 |
+
+同一 Exterior 突变另直接调用 Rust/C++ `Layout::restore`/`Layout::Restore`，以区分快照对象外层回滚和布局内部部分状态：Debug 均已安装 2 个 placement，但 CDE 动态 hazard 列表仍为空；Release 均成功并保留 2 个动态 hazard。C++ 低层 `CollisionEngine::Restore` 还单独核对“将现有动态 item 改成与静态 Exterior 重名”的顺序：Debug 先移除旧动态 hazard，再在注册重复 Exterior 时失败，失败后动态列表为空；Release 接受重复 Exterior。Rust 的 `register_hazard` 同样在 Debug 先执行 duplicate-entity `debug_assert`、再插入 hazard，Release 无该断言。
+
+slot 元数据边界另做了 C++ 快照表示检查：有效 sparse slotmap（删除首个 placement、保留后续 generation）在 Rust/C++ 均可恢复；C++ 对 placement generation 与 slot generation 不一致、以及 free-slot 列表缺项均在布局/CDE 状态变更前返回 `SnapshotMismatch`。Rust `SlotMap` 的安全快照 API 不允许构造这两类无效内部元数据，因此它们是 C++ 表示层的防御检查，没有一对一的 Rust 失败行为。
+
+本轮实现：`SPProblem::Restore` 按 Rust 顺序恢复布局/strip 再逐项扣减需求；`Layout::Restore` 仅在安装布局前执行容器、显式槽元数据与 null-shape 校验，CDE/布局一致性断言保持 Debug-only，并保留 Rust 的失败状态顺序。Release 接受已测非空损坏 hazard 快照；warm-start 预检在需要 tracker 自身 hazard 的具体路径上提前报错。越界 `item_idx` 的异常路径仍按 Rust Debug/Release 状态及顶层回调边界核对。错误类别及语言出口映射见 [ERR-WARMSTART-RESTORE](../error-semantics.md#err-warmstart-restore)。
+
+15 个 Rust/C++ 可比对 Restore 场景覆盖状态、接受/失败结果及已测回调时点：原 9 个需求/定义/hazard 缺失或错身份/额外实体/越界顺序/sparse SlotMap 场景，加上本节 6 个 CDE hazard 字段损坏场景；另有两个 C++ 无效 slot 元数据拒绝检查，以及一个 C++ null-shape 预变更拒绝检查（Rust 类型系统无法表示 null `Arc`）。未覆盖其他 placement 排序、未列出的 hazard 字段组合或任意损坏快照。Rust panic 与 C++ exception 类型仍是语言出口映射。partial/重叠输入的报告类别不代表完整需求或无碰撞布局。Rust 定向 Debug/Release reference 与 JaguarCore、SparrowCore Debug/Release 全量 runner 均通过；完整阶段验收仍见 `replication-roadmap.md`。

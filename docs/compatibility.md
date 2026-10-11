@@ -72,8 +72,12 @@ jagua-rs 规则拒绝，不把未支持的多环 offset 误称为已完成。
 `quality < required_quality` 的 `InferiorQualityZone`，而质量 0 的 Hole 不在该过滤条件内，始终作为碰撞 Hazard。
 这条规则优先于对字段名 `min_quality` 的直觉解释，C++ Layout 和差分测试均按源码行为执行。
 
-`CollisionEngine` 的动态 Hazard 只允许 `PlacedItem`；Exterior、Hole 和
-`InferiorQualityZone` 必须保持静态。Snapshot restore 会在构建临时 Slot/QuadTree 前拒绝违反该约束的输入，失败时保留原 CDE 状态。
+正常 `Layout` 用法把 PlacedItem 注册为动态 Hazard，把 Exterior、Hole 和
+`InferiorQualityZone` 作为静态 Hazard；但公开的 CDE 快照恢复入口不会在输入层限制
+Hazard entity 类型或快照列表中的 `dynamic` 标志。Restore 只按 entity 匹配当前动态 Hazard：
+匹配项沿用当前 Hazard 内容，未匹配的当前动态项移除，未匹配的快照项按快照内容注册。
+Rust Debug 的重复 entity/动态数量断言发生在恢复过程中，失败可能留下部分更新状态；C++
+复刻了这些已测 Debug/Release 状态边界。Release 会接受已测损坏快照。C++ null shape 是额外的预变更输入保护。
 
 `containment_matrix.tsv` 现在由 C++ differential comparator 和 Rust `lbf` workspace 的真实 CDE 测试共同消费；9 个 Hole/Exterior 包含、穿越、disjoint 和 Hole 角点接触 case 在两侧均通过。
 
@@ -129,7 +133,7 @@ SVG 失败只返回 `SerializationFailure`，不会改变布局或碰撞检测�
 
 ## CDE 状态和虚拟根
 
-`CollisionEngine::Restore` 采用临时 Slot/QuadTree 重建后一次性替换的原子语义。快照包含空形状或非 dynamic Hazard 时返回 `InvalidInput`/`SnapshotMismatch`，原有动态 Hazard 和索引保持不变。
+`CollisionEngine::Restore` 对非空形状先在临时 Slot/QuadTree 中按 entity 差分重建，再提交状态；C++ 对 null shape 在任何变更前返回 `InvalidInput`。Debug 遇到待新增的重复 entity 时，会先提交已清理的旧动态项和此前成功新增的前缀，再抛出 `logic_error`；动态 Hazard 数量断言也在提交后执行。Release 接受目前测得的重复 entity、错误 shape/key/transform、非 dynamic 列表项及与静态 Exterior 冲突等快照。此处的 Debug 失败不是普遍原子回滚语义，失败后的状态取决于触发的分支。
 
 四叉树同时保留完整根查询和 virtual-root 查询；CDE 的 Polygon、Surrogate 查询使用完全包围查询 bbox 的最低节点，结果集合与完整根查询保持一致。
 

@@ -203,11 +203,13 @@ void runBoundaryValidationTests()
     assert(nullShapeRestore.GetError().code == jaguar::ErrorCode::InvalidInput);
     assert(engine.DetectPolygonCollision(query, jaguar::NoFilter{}) == baselineCollision);
 
-    auto staticSnapshot = snapshot;
-    staticSnapshot.dynamicHazards.front().dynamic = false;
-    const auto staticRestore = engine.Restore(staticSnapshot);
-    assert(!staticRestore.HasValue());
-    assert(staticRestore.GetError().code == jaguar::ErrorCode::SnapshotMismatch);
+    auto nonDynamicSnapshot = snapshot;
+    nonDynamicSnapshot.dynamicHazards.front().dynamic = false;
+    const auto sameIdentityNonDynamicRestore = engine.Restore(nonDynamicSnapshot);
+    assert(sameIdentityNonDynamicRestore.HasValue());
+    // CDE restore matches by entity identity and keeps the already registered
+    // dynamic hazard, as jagua-rs does; the snapshot's flag is ignored here.
+    assert(engine.Save().dynamicHazards.size() == snapshot.dynamicHazards.size());
     assert(engine.DetectPolygonCollision(query, jaguar::NoFilter{}) == baselineCollision);
 
     assert(engine.DeregisterHazard(registered.Value()).HasValue());

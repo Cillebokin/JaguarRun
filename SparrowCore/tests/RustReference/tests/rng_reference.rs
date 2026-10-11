@@ -80,3 +80,19 @@ fn checked_in_uniform_index_fixture_matches_rand_range() {
         }
     }
 }
+
+#[test]
+fn empty_uniform_range_panics_without_consuming_rng() {
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(SEED);
+    let mut expected = Xoshiro256PlusPlus::seed_from_u64(SEED);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _: u32 = rng.random_range(0_u32..0_u32);
+    }));
+
+    assert!(result.is_err(), "an empty range must panic");
+    assert_eq!(
+        rng.next_u64(),
+        expected.next_u64(),
+        "range validation must happen before consuming RNG state"
+    );
+}

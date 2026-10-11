@@ -1,0 +1,20 @@
+# generator=Rust sparrow::optimizer::optimize with locked RustReference Cargo.lock
+# input=RustSppOptimizeColdStart.json (three 2x2 squares, strip_height=3) seed=42 initial_solution=None
+# constructor=DEFAULT_SPARROW_CONFIG LBF_SAMPLE_CONFIG (1000/0/3); exploration/compression bounded for deterministic reference
+# config=exploration(shrink_step=0.2, max_failed=1, workers=1, iter_limit=0, samples=8/0/1); compression(failure_based=0.5, shrink_range=0.01/0.01, workers=1, iter_limit=0, samples=8/0/1)
+# rows: report <kind> <placed_count> <width> <density>; then one placement <kind> <item_index> <rotation> <x> <y> per placed item
+phase	exploration
+report	expl_feas	3	6.003028393	0.666330338
+placement	expl_feas	0	0.000000000	1.001631498	1.002156854
+placement	expl_feas	1	0.000000000	3.002620697	1.000108480
+placement	expl_feas	2	0.000000000	5.002968311	1.000654340
+report	expl_infeas	3	4.802423000	0.832912922
+placement	expl_infeas	0	0.000000000	1.001631498	1.002156854
+placement	expl_infeas	1	0.000000000	1.802015305	1.000108480
+placement	expl_infeas	2	0.000000000	3.802362919	1.000654340
+phase	compression
+step	0.010000000
+report	final	3	6.003028393	0.666330338
+placement	final	0	0.000000000	1.001631498	1.002156854
+placement	final	1	0.000000000	3.002620697	1.000108480
+placement	final	2	0.000000000	5.002968311	1.000654340

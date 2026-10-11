@@ -1,0 +1,21 @@
+# generator=Sparrow Rust UniformBBoxSampler, one-ULP X interval
+# input=RustSppSingleItem.json seed=42 samples=16
+# sample seed ordinal x_f32_bits y_f32_bits
+# rng_after next_u64_after_samples_hex
+sample 42 0 3f800000 3ffdf03e
+sample 42 1 3f800001 3fcb46cf
+sample 42 2 3f800001 3f9a9679
+sample 42 3 3f800001 3feccdc7
+sample 42 4 3f800000 3fb397e7
+sample 42 5 3f800000 3f86712a
+sample 42 6 3f800000 3f94b2b3
+sample 42 7 3f800001 3fc34374
+sample 42 8 3f800000 3fb68b97
+sample 42 9 3f800001 3fef990f
+sample 42 10 3f800001 3fdc1499
+sample 42 11 3f800001 3fdb9311
+sample 42 12 3f800000 3fc4f59a
+sample 42 13 3f800001 3f95aecc
+sample 42 14 3f800001 3f861b2b
+sample 42 15 3f800001 3fca1107
+rng_after c1ad5450730123f8

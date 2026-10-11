@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/sparrow/src/quantify/simd/mod.rs`（46 行）+ `simd/circles_soa.rs`（38 行）+ `simd/overlap_proxy_simd.rs`（110 行），另涉及启用侧 `src/eval/collision_loss.rs` 的 `#[cfg(feature = "simd")]` 分支（74-88 行）与 `src/lib.rs:1`（`feature(portable_simd)`）
 **C++**: SparrowCore 侧**无独立的量化 SoA/SIMD 通道**（`SparrowCore/Include|Source` 全树无 Soa/Simd/Avx 文件，grep 验证为空）；量化走 `Source/Quantify/OverlapProxy.cpp` 的标量双循环。几何侧的 SoA/SIMD 在 JaguarCore：`JaguarCore/Source/Collision/SoaGeometry.h`（77 行）+ `SoaGeometry.cpp`（235 行）+ `SoaGeometryAvx2.cpp`（52 行）+ `SoaGeometryAvx2Fallback.cpp`（11 行），服务于 `CollisionEngine` 的精确碰撞检测，与 quantify 的 pole 代理计算是两套互不相交的数据通路。
-**判定**: 结果等价/实现不同（Rust SIMD 是 opt-in 特性、默认关闭，产物与标量路径数值等价；C++ 以标量路径为唯一路径，结果一致——但有界提前退出变体在 C++ 无对应）
+**判定**: 默认路径结果对应/实现不同（Rust SIMD 是 opt-in、默认关闭；SIMD reduce 与标量累加顺序不同，源码 debug_assert 只要求相对误差在 1e-3 内；C++ 量化恒走标量。Rust SIMD 最大 ULP 差异未测量，有界提前退出变体在 C++ 无对应）
 
 ---
 
@@ -15,7 +15,7 @@
 ## 函数逐条比对（以 Rust 为纲）
 
 ### `CirclesSoA` 结构 + `new`（circles_soa.rs:6-21）
-- Rust：`#[repr(align(32))]`，三个 `Vec<f32>`（x/y/r）SoA 布局，对齐 32 字节（为 8×f32 AVX 载入准备）。
+- Rust：`#[repr(align(32))]` 令 `CirclesSoA` 结构体类型按 32 字节对齐，含三个 `Vec<f32>`（x/y/r）SoA 字段。当前 SIMD 主循环宽度是 `SIMD_WIDTH=4`（`Simd<f32, 4>`，overlap_proxy_simd.rs:11-15），量化代码没有 AVX intrinsic；该结构体对齐属性本身也不能证明三个 `Vec` 的堆缓冲区按 32 字节对齐。原记录将其解释为 8-lane AVX 载入准备没有源码依据，现予更正。
 - C++ 对应：**无**。量化侧不存在 pole 的 SoA 结构——`Surrogate::Poles()` 返回 `vector<Circle2d>`（AoS，double 存储，Surrogate.h:60,85），`CalculateOverlapProxy` 直接嵌套遍历（OverlapProxy.cpp:115-117）。
 - 判定：【C++缺失】（数据结构层面；标量路径无需它）
 - 证据：circles_soa.rs:6-21 vs OverlapProxy.cpp:115-117、Surrogate.h:60。
@@ -38,11 +38,11 @@
   - 最终 `*= PI`；debug_assert 与标量 `overlap_area_proxy` 相对误差 1e-3 内一致（:99-109）。
 - C++ 对应：`CalculateOverlapProxy`（OverlapProxy.cpp:108-135）——**纯标量双循环**，无向量化、无块/尾巴划分、无有界退出。逐公式比对（pd/decay/min_r/PI）已在 S17 记录为逐字一致。
 - 数值等价性分析：
-  1. 块内运算与标量公式逐项相同（同一公式在 f32xN 逐 lane 执行），`reduce_sum` 是 4-lane 树状和——与标量顺序累加在 f32 下可能有 **ulp 级差异**（(a+b+c+d) 结合顺序不同）；Rust 自身的 debug_assert（1e-3 相对容差）承认亚 ulp 级偏差。
+  1. 块内各 lane 执行相同公式，但 `reduce_sum` 的 4-lane 树状归约与标量顺序累加的结合顺序不同，可能产生浮点差异。Rust debug_assert 使用约 1e-3 相对误差阈值；这不是 ULP 上界，当前没有测量最大 ULP 偏差。
   2. 尾巴处理与标量版一致。
-  3. 因此 SIMD 版对无界调用（INFINITY）与标量版**数值上等价至 ulp 级**；C++ 标量实现 = Rust 标量实现（S17 已证逐字一致），故 C++ ≈ Rust SIMD（ulp 级）。
+  3. 因此只能得出 SIMD 版在该内部断言容差内近似标量版；没有证据给出固定 ULP 上界。C++ 标量实现与 Rust 默认标量路径按 S17 的有限 fixtures/容差证据核对，不能据此推导 C++ 与 Rust SIMD 逐位或 ULP 等价。
   4. 有界退出（early-return None）是**性能/控制流**优化：`add` 在 `collision_loss.rs:51-53` 收到 None 时返回 true 提前终止 hazard 遍历——影响的是评估耗时，不是最终损失值（上界比较逻辑在 S11/S12 已录：C++ 在 SeparationEvaluator::Evaluate 事后比较 cpp:188-193）。
-- 判定：【差异】（C++ 无 SIMD/有界变体；数值结果等价至 ulp 级，控制流为 Rust opt-in 加速）
+- 判定：【差异】（C++ 无 SIMD/有界变体；Rust 内部只验证约 1e-3 相对误差，最大 ULP 偏差未测，不能声称 ULP 级等价；控制流为 Rust opt-in 路径）
 - 证据：overlap_proxy_simd.rs:24-110 vs OverlapProxy.cpp:108-135；collision_loss.rs:44-56。
 
 ### `quantify_collision_poly_poly_simd`（simd/mod.rs:13-16）
@@ -60,10 +60,10 @@
   1. Rust `CirclesSoA`（quantify）：f32 的**圆(pole)数组** x/y/r，用于**损失量化**（overlap proxy 数值计算），仅 `feature="simd"` 时存在。
   2. C++ JaguarCore `PolygonSoA`（SoaGeometry.h:23-77）：**多边形边**的 SoA（m_StartX/StartY/EndX/EndY/EdgeMinX/MaxX/MinY/MaxY，全 **double**），用于**精确碰撞检测**（`intersectsBoundary`/`Contains`/`Intersects`，服务于 CollisionEngine 的 `CollectPolygonCollisionsUntil`），带 `SoaExecutionMode`（Scalar/Auto/Avx2）运行时选择（SoaGeometry.h:21-30）与 AVX2 探测（avx2Supported）。
 - AVX2 实现（SoaGeometryAvx2.cpp:5-52）：`__m256d`（4×double）对边包围盒做 batch 相交预筛，命中 lane 再做**标量精确边相交**（:28-34），尾巴标量（:37-51）——"向量预筛 + 标量精算"模式；Rust quantify SIMD 是"整条公式向量化"。二者结构不同、服务目标不同。
-- 对接点：C++ tracker 的 `BuildFromLayout`/`EvaluateCandidateLoss(layout,...)` 调 JaguarCore `CollectPolygonCollisionsUntil`（CollisionTracker.cpp:698-702,521-525）→ 该引擎内部经 PolygonSoA/AVX2 做**检测**；检测命中的 hazard 再由 SparrowCore `CalculatePolygonCollisionLoss` 做**标量量化**。即：C++ 把 Rust 中"检测（jagua-rs CDE）+ 量化（标量或 SIMD）"的两段中，向量化的加速度放在了检测段（几何侧 AVX2），量化段恒为标量。Rust 的 simd feature 恰相反（检测段为 jagua-rs 标量/其内部结构，量化段可 SIMD）。
+- 对接点：C++ tracker 的 `BuildFromLayout`/`EvaluateCandidateLoss(layout,...)` 调 JaguarCore `CollectPolygonCollisionsUntil`（CollisionTracker.cpp:833-837,660-664）→ 该引擎内部经 PolygonSoA/AVX2 做**检测**；检测命中的 hazard 再由 SparrowCore `CalculatePolygonCollisionLoss` 做**标量量化**。即：C++ 把 Rust 中"检测（jagua-rs CDE）+ 量化（标量或 SIMD）"的两段中，向量化的加速度放在了检测段（几何侧 AVX2），量化段恒为标量。Rust 的 simd feature 恰相反（检测段为 jagua-rs 标量/其内部结构，量化段可 SIMD）。
 - 数值上：PolygonSoA 的 AVX2 预筛只影响**是否命中**的判定速度与顺序（预筛逻辑与标量等价：比较条件一致），量化数值不受影响；故两套 SoA 的存在不破坏 quantify 层的数值等价性。
 - 判定：【差异】（架构分工不同；结果等价）
-- 证据：SoaGeometry.h:23-77、SoaGeometryAvx2.cpp:5-52、CollisionTracker.cpp:698-702 vs circles_soa.rs:6-38、overlap_proxy_simd.rs:24-110。
+- 证据：SoaGeometry.h:23-77、SoaGeometryAvx2.cpp:5-52、CollisionTracker.cpp:833-837 vs circles_soa.rs:6-38、overlap_proxy_simd.rs:24-110。
 
 ### 精度路径（任务指定核对项）
 - Rust SIMD：全程 f32（`Simd<f32,4>`、`Vec<f32>`）。C++ 量化标量路径：存储 double（Circle2d）→ cast float 运算（S17 差异#9 已录 RustF32 双轨）。两者运算精度同为 f32，无双精度分歧。
@@ -77,17 +77,18 @@
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | CirclesSoA（f32 x/y/r SoA + load）及整个 SIMD 量化通道在 C++ 无对应物——C++ quantify 恒走标量双循环 | 【C++缺失】 | 无行为差异：Rust simd 为 opt-in feature（default 关闭），默认构建即标量；SIMD 与标量数值等价至 ulp 级 | Cargo.toml:49、lib.rs:1、circles_soa.rs:6-37 vs OverlapProxy.cpp:108-135 |
+| 1 | CirclesSoA（f32 x/y/r SoA + load）及 SIMD 量化通道在 C++ 无对应物——C++ quantify 恒走标量双循环 | 【C++缺失】 | Rust simd 为 opt-in、默认构建走标量；SIMD debug_assert 只要求相对误差约 1e-3，最大 ULP 差异未测 | Cargo.toml:49、lib.rs:1、circles_soa.rs:6-37 vs OverlapProxy.cpp:108-135 |
 | 2 | 有界变体（`*_simd_bounded` 的 max_unscaled_overlap 反推 + 每 pole 提前退出 None）在 C++ 无对应 | 【差异】 | 短路是性能优化；C++ 以 SeparationEvaluator 的 upperBound 事后比较等价实现（S11/S12 已录） | simd/mod.rs:28-43、overlap_proxy_simd.rs:94-96、collision_loss.rs:51-53 vs SeparationEvaluator.cpp:188-193 |
-| 3 | SIMD 块 `reduce_sum` 树状求和 vs 标量顺序累加 vs C++ 顺序累加 | 【差异】 | ulp 级；Rust 自身 debug_assert 容差 1e-3 承认 | overlap_proxy_simd.rs:72,99-106 vs OverlapProxy.cpp:114-131 |
+| 3 | SIMD 块 `reduce_sum` 树状求和 vs 标量顺序累加 | 【差异】 | 归约顺序不同；Rust debug_assert 的相对误差阈值约 1e-3，未建立 ULP 上界 | overlap_proxy_simd.rs:72,99-106 vs OverlapProxy.cpp:114-131 |
 | 4 | SIMD 标量尾巴公式与标量版/C++ 逐字一致 | 【一致】 | — | overlap_proxy_simd.rs:75-92 vs overlap_proxy.rs:13-21 |
 | 5 | `quantify_collision_poly_poly_simd_bounded` 的 epsilon/penalty/+eps²/sqrt 公式与标量版同构，C++ CalculatePolygonCollisionLoss 同公式（S17 已录） | 【一致】 | — | simd/mod.rs:25,43-45 vs OverlapProxy.cpp:147-177 |
-| 6 | JaguarCore PolygonSoA/AVX2（double、边 SoA、向量预筛+标量精算、SoaExecutionMode 运行时切换）与 Rust CirclesSoA（f32、pole SoA、公式向量化）是两套不相交结构 | 【差异】 | C++ 把向量化放在检测段（CollisionEngine→CollectPolygonCollisionsUntil 内部），量化段标量；Rust simd feature 反之。检测结果等价，量化数值不受影响 | SoaGeometry.h:23-77、SoaGeometryAvx2.cpp:5-52、CollisionTracker.cpp:698-702 vs circles_soa.rs:6-38 |
-| 7 | fixture 锁定的是标量链路：所有 quantify 相关 fixture（SeparatorSearchRustTrace 的 loss 位模式、SeparatorRoundRustTrace 的 pair loss/weight）由 Rust 默认（无 simd）构建生成，C++ 标量实现与之逐位/容差匹配 | 【一致】 | SIMD 通道无 fixture 覆盖（Rust 侧亦然，无 simd 测试） | fixtures 目录 + Cargo.toml features vs OverlapProxy.cpp |
+| 6 | JaguarCore PolygonSoA/AVX2（double、边 SoA、向量预筛+标量精算、SoaExecutionMode 运行时切换）与 Rust CirclesSoA（f32、pole SoA、公式向量化）是两套不相交结构 | 【差异】 | C++ 把向量化放在检测段（CollisionEngine→CollectPolygonCollisionsUntil 内部），量化段标量；Rust simd feature 反之。检测结果等价，量化数值不受影响 | SoaGeometry.h:23-77、SoaGeometryAvx2.cpp:5-52、CollisionTracker.cpp:833-837 vs circles_soa.rs:6-38 |
+| 7 | fixtures 覆盖 Rust 默认标量路径；C++ 标量路径用对应 reference/regression 数据核对 | 【证据范围】 | 浮点 loss/weight 用容差；Rust SIMD feature 没有 parity fixture，C++ 自参考也不证明跨语言 parity | fixtures 目录 + Cargo.toml features vs OverlapProxy.cpp |
+| 8 | `CirclesSoA` 类型的 32 字节对齐属性被旧记录误释为 8-lane AVX 用途 | 【文档更正】 | 源码只证明结构体类型对齐；活动 SIMD 宽度为 4 lanes，未证明 Vec 堆缓冲区对齐或 AVX 用途 | circles_soa.rs:6-12; overlap_proxy_simd.rs:11-15 |
 
 ## 结论
 
-Rust 的 quantify SIMD 通道（CirclesSoA + portable_simd + 有界提前退出）是默认关闭的 opt-in 加速特性，与标量路径数值等价（ulp 级，其自身 1e-3 容差的 debug_assert 佐证）；SparrowCore 不做量化向量化，恒走与 Rust 标量逐字一致的标量双循环，因此两侧**产物数值等价，无需移植 SIMD 即可维持等价基线**。C++ 的 SoA/AVX2 能力存在于 JaguarCore 几何检测侧（PolygonSoA，double、预筛模式），与 quantify 的 pole SoA 是目标、精度、结构都不同的两套体系——检测段加速不影响量化数值链，这条"检测向量化在几何侧、量化恒标量"的分工是本次最重要的架构发现。若未来要在 C++ 复刻 SIMD 量化，需注意有界退出的控制流在 SeparationEvaluator 层已有等价替代，仅剩纯吞吐收益。
+Rust 的 quantify SIMD 通道（CirclesSoA + portable_simd + 有界提前退出）默认关闭；C++ 量化恒走标量。SIMD 内部 debug_assert 仅给出约 1e-3 相对误差容差，最大 ULP 差异未测量，因此只能把默认标量路径作为当前移植 parity 基线，不能宣称 SIMD 数值等价。JaguarCore 的 PolygonSoA/AVX2 服务几何碰撞检测，与 quantify pole SIMD 是不同数据通路。若未来在 C++ 复刻量化 SIMD，还需保留/重新设计有界退出；SeparationEvaluator 的事后 upperBound 比较覆盖的是决策层，未复现 pole 循环的早停性能。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：Rust 侧文件与行数】** simd/mod.rs 46 行（2 入口封装 + bounded 主体）、circles_soa.rs 38 行、overlap_proxy_simd.rs 110 行——三个文件的每个函数（new/load、poles_overlap_area_proxy_simd、poles_overlap_area_proxy_simd_bounded、quantify_collision_poly_poly_simd、quantify_collision_poly_poly_simd_bounded）主文均有条目，无遗漏。

@@ -60,7 +60,7 @@ jaguar::Result<OptimizedInput> OptimizeInput(
     const char* inputJson,
     std::size_t inputSize)
 {
-    const jaguar::Importer importer;
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
     const auto instance = importer.ImportSPInstanceJson(
         std::string(inputJson, inputSize));
     if (!instance.HasValue())

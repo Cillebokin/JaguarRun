@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace
@@ -23,15 +24,16 @@ bool IsFiniteBounds(const jaguar::Rect2d& bounds) noexcept
         && bounds.xMin < bounds.xMax && bounds.yMin < bounds.yMax;
 }
 
-bool IsValidEntry(const sparrow::CollisionEntry& entry) noexcept
+bool SnapshotIsSeparated(
+    const sparrow::CollisionTrackerSnapshot& snapshot) noexcept
 {
-    return std::isfinite(entry.loss) && entry.loss >= 0.0F
-        && std::isfinite(entry.weight) && entry.weight > 0.0F;
-}
-
-float SafeLoss(float value) noexcept
-{
-    return std::isfinite(value) && value > 0.0F ? value : 0.0F;
+    float containerLoss = 0.0F;
+    for (const sparrow::CollisionEntry& entry : snapshot.containerEntries)
+    {
+        containerLoss += entry.loss;
+    }
+    const float totalLoss = containerLoss + snapshot.pairMatrix.TotalLoss();
+    return totalLoss == 0.0F;
 }
 
 std::optional<std::size_t> FindCollisionHandle(
@@ -106,6 +108,11 @@ Result<void> CollisionTracker::UpdateMovedItem(
     {
         return InvalidTracker("new moved item handle is not in the layout");
     }
+    if (movedPlacement->placedItem.GetItemIndex()
+        != m_PlacedItems[*movingIndex].GetItemIndex())
+    {
+        return InvalidTracker("moved item identity changed during update");
+    }
 
     for (std::size_t index = 0U; index < m_Handles.size(); ++index)
     {
@@ -137,37 +144,124 @@ Result<void> CollisionTracker::UpdateMovedItem(
         }
     }
 
-    CollisionTracker rebuilt;
-    const Result<void> rebuildResult = rebuilt.BuildFromLayout(layout);
-    if (!rebuildResult.HasValue())
+    auto engine = snapshot.container.CreateCollisionEngine();
+    if (!engine)
     {
-        return rebuildResult;
+        return InvalidTracker("moved item collision engine is unavailable");
     }
-    if (!rebuilt.IndexForHandle(newHandle).has_value()
-        || *rebuilt.IndexForHandle(newHandle) != *movingIndex)
+    std::vector<jaguar::HazardHandle> collisionHandles;
+    collisionHandles.reserve(snapshot.placements.size());
+    for (const jaguar::LayoutPlacementSnapshot& placement : snapshot.placements)
     {
-        return InvalidTracker("rebuilt tracker moved item index does not match");
+        const jaguar::PlacedItem& placedItem = placement.placedItem;
+        const jaguar::Hazard hazard{
+            {jaguar::HazardKind::PlacedItem,
+             placedItem.GetItemIndex(),
+             0,
+             0,
+             placement.handle,
+             placedItem.Transform()},
+            std::make_shared<const jaguar::SimplePolygon>(
+                placedItem.CollisionShape()),
+            true};
+        const auto registered = engine->RegisterHazard(hazard);
+        if (!registered.HasValue())
+        {
+            return Result<void>::FromError(registered.GetError());
+        }
+        collisionHandles.push_back(registered.Value());
     }
 
-    // Rust's register_item_move recomputes losses for the moved item while
-    // preserving all GLS weights. Rebuilding the collision cache here keeps
-    // the same observable semantics and avoids stale pair entries.
-    for (std::size_t first = 0U; first < m_PairMatrix.Size(); ++first)
+    std::size_t movedLayoutIndex = snapshot.placements.size();
+    for (std::size_t index = 0U; index < snapshot.placements.size(); ++index)
     {
-        for (std::size_t second = first;
-             second < m_PairMatrix.Size();
-             ++second)
+        if (snapshot.placements[index].handle == newHandle)
         {
-            rebuilt.m_PairMatrix.At(first, second).weight =
-                m_PairMatrix.At(first, second).weight;
+            movedLayoutIndex = index;
+            break;
         }
     }
-    for (std::size_t index = 0U; index < m_ContainerEntries.size(); ++index)
+    if (movedLayoutIndex == snapshot.placements.size())
     {
-        rebuilt.m_ContainerEntries[index].weight =
-            m_ContainerEntries[index].weight;
+        return InvalidTracker("moved item is missing from collision engine");
     }
-    *this = std::move(rebuilt);
+
+    jaguar::HazardFilter filter;
+    const jaguar::HazardHandle ownHandle = collisionHandles[movedLayoutIndex];
+    filter.irrelevantHandle = [ownHandle](
+                                  jaguar::HazardHandle handle,
+                                  const jaguar::HazardEntity&) {
+        return handle == ownHandle;
+    };
+    jaguar::HazardCollector collector;
+    engine->CollectPolygonCollisionsUntil(
+        movedPlacement->placedItem.CollisionShape(),
+        collector,
+        filter,
+        [](const jaguar::HazardEntity&) { return false; });
+
+    // Rust changes the key mapping and clears this row before it dispatches
+    // collected hazards. Preserve the same partial state if an unsupported
+    // hazard aborts the recomputation.
+    for (std::size_t other = 0U; other < m_Handles.size(); ++other)
+    {
+        m_PairMatrix.At(*movingIndex, other).loss = 0.0F;
+    }
+    m_ContainerEntries[*movingIndex].loss = 0.0F;
+    m_Handles[*movingIndex] = newHandle;
+    m_PlacedItems[*movingIndex] = movedPlacement->placedItem;
+    m_IsSeparated = TotalLoss() == 0.0F;
+
+    for (const auto& entry : collector.Entries())
+    {
+        if (entry.second.kind == jaguar::HazardKind::PlacedItem)
+        {
+            const auto otherLayoutIndex = FindCollisionHandle(
+                collisionHandles, entry.first);
+            if (!otherLayoutIndex.has_value())
+            {
+                return InvalidTracker(
+                    "moved item collision references an unknown placement");
+            }
+            const jaguar::PlacedItemHandle otherHandle =
+                snapshot.placements[*otherLayoutIndex].handle;
+            const auto otherTrackerIndex = IndexForHandle(otherHandle);
+            if (!otherTrackerIndex.has_value()
+                || *otherTrackerIndex == *movingIndex)
+            {
+                return InvalidTracker(
+                    "moved item collision references an invalid tracker item");
+            }
+            const float loss = CalculatePolygonCollisionLoss(
+                movedPlacement->placedItem.CollisionShape(),
+                snapshot.placements[*otherLayoutIndex].placedItem.CollisionShape());
+            if (!(loss > 0.0F))
+            {
+                throw std::logic_error("loss for a collision should be > 0.0");
+            }
+            m_PairMatrix.At(*movingIndex, *otherTrackerIndex).loss = loss;
+            m_IsSeparated = false;
+        }
+        else if (entry.second.kind == jaguar::HazardKind::Exterior)
+        {
+            const float loss = CalculateContainerPenalty(
+                movedPlacement->placedItem.CollisionShape(), m_ContainerBounds);
+            if (!(loss > 0.0F))
+            {
+                throw std::logic_error("loss for a collision should be > 0.0");
+            }
+            m_ContainerEntries[*movingIndex].loss = loss;
+            m_IsSeparated = false;
+        }
+        else
+        {
+            throw std::logic_error("unsupported hazard entity");
+        }
+    }
+
+    // Keeping the other rows untouched preserves the same collision cache and
+    // floating-point evaluation order while retaining every GLS weight.
+    m_IsSeparated = TotalLoss() == 0.0F;
     return Result<void>::FromValue();
 }
 
@@ -184,8 +278,7 @@ Result<void> CollisionTracker::Restore(
     if (!IsFiniteBounds(layoutSnapshot.container.Bounds())
         || snapshot.handles.size() != layoutSnapshot.placements.size()
         || snapshot.pairMatrix.Size() != snapshot.handles.size()
-        || snapshot.containerEntries.size() != snapshot.handles.size()
-        || snapshot.isSeparated != layout.IsFeasible())
+        || snapshot.containerEntries.size() != snapshot.handles.size())
     {
         return InvalidTracker("collision tracker snapshot does not match layout");
     }
@@ -195,22 +288,11 @@ Result<void> CollisionTracker::Restore(
         {
             return InvalidTracker("collision tracker snapshot handles do not match layout");
         }
-        if (!IsValidEntry(snapshot.containerEntries[index]))
-        {
-            return InvalidTracker("collision tracker snapshot contains an invalid container entry");
-        }
     }
-    for (std::size_t first = 0U; first < snapshot.pairMatrix.Size(); ++first)
+    if (snapshot.isSeparated != SnapshotIsSeparated(snapshot))
     {
-        for (std::size_t second = first;
-             second < snapshot.pairMatrix.Size();
-             ++second)
-        {
-            if (!IsValidEntry(snapshot.pairMatrix.At(first, second)))
-            {
-                return InvalidTracker("collision tracker snapshot contains an invalid pair entry");
-            }
-        }
+        return InvalidTracker(
+            "collision tracker snapshot separated flag does not match losses");
     }
 
     m_Handles = snapshot.handles;
@@ -299,97 +381,120 @@ std::optional<std::size_t> CollisionTracker::IndexForHandle(
 }
 
 float CollisionTracker::PairLoss(std::size_t first,
-                                 std::size_t second) const noexcept
+                                 std::size_t second) const
 {
-    if (!m_PairMatrix.Contains(first, second))
-    {
-        return 0.0F;
-    }
-    return SafeLoss(m_PairMatrix.At(first, second).loss);
+    return m_PairMatrix.At(first, second).loss;
 }
 
 float CollisionTracker::PairWeight(std::size_t first,
-                                   std::size_t second) const noexcept
+                                   std::size_t second) const
 {
-    if (!m_PairMatrix.Contains(first, second))
-    {
-        return 0.0F;
-    }
-    const float weight = m_PairMatrix.At(first, second).weight;
-    return std::isfinite(weight) && weight > 0.0F ? weight : 0.0F;
+    return m_PairMatrix.At(first, second).weight;
 }
 
-float CollisionTracker::ContainerLoss(std::size_t index) const noexcept
+float CollisionTracker::ContainerLoss(std::size_t index) const
 {
-    if (index >= m_ContainerEntries.size())
-    {
-        return 0.0F;
-    }
-    return SafeLoss(m_ContainerEntries[index].loss);
+    return m_ContainerEntries.at(index).loss;
 }
 
-float CollisionTracker::ContainerWeight(std::size_t index) const noexcept
+float CollisionTracker::ContainerWeight(std::size_t index) const
 {
-    if (index >= m_ContainerEntries.size())
-    {
-        return 0.0F;
-    }
-    const float weight = m_ContainerEntries[index].weight;
-    return std::isfinite(weight) && weight > 0.0F ? weight : 0.0F;
+    return m_ContainerEntries.at(index).weight;
 }
 
-float CollisionTracker::ItemLoss(std::size_t index) const noexcept
+float CollisionTracker::ItemLoss(std::size_t index) const
 {
-    if (index >= ItemCount())
-    {
-        return 0.0F;
-    }
-    float result = ContainerLoss(index);
+    (void)m_ContainerEntries.at(index);
+    float pairLoss = 0.0F;
     for (std::size_t other = 0U; other < ItemCount(); ++other)
     {
         if (other != index)
         {
-            result += PairLoss(index, other);
+            pairLoss += m_PairMatrix.At(index, other).loss;
         }
     }
-    return std::isfinite(result) ? result : 0.0F;
+    return m_ContainerEntries[index].loss + pairLoss;
 }
 
-float CollisionTracker::WeightedItemLoss(std::size_t index) const noexcept
+Result<float> CollisionTracker::EvaluateCandidateHazardLoss(
+    const jaguar::SimplePolygon& transformedCandidate,
+    std::size_t movingIndex,
+    const jaguar::HazardEntity& hazard) const
 {
-    if (index >= ItemCount())
+    if (movingIndex >= ItemCount())
     {
-        return 0.0F;
+        return Result<float>::FromError(
+            {jaguar::ErrorCode::InvalidInput,
+             "candidate moving item index is invalid"});
     }
-    float result = ContainerLoss(index) * ContainerWeight(index);
+
+    float result = 0.0F;
+    if (hazard.kind == jaguar::HazardKind::PlacedItem)
+    {
+        const auto otherIndex = IndexForHandle(hazard.placedItemHandle);
+        if (!otherIndex.has_value() || *otherIndex == movingIndex)
+        {
+            return Result<float>::FromValue(0.0F);
+        }
+        result = CalculatePolygonCollisionLoss(
+                     m_PlacedItems[*otherIndex].CollisionShape(),
+                     transformedCandidate)
+            * PairWeight(movingIndex, *otherIndex);
+    }
+    else if (hazard.kind == jaguar::HazardKind::Exterior)
+    {
+        result = CalculateContainerPenalty(
+                     transformedCandidate, m_ContainerBounds)
+            * ContainerWeight(movingIndex);
+    }
+    else
+    {
+        throw std::logic_error("unsupported hazard entity");
+    }
+
+    if (!std::isfinite(result))
+    {
+        return Result<float>::FromError(
+            {jaguar::ErrorCode::InvalidInput,
+             "candidate hazard loss is not finite"});
+    }
+    return Result<float>::FromValue(std::max(result, 0.0F));
+}
+
+float CollisionTracker::WeightedItemLoss(std::size_t index) const
+{
+    (void)m_ContainerEntries.at(index);
+    float pairLoss = 0.0F;
     for (std::size_t other = 0U; other < ItemCount(); ++other)
     {
         if (other != index)
         {
-            result += PairLoss(index, other) * PairWeight(index, other);
+            const CollisionEntry& entry = m_PairMatrix.At(index, other);
+            pairLoss += entry.weight * entry.loss;
         }
     }
-    return std::isfinite(result) ? result : 0.0F;
+    const CollisionEntry& containerEntry = m_ContainerEntries[index];
+    return containerEntry.weight * containerEntry.loss + pairLoss;
 }
 
 float CollisionTracker::TotalLoss() const noexcept
 {
-    float result = m_PairMatrix.TotalLoss();
+    float containerLoss = 0.0F;
     for (const CollisionEntry& entry : m_ContainerEntries)
     {
-        result += SafeLoss(entry.loss);
+        containerLoss += entry.loss;
     }
-    return std::isfinite(result) ? result : 0.0F;
+    return containerLoss + m_PairMatrix.TotalLoss();
 }
 
 float CollisionTracker::TotalWeightedLoss() const noexcept
 {
-    float result = m_PairMatrix.TotalWeightedLoss();
+    float containerLoss = 0.0F;
     for (const CollisionEntry& entry : m_ContainerEntries)
     {
-        result += entry.WeightedLoss();
+        containerLoss += entry.weight * entry.loss;
     }
-    return std::isfinite(result) ? result : 0.0F;
+    return containerLoss + m_PairMatrix.TotalWeightedLoss();
 }
 
 bool CollisionTracker::IsSeparated() const noexcept
@@ -438,7 +543,8 @@ Result<float> CollisionTracker::EvaluateCandidateLoss(
             *candidateSurrogate,
             transform,
             *otherSurrogate,
-            m_PlacedItems[index].Transform());
+            m_PlacedItems[index].Transform(),
+            0.01F);
         result += loss * PairWeight(movingIndex, index);
     }
     if (!std::isfinite(result))
@@ -541,8 +647,8 @@ Result<float> CollisionTracker::EvaluateCandidateLoss(
                 continue;
             }
             result += CalculatePolygonCollisionLoss(
-                          transformed.Value(),
-                          m_PlacedItems[*otherIndex].CollisionShape())
+                          m_PlacedItems[*otherIndex].CollisionShape(),
+                          transformed.Value())
                 * PairWeight(movingIndex, *otherIndex);
         }
         else if (entry.second.kind == jaguar::HazardKind::Exterior)
@@ -565,10 +671,7 @@ void CollisionTracker::UpdateWeights() noexcept
 {
     float maximumLoss = 0.0F;
     const auto updateMaximum = [&maximumLoss](const CollisionEntry& entry) {
-        if (std::isfinite(entry.loss) && entry.loss > maximumLoss)
-        {
-            maximumLoss = entry.loss;
-        }
+        maximumLoss = std::fmax(maximumLoss, entry.loss);
     };
     for (std::size_t first = 0U; first < m_PairMatrix.Size(); ++first)
     {
@@ -585,14 +688,10 @@ void CollisionTracker::UpdateWeights() noexcept
     }
 
     const auto update = [maximumLoss](CollisionEntry& entry) {
-        const float multiplier = entry.loss > 0.0F && maximumLoss > 0.0F
-            ? 1.2F + 0.8F * (entry.loss / maximumLoss)
-            : 0.95F;
-        const float updated = std::max(entry.weight * multiplier, 1.0F);
-        if (std::isfinite(updated) && updated > 0.0F)
-        {
-            entry.weight = std::min(updated, 1000000.0F);
-        }
+        const float multiplier = entry.loss == 0.0F
+            ? 0.95F
+            : 1.2F + (2.0F - 1.2F) * (entry.loss / maximumLoss);
+        entry.weight = std::fmax(entry.weight * multiplier, 1.0F);
     };
     for (std::size_t first = 0U; first < m_PairMatrix.Size(); ++first)
     {
@@ -622,11 +721,7 @@ void CollisionTracker::UpdateWeights(float collisionMultiplier,
         const float factor = entry.loss > 0.0F
             ? collisionMultiplier
             : clearDecay;
-        const float updated = entry.weight * factor;
-        if (std::isfinite(updated) && updated > 0.0F)
-        {
-            entry.weight = std::min(updated, 1000000.0F);
-        }
+        entry.weight *= factor;
     };
     for (std::size_t first = 0U; first < m_PairMatrix.Size(); ++first)
     {
@@ -650,7 +745,6 @@ Result<void> CollisionTracker::BuildFromLayout(const jaguar::Layout& layout)
     }
 
     m_ContainerBounds = snapshot.container.CollisionShape().BoundingBox();
-    m_IsSeparated = layout.IsFeasible();
     m_Handles.clear();
     m_PlacedItems.clear();
     m_Handles.reserve(snapshot.placements.size());
@@ -697,6 +791,10 @@ Result<void> CollisionTracker::BuildFromLayout(const jaguar::Layout& layout)
 
     for (std::size_t first = 0U; first < m_PlacedItems.size(); ++first)
     {
+        for (std::size_t other = 0U; other < m_PlacedItems.size(); ++other)
+        {
+            m_PairMatrix.At(first, other).loss = 0.0F;
+        }
         jaguar::HazardFilter filter;
         const jaguar::HazardHandle ownHandle = collisionHandles[first];
         filter.irrelevantHandle = [ownHandle](
@@ -721,18 +819,32 @@ Result<void> CollisionTracker::BuildFromLayout(const jaguar::Layout& layout)
                 {
                     continue;
                 }
-                m_PairMatrix.At(first, *second).loss =
-                    CalculatePolygonCollisionLoss(
+                const float loss = CalculatePolygonCollisionLoss(
                         m_PlacedItems[first].CollisionShape(),
                         m_PlacedItems[*second].CollisionShape());
+                if (!(loss > 0.0F))
+                {
+                    throw std::logic_error("loss for a collision should be > 0.0");
+                }
+                m_PairMatrix.At(first, *second).loss = loss;
             }
             else if (entry.second.kind == jaguar::HazardKind::Exterior)
             {
-                m_ContainerEntries[first].loss = CalculateContainerPenalty(
+                const float loss = CalculateContainerPenalty(
                     m_PlacedItems[first].CollisionShape(), m_ContainerBounds);
+                if (!(loss > 0.0F))
+                {
+                    throw std::logic_error("loss for a collision should be > 0.0");
+                }
+                m_ContainerEntries[first].loss = loss;
+            }
+            else
+            {
+                throw std::logic_error("unsupported hazard entity");
             }
         }
     }
+    m_IsSeparated = TotalLoss() == 0.0F;
     return Result<void>::FromValue();
 }
 }

@@ -120,3 +120,8 @@ fn minimum_strip_width(prob: &SPProblem) -> f32 {
     }
     min_width + width_inset
 }
+
+#[cfg(feature = "oracle-trace")]
+pub fn minimum_strip_width_for_trace(prob: &SPProblem) -> f32 {
+    minimum_strip_width(prob)
+}

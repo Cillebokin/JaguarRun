@@ -1,7 +1,7 @@
 # 26. Layout 逐文件逻辑比对
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/entities/layout.rs`（203 行）
 **C++**: `JaguarCore/Include/JaguarCore/Entities/Layout.h`（93 行）+ `JaguarCore/Source/Entities/Layout.cpp`（474 行）
-**判定**: 基本等价（place/remove/save/swap 语义一致；restore C++ 大幅增强校验与原子性；句柄体系不同；cde()/is_empty() 未暴露；RightmostCollisionX/PlacedItemCount 为 C++ 额外；debug 断言双侧降级为 debug-only）
+**判定**: 基本等价（place/remove/save/swap 语义一致；Restore 在变更前校验容器/槽元数据/null shape，随后按 Rust 顺序提交布局并恢复 CDE，Debug 一致性断言可能在变更后失败；句柄体系不同；cde()/is_empty() 未暴露；RightmostCollisionX/PlacedItemCount 为 C++ 额外）
 
 ## 函数逐条比对
 
@@ -49,19 +49,15 @@ self.cde.restore(&layout_snapshot.cde_snapshot);
 debug_assert!(...);  // debug-only
 ```
 - C++ 对应：`Layout::Restore`（cpp:261-424）。
-- 判定：差异（C++ 大幅增强：多级校验 + 原子性；eef0830 后行为已确认）。
+- 判定：差异（C++ 有额外表示层预检，但布局/CDE 一致性失败并非普遍原子；Debug/Release 对损坏 CDE 快照的行为已由 S06 定向测量）。
 - 逐步对照：
   1. 容器一致性（C++ cpp:263-269：`!m_Container.SameBase(snapshot.container)` → 错误）↔ Rust base_cde 指针等价（rs:75-80）。判定：一致（锚点等价，见记录 24）。
-  2. C++ 额外校验 A（cpp:264, 271-296）：`cdeSnapshot.dynamicHazards.size() == placements.size()` 且每个动态 hazard 与按 placements 重建的期望 hazard（MakeHazard）在 (dynamic, entity, shape) 意义上一一匹配（sameHazard/samePolygon，cpp:13-31，容差比较）。Rust 无（信任 cde.restore）。
-  3. 槽位元数据二分（C++ cpp:298-312）：`hasSlotMetadata = !slotGenerations.empty()`。无元数据但 freeSlotIndices 非空 → 错误（cpp:299-304）；无元数据时按 placements 推断 slotCount（cpp:306-312）。Rust 无对应（SlotMap 自带全部元数据）。
-  4. 哨兵校验（C++ cpp:317-322）：`slotGenerations[0] != 0` → 错误；cpp:323-329 逐槽恢复代数，或无元数据时 `newSlots[0].generation = 0`。
-  5. placement 句柄校验（C++ cpp:331-351）：index==0、generation==0、generation 偶数、index 越界、重复槽、代数与元数据不符 → 均错误（cpp:333-345），随后重建槽位。Rust 对应操作为整个 SlotMap 克隆（rs:83），无显式校验。
-  6. 空闲栈重建（C++ cpp:353-397）：有元数据时校验 freeSlotIndices 无重复/不与占用重叠/代数为偶/哨兵槽不出现/占用∪空闲全覆盖（cpp:356-386）；无元数据时未占用槽 generation=0 且按序入空闲栈（cpp:390-396）。Rust 无显式步骤（SlotMap 克隆内含）。
-  7. 引擎恢复（C++ cpp:399-401：`m_Cde->Restore(snapshot.cdeSnapshot)` 失败即返回，**此时布局未提交改动**）↔ Rust rs:84 `cde.restore`。判定：一致（调用对等）。
-  8. C++ 额外校验 B（cpp:403-418）：对每个恢复后的占用槽，用 MakeHazard 重建 hazard 实体并在引擎中 `FindHazardHandle` 查找；找不到 → `restored collision hazard is missing`。Rust 无。
-  9. 提交（C++ cpp:420-423：最后一次性替换 m_Container/m_Slots/m_FreeSlotIndices）↔ Rust rs:81-84 顺序赋值。判定：C++ 全程在局部 `newSlots` 上构建，失败时原状态不动（原子性增强）；Rust 中间失败（仅可能 base_cde 不匹配，在第一步即返回）也不改状态，但 rs:81 起 cde.restore 若 panic（Rust CDEngine::restore 的内部断言）会留下部分状态——Rust 依赖"restore 不会失败"的内部约定。
-  10. debug 断言：Rust rs:86-87 `debug_assert!(layout_qt_matches_fresh_qt / snapshot_matches_layout)`；C++ `Restore` 无 DebugAssertLayout 调用（校验已内化为正式错误返回）。判定：差异（形态）——Rust debug-only 采样式校验 vs C++ Release 全量结构校验。
-- 结论：**Release 构建下 C++ restore 比双方 debug 断言更严格**；对合法快照行为一致；对损坏快照 C++ 报错误、Rust 可能 UB/panic 或静默接受。
+  2. C++ 在提交前重建 `newSlots` 并校验 slot sentinel、placement handle、generation、free-slot 完整性（cpp:277-376）；这些是 C++ 显式槽位表示的防御检查。Rust 通过 `SlotMap` 整体克隆恢复内部元数据（rs:83），安全 Rust API 无法构造同类非法 slot 元数据。C++ 对快照 dynamic-hazard 列表中的 null shape 也在变更前返回 `InvalidInput`（cpp:378-386）；Rust `Arc<SPolygon>` 无 null 对应值。
+  3. 提交顺序：C++ 完成上述预检后，先写入容器、placements 和 free-slot 元数据，再调用 CDE Restore（cpp:388-397），与 Rust 先写 container/placed_items 再调 `cde.restore`（rs:81-84）对齐。因此 CDE Debug 断言失败时，Layout 已包含快照 placements，不能描述为全程原子。
+  4. CDE Restore 按当前动态 hazard 的 entity 与快照列表做差分。匹配 entity 沿用当前 hazard；未匹配当前项删除；未匹配快照项按原字段新增。Rust `register_hazard` 对重复 entity 在 Debug 断言；数量等一致性检查也在更新后执行。C++ 对应地在 Debug 遇到待新增重复 entity 时提交已处理前缀后抛异常，且动态数量/布局匹配断言在 CDE 状态提交后发生（CollisionEngine.cpp:762-885；Layout.cpp:395-440）。Release 不执行这些断言，已测的非空损坏快照可被接受。
+  5. C++ 在 CDE 恢复后回查 placement hazard 句柄并更新槽位句柄，再于 Debug 检查实际 dynamic hazards 是否与 placements 一致（cpp:399-440）。Rust 的 `layout_qt_matches_fresh_qt` / `snapshot_matches_layout` 也是 Debug-only（rs:86-87）；两侧都可能在恢复副作用发生后 panic/throw，具体残留状态取决于损坏字段与触发分支。
+  6. 定向证据：S06 记录 15 个 Rust/C++ 配对 Restore 场景（包含六种 CDE hazard 字段变异），另有两个 C++ slot 元数据检查及一个 null-shape 检查。它们支持列明输入/profile 的结论，不证明任意损坏快照等价。
+- 结论：Restore 只有容器、槽元数据和 null-shape 等前置拒绝路径具备变更前失败；CDE/布局一致性差异会在变更后暴露。不能将 C++ Restore 总结为比 Rust 更严格或普遍原子。合法快照路径及列出的损坏快照 profile 结果有定向证据，未列组合仍开放。
 
 ### `place_item`（Rust 93-105 行）
 ```rust
@@ -134,8 +130,8 @@ self.placed_items.iter().all(|(pk, pi)| {
 |---|---|---|---|---|
 | 1 | 句柄体系：slotmap PItemKey vs 手工 (index, generation) 槽位 + 奇偶代数 + 空闲栈 LIFO | 差异（表示法） | 行为等价；键不按位兼容 | Rust rs:20；C++ h:75-91, cpp:62-95 |
 | 2 | 槽位 0 哨兵（generation=0 恒空） | C++ 额外 | 使生成键 index 恒非 0，供 Restore 校验；slotmap 无显式对应 | cpp:54-60, 317-322, 333 |
-| 3 | Restore 原子性：C++ 全程局部 newSlots 构建、最后提交，任何校验失败原状态不变 | C++ 增强 | 损坏快照下 C++ 报 SnapshotMismatch 且布局不变；Rust 依赖内部约定（restore 不会失败） | cpp:261-424 vs rs:74-89 |
-| 4 | Restore 校验集（hazard↔placement 匹配、句柄合法/去重、代数奇偶、空闲栈全覆盖、FindHazardHandle 回查） | C++ 额外 | 非法快照被拒绝；合法快照行为一致 | cpp:271-296, 331-351, 353-397, 403-418 |
+| 3 | Restore 失败时点：容器/槽元数据/null shape 在布局提交前校验；CDE 重建与一致性断言在布局提交后执行 | 具体边界差异 | 前置拒绝保留原布局；Debug CDE 断言可能留下已安装 placements 和部分 CDE 状态；Release 接受已测非空损坏快照 | cpp:263-386, 388-440; rs:74-87; S06 Restore cases |
+| 4 | Restore 校验集（句柄合法/去重、代数奇偶、空闲栈全覆盖、hazard 与 placement 一致性回查） | C++ 额外；部分 Debug-only | slot 元数据与 null shape 是 C++ 表示层前置保护；hazard 一致性在恢复后检查，不能概括为所有非法快照都先拒绝 | cpp:277-386, 399-440 |
 | 5 | Restore 兼容无槽位元数据快照（hasSlotMetadata 二分路径） | C++ 额外 | 支持外部构造的简化快照；Rust SlotMap 快照总含元数据 | cpp:298-312, 326-329, 388-397 |
 | 6 | PlaceItem 注册失败回滚（reset 槽 + 代数递增 + 归还空闲栈） | C++ 额外 | Rust 忽略 register_hazard 返回值（rs:100），失败只在 debug 断言暴露 | cpp:126-132 |
 | 7 | SwapContainer 失败原子性 + hazard↔placement 有效性校验 + cdeHandle 回填 | C++ 增强 | Rust swap 无失败路径；C++ 失败不动原状态 | cpp:159-200 vs rs:46-55 |
@@ -148,7 +144,7 @@ self.placed_items.iter().all(|(pk, pi)| {
 | 14 | Layout 不可拷贝（C++ delete 拷贝构造）vs Rust `#[derive(Clone)]` | 差异（API） | Rust 问题层靠 Clone 深拷贝（如 BPP restore 重建）；C++ 用移动/重建替代 | h:42-45 vs rs:15 |
 
 ## 结论
-Layout 的核心动态行为（place/remove/save/swap/is_feasible/面积密度）双侧语义一致，C++ 用手工槽位结构忠实复刻了 slotmap 的键分配与 LIFO 复用规则，并通过 f32 对齐保持数值路径一致。最大差异在 Restore/PlaceItem/SwapContainer 的防御性：C++ 将 Rust 的"内部约定 + debug 断言"升级为 Release 生效的多级校验与失败原子性（eef0830 后确认如此），对合法输入行为等价，对损坏输入 C++ 更严格。`cde()`/`is_empty()` 未暴露、`RightmostCollisionX`/`PlacedItemCount` 为 C++ 额外提炼。
+Layout 的核心动态行为（place/remove/save/swap/is_feasible/面积密度）双侧语义一致，C++ 用手工槽位结构复刻了 slotmap 的键分配与 LIFO 复用规则，并通过 f32 对齐保持数值路径一致。Restore 的容器、槽元数据和 null-shape 前置检查属于 C++ 表示层保护；CDE/布局一致性断言发生在布局和/或 CDE 状态更新之后，Debug 失败可能留下部分状态，Release 对已测非空损坏快照会接受。具体恢复顺序、profile 差异与覆盖边界见上文及 Sparrow S06 reference，不能概括为 C++ Restore 普遍更严格或原子。PlaceItem/SwapContainer 的额外失败保护仍单独记录。`cde()`/`is_empty()` 未暴露、`RightmostCollisionX`/`PlacedItemCount` 为 C++ 额外提炼。
 
 ## 补充审计（2026-09-29，逐行复核）
 

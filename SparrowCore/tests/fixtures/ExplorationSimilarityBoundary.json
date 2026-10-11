@@ -1,0 +1,33 @@
+{
+  "name": "sparrow-exploration-similarity-boundary",
+  "items": [
+    {
+      "id": 909,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    },
+    {
+      "id": 910,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [0.0970306321978569, 0], [0.0970306321978569, 10.40908432006836], [0, 10.40908432006836]]
+      }
+    },
+    {
+      "id": 911,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 20
+}

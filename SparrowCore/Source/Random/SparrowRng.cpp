@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 namespace
 {
@@ -58,11 +59,11 @@ std::uint32_t SparrowRng::NextU32() noexcept
     return static_cast<std::uint32_t>(NextU64() >> 32U);
 }
 
-std::uint32_t SparrowRng::UniformIndex(std::uint32_t upperExclusive) noexcept
+std::uint32_t SparrowRng::UniformIndex(std::uint32_t upperExclusive)
 {
     if (upperExclusive == 0U)
     {
-        return 0U;
+        throw std::invalid_argument("uniform index range must be non-empty");
     }
 
     const std::uint64_t product =

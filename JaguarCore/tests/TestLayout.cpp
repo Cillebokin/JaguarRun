@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <limits>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 namespace
@@ -224,18 +225,66 @@ void runLayoutTests()
     assert(snapshot.cdeSnapshot.dynamicHazards.size() == 1);
     auto mismatchedHazardSnapshot = snapshot;
     mismatchedHazardSnapshot.cdeSnapshot.dynamicHazards[0].entity.itemIndex = 99;
-    assert(!layout.Restore(mismatchedHazardSnapshot).HasValue());
     assert(!jaguar::ValidateLayoutSnapshot(layout, mismatchedHazardSnapshot).HasValue());
-    assert(layout.PlacedItemCount() == 1);
-    assert(layout.IsFeasible());
+    jaguar::Layout mismatchedHazardLayout(layout.GetContainer());
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(mismatchedHazardLayout.Restore(mismatchedHazardSnapshot).HasValue());
+#else
+    bool mismatchedHazardThrew = false;
+    try
+    {
+        (void)mismatchedHazardLayout.Restore(mismatchedHazardSnapshot);
+    }
+    catch (const std::logic_error&)
+    {
+        mismatchedHazardThrew = true;
+    }
+    assert(mismatchedHazardThrew);
+#endif
+    assert(mismatchedHazardLayout.PlacedItemCount() == 1);
 
     auto geometryMismatchedSnapshot = snapshot;
     geometryMismatchedSnapshot.cdeSnapshot.dynamicHazards[0].shape =
         std::make_shared<const jaguar::SimplePolygon>(Rectangle(8.0, 8.0, 9.0, 9.0));
-    assert(!layout.Restore(geometryMismatchedSnapshot).HasValue());
+    jaguar::Layout geometryMismatchedLayout(layout.GetContainer());
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(geometryMismatchedLayout.Restore(geometryMismatchedSnapshot).HasValue());
+#else
+    bool geometryMismatchThrew = false;
+    try
+    {
+        (void)geometryMismatchedLayout.Restore(geometryMismatchedSnapshot);
+    }
+    catch (const std::logic_error&)
+    {
+        geometryMismatchThrew = true;
+    }
+    assert(geometryMismatchThrew);
+#endif
+    assert(geometryMismatchedLayout.PlacedItemCount() == 1);
+
     auto dynamicFlagMismatchedSnapshot = snapshot;
     dynamicFlagMismatchedSnapshot.cdeSnapshot.dynamicHazards[0].dynamic = false;
-    assert(!layout.Restore(dynamicFlagMismatchedSnapshot).HasValue());
+    jaguar::Layout dynamicFlagMismatchedLayout(layout.GetContainer());
+#ifdef JAGUARCORE_TEST_RELEASE
+    assert(dynamicFlagMismatchedLayout
+               .Restore(dynamicFlagMismatchedSnapshot)
+               .HasValue());
+    assert(dynamicFlagMismatchedLayout.PlacedItemCount() == 1);
+    assert(dynamicFlagMismatchedLayout.Save().cdeSnapshot.dynamicHazards.empty());
+#else
+    bool dynamicFlagMismatchThrew = false;
+    try
+    {
+        (void)dynamicFlagMismatchedLayout.Restore(dynamicFlagMismatchedSnapshot);
+    }
+    catch (const std::logic_error&)
+    {
+        dynamicFlagMismatchThrew = true;
+    }
+    assert(dynamicFlagMismatchThrew);
+    assert(dynamicFlagMismatchedLayout.PlacedItemCount() == 1);
+#endif
 
     const auto second = layout.PlaceItem(
         item, jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 2.0}));

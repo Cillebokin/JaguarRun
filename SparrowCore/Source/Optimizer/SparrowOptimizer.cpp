@@ -7,10 +7,20 @@
 
 #include "JaguarCore/Assertions.h"
 
+#include <algorithm>
+#include <random>
+#include <stdexcept>
 #include <utility>
 
 namespace
 {
+std::uint64_t GenerateRandomSeed()
+{
+    std::random_device entropySource;
+    std::uniform_int_distribution<std::uint64_t> seedDistribution;
+    return seedDistribution(entropySource);
+}
+
 sparrow::OptimizationProgress MakeProgress(
     sparrow::OptimizationPhase phase,
     std::size_t iteration,
@@ -48,18 +58,8 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
     {
         remainingDemand += problem.RemainingDemand(index);
     }
-    if (remainingDemand != 0U)
-    {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            {jaguar::ErrorCode::Infeasible,
-             "warm-start solution does not satisfy item demand"});
-    }
-    const auto validation = jaguar::ValidateSPSolution(problem, solution);
-    if (!validation.HasValue())
-    {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            validation.GetError());
-    }
+    // Rust restores warm starts without requiring complete demand or a
+    // collision-free layout; keep those facts in metrics instead of rejecting.
     jaguar::Layout layout(solution.layoutSnapshot.container);
     const auto layoutRestored = layout.Restore(solution.layoutSnapshot);
     if (!layoutRestored.HasValue())
@@ -67,21 +67,38 @@ sparrow::Result<sparrow::SppLbfResult> MakeWarmStart(
         return sparrow::Result<sparrow::SppLbfResult>::FromError(
             layoutRestored.GetError());
     }
-    if (!layout.IsFeasible())
+    const auto restoredHazards =
+        layout.Save().cdeSnapshot.dynamicHazards;
+    for (const jaguar::LayoutPlacementSnapshot& placement :
+         solution.layoutSnapshot.placements)
     {
-        return sparrow::Result<sparrow::SppLbfResult>::FromError(
-            {jaguar::ErrorCode::Infeasible,
-             "warm-start solution is geometrically infeasible"});
+        jaguar::HazardEntity expectedHazard;
+        expectedHazard.kind = jaguar::HazardKind::PlacedItem;
+        expectedHazard.itemIndex = placement.placedItem.GetItemIndex();
+        expectedHazard.placedItemHandle = placement.handle;
+        expectedHazard.transform = placement.placedItem.Transform();
+        const bool hasOwnHazard = std::any_of(
+            restoredHazards.begin(), restoredHazards.end(),
+            [&expectedHazard](const jaguar::Hazard& hazard) {
+                return hazard.entity == expectedHazard;
+            });
+        if (!hasOwnHazard)
+        {
+            // Rust's next warm-start step constructs its collision tracker
+            // from the restored CDE and panics when an item has no own hazard.
+            throw std::logic_error("HazardEntity not found in collector");
+        }
     }
-
     sparrow::LbfMetrics metrics;
     metrics.seed = seed;
     metrics.sampleCount = 0U;
     metrics.placedItemCount = problem.PlacedItemCount();
-    metrics.remainingDemand = 0U;
+    metrics.remainingDemand = remainingDemand;
     metrics.stripWidth = solution.StripWidth();
     metrics.density = solution.Density();
-    metrics.feasible = true;
+    metrics.feasible = remainingDemand == 0U
+        && jaguar::ValidateSPSolution(problem, solution).HasValue()
+        && layout.IsFeasible();
     return sparrow::Result<sparrow::SppLbfResult>::FromValue(
         {solution, metrics});
 }
@@ -103,18 +120,20 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         return Result<SparrowOptimizationResult>::FromError(
             configResult.GetError());
     }
+    const std::uint64_t effectiveSeed =
+        config.seed.has_value() ? *config.seed : GenerateRandomSeed();
     OptimizationHistory history;
     // sparrow derives independent child streams from one root stream in the
     // order construction, exploration, compression. Keep the public seed as
     // the only root and reproduce that phase order here.
-    SparrowRng phaseRng(config.seed);
+    SparrowRng phaseRng(effectiveSeed);
     SparrowConstructorConfig constructorConfig = config.constructor;
     if (!config.warmStart.has_value())
     {
         constructorConfig.seed = phaseRng.NextU64();
     }
     const auto constructed = config.warmStart.has_value()
-        ? MakeWarmStart(instance, *config.warmStart, config.seed)
+        ? MakeWarmStart(instance, *config.warmStart, effectiveSeed)
         : ConstructSparrowInitialSolution(instance, constructorConfig);
     if (!constructed.HasValue())
     {
@@ -160,6 +179,7 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     terminator.StartPhase(config.compression.timeLimit);
     const auto compressed = Compress(
         instance,
+        explored.Value().separatorState,
         explored.Value().solution,
         config.compression,
         compressionSeed,
@@ -183,10 +203,9 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     jaguar::SPProblem validationProblem =
         std::move(validationProblemResult.Value());
     const auto restored = validationProblem.Restore(compressed.Value().solution);
-    if (!restored.HasValue()
-        || !jaguar::ValidateSPSolution(
-                validationProblem, compressed.Value().solution)
-                .HasValue())
+    // A stopped Rust run may return its restorable partial/infeasible seed.
+    // Validate snapshot structure here and leave solution quality in metrics.
+    if (!restored.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
             {jaguar::ErrorCode::Infeasible,
@@ -196,7 +215,7 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         compressed.Value().solution.layoutSnapshot.container);
     const auto finalLayoutRestored = finalLayout.Restore(
         compressed.Value().solution.layoutSnapshot);
-    if (!finalLayoutRestored.HasValue() || !finalLayout.IsFeasible())
+    if (!finalLayoutRestored.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
             {jaguar::ErrorCode::Infeasible,
@@ -204,16 +223,8 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     }
 
     LbfMetrics finalMetrics = compressed.Value().metrics;
-    finalMetrics.seed = config.seed;
+    finalMetrics.seed = effectiveSeed;
     finalMetrics.sampleCount = constructed.Value().metrics.sampleCount;
-    if (listener != nullptr)
-    {
-        listener->OnProgress(MakeProgress(
-            OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE,
-            0U,
-            finalMetrics,
-            0.0F));
-    }
     PublishSolutionReport(
         history,
         listener,

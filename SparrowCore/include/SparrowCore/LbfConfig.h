@@ -30,10 +30,6 @@ struct LbfConfig
             return Result<void>::FromError({jaguar::ErrorCode::InvalidInput, message});
         };
 
-        if (samplesPerItem == 0)
-        {
-            return invalid("samplesPerItem must be positive");
-        }
         if (!std::isfinite(localSearchFraction)
             || localSearchFraction < 0.0
             || localSearchFraction > 1.0)
@@ -71,18 +67,14 @@ struct SparrowConstructorConfig
     std::size_t nContainerSamples = 1000;
     std::size_t nFocussedSamples = 0;
     std::size_t nCoordinateDescents = 3;
-    std::size_t maxWidthGrowthAttempts = 32;
+    // Zero keeps the Rust Sparrow builder's width-only termination behavior.
+    // A positive cap is an optional C++ extension.
+    std::size_t maxWidthGrowthAttempts = 0;
     double widthGrowthRatio = 1.2;
     double widthCeilingFactor = 2.0;
 
     inline Result<void> Validate() const
     {
-        if (nContainerSamples == 0U && nFocussedSamples == 0U)
-        {
-            return Result<void>::FromError(
-                {jaguar::ErrorCode::InvalidInput,
-                 "Sparrow constructor needs a positive sample budget"});
-        }
         if (!std::isfinite(widthGrowthRatio) || widthGrowthRatio <= 1.0)
         {
             return Result<void>::FromError(

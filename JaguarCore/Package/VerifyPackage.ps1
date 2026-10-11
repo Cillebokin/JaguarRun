@@ -46,8 +46,8 @@ foreach ($path in $requiredSharedFiles) {
 }
 
 $headers = @(Get-ChildItem -LiteralPath $includeRoot -Recurse -File -Filter '*.h')
-if ($headers.Count -ne 31) {
-    throw "Expected 31 public headers, found $($headers.Count)"
+if ($headers.Count -ne 33) {
+    throw "Expected 33 public headers, found $($headers.Count)"
 }
 
 $nonConformingHeaders = @(

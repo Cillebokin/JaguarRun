@@ -38,8 +38,15 @@ evidence. The currently direct-checked surface is intentionally narrow:
   zero separator strikes. A separate seed-43 Rust trace checks a two-candidate weighted failure pool,
   the sampled higher-loss candidate, and the resulting two-item pair-swap state. Another seed-43
   three-item trace checks all three failed states and verifies the POI-contained child is relocated
-  4.3 units into its swapped large-item host's vacated space. Other contained-layout geometries,
-  arbitrary disruption settings, and compression remain outside Rust differential evidence.
+  4.3 units into its swapped large-item host's vacated space. Other contained-layout geometries
+  and arbitrary disruption settings remain outside the checked Exploration evidence. A further
+  Rust/C++ Explore trace starts from a feasible three-item layout with a 37° host rotation; it
+  compares the filtered-candidate RNG events, ordered host swaps, POI-contained child relocation,
+  and both failed states. That trace exposed the difference between C++ bounded-index sampling
+  and rand 0.10 `IteratorRandom::choose` on filtered iterators; C++ now mirrors the Rust
+  `CoinFlipper` reservoir path for this selection. This remains one fixed seed/configuration, so
+  other candidate counts and contained geometries are not established. Compression has the two
+  fixed Rust references described below and in `Differential.md`.
 
 Known boundaries and compatibility choices:
 
@@ -58,10 +65,15 @@ Known boundaries and compatibility choices:
   failed-pool termination paths also match directly. Fixed Exploration traces check multi-candidate
   weighted selection and a two-item pair-swap state, plus three-item POI-driven contained-child
   relocation into vacated space after a large-item swap. The checked multi-worker Rust
-  traces are reproducible across independent generations. This does not establish full optimizer
-  parity: geometry kernels, floating-point execution outside those traces, worker counts above
-three, other contained-layout geometries and disruption settings, compression, and end-to-end runs
-remain outside this evidence; bit-identical optimizer output is not claimed.
+  traces are reproducible across independent generations. The two checked Explore containment
+  traces cover an axis-aligned case and one actual 37° disruption/relocation path; the latter
+  compares pool/RNG/move events exactly and failure layouts within stated tolerances. Compression now has two limited Rust
+  references: one single-item warm-start `optimize` path without separator moves and one direct
+  single-worker `compression_phase` case with actual moves during two failed retries. This does not
+  establish full optimizer parity: geometry kernels, floating-point execution outside those traces,
+  worker counts above three, other contained-layout geometries and disruption settings, multi-worker
+  compression, default cold-start, termination handoff, and general end-to-end runs remain outside
+  this evidence; bit-identical optimizer output is not claimed.
 - Legacy iteration, failure, and infeasible-pool limits remain available to existing C++ callers.
 - WASM exports the stable C ABI (`SparrowOptimizeJson` and `SparrowOptimizeSvg`); Emscripten
   module packaging and host-side memory ownership remain deployment concerns.

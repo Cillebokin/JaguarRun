@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -14,7 +15,7 @@ namespace
 struct OrderedItem
 {
     std::size_t index = 0U;
-    double key = 0.0;
+    float key = 0.0F;
 };
 
 sparrow::Result<sparrow::SppLbfResult> InvalidConstruction(const char* message)
@@ -23,7 +24,8 @@ sparrow::Result<sparrow::SppLbfResult> InvalidConstruction(const char* message)
         {jaguar::ErrorCode::InvalidInput, message});
 }
 
-sparrow::Result<sparrow::SppLbfResult> InfeasibleConstruction(const char* message)
+sparrow::Result<sparrow::SppLbfResult> InfeasibleConstruction(
+    const std::string& message)
 {
     return sparrow::Result<sparrow::SppLbfResult>::FromError(
         {jaguar::ErrorCode::Infeasible, message});
@@ -106,7 +108,7 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
 
     std::vector<OrderedItem> itemOrder;
     itemOrder.reserve(instance.TotalDemand());
-    double widthCeiling = 0.0;
+    float widthCeiling = 0.0F;
     for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
         const jaguar::Item& item = instance.GetItem(index);
@@ -116,13 +118,15 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
         {
             return InvalidConstruction("Sparrow item geometry is invalid");
         }
-        const double key = surrogate->ConvexHullArea() * diameter;
+        const float key = static_cast<float>(surrogate->ConvexHullArea())
+            * static_cast<float>(diameter);
         if (!std::isfinite(key))
         {
             return InvalidConstruction("Sparrow item order key is not finite");
         }
         itemOrder.push_back({index, key});
-        widthCeiling += diameter * static_cast<double>(instance.ItemDemand(index));
+        widthCeiling += static_cast<float>(diameter)
+            * static_cast<float>(instance.ItemDemand(index));
     }
     std::sort(itemOrder.begin(), itemOrder.end(), [](const OrderedItem& left,
                                                      const OrderedItem& right) {
@@ -132,7 +136,7 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
         }
         return left.index < right.index;
     });
-    widthCeiling *= config.widthCeilingFactor;
+    widthCeiling *= static_cast<float>(config.widthCeilingFactor);
     if (!IsFiniteWidth(widthCeiling))
     {
         return InvalidConstruction("Sparrow width ceiling is invalid");
@@ -164,18 +168,25 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
             }
             if (!placement.Value().has_value())
             {
-                if (widthAttempts >= config.maxWidthGrowthAttempts)
+                if (config.maxWidthGrowthAttempts != 0U
+                    && widthAttempts >= config.maxWidthGrowthAttempts)
                 {
                     return InfeasibleConstruction(
-                        "Sparrow constructor width growth limit exceeded");
+                        "could not construct an initial placement for item "
+                        + std::to_string(ordered.index));
                 }
-                const double nextWidth = problem.StripWidth() * config.widthGrowthRatio;
-                if (!IsFiniteWidth(nextWidth) || nextWidth > widthCeiling)
+                const float nextWidth =
+                    static_cast<float>(problem.StripWidth())
+                    * static_cast<float>(config.widthGrowthRatio);
+                if (!IsFiniteWidth(nextWidth)
+                    || nextWidth >= widthCeiling)
                 {
                     return InfeasibleConstruction(
-                        "Sparrow constructor width ceiling exceeded");
+                        "could not construct an initial placement for item "
+                        + std::to_string(ordered.index));
                 }
-                const auto changed = problem.ChangeStripWidth(nextWidth);
+                const auto changed = problem.ChangeStripWidth(
+                    static_cast<double>(nextWidth));
                 if (!changed.HasValue())
                 {
                     return Result<SppLbfResult>::FromError(changed.GetError());

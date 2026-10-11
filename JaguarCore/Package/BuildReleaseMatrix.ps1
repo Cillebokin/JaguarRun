@@ -2,7 +2,7 @@
 param(
     [string]$QtBin = 'D:\MySoftwares\Tools\Qt\Qt5.12.10\5.12.10\msvc2017_64\bin',
     [string]$VcVars = 'D:\MySoftwares\Tools\VisualStudio\VS2019\Professional\VC\Auxiliary\Build\vcvars64.bat',
-    [string]$BuildRoot = (Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) 'build-JaguarCore-matrix'),
+    [string]$BuildRoot = '',
     [string]$PackageRoot = 'D:\MyWorks\ProQt\package-JaguarCore-0.1.0-msvc2019-x64',
     [string]$ExpectedPublicVersion = '0.1.0-dev',
     [string]$ExpectedFileVersion = '0.1.0.0',
@@ -92,10 +92,14 @@ function New-IsolatedRunRoot {
     return $candidate
 }
 
-$repoRoot = Resolve-FullPath (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+$repoRoot = Resolve-FullPath (Split-Path -Parent (Split-Path -Parent $scriptDir))
 $sourceRoot = Join-Path $repoRoot 'JaguarCore'
 $qtBinPath = Resolve-FullPath $QtBin
 $vcVarsPath = Resolve-FullPath $VcVars
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
+    $BuildRoot = Join-Path (Split-Path -Parent $repoRoot) 'build-JaguarCore-matrix'
+}
 $buildRootPath = Resolve-FullPath $BuildRoot
 $packageRootPath = Resolve-FullPath $PackageRoot
 

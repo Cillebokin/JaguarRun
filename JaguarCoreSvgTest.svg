@@ -15,6 +15,8 @@
         <circle class="surrogate-pole" cx="46.464465944957318" cy="56.82247550683303" r="2.67578125" fill="none" stroke="#00AA55" stroke-width="0.5"/>
       </g>
     </g>
+    <g id="quality_zones">
+    </g>
     <g id="collision_lines">
     </g>
     <g id="collision-debug" data-layout-feasible="true" data-enabled="true"/>

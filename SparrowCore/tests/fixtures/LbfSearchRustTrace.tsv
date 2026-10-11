@@ -4,6 +4,7 @@
 # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count
 # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
 # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# rng_after next_u64_after_search_hex
 eval container 0 00000000 40633c80 403df03e clear 42afe4d4
 report container 0 1 00000000 40633c80 403df03e clear 42afe4d4 1
 keep container 0 0 00000000 40633c80 403df03e clear 42afe4d4
@@ -162,3 +163,4 @@ eval finalrefine 29 00000000 3f7ffd78 3f8064c0 invalid 00000000
 eval finalrefine 30 00000000 3f801784 3f80dcb0 clear 42041c7e
 eval finalrefine 31 00000000 3f801784 3f7fd99f invalid 00000000
 result 104 1 00000000 3f801784 3f8064c0 clear 420414fe
+rng_after 519dc75acd5f6acc

@@ -13,6 +13,8 @@
 
 namespace sparrow
 {
+// For Rust-parity calls, keep the referenced layout and item unchanged while
+// evaluating. Rust's shared borrow enforces this lifetime invariant.
 class SPARROWCORE_API LbfEvaluator final : public SampleEvaluator
 {
 public:

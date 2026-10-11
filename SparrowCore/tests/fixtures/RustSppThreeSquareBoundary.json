@@ -1,0 +1,15 @@
+{
+  "name": "sparrow-rust-cpp-three-square-boundary",
+  "items": [
+    {
+      "id": 903,
+      "demand": 3,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 4
+}

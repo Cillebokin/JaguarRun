@@ -1,14 +1,14 @@
 # S02. consts.rs + lib.rs 逐文件逻辑比对
-**Rust**: `CodeResource/sparrow/src/consts.rs`（54 行）+ `CodeResource/sparrow/src/lib.rs`（38 行）
+**Rust**: `CodeResource/sparrow/src/consts.rs`（55 行，19 个 `pub const` 声明）+ `CodeResource/sparrow/src/lib.rs`（39 行）
 **C++**: 常量分散于 `SparrowCore/Include/SparrowCore/Optimizer/SparrowConfig.h`、`SeparatorWorker.h`、`Quantify/CollisionTracker.h/.cpp`、`Sampling/CoordinateDescent.h`、`Quantify/OverlapProxy.h`、`LbfConfig.h`；随机对应 `Include/SparrowCore/Random/SparrowRng.h`（29 行）+ `Source/Random/SparrowRng.cpp`（116 行）
 **判定**: 基本等价（常量逐项数值一致但无集中"consts"文件；SparrowRng 为 xorshift64\* 血统的 xoshiro256++ 重实现，种子派生用 SplitMix64，与 Rust `Xoshiro256PlusPlus::seed_from_u64` 语义对齐；PItemId/LItemId 类公共类型在 sparrow 侧不存在，无需对应）
 
 ## 逐条比对（consts.rs 常量）
 
 ### `GLS_WEIGHT_MAX_INC_RATIO = 2.0` / `GLS_WEIGHT_MIN_INC_RATIO = 1.2` / `GLS_WEIGHT_DECAY = 0.95`（Rust 4-6）
-- C++ 对应：`CollisionTracker::UpdateWeights()` 默认无参重载（CollisionTracker.cpp:559-585）。
-- 判定：一致（数值内联）。
-- 证据与说明：cpp:584 `1.2F + 0.8F * (entry.loss / maximumLoss)`——碰撞项增量由 1.2（MIN_INC）线性插值到 2.0（MIN+0.8=MAX）；cpp:585 无碰撞项 `0.95F`（DECAY）。带参重载 `UpdateWeights(collisionMultiplier, clearDecay=0.95F)`（CollisionTracker.h:65-66）把 2.0 外提为参数。数值语义与 Rust 一致（公式细节见 S18）。
+- C++ 对应：`CollisionTracker::UpdateWeights()` 默认无参重载（CollisionTracker.cpp:698-740）。
+- 判定：一致（常量内联；f32 运算表达式已按 Rust 对齐）。
+- 证据与说明：CollisionTracker.cpp:723 `1.2F + (2.0F - 1.2F) * (entry.loss / maximumLoss)`；无碰撞项为 `0.95F`。旧 `0.8F` 字面量与 Rust 实际 f32 运算 `2.0F - 1.2F` 相差 1 ULP，已由 S18 的跨语言部分碰撞权重 reference 捕获并修复。带参重载 `UpdateWeights(collisionMultiplier, clearDecay=0.95F)`（CollisionTracker.h:65-66）是 C++ 扩展；公式与边界见 S18。
 
 ### `OVERLAP_PROXY_EPSILON_DIAM_RATIO = 0.01`（Rust 7）
 - C++ 对应：`OverlapProxy.h/.cpp` 中 epsilon 处理（见 S17）。
@@ -108,29 +108,29 @@
 - 判定：一致。
 - 证据与说明：取 `NextU64() >> 32` 高 32 位，rand_xoshiro 的 u32 输出同为 u64 高半字。
 
-### `UniformIndex(upperExclusive)`（h:18，cpp:61-81）
+### `UniformIndex(upperExclusive)`（h:18，cpp:61-82）
 - Rust 对应：`Rng::random_range(0..n)` / rand 0.10 的 u32 区间映射。
-- 判定：一致。
-- 证据与说明：Lemire 乘法映射 `(u32 * n) >> 32` + 拒绝进位修正（cpp:68-80），注释明言"using rand 0.10's u32 range mapping"；边界 `upper==0` 返回 0（cpp:63-66）。
+- 判定：有效正上界的映射一致；零上界失败类别已通过语言机制映射。
+- 证据与说明：对 `upperExclusive > 0`，Lemire 乘法映射 `(u32 * n) >> 32` + 拒绝进位修正与 rand 0.10 的 u32 区间映射对应，并由正 bound fixture 覆盖。`upperExclusive==0` 时 Rust `random_range(0..0)` panic；C++ 现在在调用 RNG 前抛 `std::invalid_argument`，不再返回 0。Rust/C++ 测试均比较失败前后 RNG 状态和后续输出。包裹它的 sampler 构造错误仍由 S16 单独核对。
 
 ### `Uniform01F32()`（cpp:83-87）
 - Rust 对应：`Rng::random::<f32>()`（Standard）。
 - 判定：一致。
-- 证据与说明：`u32 >> 9` 取高 23 位 / 2^23（cpp:85-86），即 [0,1) 的标准 f32 采样（rand 对 f32 的 Standard 实现同为 23 位尾数缩放）。
+- 证据与说明：`u32 >> 9` 取高 23 位 / 2^23（cpp:85-86），即 [0,1) 的标准 f32 采样（rand 对 f32 的 Standard 实现同为 23 位尾数缩放）。`LbfSeed42Reference.tsv` 由 Rust `rng_reference.rs` 直接生成，TestRng.cpp:132-160 对同一 seed 的 4 个 `NextU64` 与 4 个 `Uniform01F32` 原始位模式逐值断言；这验证列明输出，不比较 RNG 内部状态。
 
 ### `Normal01F32()`（cpp:89-110）
-- Rust 对应：`Rng::sample(StandardNormal)`（f32）。
-- 判定：一致。
-- 证据与说明：Marsaglia polar 变体的 Box–Muller（cos/sin 对 + spare 缓存，`m_HasNormalSpare/m_NormalSpare`，cpp:91-109）；rand 的正态采样同为 spare 缓存形态（Zigguart/Box-Muller 因版本而异，但 C++ 侧注释与既有差分 fixture 锁定该实现，见 tests/TestRng.cpp）。
+- Rust 对应：Sparrow Rust 没有此 helper 的对应调用。探索池的 Rust `rand_distr::Normal` 由 C++ `Exploration.cpp` 的 `RustStandardNormalF64` 路径承接（S06）；本 helper 只由额外的 `LocalSearchSampler` 使用。
+- 判定：C++ 额外。
+- 证据与说明：C++ helper 是三角 Box–Muller：`sqrt(-2 ln u1)`、`2πu2`、cos 返回/sin spare 缓存（cpp:91-109），不是 Marsaglia 极坐标拒绝算法。TestRng 的此项检查 C++ 同种子实例间的确定性，不是 Rust/C++ 差分测试，也不证明与 Rust `StandardNormal` 同序列。
 
 ### `State()`（cpp:112-115）
 - 判定：C++ 额外（可观察状态，用于测试/断言）。
-- 证据与说明：返回 4×u64 状态副本；Rust Xoshiro 无公共状态导出（测试用 `from_seed`）。tests/TestRng.cpp 借此做差分验证。
+- 证据与说明：返回 4×u64 状态副本；Rust Xoshiro 无公共状态导出（测试用 `from_seed`）。`TestRng.cpp:258,285,291,318` 用它核对 C++ 同种子实例/状态的一致性，不是 Rust/C++ 状态差分；跨语言 RNG 输出 fixture 在 `TestRng.cpp:132-160`，只验证列明输出，不比较内部状态。
 
-### 种子派生链（SparrowOptimizer.cpp:110/114/135-136）
+### 种子派生链（SparrowOptimizer.cpp:115-139）
 - Rust 对应：optimizer/mod.rs 的子流派生。
-- 判定：一致（S08 记录核对）。
-- 证据与说明：C++ `SparrowRng phaseRng(config.seed)` 后依次 `NextU64()` → constructor/exploration/compression 三子种子，注释明言"reproduce that phase order"。
+- 判定：显式有效 seed 下顺序一致（S08 记录核对）；缺省 seed 入口已恢复非确定性语义。
+- 证据与说明：C++ 用 optional seed 或生成的 `effectiveSeed` 构造根 `SparrowRng`，cold-start 依次 `NextU64()` 派生 construction、exploration、compression 子 seed；warm-start 按 Rust 不消耗 construction RNG 的顺序派生 Explore/Compression。无 seed 运行把 `effectiveSeed` 写入 metrics，并通过 CLI stderr 输出；固定该 seed 重跑可复现。随机熵源本身按语言实现，不比较彼此独立的熵输出。
 
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
@@ -139,17 +139,22 @@
 | 2 | `LOG_LEVEL_FILTER_*` | C++缺失 | 日志分级归应用层 | consts.rs:38-40 vs（无） |
 | 3 | `DRAW_OPTIONS` vs SvgExportOptions | 差异 | C++ 默认 drawSurrogates=true（Rust false）；选项集不同属 JaguarCore 记录 36 | consts.rs:42-49 vs Main.cpp:207-209 |
 | 4 | `EPOCH`/`FMT`/SVG 特性开关 | C++缺失 | 应用层设施（日志时间戳、numfmt、live/final-svg 编译开关） | lib.rs:17-39 vs（无） |
-| 5 | `SparrowRng` 内置 RNG 类 | C++额外 | Rust 用 rand crate；C++ 自实现 xoshiro256++（SplitMix64 播种、Lemire 区间、Box-Muller 正态），并有 State() 观察口 | SparrowRng.h:10-28 vs cli.rs:17 |
+| 5 | `SparrowRng` 内置 RNG 类及额外 `Normal01F32` helper | C++额外 | Xoshiro/SplitMix64/整数区间映射有 Rust reference 覆盖；Box–Muller helper 仅供 C++ LocalSearchSampler，不属于 Rust parity | SparrowRng.h:10-28; SparrowRng.cpp:89-110 vs cli.rs:17 |
 | 6 | PItemId/LItemId 等公共类型 | 不适用 | sparrow 侧不定义此类 ID 类型（属 jagua-rs↔JaguarCore） | lib.rs 全文 vs（无） |
+| 7 | `UniformIndex(0)` vs Rust `random_range(0..0)` | 已对齐（错误类别/副作用） | Rust panic 对应 C++ `invalid_argument`；两边都在状态消耗前失败。语言出口不同，稳定分类一致 | SparrowRng.cpp:61-67; `rng_reference.rs::empty_uniform_range_panics_without_consuming_rng`; `TestRng.cpp::TestUniformIndexRejectsEmptyRangeWithoutConsumingRng` |
 
 ## 结论
-consts.rs 的算法常量（GLS 权重 2.0/1.2/0.95、CD 步长 1.1/0.5、精化比例、去重阈值、LBF 采样 1000/0/3、失败衰减 0.9、探索失败上限 10）在 C++ 侧全部等值存在——分散内联于 Quantify/Sampling/Optimizer 实现与 LbfConfig 默认值，无集中 consts 文件；应用层常量（时间比例、日志级别、SVG 开关、EPOCH）按归属判定为 C++ 缺失（归 CLI/Demo/NestLab）。SparrowRng 是 rand `Xoshiro256PlusPlus`+`seed_from_u64`+f32/uniform/normal 采样的忠实重实现，种子语义（SplitMix64 播撒）与输出映射（u32 高位、23 位尾数、Lemire+拒绝修正）逐项对齐并有 TestRng 差分锁定。总体判定基本等价。
+consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 对应实现中等值出现；应用层时间比例、日志级别、SVG 开关与 EPOCH 由调用方/宿主承担。SparrowRng 的 Xoshiro256++、SplitMix64 播种、有效 u32 区间映射、零区间失败和 f32 均匀采样按 Rust reference 核对；空区间的 panic/exception 类型不同，但失败前 RNG 状态一致。`Normal01F32` 是 C++ 额外 Box–Muller helper，不能纳入 Rust parity 结论。Rust 探索正态的对应路径单列于 S06。
+
+### P0 闭合记录（2026-10-09）
+
+`UniformIndex(0)` 的 Rust/C++ 对照用例已在 Debug/Release 全量套件通过：Rust `catch_unwind` 捕获空 range panic 后，下一 `next_u64()` 与未触发 panic 的参考 RNG 相同；C++ 捕获 `invalid_argument` 后，状态快照和下一 `NextU64()` 与参考 RNG 相同。固定 seed 的既有 RNG/整数映射 fixture 仍通过。该结果只证明 RNG primitive 的错误时点与副作用，不覆盖 S16 上层构造器如何把无效旋转/空候选转换成错误。
 
 ### 补充审计（2026-09-29）
-本审计对 consts.rs 54 行的**全部 15 个常量**与 lib.rs 38 行的**全部声明**做逐项覆盖复核（主文已逐条有记录），现场补验两处：
+本审计对 consts.rs 的**19 个 `pub const` 声明**与 lib.rs 39 行的**全部声明**做逐项覆盖复核（主文已逐条有记录），现场补验两处：
 
 1. **【浅覆盖补全：`PRE_REFINE_CD_TL_RATIOS` 等 4 组常量的 C++ 落点行号】** 主文只说"数值内联/拆入 LbfConfig 相邻字段"。现场确认实际落点：两轮 CD 精化的 8 个数值（0.25/0.02、5°/1°、0.01/0.001、0.5°/0.05°）内联于 `LbfSearch.cpp:31-63` 与 `SeparatorWorker.cpp:21-53` 的 `MakeRefinementConfig`（两处同构副本，S13 差异已记双副本），不在 LbfConfig.h——LbfConfig.h:19-22 的 stddev 字段属 LbfSearch 扰动范围（主文已警示不要混淆，判定维持）。全部 8 数值与 consts.rs:17-26 逐项一致，无遗漏常量。
 2. **【浅覆盖补全：`OVERLAP_PROXY_EPSILON_DIAM_RATIO=0.01` 落点】** 主文说"值内联于 OverlapProxy.cpp"。现场确认：OverlapProxy.cpp:155-157 `epsilonDiameterRatio = 0.01F` 硬编码（无命名常量）；另外 UniformRectSampler 侧的 `RotEntry` 无关。常量值双侧一致。
 3. **【浅覆盖补全：lib.rs 的 `pub use` 面（任务指定核对项）】** 现场核验：**lib.rs 不含任何 `pub use` 再导出**（全文仅 `pub mod` ×7 + EPOCH/FMT/特性开关）；sparrow 的公共导出面=各模块自身可见性（`quantify::mod` 的 `pub mod overlap_proxy/tracker/simd` + `mod pair_matrix` 私有 + 3 个 `pub fn`；`sample::mod` 的 oracle-trace 门控 `pub use coord_descent::{CDConfig, refine_coord_desc}`（feature=oracle-trace 时，sample/mod.rs:4）；`eval::mod` 的 `mod collision_loss` 私有 + `pub mod` ×3；`optimizer::mod` 的 `mod worker` 私有）。C++ 头文件导出面对照：PairMatrix 在 C++ 升为公共（S17 差异已记）；CDConfig/RefineCoordinateDescent 在 C++ 公共（CoordinateDescent.h）；`CollisionLossEvaluator` 双侧私有（C++ 摊进 SeparationEvaluator，S12）；`SeparatorWorker` 双侧私有（C++ 为自由函数 FindBestSeparatorMove，S05）——**逐项对齐，无未记录的导出面差异**。
-4. **【核对确认：15 常量清单完整】** GLS×3、EPSILON_DIAM×1、CD_STEP×2、REFINE 组×4、UNIQUE_THRESHOLD×1、TIME_RATIO×2、MAX_CONSEQ_FAILS×1、FAIL_DECAY×1、LOG_FILTER×2、DRAW_OPTIONS×1、LBF_SAMPLE_CONFIG×1——主文 11 个小节全覆盖，无遗漏条目。
+4. **【核对确认：19 个声明清单完整】** GLS×3、EPSILON_DIAM×1、CD_STEP×2、REFINE 组×4、UNIQUE_THRESHOLD×1、TIME_RATIO×2、MAX_CONSEQ_FAILS×1、FAIL_DECAY×1、LOG_FILTER×2、DRAW_OPTIONS×1、LBF_SAMPLE_CONFIG×1——合计 19 个声明，主文 11 个小节全覆盖。
 5. **【核对确认：SparrowRng 数学】** 抽验 `UniformIndex`（SparrowRng.cpp:61-81）Lemire+拒绝修正与 `NextU64` rotl(s0+s3,23)+s0 与 rand_xoshiro 参考一致，判定维持"一致"。

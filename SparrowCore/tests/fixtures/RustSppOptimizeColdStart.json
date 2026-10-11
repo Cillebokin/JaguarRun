@@ -1,0 +1,33 @@
+{
+  "name": "sparrow-rust-cpp-optimize-cold-start",
+  "items": [
+    {
+      "id": 930,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 931,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    },
+    {
+      "id": 932,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [2, 0], [2, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 3
+}

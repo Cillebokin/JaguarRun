@@ -27,27 +27,40 @@ impl BestSamples {
         let accept = match eval < self.upper_bound() {
             false => false,
             true => {
-                let any_similar = self.samples.iter()
-                    .any(|(d, _)| dtransfs_are_similar(*d, dt, self.unique_thresh, self.unique_thresh));
+                let any_similar = self.samples.iter().any(|(d, _)| {
+                    dtransfs_are_similar(*d, dt, self.unique_thresh, self.unique_thresh)
+                });
 
                 match any_similar {
-                    false => { //no similar sample found, evict worst and accept
+                    false => {
+                        //no similar sample found, evict worst and accept
                         if self.samples.len() == self.size {
                             self.samples.pop();
                         }
                         true
                     }
-                    true => { //at least one similar sample exists
-                        let better_than_all_similar = self.samples.iter()
-                            .filter(|(d, _)| dtransfs_are_similar(*d, dt, self.unique_thresh, self.unique_thresh))
+                    true => {
+                        //at least one similar sample exists
+                        let better_than_all_similar = self
+                            .samples
+                            .iter()
+                            .filter(|(d, _)| {
+                                dtransfs_are_similar(*d, dt, self.unique_thresh, self.unique_thresh)
+                            })
                             .all(|(_, sim_eval)| eval < *sim_eval);
 
                         if better_than_all_similar {
                             //evict all similar samples
-                            self.samples.retain(|(d, _)| !dtransfs_are_similar(*d, dt, self.unique_thresh, self.unique_thresh));
+                            self.samples.retain(|(d, _)| {
+                                !dtransfs_are_similar(
+                                    *d,
+                                    dt,
+                                    self.unique_thresh,
+                                    self.unique_thresh,
+                                )
+                            });
                             true
-                        }
-                        else {
+                        } else {
                             false
                         }
                     }
@@ -58,17 +71,18 @@ impl BestSamples {
             self.samples.push((dt, eval));
             self.samples.sort_by_key(|(_, eval)| *eval);
             debug_assert!(
-                self.samples.iter()
+                self.samples
+                    .iter()
                     .filter(|(_, eval)| *eval != SampleEval::Invalid)
-                    .array_combinations().all(|[a, b]| {
+                    .array_combinations()
+                    .all(|[a, b]| {
                         !dtransfs_are_similar(a.0, b.0, self.unique_thresh, self.unique_thresh)
-                    }
-                ),
-                "BestSamples: samples are not unique: {:?}", &self.samples
+                    }),
+                "BestSamples: samples are not unique: {:?}",
+                &self.samples
             );
             true
-        }
-        else{
+        } else {
             debug_assert!(self.samples.is_sorted_by_key(|(_, eval)| *eval));
             false
         }

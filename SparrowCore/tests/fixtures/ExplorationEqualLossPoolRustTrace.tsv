@@ -1,0 +1,9 @@
+# generator=Sparrow Rust exploration_phase; two distinct identity layouts with an equal collision loss
+# case name seed initial_width shrink_step iteration_limit pool_stddev failures item_count
+# Rust Vec::binary_search_by equal-loss insertion positions for the first three rows: 0, 0, 1
+# Resulting pool IDs after those rows: 1, 2, 0; selected pool index 0 is row 1 and leads to failure row 3
+case equal_loss 0 8.000000000 0.187500000 6 0.000001000 4 2
+failure 0 2.011691300 0 0.500000000 1.000000000 2.500000000 3.000000000 1 2.281250000 1.000000000 4.281250000 3.000000000
+failure 1 2.011691300 0 2.281250000 1.000000000 4.281250000 3.000000000 1 0.500000000 1.000000000 2.500000000 3.000000000
+failure 2 2.011691300 0 0.500000000 1.000000000 2.500000000 3.000000000 1 2.281250000 1.000000000 4.281250000 3.000000000
+failure 3 2.011691300 0 0.500000000 1.000000000 2.500000000 3.000000000 1 2.281250000 1.000000000 4.281250000 3.000000000

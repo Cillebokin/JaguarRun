@@ -1,0 +1,7 @@
+# generator=Sparrow Rust sparrow::optimizer::optimize with the locked RustReference Cargo.lock
+# input=RustSppOptimizeCompressSingleItem.json seed=3 warm_start=true initial_width=4 initial_translation=1.003,1.01
+# comparison=Rust measurements; abs tolerance width/density/rotation=0.0000005, translation=0.000005; phase/report/step count exact, step values tolerance=0.000001
+# path=zero separator no-improvement iterations; exercises phase handoff, random split, width updates, rollback, and compression success/failure reporting
+# config=exploration(shrink_step=0.2, workers=1, iter_limit=0, samples=8/0/1); compression(failure_based=0.5, shrink_range=0.01/0.01, workers=1, iter_limit=0, samples=8/0/1)
+# case seed placed remaining width density rotation x y phases reports compression_steps
+optimize_compress_single_warm 3 1 0 2.027520180 0.976660132 0.000000000 1.003000021 1.009999990 exploration,compression expl_feas,expl_feas,expl_feas,expl_feas,cmpr_feas,final 2

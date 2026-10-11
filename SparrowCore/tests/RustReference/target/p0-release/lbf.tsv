@@ -1,0 +1,4 @@
+# generator=Sparrow Rust LBFBuilder; see this crate's Cargo.lock for resolved sources
+# input=RustSppSingleItem.json seed=42 n_container_samples=64 n_focussed_samples=0 n_coord_descents=1
+# fixture seed placed remaining width density feasible
+rust_spp_single_item 42 1 0 2.001098871 0.499725431 true

@@ -1,0 +1,29 @@
+# generator=Rust rand 0.10.3 UniformBBoxSampler::sample with Xoshiro256++ seed_from_u64
+# input=RustSppSingleItem.json (one discrete 0-rad rotation; container_bbox=[0,0,10,10])
+# sample_bbox X singleton=[2,0,2,5], Y singleton=[0,2,5,2], XY singleton=[2,2,2,2]
+# singleton axes return their coordinate without consuming axis RNG; all samples compare f32 raw bits
+# case seed sample_index x_f32_bits y_f32_bits
+x 42 0 40000000 40119e40
+x 42 1 40000000 40737d9e
+x 42 2 40000000 40568d9e
+x 42 3 40000000 405ae94e
+x 42 4 40000000 409777eb
+x 42 5 40000000 408ccdc7
+x 42 6 40000000 3fa3997c
+x 42 7 40000000 404bc6e8
+y 42 0 40119e40 40000000
+y 42 1 40737d9e 40000000
+y 42 2 40568d9e 40000000
+y 42 3 405ae94e 40000000
+y 42 4 409777eb 40000000
+y 42 5 408ccdc7 40000000
+y 42 6 3fa3997c 40000000
+y 42 7 404bc6e8 40000000
+xy 42 0 40000000 40000000
+xy 42 1 40000000 40000000
+xy 42 2 40000000 40000000
+xy 42 3 40000000 40000000
+xy 42 4 40000000 40000000
+xy 42 5 40000000 40000000
+xy 42 6 40000000 40000000
+xy 42 7 40000000 40000000

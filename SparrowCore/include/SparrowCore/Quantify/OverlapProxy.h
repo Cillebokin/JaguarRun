@@ -14,7 +14,7 @@ SPARROWCORE_API float CalculateOverlapProxy(
     const jaguar::Transform2d& firstTransform,
     const jaguar::Surrogate& second,
     const jaguar::Transform2d& secondTransform,
-    float epsilon = 0.01F) noexcept;
+    float epsilon) noexcept;
 
 // Quantifies an already colliding pair using Sparrow's polygon loss formula.
 // The low-level overload above intentionally remains available for callers

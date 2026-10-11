@@ -1,6 +1,8 @@
 #include "SparrowCore/Optimizer/Exploration.h"
-
 #include "SparrowCore/Optimizer/Separator.h"
+#include "ExplorationNumeric.h"
+#include "ExplorationNormalSampler.h"
+#include "ExplorationTrace.h"
 
 #include "JaguarCore/Assertions.h"
 
@@ -9,6 +11,8 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -54,29 +58,34 @@ sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     return sparrow::Result<sparrow::LbfMetrics>::FromValue(metrics);
 }
 
-double CalculateMinimumStripWidth(
+float CalculateMinimumStripWidth(
     const jaguar::SPInstance& instance,
     const jaguar::SPSolution& solution) noexcept
 {
-    constexpr double relativeTolerance = 1.0e-6;
+    constexpr float relativeTolerance = 1.0e-6F;
     const jaguar::Rect2d containerBounds =
         solution.layoutSnapshot.container.CollisionShape().BoundingBox();
-    if (!std::isfinite(containerBounds.Width())
-        || !std::isfinite(containerBounds.Height())
-        || containerBounds.Width() <= 0.0
-        || containerBounds.Height() <= 0.0)
+    const float containerWidth = static_cast<float>(containerBounds.Width());
+    const float containerHeight = static_cast<float>(containerBounds.Height());
+    if (!std::isfinite(containerWidth)
+        || !std::isfinite(containerHeight)
+        || containerWidth <= 0.0F
+        || containerHeight <= 0.0F)
     {
-        return 0.0;
+        return 0.0F;
     }
 
     double totalArea = 0.0;
     for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
-        totalArea += instance.GetItem(index).CollisionShape().Area()
+        const float itemArea = static_cast<float>(
+            instance.GetItem(index).CollisionShape().Area());
+        totalArea += static_cast<double>(itemArea)
             * static_cast<double>(instance.ItemDemand(index));
     }
-    double minimumWidth = totalArea / containerBounds.Height()
-        * (1.0 - relativeTolerance);
+    float minimumWidth = static_cast<float>(
+        totalArea / static_cast<double>(containerHeight))
+        * (1.0F - relativeTolerance);
 
     for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
     {
@@ -87,19 +96,23 @@ double CalculateMinimumStripWidth(
             continue;
         }
 
-        std::vector<double> rotations;
+        std::vector<float> rotations;
         if (rotation.mode == jaguar::RotationMode::None)
         {
-            rotations.push_back(0.0);
+            rotations.push_back(0.0F);
         }
         else
         {
-            rotations = rotation.radians;
+            rotations.reserve(rotation.radians.size());
+            for (const double angle : rotation.radians)
+            {
+                rotations.push_back(static_cast<float>(angle));
+            }
         }
-        double itemWidth = std::numeric_limits<double>::infinity();
-        const double tolerance = item.CollisionShape().Diameter()
-            * relativeTolerance;
-        for (const double angle : rotations)
+        float itemWidth = std::numeric_limits<float>::infinity();
+        const float tolerance = static_cast<float>(
+            item.CollisionShape().Diameter()) * relativeTolerance;
+        for (const float angle : rotations)
         {
             if (!std::isfinite(angle))
             {
@@ -112,22 +125,22 @@ double CalculateMinimumStripWidth(
                 continue;
             }
             const jaguar::Rect2d bounds = transformed.Value().BoundingBox();
-            if (bounds.Height() <= containerBounds.Height() + tolerance)
+            const float boundsWidth = static_cast<float>(bounds.Width());
+            const float boundsHeight = static_cast<float>(bounds.Height());
+            if (boundsHeight <= containerHeight + tolerance)
             {
                 itemWidth = std::min(
                     itemWidth,
-                    std::max(0.0, bounds.Width() - tolerance));
+                    std::max(0.0F, boundsWidth - tolerance));
             }
         }
-        if (std::isfinite(itemWidth))
-        {
-            minimumWidth = std::max(minimumWidth, itemWidth);
-        }
+        minimumWidth = std::max(minimumWidth, itemWidth);
     }
 
-    const double widthInset = solution.StripWidth() - containerBounds.Width();
-    const double result = minimumWidth + widthInset;
-    return std::isfinite(result) && result > 0.0 ? result : 0.0;
+    const float widthInset = static_cast<float>(solution.StripWidth())
+        - containerWidth;
+    const float result = minimumWidth + widthInset;
+    return result > 0.0F ? result : 0.0F;
 }
 
 double NormalizeRotation(double value) noexcept
@@ -137,15 +150,7 @@ double NormalizeRotation(double value) noexcept
     return normalized < 0.0 ? normalized + twoPi : normalized;
 }
 
-double RotationDistance(double first, double second) noexcept
-{
-    constexpr double pi = 3.14159265358979323846;
-    const double distance = std::abs(
-        NormalizeRotation(first) - NormalizeRotation(second));
-    return std::min(distance, 2.0 * pi - distance);
-}
-
-jaguar::Transform2d LegalizeTransform(
+sparrow::Result<jaguar::Transform2d> LegalizeTransform(
     jaguar::Transform2d transform,
     const jaguar::Item& item)
 {
@@ -155,52 +160,181 @@ jaguar::Transform2d LegalizeTransform(
         transform.rotationRad = 0.0;
         break;
     case jaguar::RotationMode::Discrete:
-        if (!item.AllowedRotation().radians.empty())
+    {
+        if (item.AllowedRotation().radians.empty())
         {
-            double nearest = std::numeric_limits<double>::infinity();
-            double selected = item.AllowedRotation().radians.front();
-            for (const double allowed : item.AllowedRotation().radians)
+            return sparrow::Result<jaguar::Transform2d>::FromError(
+                {jaguar::ErrorCode::Infeasible,
+                 "called `Option::unwrap()` on a `None` value"});
+        }
+        double nearest = std::numeric_limits<double>::infinity();
+        double selected = item.AllowedRotation().radians.front();
+        for (const double allowed : item.AllowedRotation().radians)
+        {
+            if (!std::isfinite(allowed))
             {
-                if (!std::isfinite(allowed))
-                {
-                    continue;
-                }
-                const double distance = RotationDistance(
-                    transform.rotationRad, allowed);
-                if (distance < nearest)
-                {
-                    nearest = distance;
-                    selected = allowed;
-                }
+                continue;
             }
-            transform.rotationRad = selected;
+            const double distance = std::abs(
+                NormalizeRotation(transform.rotationRad - allowed));
+            if (distance < nearest)
+            {
+                nearest = distance;
+                selected = allowed;
+            }
         }
-        else
-        {
-            transform.rotationRad = 0.0;
-        }
+        transform.rotationRad = selected;
         break;
+    }
     case jaguar::RotationMode::Continuous:
         break;
     }
-    return transform;
+    return sparrow::Result<jaguar::Transform2d>::FromValue(transform);
 }
 
-std::uint64_t BoundedIndex(sparrow::SparrowRng& rng,
-                           std::uint64_t bound) noexcept
+std::size_t LeadingZeroes(std::size_t value) noexcept
 {
-    if (bound <= 1U)
+    constexpr std::size_t bits = std::numeric_limits<std::size_t>::digits;
+    if (value == 0U)
     {
-        return 0U;
+        return bits;
     }
-    const std::uint64_t threshold =
-        (std::numeric_limits<std::uint64_t>::max() % bound + 1U) % bound;
-    std::uint64_t value = 0U;
-    do
+    std::size_t count = 0U;
+    for (std::size_t bit = bits; bit > 0U; --bit)
     {
-        value = rng.NextU64();
-    } while (value < threshold);
-    return value % bound;
+        if ((value & (std::size_t{1U} << (bit - 1U))) != 0U)
+        {
+            break;
+        }
+        ++count;
+    }
+    return count;
+}
+
+std::uint32_t LeadingZeroes(std::uint32_t value) noexcept
+{
+    if (value == 0U)
+    {
+        return 32U;
+    }
+    std::uint32_t count = 0U;
+    for (std::uint32_t bit = 32U; bit > 0U; --bit)
+    {
+        if ((value & (std::uint32_t{1U} << (bit - 1U))) != 0U)
+        {
+            break;
+        }
+        ++count;
+    }
+    return count;
+}
+
+// rand 0.10 IteratorRandom::choose on a Filter iterator uses CoinFlipper
+// reservoir sampling. A bounded index draw has the same target distribution
+// but consumes/maps RNG bits differently, so mirror it for Rust trace parity.
+class RustCoinFlipper
+{
+public:
+    explicit RustCoinFlipper(sparrow::SparrowRng& rng) noexcept
+        : m_Rng(rng)
+    {
+    }
+
+    bool RandomRatioOneOver(std::size_t denominator) noexcept
+    {
+        const std::size_t bits = std::numeric_limits<std::size_t>::digits;
+        std::uint32_t count = static_cast<std::uint32_t>(
+            std::min<std::size_t>(bits - 1U - LeadingZeroes(denominator), 32U));
+        if (!FlipCHeads(count))
+        {
+            return false;
+        }
+
+        std::size_t numerator = std::size_t{1U} << count;
+        while (numerator < denominator)
+        {
+            const std::size_t numeratorZeros = LeadingZeroes(numerator);
+            const std::size_t denominatorZeros = LeadingZeroes(denominator);
+            const std::size_t difference = numeratorZeros
+                    > denominatorZeros + 1U
+                ? numeratorZeros - (denominatorZeros + 1U)
+                : 0U;
+            count = static_cast<std::uint32_t>(
+                std::clamp<std::size_t>(difference, 1U, 32U));
+            if (FlipCHeads(count))
+            {
+                const std::size_t multiplier = std::size_t{1U} << count;
+                numerator = numerator
+                        > std::numeric_limits<std::size_t>::max() / multiplier
+                    ? std::numeric_limits<std::size_t>::max()
+                    : numerator * multiplier;
+            }
+            else if (count == 1U)
+            {
+                const std::size_t nextNumerator =
+                    numerator + numerator - denominator;
+                if (nextNumerator == 0U || nextNumerator > numerator)
+                {
+                    return false;
+                }
+                numerator = nextNumerator;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+private:
+    bool FlipCHeads(std::uint32_t count) noexcept
+    {
+        while (true)
+        {
+            const std::uint32_t zeroCount = LeadingZeroes(m_Chunk);
+            if (zeroCount < count)
+            {
+                const std::uint32_t consumed = zeroCount + 1U;
+                m_Chunk <<= consumed;
+                m_ChunkRemaining = consumed >= m_ChunkRemaining
+                    ? 0U
+                    : m_ChunkRemaining - consumed;
+                return false;
+            }
+            if (m_ChunkRemaining >= count)
+            {
+                m_ChunkRemaining -= count;
+                m_Chunk <<= count;
+                return true;
+            }
+            count -= m_ChunkRemaining;
+            m_Chunk = m_Rng.NextU32();
+            m_ChunkRemaining = 32U;
+        }
+    }
+
+    sparrow::SparrowRng& m_Rng;
+    std::uint32_t m_Chunk = 0U;
+    std::uint32_t m_ChunkRemaining = 0U;
+};
+
+std::optional<std::size_t> ChooseFromRustFilteredRange(
+    sparrow::SparrowRng& rng,
+    const std::vector<std::size_t>& candidates)
+{
+    RustCoinFlipper coinFlipper(rng);
+    std::optional<std::size_t> selected;
+    std::size_t consumed = 0U;
+    for (const std::size_t candidate : candidates)
+    {
+        ++consumed;
+        if (coinFlipper.RandomRatioOneOver(consumed))
+        {
+            selected = candidate;
+        }
+    }
+    return selected;
 }
 
 double DoubleFromBits(std::uint64_t bits) noexcept
@@ -208,6 +342,32 @@ double DoubleFromBits(std::uint64_t bits) noexcept
     double value = 0.0;
     std::memcpy(&value, &bits, sizeof(value));
     return value;
+}
+
+std::size_t CountConsumedU64Words(
+    sparrow::SparrowRng before,
+    const sparrow::SparrowRng& after) noexcept
+{
+    for (std::size_t words = 0U; words <= 64U; ++words)
+    {
+        if (before.State() == after.State())
+        {
+            return words;
+        }
+        before.NextU64();
+    }
+    return 65U;
+}
+
+std::array<std::uint64_t, 4U> FollowingU64(
+    sparrow::SparrowRng rng) noexcept
+{
+    std::array<std::uint64_t, 4U> values{};
+    for (std::uint64_t& value : values)
+    {
+        value = rng.NextU64();
+    }
+    return values;
 }
 
 // rand_distr 0.6 samples StandardNormal with ZIGNOR in f64, then casts to f32.
@@ -234,6 +394,10 @@ const NormalZigguratTables& GetNormalZigguratTables() noexcept
                     + std::exp(-previous * previous / 2.0)));
         }
         result.x[0U] = area / std::exp(-tail * tail / 2.0);
+        // rand_distr 0.6 stores the terminal Ziggurat edge as exact zero.
+        // Reapplying the recurrence can round its log argument above 1.0,
+        // producing NaN and rejecting every candidate in the last layer.
+        result.x.back() = 0.0;
         for (std::size_t index = 0U; index < result.x.size(); ++index)
         {
             result.f[index] =
@@ -370,7 +534,7 @@ CollectContainedHandles(
         filter,
         [](const jaguar::HazardEntity&) { return false; });
 
-    std::vector<jaguar::PlacedItemHandle> result;
+    std::vector<std::pair<jaguar::HazardHandle, jaguar::PlacedItemHandle>> orderedHandles;
     for (const auto& entry : collector.Entries())
     {
         if (entry.second.kind != jaguar::HazardKind::PlacedItem)
@@ -384,16 +548,63 @@ CollectContainedHandles(
                    other->placedItem.CollisionShape()
                        .PointOfInaccessibility().center))
         {
-            result.push_back(entry.second.placedItemHandle);
+            orderedHandles.emplace_back(
+                entry.first, entry.second.placedItemHandle);
         }
+    }
+    // Rust's BasicHazardCollector stores entries in a SecondaryMap and
+    // iterates them by hazard-key slot. Match that order rather than keeping
+    // the quadtree traversal order used to populate the C++ collector.
+    std::sort(orderedHandles.begin(), orderedHandles.end(), [](const auto& left, const auto& right) {
+        if (left.first.index != right.first.index)
+        {
+            return left.first.index < right.first.index;
+        }
+        return left.first.generation < right.first.generation;
+    });
+    std::vector<jaguar::PlacedItemHandle> result;
+    result.reserve(orderedHandles.size());
+    for (const auto& entry : orderedHandles)
+    {
+        result.push_back(entry.second);
     }
     return sparrow::Result<std::vector<jaguar::PlacedItemHandle>>::FromValue(
         std::move(result));
 }
 
+void TraceDisruptionMove(
+    const sparrow::detail::ExplorationTraceCallback* trace,
+    std::size_t failureId,
+    sparrow::detail::ExplorationTraceEvent::DisruptionMoveKind kind,
+    std::size_t itemIndex,
+    std::size_t relatedItemIndex,
+    const jaguar::Transform2d& from,
+    const jaguar::Transform2d& to)
+{
+    if (trace == nullptr)
+    {
+        return;
+    }
+    sparrow::detail::ExplorationTraceEvent event;
+    event.type = sparrow::detail::ExplorationTraceEvent::Type::DisruptionMove;
+    event.failureId = failureId;
+    event.disruptionMoveKind = kind;
+    event.itemIndex = itemIndex;
+    event.relatedItemIndex = relatedItemIndex;
+    event.fromPose = {static_cast<float>(from.rotationRad),
+                      static_cast<float>(from.translation.x),
+                      static_cast<float>(from.translation.y)};
+    event.toPose = {static_cast<float>(to.rotationRad),
+                    static_cast<float>(to.translation.x),
+                    static_cast<float>(to.translation.y)};
+    (*trace)(event);
+}
+
 sparrow::Result<void> DisruptSolution(
     sparrow::Separator& separator,
-    const sparrow::ExplorationConfig& config)
+    const sparrow::ExplorationConfig& config,
+    std::size_t failureId,
+    const sparrow::detail::ExplorationTraceCallback* trace)
 {
     if (config.disruptionCount == 0U
         && config.containedRelocationCount == 0U)
@@ -407,8 +618,8 @@ sparrow::Result<void> DisruptSolution(
         return sparrow::Result<void>::FromValue();
     }
 
-    double totalConvexHullArea = 0.0;
-    std::vector<double> itemHullAreas;
+    float totalConvexHullArea = 0.0F;
+    std::vector<float> itemHullAreas;
     itemHullAreas.reserve(separator.Problem().Instance().ItemCount());
     for (std::size_t index = 0U;
          index < separator.Problem().Instance().ItemCount();
@@ -416,16 +627,16 @@ sparrow::Result<void> DisruptSolution(
     {
         const jaguar::Surrogate* surrogate = separator.Problem().Instance()
             .GetItem(index).CollisionShape().GetSurrogate();
-        const double hullArea = surrogate == nullptr
-            ? 0.0
-            : surrogate->ConvexHullArea();
+        const float hullArea = surrogate == nullptr
+            ? 0.0F
+            : static_cast<float>(surrogate->ConvexHullArea());
         itemHullAreas.push_back(hullArea);
-        totalConvexHullArea += hullArea * static_cast<double>(
+        totalConvexHullArea += hullArea * static_cast<float>(
             separator.Problem().Instance().ItemDemand(index));
     }
-    const double cutoff = totalConvexHullArea
-        * config.largeItemChAreaCutoffPercentile;
-    std::vector<std::pair<double, std::size_t>> ordered;
+    const float cutoff = totalConvexHullArea
+        * static_cast<float>(config.largeItemChAreaCutoffPercentile);
+    std::vector<std::pair<float, std::size_t>> ordered;
     for (std::size_t index = 0U; index < itemHullAreas.size(); ++index)
     {
         ordered.emplace_back(itemHullAreas[index], index);
@@ -438,11 +649,11 @@ sparrow::Result<void> DisruptSolution(
                   }
                   return left.second < right.second;
               });
-    double cumulative = 0.0;
-    double cutoffArea = 0.0;
+    float cumulative = 0.0F;
+    float cutoffArea = 0.0F;
     for (const auto& entry : ordered)
     {
-        cumulative += entry.first * static_cast<double>(
+        cumulative += entry.first * static_cast<float>(
             separator.Problem().Instance().ItemDemand(entry.second));
         if (cumulative > cutoff)
         {
@@ -468,12 +679,18 @@ sparrow::Result<void> DisruptSolution(
     }
     if (large.empty())
     {
-        large = all;
+        return sparrow::Result<void>::FromError(
+            {jaguar::ErrorCode::Infeasible,
+             "[DSRP] failed to choose first item"});
     }
 
-    const std::size_t firstOffset = static_cast<std::size_t>(BoundedIndex(
-        separator.Random(), static_cast<std::uint64_t>(large.size())));
-    const std::size_t firstIndex = large[firstOffset];
+    const auto firstChoice = ChooseFromRustFilteredRange(
+        separator.Random(), large);
+    if (!firstChoice.has_value())
+    {
+        return sparrow::Result<void>::FromValue();
+    }
+    const std::size_t firstIndex = *firstChoice;
     std::vector<std::size_t> distinct;
     for (const std::size_t index : large)
     {
@@ -485,13 +702,11 @@ sparrow::Result<void> DisruptSolution(
             .placedItem;
         const auto& candidate = solution.layoutSnapshot.placements[index]
             .placedItem;
-        const double areaTolerance = firstItem.Area() * 0.01;
-        const double diameterTolerance = firstItem.CollisionShape().Diameter()
-            * 0.01;
-        if (std::abs(candidate.Area() - firstItem.Area()) > areaTolerance
-            && std::abs(candidate.CollisionShape().Diameter()
-                        - firstItem.CollisionShape().Diameter())
-                   > diameterTolerance)
+        if (sparrow::detail::IsRustF32Distinct(
+                candidate.Area(),
+                firstItem.Area(),
+                candidate.CollisionShape().Diameter(),
+                firstItem.CollisionShape().Diameter()))
         {
             distinct.push_back(index);
         }
@@ -509,18 +724,36 @@ sparrow::Result<void> DisruptSolution(
     {
         return sparrow::Result<void>::FromValue();
     }
-    const std::size_t secondIndex = filteredSecondPool[static_cast<std::size_t>(
-        BoundedIndex(separator.Random(), static_cast<std::uint64_t>(
-            filteredSecondPool.size())))];
+    const auto secondChoice = ChooseFromRustFilteredRange(
+        separator.Random(), filteredSecondPool);
+    if (!secondChoice.has_value())
+    {
+        return sparrow::Result<void>::FromValue();
+    }
+    const std::size_t secondIndex = *secondChoice;
 
     const auto& firstPlacement = solution.layoutSnapshot.placements[firstIndex];
     const auto& secondPlacement = solution.layoutSnapshot.placements[secondIndex];
     const jaguar::Transform2d firstOld = firstPlacement.placedItem.Transform();
     const jaguar::Transform2d secondOld = secondPlacement.placedItem.Transform();
-    const jaguar::Transform2d firstNew = LegalizeTransform(
+    const auto firstNewResult = LegalizeTransform(
         secondOld, firstPlacement.placedItem.GetItem());
-    const jaguar::Transform2d secondNew = LegalizeTransform(
+    if (!firstNewResult.HasValue())
+    {
+        return sparrow::Result<void>::FromError(firstNewResult.GetError());
+    }
+    const jaguar::Transform2d firstNew = firstNewResult.Value();
+    const auto secondNewResult = LegalizeTransform(
         firstOld, secondPlacement.placedItem.GetItem());
+    if (!secondNewResult.HasValue())
+    {
+        return sparrow::Result<void>::FromError(secondNewResult.GetError());
+    }
+    const jaguar::Transform2d secondNew = secondNewResult.Value();
+    const std::size_t firstItemIndex =
+        firstPlacement.placedItem.GetItemIndex();
+    const std::size_t secondItemIndex =
+        secondPlacement.placedItem.GetItemIndex();
 
     const auto firstMoved = separator.MoveItem(
         firstPlacement.handle, firstNew);
@@ -528,12 +761,28 @@ sparrow::Result<void> DisruptSolution(
     {
         return sparrow::Result<void>::FromError(firstMoved.GetError());
     }
+    TraceDisruptionMove(
+        trace,
+        failureId,
+        sparrow::detail::ExplorationTraceEvent::DisruptionMoveKind::Swap,
+        firstItemIndex,
+        secondItemIndex,
+        firstOld,
+        firstNew);
     const auto secondMoved = separator.MoveItem(
         secondPlacement.handle, secondNew);
     if (!secondMoved.HasValue())
     {
         return sparrow::Result<void>::FromError(secondMoved.GetError());
     }
+    TraceDisruptionMove(
+        trace,
+        failureId,
+        sparrow::detail::ExplorationTraceEvent::DisruptionMoveKind::Swap,
+        secondItemIndex,
+        firstItemIndex,
+        secondOld,
+        secondNew);
 
     // jagua-rs: converting_transformation = dt_new.compose().inverse()
     //     .transform(&dt_old.compose()) — f32 矩阵路径；用 RustF32 位级对应。
@@ -557,16 +806,29 @@ sparrow::Result<void> DisruptSolution(
         {
             continue;
         }
-        const auto moved = separator.MoveItem(
-            handle,
-            LegalizeTransform(
-                placement->placedItem.Transform().FollowedByRustF32(
-                    firstConversion),
-                placement->placedItem.GetItem()));
+        const jaguar::Transform2d from = placement->placedItem.Transform();
+        const auto toResult = LegalizeTransform(
+            from.FollowedByRustF32(firstConversion),
+            placement->placedItem.GetItem());
+        if (!toResult.HasValue())
+        {
+            return sparrow::Result<void>::FromError(toResult.GetError());
+        }
+        const jaguar::Transform2d to = toResult.Value();
+        const std::size_t itemIndex = placement->placedItem.GetItemIndex();
+        const auto moved = separator.MoveItem(handle, to);
         if (!moved.HasValue())
         {
             return sparrow::Result<void>::FromError(moved.GetError());
         }
+        TraceDisruptionMove(
+            trace,
+            failureId,
+            sparrow::detail::ExplorationTraceEvent::DisruptionMoveKind::ContainedRelocation,
+            itemIndex,
+            firstItemIndex,
+            from,
+            to);
     }
 
     // jagua-rs: converting_transformation = dt2_new.compose().inverse()
@@ -591,16 +853,29 @@ sparrow::Result<void> DisruptSolution(
         {
             continue;
         }
-        const auto moved = separator.MoveItem(
-            handle,
-            LegalizeTransform(
-                placement->placedItem.Transform().FollowedByRustF32(
-                    secondConversion),
-                placement->placedItem.GetItem()));
+        const jaguar::Transform2d from = placement->placedItem.Transform();
+        const auto toResult = LegalizeTransform(
+            from.FollowedByRustF32(secondConversion),
+            placement->placedItem.GetItem());
+        if (!toResult.HasValue())
+        {
+            return sparrow::Result<void>::FromError(toResult.GetError());
+        }
+        const jaguar::Transform2d to = toResult.Value();
+        const std::size_t itemIndex = placement->placedItem.GetItemIndex();
+        const auto moved = separator.MoveItem(handle, to);
         if (!moved.HasValue())
         {
             return sparrow::Result<void>::FromError(moved.GetError());
         }
+        TraceDisruptionMove(
+            trace,
+            failureId,
+            sparrow::detail::ExplorationTraceEvent::DisruptionMoveKind::ContainedRelocation,
+            itemIndex,
+            secondItemIndex,
+            from,
+            to);
     }
     return sparrow::Result<void>::FromValue();
 }
@@ -617,6 +892,14 @@ sparrow::OptimizationProgress MakeProgress(
             metrics.density,
             collisionLoss,
             metrics.feasible};
+}
+}
+
+namespace sparrow::detail
+{
+float RustNormalF32(sparrow::SparrowRng& rng, float standardDeviation)
+{
+    return ::RustNormalF32(rng, standardDeviation);
 }
 }
 
@@ -640,13 +923,16 @@ Result<void> ExplorationConfig::Validate() const
     return separator.Validate();
 }
 
-Result<ExplorationResult> Explore(
+namespace
+{
+Result<ExplorationResult> ExploreImpl(
     const jaguar::SPInstance& instance,
     const jaguar::SPSolution& initialSolution,
     const ExplorationConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    const detail::ExplorationTraceCallback* trace)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -680,23 +966,24 @@ Result<ExplorationResult> Explore(
 
     jaguar::SPSolution bestSolution = initialSolution;
     LbfMetrics bestMetrics = initialMetrics.Value();
-    const double minimumWidth = CalculateMinimumStripWidth(
-        instance, initialSolution);
-    double currentWidth = separator.Problem().StripWidth();
-    double bestWidth = currentWidth;
+    const float minimumWidth = static_cast<float>(CalculateMinimumStripWidth(
+        instance, initialSolution));
+    float currentWidth = static_cast<float>(
+        separator.Problem().StripWidth());
+    float bestWidth = currentWidth;
     std::size_t totalSurrogateRejectCount = 0U;
     std::size_t totalExactCollisionCount = 0U;
     std::size_t failures = 0U;
     std::size_t iteration = 0U;
+    std::size_t nextFailureId = 0U;
+    std::vector<std::size_t> tracePoolOrder;
     std::vector<InfeasibleCandidate> infeasiblePool;
     OptimizationHistory history;
     PublishSolutionReport(
         history,
         listener,
         MakeSolutionReport(
-            bestMetrics.feasible
-                ? OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
-                : OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE,
+            OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE,
             OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
             0U,
             bestSolution,
@@ -787,10 +1074,11 @@ Result<ExplorationResult> Explore(
                         totalLoss,
                         true));
             }
-            const double nextWidth = currentWidth * (1.0 - config.shrinkStep);
-            if (!std::isfinite(nextWidth) || nextWidth <= 0.0
+            const float nextWidth = currentWidth
+                * (1.0F - static_cast<float>(config.shrinkStep));
+            if (!std::isfinite(nextWidth) || nextWidth <= 0.0F
                 || nextWidth >= currentWidth
-                || (minimumWidth > 0.0 && nextWidth < minimumWidth))
+                || (minimumWidth > 0.0F && nextWidth < minimumWidth))
             {
                 break;
             }
@@ -802,41 +1090,119 @@ Result<ExplorationResult> Explore(
             }
             currentWidth = nextWidth;
             infeasiblePool.clear();
+            tracePoolOrder.clear();
             failures = 0U;
         }
         else
         {
             InfeasibleCandidate candidate(
                 separated.Value().solution, totalLoss);
-            const auto insertion = std::lower_bound(
-                infeasiblePool.begin(),
-                infeasiblePool.end(),
-                candidate.loss,
-                [](const InfeasibleCandidate& value, float loss) {
-                    return value.loss < loss;
-                });
+            const std::size_t insertionIndex = [&infeasiblePool,
+                                                loss = candidate.loss]() {
+                if (infeasiblePool.empty())
+                {
+                    return std::size_t{0U};
+                }
+                std::size_t left = 0U;
+                std::size_t size = infeasiblePool.size();
+                // Rust 1.98.1 slice::binary_search_by advances to the last
+                // equal element before returning its matching index.
+                while (size > 1U)
+                {
+                    const std::size_t half = size / 2U;
+                    const std::size_t middle = left + half;
+                    const float poolLoss = infeasiblePool[middle].loss;
+                    if (std::isnan(poolLoss) || std::isnan(loss))
+                    {
+                        throw std::domain_error(
+                            "Rust binary_search_by partial_cmp cannot compare NaN loss");
+                    }
+                    if (poolLoss > loss)
+                    {
+                        size = half;
+                    }
+                    else
+                    {
+                        left = middle;
+                        size -= half;
+                    }
+                }
+                const float candidateLoss = infeasiblePool[left].loss;
+                if (std::isnan(candidateLoss) || std::isnan(loss))
+                {
+                    throw std::domain_error(
+                        "Rust binary_search_by partial_cmp cannot compare NaN loss");
+                }
+                if (candidateLoss == loss)
+                {
+                    return left;
+                }
+                return candidateLoss < loss ? left + 1U : left;
+            }();
+            const auto insertion = infeasiblePool.begin() + insertionIndex;
             infeasiblePool.insert(insertion, std::move(candidate));
+            const std::size_t failureId = nextFailureId++;
+            if (trace != nullptr)
+            {
+                tracePoolOrder.insert(
+                    tracePoolOrder.begin() + insertionIndex,
+                    failureId);
+            }
             if (config.infeasiblePoolSize > 0U
                 && infeasiblePool.size() > config.infeasiblePoolSize)
             {
                 infeasiblePool.pop_back();
+                if (trace != nullptr)
+                {
+                    tracePoolOrder.pop_back();
+                }
+            }
+            if (trace != nullptr)
+            {
+                detail::ExplorationTraceEvent event;
+                event.type = detail::ExplorationTraceEvent::Type::PoolInsert;
+                event.failureId = failureId;
+                event.insertionIndex = insertionIndex;
+                event.poolOrder = tracePoolOrder;
+                (*trace)(event);
             }
             ++failures;
-            if (config.maxConsecutiveFailures > 0U
-                && failures >= config.maxConsecutiveFailures)
+            if (config.maxConsecutiveFailures.has_value()
+                && failures >= *config.maxConsecutiveFailures)
             {
                 break;
             }
 
-            const float sampled = std::min(
-                std::abs(RustNormalF32(
-                    separator.Random(),
-                    static_cast<float>(config.solutionPoolDistributionStddev))),
-                0.999F);
+            std::optional<SparrowRng> rngBeforeSample;
+            if (trace != nullptr)
+            {
+                rngBeforeSample = separator.Random();
+            }
+            const float rawSample = sparrow::detail::RustNormalF32(
+                separator.Random(),
+                static_cast<float>(config.solutionPoolDistributionStddev));
+            const float sampled = std::min(std::abs(rawSample), 0.999F);
             const std::size_t selectedIndex = std::min(
                 static_cast<std::size_t>(sampled
                     * static_cast<float>(infeasiblePool.size())),
                 infeasiblePool.size() - 1U);
+            if (trace != nullptr && rngBeforeSample.has_value())
+            {
+                sparrow::SparrowRng firstLayerProbe = *rngBeforeSample;
+                detail::ExplorationTraceEvent event;
+                event.type = detail::ExplorationTraceEvent::Type::PoolSample;
+                event.failureId = failureId;
+                event.rawSample = rawSample;
+                event.mappedSample = sampled;
+                event.selectedIndex = selectedIndex;
+                event.consumedU64Words = CountConsumedU64Words(
+                    *rngBeforeSample,
+                    separator.Random());
+                event.firstLayerIndex = static_cast<std::uint32_t>(
+                    firstLayerProbe.NextU64() & 0xffU);
+                event.followingU64 = FollowingU64(separator.Random());
+                (*trace)(event);
+            }
             const auto rolledBack = separator.Rollback(
                 infeasiblePool[selectedIndex].solution);
             if (!rolledBack.HasValue())
@@ -844,7 +1210,8 @@ Result<ExplorationResult> Explore(
                 return Result<ExplorationResult>::FromError(
                     rolledBack.GetError());
             }
-            const auto disrupted = DisruptSolution(separator, config);
+            const auto disrupted = DisruptSolution(
+                separator, config, failureId, trace);
             if (!disrupted.HasValue())
             {
                 return Result<ExplorationResult>::FromError(
@@ -858,6 +1225,42 @@ Result<ExplorationResult> Explore(
     bestMetrics.surrogateRejectCount = totalSurrogateRejectCount;
     bestMetrics.exactCollisionCount = totalExactCollisionCount;
     return Result<ExplorationResult>::FromValue(
-        {bestSolution, bestMetrics, std::move(history)});
+        {bestSolution,
+         separator.SaveSolution(),
+         bestMetrics,
+         std::move(history)});
+}
+}
+
+Result<ExplorationResult> Explore(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& initialSolution,
+    const ExplorationConfig& config,
+    std::uint64_t seed,
+    OptimizationTerminator& terminator,
+    OptimizationListener* listener)
+{
+    return ExploreImpl(
+        instance, initialSolution, config, seed, terminator, listener, nullptr);
+}
+
+float detail::ExplorationMinimumStripWidthForTrace(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& solution) noexcept
+{
+    return CalculateMinimumStripWidth(instance, solution);
+}
+
+Result<ExplorationResult> detail::ExploreWithTrace(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& initialSolution,
+    const ExplorationConfig& config,
+    std::uint64_t seed,
+    OptimizationTerminator& terminator,
+    OptimizationListener* listener,
+    const detail::ExplorationTraceCallback& callback)
+{
+    return ExploreImpl(
+        instance, initialSolution, config, seed, terminator, listener, &callback);
 }
 }

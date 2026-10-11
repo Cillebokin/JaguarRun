@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <utility>
 
 namespace jaguar
@@ -260,8 +261,7 @@ JAGUARCORE_API LayoutSnapshot Layout::Save() const
 
 JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
 {
-    if (!m_Container.SameBase(snapshot.container) ||
-        snapshot.cdeSnapshot.dynamicHazards.size() != snapshot.placements.size())
+    if (!m_Container.SameBase(snapshot.container))
     {
         return Result<void>::FromError(
             {ErrorCode::SnapshotMismatch,
@@ -273,27 +273,6 @@ JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
     for (const LayoutPlacementSnapshot& placement : snapshot.placements)
         expectedHazards.push_back(
             MakeHazard(placement.placedItem, placement.handle));
-
-    std::vector<bool> matched(expectedHazards.size(), false);
-    for (const Hazard& actual : snapshot.cdeSnapshot.dynamicHazards)
-    {
-        bool found = false;
-        for (std::size_t i = 0; i < expectedHazards.size(); ++i)
-        {
-            if (!matched[i] && sameHazard(actual, expectedHazards[i]))
-            {
-                matched[i] = true;
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-        {
-            return Result<void>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "snapshot dynamic hazards do not match placements"});
-        }
-    }
 
     const bool hasSlotMetadata = !snapshot.slotGenerations.empty();
     if (!hasSlotMetadata && !snapshot.freeSlotIndices.empty())
@@ -396,13 +375,53 @@ JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
         }
     }
 
+    for (const Hazard& hazard : snapshot.cdeSnapshot.dynamicHazards)
+    {
+        if (!hazard.shape)
+        {
+            return Result<void>::FromError(
+                {ErrorCode::InvalidInput,
+                 "snapshot contains a dynamic hazard with a null shape"});
+        }
+    }
+
+    // Rust installs placements and the container before restoring the CDE.
+    // Preserve that order so a Debug CDE consistency failure exposes the same
+    // partially restored Layout state.
+    m_Container = snapshot.container;
+    m_Slots = std::move(newSlots);
+    m_FreeSlotIndices = std::move(newFreeSlotIndices);
+
     const auto restoredCde = m_Cde->Restore(snapshot.cdeSnapshot);
     if (!restoredCde.HasValue())
         return restoredCde;
 
-    for (std::size_t slotIndex = 1; slotIndex < newSlots.size(); ++slotIndex)
+    const CollisionSnapshot restoredCdeSnapshot = m_Cde->Save();
+    bool dynamicHazardsMismatch =
+        restoredCdeSnapshot.dynamicHazards.size() != expectedHazards.size();
+    std::vector<bool> matched(expectedHazards.size(), false);
+    for (const Hazard& actual : restoredCdeSnapshot.dynamicHazards)
     {
-        Slot& slot = newSlots[slotIndex];
+        bool found = false;
+        for (std::size_t i = 0; i < expectedHazards.size(); ++i)
+        {
+            if (!matched[i] && sameHazard(actual, expectedHazards[i]))
+            {
+                matched[i] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            dynamicHazardsMismatch = true;
+    }
+    if (std::any_of(matched.begin(), matched.end(),
+                    [](bool isMatched) { return !isMatched; }))
+        dynamicHazardsMismatch = true;
+
+    for (std::size_t slotIndex = 1; slotIndex < m_Slots.size(); ++slotIndex)
+    {
+        Slot& slot = m_Slots[slotIndex];
         if (!slot.placedItem.has_value())
             continue;
         const Hazard hazard = MakeHazard(
@@ -410,16 +429,16 @@ JAGUARCORE_API Result<void> Layout::Restore(const LayoutSnapshot& snapshot)
         const auto cdeHandle = m_Cde->FindHazardHandle(hazard.entity);
         if (!cdeHandle.has_value())
         {
-            return Result<void>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "restored collision hazard is missing"});
+            dynamicHazardsMismatch = true;
+            continue;
         }
         slot.cdeHandle = *cdeHandle;
     }
 
-    m_Container = snapshot.container;
-    m_Slots = std::move(newSlots);
-    m_FreeSlotIndices = std::move(newFreeSlotIndices);
+#ifndef NDEBUG
+    if (dynamicHazardsMismatch)
+        throw std::logic_error("layout quadtree does not match placed items");
+#endif
     return Result<void>::FromValue();
 }
 

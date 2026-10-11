@@ -1,0 +1,42 @@
+{
+  "name": "sparrow-rust-cpp-exploration-oblique-bilateral-second-independent-geometry",
+  "items": [
+    {
+      "id": 1200,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [0.75, 0], [0.75, 1.15], [2.25, 1.15], [2.25, 0], [3, 0], [3, 3], [2.25, 3], [2.25, 1.85], [0.75, 1.85], [0.75, 3], [0, 3]]}
+    },
+    {
+      "id": 1201,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [3.2, 0], [3.2, 0.75], [1.775, 0.75], [1.775, 2.25], [3.2, 2.25], [3.2, 3], [0, 3], [0, 2.25], [1.425, 2.25], [1.425, 0.75], [0, 0.75]]}
+    },
+    {
+      "id": 1202,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [0.65, 0], [0.65, 0.65], [0, 0.65]]}
+    },
+    {
+      "id": 1203,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 37]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [0.65, 0], [0.65, 0.65], [0, 0.65]]}
+    },
+    {
+      "id": 1204,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [0.65, 0], [0.65, 0.65], [0, 0.65]]}
+    },
+    {
+      "id": 1205,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {"type": "simple_polygon", "data": [[0, 0], [0.65, 0], [0.65, 0.65], [0, 0.65]]}
+    }
+  ],
+  "strip_height": 7.0
+}

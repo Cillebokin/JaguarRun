@@ -22,6 +22,6 @@ pub fn overlap_area_proxy(sp1: &SPSurrogate, sp2: &SPSurrogate, epsilon: f32) ->
     }
     total_overlap *= PI;
     debug_assert!(total_overlap.is_normal());
-    
+
     total_overlap
 }

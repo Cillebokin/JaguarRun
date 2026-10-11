@@ -1,0 +1,11 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-four-candidates-none-rotation",
+  "items": [
+    {"id": 920, "demand": 1, "orientation": {"rotation": {"mode": "stepped", "step": 360}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [1, 0], [1, 1], [0, 1]]}},
+    {"id": 921, "demand": 1, "orientation": {"rotation": {"mode": "stepped", "step": 360}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [2, 0], [2, 2], [0, 2]]}},
+    {"id": 922, "demand": 1, "orientation": {"rotation": {"mode": "stepped", "step": 360}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [4, 0], [4, 4], [0, 4]]}},
+    {"id": 923, "demand": 1, "orientation": {"rotation": {"mode": "stepped", "step": 360}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [8, 0], [8, 8], [0, 8]]}},
+    {"id": 924, "demand": 1, "orientation": {"rotation": {"mode": "stepped", "step": 360}}, "shape": {"type": "simple_polygon", "data": [[0, 0], [16, 0], [16, 16], [0, 16]]}}
+  ],
+  "strip_height": 18.0
+}

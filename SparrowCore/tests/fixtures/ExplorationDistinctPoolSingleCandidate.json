@@ -1,0 +1,24 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-single-candidate",
+  "items": [
+    {
+      "id": 935,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [3, 0], [3, 3], [0, 3]]
+      }
+    },
+    {
+      "id": 936,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [1, 0], [1, 1], [0, 1]]
+      }
+    }
+  ],
+  "strip_height": 6.0
+}

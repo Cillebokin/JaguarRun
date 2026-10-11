@@ -43,19 +43,15 @@ sparrow::CoordinateDescentConfig MakeRefinementConfig(
     {
         result.translationStepInit = minimumDimension * 0.01F;
         result.translationStepLimit = minimumDimension * 0.001F;
-        result.rotationStepInit = 0.5F
-            * 3.14159265358979323846F / 180.0F;
-        result.rotationStepLimit = 0.05F
-            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(0.5F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(0.05F);
     }
     else
     {
         result.translationStepInit = minimumDimension * 0.25F;
         result.translationStepLimit = minimumDimension * 0.02F;
-        result.rotationStepInit = 5.0F
-            * 3.14159265358979323846F / 180.0F;
-        result.rotationStepLimit = 1.0F
-            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(5.0F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(1.0F);
     }
     result.rotationWiggle =
         item.AllowedRotation().mode == jaguar::RotationMode::Continuous;
@@ -153,12 +149,16 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
         containerBounds, item, containerBounds);
     if (!samplerResult.HasValue())
     {
-        // UniformBBoxSampler::new returns None when no legal rotation can fit
-        // the current container; the SPP builder interprets that as a width
-        // growth opportunity rather than as malformed input.
+        return Result<std::optional<SearchResult>>::FromError(
+            samplerResult.GetError());
+    }
+    if (!samplerResult.Value().has_value())
+    {
+        // Rust UniformBBoxSampler::new returns None when no legal rotation
+        // fits; the SPP builder treats it as an opportunity to grow the strip.
         return Result<std::optional<SearchResult>>::FromValue(std::nullopt);
     }
-    const UniformRectSampler sampler = samplerResult.Value();
+    const UniformRectSampler& sampler = *samplerResult.Value();
     const jaguar::Rect2d itemBounds = item.CollisionShape().BoundingBox();
     const float itemMinimumDimension = static_cast<float>(std::min(
         itemBounds.Width(), itemBounds.Height()));
@@ -168,7 +168,7 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
     }
 
     BestSamples best(
-        std::max<std::size_t>(1U, config.nCoordinateDescents),
+        config.nCoordinateDescents,
         itemMinimumDimension * 0.05F);
     std::vector<LbfLoss> tighteningHistory;
     std::optional<LbfLoss> bestLoss;

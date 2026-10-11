@@ -84,6 +84,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let exploration_contained_trace_output_path = args
         .next()
         .unwrap_or_else(|| "../Fixtures/ExplorationContainedRustTrace.tsv".to_owned());
+    let narrow_sampler_trace_output_path = args
+        .next()
+        .unwrap_or_else(|| "../Fixtures/UniformSamplerNarrowIntervalRust.tsv".to_owned());
 
     let (external_instance, _) = sparrow::util::io::read_spp_input(Path::new(&input_path))?;
     let config = DEFAULT_SPARROW_CONFIG;
@@ -119,6 +122,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let exploration_pool_trace = exploration_pool_trace_tsv(&exploration_pool_instance)?;
     let exploration_contained_trace =
         exploration_contained_trace_tsv(&exploration_contained_instance)?;
+    let narrow_sampler_trace = uniform_sampler_narrow_interval_reference_tsv(instance.item(0));
     let builder = LBFBuilder::new(
         instance,
         Xoshiro256PlusPlus::seed_from_u64(42),
@@ -196,6 +200,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         exploration_contained_trace_output_path,
         exploration_contained_trace,
     )?;
+    if let Some(parent) = Path::new(&narrow_sampler_trace_output_path).parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(narrow_sampler_trace_output_path, narrow_sampler_trace)?;
     Ok(())
 }
 
@@ -223,7 +231,8 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
          # eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count\n\
          # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
-         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n",
+         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
+         # rng_after next_u64_after_search_hex\n",
     );
     let mut eval_ordinals = [0_usize; 5];
     let mut report_ordinals = [0_usize; 5];
@@ -303,6 +312,7 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
             },
         },
     );
+    output.push_str(&format!("rng_after {:016x}\n", rng.next_u64()));
     output
 }
 
@@ -342,7 +352,8 @@ fn separator_search_trace_tsv(input_path: &Path) -> Result<String, Box<dyn Error
          # eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count\n\
          # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
-         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n",
+         # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
+         # rng_after next_u64_after_search_hex\n",
     );
     let mut eval_ordinals = [0_usize; 5];
     let mut report_ordinals = [0_usize; 5];
@@ -422,6 +433,7 @@ fn separator_search_trace_tsv(input_path: &Path) -> Result<String, Box<dyn Error
             },
         },
     );
+    output.push_str(&format!("rng_after {:016x}\n", rng.next_u64()));
     Ok(output)
 }
 
@@ -1098,6 +1110,34 @@ fn sampling_coordinate_descent_reference_tsv(item: &Item) -> String {
         final_state.0,
         final_state.1,
     );
+    output
+}
+
+fn uniform_sampler_narrow_interval_reference_tsv(item: &Item) -> String {
+    let low = f32::from_bits(0x3f80_0000);
+    let high = f32::from_bits(0x3f80_0001);
+    let sample_bounds =
+        Rect::try_new(low, 1.0, high, 2.0).expect("one-ULP sample bounds are valid");
+    let container_bounds =
+        Rect::try_new(0.0, 0.0, 10.0, 10.0).expect("narrow-interval container bounds are valid");
+    let sampler = UniformBBoxSampler::new(sample_bounds, item, container_bounds)
+        .expect("one-ULP sample interval must fit");
+    let mut output = String::from(
+        "# generator=Sparrow Rust UniformBBoxSampler, one-ULP X interval\n\
+         # input=RustSppSingleItem.json seed=42 samples=16\n\
+         # sample seed ordinal x_f32_bits y_f32_bits\n\
+         # rng_after next_u64_after_samples_hex\n",
+    );
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(TRACE_SEED);
+    for ordinal in 0..16 {
+        let (x, y) = sampler.sample(&mut rng).translation();
+        output.push_str(&format!(
+            "sample {TRACE_SEED} {ordinal} {:08x} {:08x}\n",
+            x.to_bits(),
+            y.to_bits(),
+        ));
+    }
+    output.push_str(&format!("rng_after {:016x}\n", rng.next_u64()));
     output
 }
 

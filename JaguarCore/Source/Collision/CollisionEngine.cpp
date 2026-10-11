@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -745,8 +746,9 @@ JAGUARCORE_API CollisionSnapshot CollisionEngine::Save() const
 
 JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& snapshot)
 {
-    std::vector<HazardEntity> snapshotEntities;
-    snapshotEntities.reserve(snapshot.dynamicHazards.size());
+    // Restore the snapshot's listed hazards as-is. Rust's CDE restore does
+    // not pre-reject duplicate entities or entries marked non-dynamic here;
+    // Layout's Debug consistency check observes those mismatches afterward.
     for (const Hazard& hazard : snapshot.dynamicHazards)
     {
         if (!hazard.shape)
@@ -755,27 +757,6 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
                 {ErrorCode::InvalidInput,
                  "snapshot contains a dynamic hazard with a null shape"});
         }
-        if (!hazard.dynamic)
-        {
-            return Result<void>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "snapshot contains a non-dynamic hazard"});
-        }
-
-        const bool duplicatesStaticEntity = std::any_of(
-            m_Slots.begin(), m_Slots.end(), [&hazard](const Slot& slot) {
-                return slot.hazard.has_value() && !slot.hazard->dynamic &&
-                       slot.hazard->entity == hazard.entity;
-            });
-        if (duplicatesStaticEntity ||
-            std::find(snapshotEntities.begin(), snapshotEntities.end(),
-                      hazard.entity) != snapshotEntities.end())
-        {
-            return Result<void>::FromError(
-                {ErrorCode::SnapshotMismatch,
-                 "snapshot contains duplicate hazard entities"});
-        }
-        snapshotEntities.push_back(hazard.entity);
     }
 
     std::vector<std::size_t> unmatchedCurrentDynamic;
@@ -853,6 +834,24 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
 
     for (const std::size_t snapshotIndex : hazardsToAdd)
     {
+        const Hazard& hazard = snapshot.dynamicHazards[snapshotIndex];
+#ifndef NDEBUG
+        const bool duplicateEntity = std::any_of(
+            rebuiltSlots.begin(), rebuiltSlots.end(), [&hazard](const Slot& slot) {
+                return slot.hazard.has_value() &&
+                       slot.hazard->entity == hazard.entity;
+            });
+        if (duplicateEntity)
+        {
+            // Rust removes unmatched hazards and registers additions in order;
+            // a duplicate debug assertion therefore leaves the valid prefix.
+            m_Slots = std::move(rebuiltSlots);
+            m_FreeSlotIndices = std::move(rebuiltFreeSlotIndices);
+            m_QuadTree = std::move(rebuiltTree);
+            throw std::logic_error(
+                "Hazard with an identical entity already registered");
+        }
+#endif
         std::size_t slotIndex = 0;
         if (!rebuiltFreeSlotIndices.empty())
         {
@@ -867,7 +866,6 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
         }
 
         Slot& rebuilt = rebuiltSlots[slotIndex];
-        const Hazard& hazard = snapshot.dynamicHazards[snapshotIndex];
         rebuilt.hazard = hazard;
         rebuilt.shapeCache = std::make_unique<PolygonSoA>(*hazard.shape);
         rebuiltTree.RegisterHazard(
@@ -877,6 +875,14 @@ JAGUARCORE_API Result<void> CollisionEngine::Restore(const CollisionSnapshot& sn
     m_Slots = std::move(rebuiltSlots);
     m_FreeSlotIndices = std::move(rebuiltFreeSlotIndices);
     m_QuadTree = std::move(rebuiltTree);
+#ifndef NDEBUG
+    const std::size_t restoredDynamicCount = static_cast<std::size_t>(
+        std::count_if(m_Slots.begin(), m_Slots.end(), [](const Slot& slot) {
+            return slot.hazard.has_value() && slot.hazard->dynamic;
+        }));
+    if (restoredDynamicCount != snapshot.dynamicHazards.size())
+        throw std::logic_error("CDE dynamic hazard count does not match snapshot");
+#endif
     return Result<void>::FromValue();
 }
 

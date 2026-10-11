@@ -13,6 +13,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <string>
 
 namespace
@@ -60,7 +61,7 @@ int main(int argc, char** argv)
     std::string inputPath;
     std::string outputPath;
     std::string svgPath;
-    std::uint64_t seed = 0U;
+    std::optional<std::uint64_t> seed;
     std::uint64_t samples = 1000U;
     std::uint64_t timeMs = 0U;
     bool earlyTermination = false;
@@ -92,11 +93,13 @@ int main(int argc, char** argv)
             }
             else if (argument == "--seed")
             {
-                if (!ParseUnsigned(value, seed))
+                std::uint64_t parsedSeed = 0U;
+                if (!ParseUnsigned(value, parsedSeed))
                 {
                     std::cerr << "invalid seed\n";
                     return 2;
                 }
+                seed = parsedSeed;
             }
             else if (argument == "--samples")
             {
@@ -130,7 +133,7 @@ int main(int argc, char** argv)
         std::cerr << "cannot read input: " << inputPath << '\n';
         return 3;
     }
-    const jaguar::Importer importer;
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
     const auto instance = importer.ImportSPInstanceJson(inputJson);
     if (!instance.HasValue())
     {
@@ -163,6 +166,15 @@ int main(int argc, char** argv)
         std::cerr << "optimization failed: "
                   << optimized.GetError().message << '\n';
         return 5;
+    }
+    if (seed.has_value())
+    {
+        std::cerr << "[MAIN] using seed: " << *seed << '\n';
+    }
+    else
+    {
+        std::cerr << "[MAIN] no seed provided, using: "
+                  << optimized.Value().metrics.seed << '\n';
     }
     const auto external = jaguar::ExternalSPSolutionFromSolution(
         instance.Value(), optimized.Value().solution);

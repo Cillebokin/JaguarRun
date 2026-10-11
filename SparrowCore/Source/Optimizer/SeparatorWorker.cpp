@@ -33,19 +33,15 @@ sparrow::CoordinateDescentConfig MakeRefinementConfig(
     {
         result.translationStepInit = minimumDimension * 0.01F;
         result.translationStepLimit = minimumDimension * 0.001F;
-        result.rotationStepInit = 0.5F
-            * 3.14159265358979323846F / 180.0F;
-        result.rotationStepLimit = 0.05F
-            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(0.5F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(0.05F);
     }
     else
     {
         result.translationStepInit = minimumDimension * 0.25F;
         result.translationStepLimit = minimumDimension * 0.02F;
-        result.rotationStepInit = 5.0F
-            * 3.14159265358979323846F / 180.0F;
-        result.rotationStepLimit = 1.0F
-            * 3.14159265358979323846F / 180.0F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(5.0F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(1.0F);
     }
     result.rotationWiggle =
         item.AllowedRotation().mode == jaguar::RotationMode::Continuous;
@@ -108,17 +104,11 @@ namespace sparrow
 {
 Result<void> SeparatorConfig::Validate() const
 {
-    if (noImprovementLimit == 0U || nWorkers == 0U)
+    if (nWorkers == 0U)
     {
         return Result<void>::FromError(
             {jaguar::ErrorCode::InvalidInput,
-             "separator no-improvement limit and worker count must be positive"});
-    }
-    if (nContainerSamples == 0U && nFocussedSamples == 0U)
-    {
-        return Result<void>::FromError(
-            {jaguar::ErrorCode::InvalidInput,
-             "separator needs a positive sample budget"});
+             "separator worker count must be positive"});
     }
     return Result<void>::FromValue();
 }
@@ -162,7 +152,7 @@ Result<SeparatorWorkerResult> FindBestSeparatorMoveImpl(
         return InvalidWorker("separator item minimum dimension is invalid");
     }
     BestSamples best(
-        std::max<std::size_t>(1U, config.nCoordinateDescents),
+        config.nCoordinateDescents,
         minimumDimension * 0.05F);
     tracingEvaluator.SetPhase(SeparatorSearchTracePhase::ReferencePlacement);
     const SampleEval current = tracingEvaluator.Evaluate(
@@ -193,10 +183,20 @@ Result<SeparatorWorkerResult> FindBestSeparatorMoveImpl(
         bounds);
     const auto containerSampler = UniformRectSampler::Create(
         bounds, movingItem.GetItem(), bounds);
-    if (focusedSampler.HasValue())
+    if (!focusedSampler.HasValue())
+    {
+        return Result<SeparatorWorkerResult>::FromError(
+            focusedSampler.GetError());
+    }
+    if (!containerSampler.HasValue())
+    {
+        return Result<SeparatorWorkerResult>::FromError(
+            containerSampler.GetError());
+    }
+    if (focusedSampler.Value().has_value())
     {
         tracingEvaluator.SetPhase(SeparatorSearchTracePhase::FocusedSample);
-        const UniformRectSampler sampler = focusedSampler.Value();
+        const UniformRectSampler& sampler = *focusedSampler.Value();
         for (std::size_t index = 0U;
              index < config.nFocussedSamples;
              ++index)
@@ -207,10 +207,10 @@ Result<SeparatorWorkerResult> FindBestSeparatorMoveImpl(
         }
     }
 
-    if (containerSampler.HasValue())
+    if (containerSampler.Value().has_value())
     {
         tracingEvaluator.SetPhase(SeparatorSearchTracePhase::ContainerSample);
-        const UniformRectSampler sampler = containerSampler.Value();
+        const UniformRectSampler& sampler = *containerSampler.Value();
         for (std::size_t index = 0U;
              index < config.nContainerSamples;
              ++index)

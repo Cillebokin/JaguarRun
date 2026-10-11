@@ -1,0 +1,20 @@
+# generator=Rust rand 0.10.3 UniformBBoxSampler::sample with Xoshiro256++ seed_from_u64
+# input=CollisionLossFloorRust.json item[0] (Continuous); first seed per observed angle while scanning seeds 0..9999
+# bounds=sample_bbox=container_bbox=[-100,100]x[-100,100]; all 16 rotation entries are feasible
+# seed expected_rotation_f32_bits
+3 00000000
+15 3ec90fdb
+43 3f490fdb
+10 3f96cbe4
+5 3fc90fdb
+0 3ffb53d2
+8 4016cbe4
+40 402fede0
+41 40490fdb
+9 406231d6
+4 407b53d2
+6 408a3ae7
+1 4096cbe4
+11 40a35ce2
+28 40afede0
+19 40bc7edd

@@ -1,0 +1,7 @@
+# generator=Sparrow Rust optimizer::minimum_strip_width and compression_phase
+# input=RustSppSingleItem.json initial_width=4.0 strip_height=4.0 2x2-square
+# case minimum_width_f32_bits
+# probe name shrink_step_f32_bits next_width_f32_bits should_enter_compression actual_progress_count
+case square 3fffffe8
+probe below 3f00000d 3fffffe6 0 0
+probe at_or_above 3f00000c 3fffffe8 1 1

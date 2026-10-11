@@ -1,0 +1,15 @@
+{
+  "name": "sparrow-rust-cpp-exploration-rotation-height-below",
+  "items": [
+    {
+      "id": 920,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0, 90]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [8, 0], [8, 2], [0, 2]]
+      }
+    }
+  ],
+  "strip_height": 7.99999141693115234375
+}

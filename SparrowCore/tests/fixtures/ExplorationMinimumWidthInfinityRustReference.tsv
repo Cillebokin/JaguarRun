@@ -1,0 +1,4 @@
+# generator=Sparrow Rust optimizer::minimum_strip_width and exploration_phase
+# input=ExplorationMinimumWidthInfinity.json strip_height=4 initial_width=20 shrink_step=0.25 seed=42
+# case minimum_width_f32_bits best_width_f32_bits separator_width_f32_bits
+case all_discrete_rotations_too_tall 7f800000 41a00000 41a00000

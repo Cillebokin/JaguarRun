@@ -13,6 +13,13 @@
 
 namespace sparrow
 {
+inline float RustF32DegreesToRadians(float degrees) noexcept
+{
+    constexpr float radiansPerDegree =
+        3.14159265358979323846F / 180.0F;
+    return degrees * radiansPerDegree;
+}
+
 struct CoordinateDescentConfig
 {
     float translationStepInit = 0.0F;

@@ -1,0 +1,23 @@
+# generator=Rust direct exploration_phase plus compression_phase; seed=43 exploration, seed=42 compression
+# input=ExplorationPool.json, initial_width=8.0, placements=(2.6,2.0),(6.5,2.0)
+# interruption=listener requests stop on first exploration-infeasible report; phase timeout reset clears it; compression stops after its first separator result
+# comparison=state/phase/report/event ordering exact; width/density tolerance=0.00001; transform tolerance=0.00001
+solution best 8.000000000 0.343750000 2 1
+placement best 0 0.000000000 2.599999905 2.000000000
+placement best 1 0.000000000 6.500000000 2.000000000
+solution separator 6.500000000 0.423076928 2 0
+placement separator 0 0.000000000 5.000000000 2.000000000
+placement separator 1 0.000000000 2.599999905 2.000000000
+solution final 7.599999905 0.361842096 2 1
+placement final 0 0.000000000 2.599999905 2.000000000
+placement final 1 0.000000000 6.500000000 2.000000000
+step 0.050000001
+report expl_feas
+report expl_infeas
+report cmpr_feas
+progress 0 8.000000000 34.375000000 0.000000000
+progress 0 6.500000000 42.307693481 2.050589323
+progress 0 7.599999905 36.184207916 0.000000000
+result 1 0 0 0
+result 0 0 0 0
+result 1 0 0 0

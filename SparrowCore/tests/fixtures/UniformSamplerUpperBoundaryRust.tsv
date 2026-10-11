@@ -1,0 +1,5 @@
+# generator=Rust rand 0.10.3 UniformBBoxSampler::sample with Xoshiro256++ seed_from_u64
+# input=RustSppSingleItem.json rotation_entries=1; choose consumes first u32, x consumes second
+# interval_x=[0x3f800000,0x3f800002]; rand sample_single rounds its multiply-add to the upper endpoint
+# seed low_f32_bits high_f32_bits expected_x_f32_bits
+10 3f800000 3f800002 3f800002

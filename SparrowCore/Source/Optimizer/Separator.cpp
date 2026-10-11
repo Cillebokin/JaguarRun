@@ -328,6 +328,16 @@ Result<void> Separator::RebuildTracker()
     return Result<void>::FromValue();
 }
 
+void Separator::ResetWorkerRngs(std::size_t workerCount)
+{
+    m_WorkerRngs.clear();
+    m_WorkerRngs.reserve(workerCount);
+    for (std::size_t index = 0U; index < workerCount; ++index)
+    {
+        m_WorkerRngs.emplace_back(m_Rng.NextU64());
+    }
+}
+
 Result<void> Separator::ChangeStripWidth(
     double newWidth,
     std::optional<double> splitPosition)
@@ -380,7 +390,7 @@ Result<void> Separator::ChangeStripWidth(
     {
         return rebuilt;
     }
-    m_WorkerRngs.clear();
+    ResetWorkerRngs(m_WorkerRngs.size());
     return Result<void>::FromValue();
 }
 
@@ -474,12 +484,7 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
 
     if (m_WorkerRngs.size() != config.nWorkers)
     {
-        m_WorkerRngs.clear();
-        m_WorkerRngs.reserve(config.nWorkers);
-        for (std::size_t index = 0U; index < config.nWorkers; ++index)
-        {
-            m_WorkerRngs.emplace_back(m_Rng.NextU64());
-        }
+        ResetWorkerRngs(config.nWorkers);
     }
 
     jaguar::SPSolution bestSolution = m_Problem.Save();
@@ -507,14 +512,12 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
     reportProgress(0U, minLoss);
 
     while (!terminator.ShouldTerminate(iteration)
-           && !m_Tracker.IsSeparated()
            && strikes < config.strikeLimit)
     {
         const float initialStrikeLoss = m_Tracker.TotalLoss();
         std::size_t noImprovement = 0U;
 
         while (!terminator.ShouldTerminate(iteration)
-               && !m_Tracker.IsSeparated()
                && noImprovement < config.noImprovementLimit)
         {
             const jaguar::SPSolution masterSolution = m_Problem.Save();

@@ -1,10 +1,10 @@
 # S09. lbf_evaluator（LBF 采样评估器）逐文件逻辑比对
 
 **Rust**: `CodeResource/sparrow/src/eval/lbf_evaluator.rs`（59 行）+ `CodeResource/sparrow/src/eval/mod.rs`（4 行）
-**C++**: `SparrowCore/Include/SparrowCore/eval/LbfEvaluator.h`（35 行）+ `Source/Eval/LbfEvaluator.cpp`（213 行）+ `Include/SparrowCore/eval/SparrowLbfEvaluator.h`（26 行）+ `Source/Eval/SparrowLbfEvaluator.cpp`（23 行）
-**判定**: 基本等价（列差异）
+**C++**: `SparrowCore/Include/SparrowCore/Eval/LbfEvaluator.h`（35 行）+ `Source/Eval/LbfEvaluator.cpp`（213 行）+ `Include/SparrowCore/Eval/SparrowLbfEvaluator.h`（26 行）+ `Source/Eval/SparrowLbfEvaluator.cpp`（23 行）
+**判定**: Rust 可表达输入域内的主路径等价；C++ 记录 evaluator 使用期间保持 layout/item 不变的前置条件，与 Rust 共享借用一致。其它差异为执行顺序、double geometry 中间量和额外防御的边界风险。
 
-评估语义被 `LbfSearchRustTrace.tsv`（158 条 eval 的 kind + loss f32 位模式，逐位锁定，TestSampling.cpp:1001 起消费）与 `SparrowLbfRustReference.tsv`（LBFBuilder 端到端：placed/width/density，TestSppLbf.cpp:471 消费）锁定。`SparrowLbfEvaluator` 是 LbfEvaluator 的纯转发包装（无逻辑，兼容层入口）。
+评估语义由两类有限参考覆盖：`LbfSearchRustTrace.tsv` 是 seed=42、16 container/0 focused/2 CD 的直接搜索轨迹；测试精确比较事件类型/阶段、evaluation kind、accepted、retained 数量与 evaluation count，transform 使用 2e-5、非 Invalid loss 使用 2e-3 容差（TestSampling.cpp:1203-1217,1296-1348）。fixture 列中的 `*_f32_bits` 会解析为 float 再作容差比较，不是逐位断言。`SparrowLbfRustReference.tsv` 则是一项单件 SPP builder 参考：placed/remaining/feasible 精确比较，width/density 分别用 4e-3/1e-3 容差（TestSppLbf.cpp:522-533）。这两者都不是任意形状或默认整条优化流水线的证明。`SparrowLbfEvaluator` 是 LbfEvaluator 的纯转发包装（无逻辑，兼容层入口）。
 
 ## 函数逐条比对
 
@@ -15,20 +15,20 @@
 
 ### `LBFEvaluator::new`（lbf_evaluator.rs:22-30）
 - C++ 对应：构造函数（LbfEvaluator.cpp:141-156）。Rust 保存 `layout` 引用、`item` 引用、`shape_buff`（item.shape_cd 的克隆，评估时复用缓冲）、n_evals=0。C++ 保存 m_Item 指针、m_Filter（经 MakeEffectiveFilter 包装，见下）、**以及一个 Layout 快照的独立 CollisionEngine**（cpp:147-155 `layout.Save()` → `snapshot.container.CreateCollisionEngine()` → `Restore(snapshot.cdeSnapshot)`）——因为 C++ 的 CollisionEngine 不绑定 Layout 生命周期，需要快照重建。Rust 直接借用 layout 的 cde（每次 evaluate 用 `self.layout.cde()`，:36）。
-- 判定：【差异】（实现形式：借用 layout 的 CDE vs 快照重建独立引擎；语义等价——快照即当前 layout 状态）
-- 证据：lbf_evaluator.rs:23-30 vs LbfEvaluator.cpp:141-156；评估侧 Rust :36 `self.layout.cde()` vs C++ cpp:182-202 `m_Engine->Detect...`。
+- 判定：【条件等价】（layout/item 在 evaluator 生命周期内不变时，快照重建与 Rust 借用 live CDE 等价；Rust `&Layout`/`&Item` 借用阻止安全代码同时取得可变引用，C++ 头文件现记录相同稳定性前置条件）
+- 证据：lbf_evaluator.rs:23-30,36 vs LbfEvaluator.cpp:141-156,182-202。Rust 对 layout 的不可变借用通常保证评估期间状态稳定；C++ evaluator 保存独立快照，若调用方通过其他别名继续修改 layout，C++ 可能读取旧布局，Rust 安全借用接口不能以相同方式形成该状态。
 
 ### `SampleEvaluator::evaluate_sample`（lbf_evaluator.rs:34-54）
 - C++ 对应：`LbfEvaluator::Evaluate`（LbfEvaluator.cpp:158-207）。逐段核对：
   1. **计数**：Rust :35 `self.n_evals += 1`；C++ cpp:162 `++m_EvaluationCount`。【一致】
   2. **代理碰撞**：Rust :38 `cde.detect_surrogate_collision(item.shape_cd.surrogate(), &transf, &NoFilter)` → true 则 Invalid；C++ cpp:182-187 `m_Engine->DetectSurrogateCollision(*surrogate, *legalTransform, m_Filter)`，失败或 true 则 Invalid。差异点：(a) C++ 先做 `LegalizeTransform`（旋转合法化，None→0、Discrete→最近允许角，cpp:168-172 / cpp:31-87）——Rust 无此步，因为采样器产出的旋转本就合法（uniform_sampler 只从合法旋转集采样）；这是防御性冗余，正常路径恒等变换（Discrete 时最近角=自身）。(b) C++ 的 filter 经 `MakeEffectiveFilter` 包装（cpp:110-136）：把 Hole 类型的 hazard 强制为"不可忽略"（`entity.kind == Hole → return false` 即不跳过），再叠加调用方的 irrelevant/irrelevantHandle——对应 jagua-rs `NoFilter`（不过滤任何 hazard）时，若调用方传空 filter，效果等同 NoFilter + Hole 例外。Rust `NoFilter` 语义是**完全不滤**。hole 是否参与 LBF 评估？jagua-rs 的 detect_surrogate_collision 对容器外环/洞的处理：容器洞是 hazard（jagua-rs 容器 hole 视为 hazard，碰撞含洞内区域）。Rust NoFilter 意味着洞也参与碰撞检测。C++ 的 Hole 例外强制洞参与——与 NoFilter 一致（洞不被滤掉）。【差异】（C++ 额外的 LegalizeTransform 防御 + Hole 语义显式化；行为等价）
-  3. **精确形状碰撞**：Rust :41-43 `shape_buff.transform_from(item.shape_cd, &transf)` → `cde.detect_poly_collision(&shape_buff, &NoFilter)` → true 则 Invalid。C++ cpp:189-204：`TransformedRustF32(legalTransform)`（对应 jagua-rs 的 f32 变换路径）→ **先算 loss（cpp:196）再检测多边形碰撞（cpp:202）**——顺序与 Rust 相反（Rust 先碰撞后算 loss）。由于碰撞时 C++ 只丢弃 loss（返回 INVALID），不产生额外副作用，两者对外行为一致；但 C++ 在碰撞场景多算了一次 POI/bbox。C++ 侧有注释明确说明这是刻意的"fail-fast 对齐"（cpp:180-181 注释讲的是 surrogate 先行；顺序差异见差异表 #4）。另注意 jagua-rs detect_poly_collision 是精确多边形（非 surrogate），TransformedRustF32 名义对齐 f32 语义。【差异】（loss 计算与碰撞检测顺序互换；无外部行为影响）
+  3. **精确形状碰撞**：Rust :41-43 `shape_buff.transform_from(item.shape_cd, &transf)` → `cde.detect_poly_collision(&shape_buff, &NoFilter)` → true 则 Invalid。C++ cpp:189-204：`TransformedRustF32(legalTransform)` 后先算 loss（cpp:196）再检测多边形碰撞（cpp:202），顺序与 Rust 相反（Rust 先碰撞后算 loss）。碰撞时 C++ 丢弃该 loss 并返回 INVALID，故当前对外 SampleEval 相同，但多做 POI/bbox 工作。源码注释只说明 surrogate 检测先行，不证明该精确检测顺序是有意设计，本文不推断其设计意图。另注意 jagua-rs detect_poly_collision 是精确多边形（非 surrogate），TransformedRustF32 名义上选择 f32 变换路径。【实现顺序差异；指定路径外未验证】
   4. **损失公式**：Rust :46-49：`poi = shape_buff.poi.center`（变换后形状的 POI 中心）、`bbox_corner = shape_buff.bbox.corners()[0]`、`loss = 10.0*(poi.0 + bbox_corner.0) + 1.0*(poi.1 + bbox_corner.1)`。jagua-rs `Rect::corners()[0]`（rect.rs:161-169）= `Point(x_max, y_max)`——**右上角**。C++ cpp:89-108 `CalculateLbfLoss`：`poi = shape.PointOfInaccessibility().center`、`bbox = shape.BoundingBox()`、`bboxX = static_cast<float>(bbox.xMax)`、`bboxY = bbox.yMax`（cpp:95-96）、`value = 10.0F*(poiX+bboxX) + (poiY+bboxY)`。逐项一致（xMax/yMax = 右上角）。【一致】
-  5. **精度路径**：Rust 全 f32（shape_buff 为 f32 多边形，POI/bbox 均 f32，loss f32）；C++ POI/BoundingBox 由 JaguarCore 给出 double（PointOfInaccessibility().center 是 Point2d(double)，BoundingBox() 是 Rect2d(double)），在 cpp:93-96 cast 为 float 后按 float 算 loss。即 C++ 内部几何是 double 双轨（JaguarCore 封存特性），仅在 loss 装配点转 f32——与 RustF32 对齐（TransformedRustF32 保证变换后的顶点与 jagua-rs f32 一致，后续 POI/bbox 在 double 上算再 cast，可能有 ulp 级差别，但被 LbfSearchRustTrace.tsv 的 loss 位模式逐位验证通过）。【一致】（经 fixture 证实位级等价）
+  5. **精度路径**：Rust 全 f32（shape_buff 为 f32 多边形，POI/bbox 均 f32，loss f32）；C++ POI/BoundingBox 由 JaguarCore 给出 double（PointOfInaccessibility().center 是 Point2d(double)，BoundingBox() 是 Rect2d(double)），在 cpp:93-96 cast 为 float 后按 float 算 loss。即 C++ 内部几何是 double 双轨（JaguarCore 封存特性），仅在 loss 装配点转 f32——与 RustF32 对齐（TransformedRustF32 保证变换后的顶点与 jagua-rs f32 一致，后续 POI/bbox 在 double 上算再 cast，仍可能产生浮点差异）。当前 search trace 仅在该固定输入路径按 loss 2e-3 容差比较；它没有测得差异的 ULP 上界，也没有证明任意几何下位级相同。【源码路径对应；fixture 有限支持】
   6. **Invalid 语义**：Rust 没有显式 `SampleEval::Collision` 分支——LBF 评估器从不返回 Collision（:39,:43 只返回 Invalid，:49 返回 Clear）。C++ 同样只返回 INVALID 或 CLEAR（cpp:186,204,206）。【一致】
   7. **upper_bound 忽略**：Rust `_upper_bound: Option<SampleEval>` 显式忽略（:34）；C++ 同样不使用（cpp:159-160 空参数名）。LBF loss 无上界提前终止。【一致】
 - 判定：【一致】（含两条顺序/防御差异）
-- 证据：fixture LbfSearchRustTrace.tsv 全部 158 条 eval 的 kind/loss 位模式（如首行 `clear 42afe4d4` = 82.99f）与 C++ trace 逐位匹配（TestSampling.cpp:1001 起的逐行比对），覆盖 container/prerefine/finalrefine 三阶段。
+- 证据：fixture `LbfSearchRustTrace.tsv` 共 159 条数据记录，其中 104 条 eval（16 container / 56 prerefine / 32 finalrefine），另有 report/keep/result 事件覆盖三阶段，末尾 RNG 哨兵的消费后对照见 S13。测试按事件类型、阶段和离散报告字段精确比较；样本 kind 精确，transform/loss 按 2e-5/2e-3 容差比较（TestSampling.cpp:1203-1217,1296-1348）。fixture 写出的 `loss_f32_bits` 只是 float 输入格式，不是被断言为相同位模式。
 
 ### `n_evals`（lbf_evaluator.rs:56-58）
 - C++ 对应：`EvaluationCount()`（LbfEvaluator.cpp:209-212）。计数器只加不减。【一致】
@@ -49,15 +49,15 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | LegalizeTransform 防御（旋转合法化，None→0、Discrete→最近允许角） | C++ 额外 | 采样器产出本就合法，正常路径恒等；提供 API 层稳健性 | LbfEvaluator.cpp:168-172,31-87 vs lbf_evaluator.rs:34-54 无对应 |
-| 2 | 布局引擎持有方式：借用 layout.cde() vs Save() 快照重建独立 CollisionEngine | 差异 | 实现形式差异；语义等价（快照=当前布局），多一次快照成本 | lbf_evaluator.rs:36 vs cpp:147-155,182 |
+| 2 | 布局引擎持有方式：Rust 借用 live `layout.cde()` vs C++ Save() 快照重建独立 CollisionEngine | Rust 有效借用域内等价；C++ 已记录稳定性前置条件 | Rust 安全借用期间不能合法修改 layout；可经其他别名修改的 C++ 用法不属于本 parity 输入域 | lbf_evaluator.rs:23-30,36; `LbfEvaluator.h`; cpp:141-156,182 |
 | 3 | filter 语义：Rust NoFilter vs C++ MakeEffectiveFilter 强制 Hole 不被忽略 + 叠加调用方 filter | 差异 | 默认（无调用方 filter）下与 NoFilter 等价；Hole 例外是 jagua-rs 语义的显式化 | lbf_evaluator.rs:38,42 vs cpp:110-136 |
-| 4 | loss 计算与精确碰撞检测的顺序：Rust 先检测后算 loss，C++ 先算 loss 后检测 | 差异 | 对外行为一致（碰撞时 loss 被丢弃）；碰撞场景多算一次 POI/bbox | lbf_evaluator.rs:41-49 vs cpp:189-204 |
-| 5 | 几何精度路径：Rust 全 f32，C++ TransformedRustF32 + POI/bbox 在 double 上计算后 cast f32 | 差异 | ulp 级风险，已被 loss 位模式 fixture 验证等价 | lbf_evaluator.rs:46-48 vs cpp:93-102 |
+| 4 | loss 计算与精确碰撞检测的顺序：Rust 先检测后算 loss，C++ 先算 loss 后检测 | 差异 | 对外 SampleEval 相同；碰撞场景多算一次 POI/bbox。注释没有证明此顺序是刻意选择 | lbf_evaluator.rs:41-49 vs cpp:189-204 |
+| 5 | 几何精度路径：Rust 全 f32，C++ TransformedRustF32 + POI/bbox 在 double 上计算后 cast f32 | 差异 | 存在浮点差异风险；固定 search trace 的 loss 以 2e-3 容差比较，未验证 ULP 上界或任意几何 | lbf_evaluator.rs:46-48 vs cpp:93-102 |
 | 6 | `SparrowLbfEvaluator` 纯转发包装 | C++ 额外 | API 形态差异，无行为影响 | SparrowLbfEvaluator.cpp:12-22 |
 
 ## 结论
 
-LBF 评估器的核心语义——"surrogate 先行、精确多边形随后、无碰撞时按 10·(poiX+bboxXMax)+(poiY+bboxYMax) 计 loss、从不返回 Collision"——逐项对齐，loss 的 f32 位模式被 LbfSearchRustTrace.tsv 全量锁定，端到端构造被 SparrowLbfRustReference.tsv 锁定。差异集中在实现形式（快照引擎 vs 借用 CDE、合法化防御、loss/检测顺序）与既定 API 形态（SparrowLbfEvaluator 包装、Result 错误通道），正常输入下行为等价。
+LBF 评估器的主语义——"surrogate 先行、精确多边形随后、无碰撞时按 10·(poiX+bboxXMax)+(poiY+bboxYMax) 计 loss、从不返回 Collision"——可由源码逐项对应。固定 LBF search trace 的事件顺序和离散决定精确比较，浮点变换与 loss 分别以 2e-5/2e-3 容差比较；单件 builder reference 只核对 placed/remaining/feasible 及 width/density 容差。它们支持所列输入，不证明损失函数在所有几何上位级相同，也不证明完整默认流水线。Rust 共享借用与 C++ evaluator 稳定性前置条件对齐；剩余风险集中于 double geometry 中间量、loss/检测顺序和未测边界。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：59+4 行逐项覆盖】** lbf_evaluator.rs 全量复核：X/Y_MULTIPLIER 常量、LBFEvaluator 结构（4 字段）、new、evaluate_sample（含 n_evals 计数/surrogate 检测/精确检测/loss 公式）、n_evals；eval/mod.rs 4 行模块声明——主文 7 小节全覆盖无遗漏。

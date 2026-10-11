@@ -1,5 +1,6 @@
 #include "SparrowCore/Optimizer/SppLbfOptimizer.h"
 #include "SparrowCore/Optimizer/SparrowLbfBuilder.h"
+#include "SparrowCore/Optimizer/SparrowConfig.h"
 
 #include "JaguarCore/Assertions.h"
 #include "JaguarCore/Entities/Item.h"
@@ -7,7 +8,10 @@
 #include "JaguarCore/IO/JsonCodec.h"
 #include "JaguarCore/Problems/Spp.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -241,9 +245,9 @@ bool TestSppDemandAndInvalidInputs(std::ostream& output)
     invalidConfig.samplesPerItem = 0U;
     const auto invalidResult = sparrow::SolveSppLbf(impossible.Value(), invalidConfig);
     return Expect(!invalidResult.HasValue()
-                      && invalidResult.GetError().code == jaguar::ErrorCode::InvalidInput,
+                      && invalidResult.GetError().code == jaguar::ErrorCode::Infeasible,
                   output,
-                  "SPP LBF must reject invalid configuration");
+                  "zero samples must follow Rust's no-placement path and fail at the width ceiling");
 }
 
 bool TestSppJsonRoundTrip(std::ostream& output)
@@ -329,6 +333,334 @@ bool TestSparrowBuilderSmallInstance(std::ostream& output)
                       && constructed.Value().metrics.feasible,
                   output,
                   "Sparrow builder must conserve demand and report feasibility");
+}
+
+bool TestSparrowBuilderZeroContainerSamplesMatchesRustError(
+    std::ostream& output)
+{
+    const auto instance = MakeInstance({MakeItem(0U, 594U, 2.0, 2.0)}, {1U});
+    if (!Expect(instance.HasValue(),
+                output,
+                "zero-sample Sparrow builder setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 0U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto constructed =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    return Expect(!constructed.HasValue()
+                      && constructed.GetError().code
+                          == jaguar::ErrorCode::Infeasible
+                      && constructed.GetError().message
+                          == "could not construct an initial placement for item 0",
+                  output,
+                  "zero container samples must match Rust's item-indexed construction failure");
+}
+
+bool TestSparrowBuilderFocusedSamplesStayAtRustZero(std::ostream& output)
+{
+    const auto instance = MakeInstance({MakeItem(0U, 595U, 2.0, 2.0)}, {1U});
+    if (!Expect(instance.HasValue(),
+                output,
+                "focused-sample Sparrow builder setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig rustDefaults;
+    rustDefaults.seed = 42U;
+    rustDefaults.nContainerSamples = 64U;
+    rustDefaults.nFocussedSamples = 0U;
+    rustDefaults.nCoordinateDescents = 1U;
+    sparrow::SparrowConstructorConfig positiveFocusedRequest = rustDefaults;
+    positiveFocusedRequest.nFocussedSamples = 8U;
+
+    const auto rustDefaultResult = sparrow::ConstructSparrowInitialSolution(
+        instance.Value(), rustDefaults);
+    const auto focusedResult = sparrow::ConstructSparrowInitialSolution(
+        instance.Value(), positiveFocusedRequest);
+    if (!Expect(rustDefaultResult.HasValue() && focusedResult.HasValue(),
+                output,
+                "focused-sample builder paths must both construct the item"))
+    {
+        return false;
+    }
+
+    const auto& expected = rustDefaultResult.Value();
+    const auto& actual = focusedResult.Value();
+    const auto& expectedPlacements = expected.solution.layoutSnapshot.placements;
+    const auto& actualPlacements = actual.solution.layoutSnapshot.placements;
+    if (!Expect(expected.metrics.sampleCount == actual.metrics.sampleCount
+                    && expectedPlacements.size() == actualPlacements.size(),
+                output,
+                "Sparrow constructor must keep focused sampling disabled like Rust"))
+    {
+        return false;
+    }
+    for (std::size_t index = 0U; index < expectedPlacements.size(); ++index)
+    {
+        const auto& expectedPlacement = expectedPlacements[index].placedItem;
+        const auto& actualPlacement = actualPlacements[index].placedItem;
+        const jaguar::Transform2d expectedTransform = expectedPlacement.Transform();
+        const jaguar::Transform2d actualTransform = actualPlacement.Transform();
+        if (!Expect(expectedPlacement.GetItemIndex()
+                            == actualPlacement.GetItemIndex()
+                        && expectedTransform.rotationRad
+                            == actualTransform.rotationRad
+                        && expectedTransform.translation.x
+                            == actualTransform.translation.x
+                        && expectedTransform.translation.y
+                            == actualTransform.translation.y,
+                    output,
+                    "focused-sample setting must not change the Rust-compatible placement"))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TestSparrowBuilderGrowthBeyond32AttemptsMatchesRust(
+    std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttempt.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfGrowthAttempt.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "growth-attempt shared input fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string inputJson{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer;
+    const auto instance = importer.ImportSPInstanceJson(inputJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "growth-attempt shared input must import"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto result =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    if (!Expect(result.HasValue(),
+                output,
+                "Sparrow builder must not stop at the C++-only 32-attempt cap"))
+    {
+        if (!result.HasValue())
+        {
+            output << "growth-attempt error=" << result.GetError().message << '\n';
+        }
+        return false;
+    }
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfGrowthAttemptRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfGrowthAttemptRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "growth-attempt Rust reference must be readable"))
+    {
+        return false;
+    }
+
+    std::uint64_t expectedSeed = 0U;
+    std::size_t expectedPlaced = 0U;
+    std::size_t expectedRemaining = 0U;
+    std::string fixture;
+    std::uint32_t expectedWidthBits = 0U;
+    std::uint32_t expectedRotationBits = 0U;
+    std::uint32_t expectedXBits = 0U;
+    std::uint32_t expectedYBits = 0U;
+    bool expectedFeasible = false;
+    bool referenceFound = false;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        if (row >> fixture >> expectedSeed >> expectedPlaced
+                >> expectedRemaining >> std::hex >> expectedWidthBits
+                >> expectedRotationBits >> expectedXBits >> expectedYBits
+                >> std::dec >> std::boolalpha >> expectedFeasible
+            && fixture == "growth_limit_38")
+        {
+            referenceFound = true;
+            break;
+        }
+    }
+    if (!Expect(referenceFound,
+                output,
+                "growth-attempt Rust reference row must be present"))
+    {
+        return false;
+    }
+
+    const auto& value = result.Value();
+    const auto& metrics = value.metrics;
+    const auto& placement = value.solution.layoutSnapshot.placements.front().placedItem;
+    const auto transform = placement.Transform();
+    const auto floatBits = [](double input) {
+        const float value = static_cast<float>(input);
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const bool matches = expectedSeed == config.seed
+        && expectedPlaced == metrics.placedItemCount
+        && expectedRemaining == metrics.remainingDemand
+        && expectedFeasible == metrics.feasible
+        && expectedWidthBits == floatBits(metrics.stripWidth)
+        && expectedRotationBits == floatBits(transform.rotationRad)
+        && expectedXBits == floatBits(transform.translation.x)
+        && expectedYBits == floatBits(transform.translation.y);
+    return Expect(matches,
+                  output,
+                  "Sparrow LBF result after more than 32 growth attempts must match Rust bits");
+}
+
+bool TestSparrowBuilderRustF32SortTie(std::ostream& output)
+{
+    const auto instance = MakeInstance(
+        {MakeItem(0U, 591U, 1.0, 1.0),
+         MakeItem(1U, 592U, 0.50006104, 1.6449358)},
+        {1U, 1U},
+        2.0);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust f32 sort-tie instance creation failed"))
+    {
+        return false;
+    }
+
+    const jaguar::Item& first = instance.Value().GetItem(0U);
+    const jaguar::Item& second = instance.Value().GetItem(1U);
+    const auto* firstSurrogate = first.CollisionShape().GetSurrogate();
+    const auto* secondSurrogate = second.CollisionShape().GetSurrogate();
+    if (!Expect(firstSurrogate != nullptr && secondSurrogate != nullptr,
+                output,
+                "Rust f32 sort-tie items must have surrogates"))
+    {
+        return false;
+    }
+
+    const float firstRustKey =
+        static_cast<float>(firstSurrogate->ConvexHullArea())
+        * static_cast<float>(first.CollisionShape().Diameter());
+    const float secondRustKey =
+        static_cast<float>(secondSurrogate->ConvexHullArea())
+        * static_cast<float>(second.CollisionShape().Diameter());
+    const double firstCppKey = firstSurrogate->ConvexHullArea()
+        * first.CollisionShape().Diameter();
+    const double secondCppKey = secondSurrogate->ConvexHullArea()
+        * second.CollisionShape().Diameter();
+    if (firstRustKey != secondRustKey || !(firstCppKey < secondCppKey))
+    {
+        output << std::setprecision(17)
+               << "Rust-f32 keys: " << firstRustKey << ", " << secondRustKey
+               << "; C++-double keys: " << firstCppKey << ", " << secondCppKey
+               << '\n';
+        return Expect(false,
+                      output,
+                      "sort-tie geometry must tie in Rust f32 but differ in C++ double");
+    }
+
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 64U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    const auto constructed =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    if (!Expect(constructed.HasValue(),
+                output,
+                "Rust f32 sort-tie construction failed"))
+    {
+        return false;
+    }
+
+    const auto& placements =
+        constructed.Value().solution.layoutSnapshot.placements;
+    return Expect(!placements.empty()
+                      && placements.front().placedItem.GetItemIndex() == 0U,
+                  output,
+                  "construction ties must retain input order like Rust f32 sorting");
+}
+
+bool TestSparrowBuilderRejectsWidthCeilingEquality(std::ostream& output)
+{
+    const auto instance = MakeInstance({MakeItem(0U, 593U, 2.0, 2.0)}, {1U}, 4.0);
+    if (!Expect(instance.HasValue(),
+                output,
+                "width-ceiling equality instance creation failed"))
+    {
+        return false;
+    }
+
+    const double widthCeiling = static_cast<double>(
+        2.0F * static_cast<float>(
+                   instance.Value().GetItem(0U).CollisionShape().Diameter()));
+    const double baseWidth = instance.Value().BaseStrip().width;
+    sparrow::SparrowConstructorConfig config;
+    config.seed = 42U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.widthGrowthRatio = static_cast<double>(
+        static_cast<float>(widthCeiling / baseWidth));
+    const float nextWidth = static_cast<float>(baseWidth)
+        * static_cast<float>(config.widthGrowthRatio);
+    if (!Expect(nextWidth == static_cast<float>(widthCeiling),
+                output,
+                "width-growth test must land exactly on the configured ceiling"))
+    {
+        return false;
+    }
+
+    const auto constructed =
+        sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+    return Expect(!constructed.HasValue()
+                      && constructed.GetError().code == jaguar::ErrorCode::Infeasible,
+                  output,
+                  "Rust width growth must stop when next width equals its ceiling");
 }
 
 bool TestLegacyLbfMetricsReferenceFixture(std::ostream& output)
@@ -551,6 +883,263 @@ bool TestSparrowRustReferenceMetrics(std::ostream& output)
                   output,
                   "SparrowCore initial metrics must match live Sparrow Rust output");
 }
+
+struct MultiInstancePlacementReference
+{
+    std::size_t itemIndex = 0U;
+    double rotation = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct MultiInstanceCaseReference
+{
+    std::string name;
+    std::uint64_t seed = 0U;
+    std::size_t placed = 0U;
+    std::size_t remaining = 0U;
+    double width = 0.0;
+    double density = 0.0;
+    bool feasible = false;
+    std::vector<MultiInstancePlacementReference> placements;
+};
+
+bool TestSparrowRustMultiInstanceLbfParity(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfMultiInstanceRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfMultiInstanceRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfMultiInstanceRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfMultiInstanceRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "multi-instance Rust LBF reference fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    std::vector<MultiInstanceCaseReference> references;
+    MultiInstanceCaseReference* activeReference = nullptr;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string record;
+        row >> record;
+        if (record == "case")
+        {
+            MultiInstanceCaseReference reference;
+            if (!(row >> reference.name >> reference.seed >> reference.placed
+                      >> reference.remaining >> reference.width
+                      >> reference.density >> std::boolalpha
+                      >> reference.feasible))
+            {
+                return Expect(false,
+                              output,
+                              "multi-instance Rust case row is malformed");
+            }
+            references.push_back(std::move(reference));
+            activeReference = &references.back();
+        }
+        else if (record == "placement")
+        {
+            std::string caseName;
+            MultiInstancePlacementReference placement;
+            if (activeReference == nullptr
+                || !(row >> caseName >> placement.itemIndex
+                      >> placement.rotation >> placement.x >> placement.y)
+                || caseName != activeReference->name)
+            {
+                return Expect(false,
+                              output,
+                              "multi-instance Rust placement row is malformed");
+            }
+            activeReference->placements.push_back(placement);
+        }
+        else
+        {
+            return Expect(false,
+                          output,
+                          "multi-instance Rust reference has an unknown row type");
+        }
+    }
+
+    struct InputCase
+    {
+        const char* name;
+        const char* path;
+    };
+    constexpr InputCase inputs[] = {
+        {"single_item", "RustSppSingleItem.json"},
+        {"three_square_cold_start", "RustSppOptimizeColdStart.json"},
+        {"mixed_shape", "ExplorationPool.json"},
+        {"three_square_boundary", "RustSppThreeSquareBoundary.json"},
+    };
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    for (const InputCase& input : inputs)
+    {
+        const auto expected = std::find_if(
+            references.begin(), references.end(), [&input](const auto& row) {
+                return row.name == input.name;
+            });
+        if (!Expect(expected != references.end(),
+                    output,
+                    "multi-instance Rust reference is missing an input case"))
+        {
+            return false;
+        }
+
+        std::ifstream instanceFile;
+        const std::string fixturePath =
+            std::string{"SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string parentFixturePath =
+            std::string{"../SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string alternateFixturePath =
+            std::string{"../JaguarRun/SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string windowsFixturePath =
+            std::string{"..\\SparrowCore\\Tests\\Fixtures\\"} + input.path;
+        for (const std::string& path : {fixturePath,
+                                        parentFixturePath,
+                                        alternateFixturePath,
+                                        windowsFixturePath})
+        {
+            instanceFile.open(path);
+            if (instanceFile.is_open())
+            {
+                break;
+            }
+            instanceFile.clear();
+        }
+        if (!Expect(instanceFile.is_open(),
+                    output,
+                    "multi-instance Rust input fixture cannot be opened"))
+        {
+            return false;
+        }
+        const std::string instanceJson{
+            std::istreambuf_iterator<char>(instanceFile),
+            std::istreambuf_iterator<char>()};
+        const auto instance = importer.ImportSPInstanceJson(instanceJson);
+        if (!Expect(instance.HasValue(),
+                    output,
+                    "multi-instance Rust input must import with Rust defaults"))
+        {
+            return false;
+        }
+
+        sparrow::SparrowConstructorConfig config;
+        config.seed = 42U;
+        config.nContainerSamples = 64U;
+        config.nFocussedSamples = 0U;
+        config.nCoordinateDescents = 1U;
+        const auto result =
+            sparrow::ConstructSparrowInitialSolution(instance.Value(), config);
+        if (!Expect(result.HasValue(),
+                    output,
+                    "SparrowCore multi-instance LBF construction must succeed"))
+        {
+            return false;
+        }
+        const auto& metrics = result.Value().metrics;
+        if (!(expected->seed == metrics.seed
+              && expected->placed == metrics.placedItemCount
+              && expected->remaining == metrics.remainingDemand
+              && expected->feasible == metrics.feasible
+              && std::abs(expected->width - metrics.stripWidth)
+                     < SPARROW_RUST_LBF_WIDTH_TOLERANCE
+              && std::abs(expected->density - metrics.density)
+                     < SPARROW_RUST_LBF_DENSITY_TOLERANCE))
+        {
+            output << std::setprecision(17) << "multi-instance case "
+                   << input.name << " Rust(width=" << expected->width
+                   << ", density=" << expected->density << ", placed="
+                   << expected->placed << ", remaining="
+                   << expected->remaining << ", feasible="
+                   << expected->feasible << ") C++(width="
+                   << metrics.stripWidth << ", density=" << metrics.density
+                   << ", placed=" << metrics.placedItemCount
+                   << ", remaining=" << metrics.remainingDemand
+                   << ", feasible=" << metrics.feasible << ")\n";
+            return Expect(false,
+                          output,
+                          "multi-instance LBF metrics must match Rust within recorded tolerances");
+        }
+
+        std::vector<const jaguar::LayoutPlacementSnapshot*> placements;
+        for (const auto& placement :
+             result.Value().solution.layoutSnapshot.placements)
+        {
+            placements.push_back(&placement);
+        }
+        std::sort(placements.begin(), placements.end(), [](const auto* left,
+                                                           const auto* right) {
+            const auto leftIndex = left->placedItem.GetItemIndex();
+            const auto rightIndex = right->placedItem.GetItemIndex();
+            if (leftIndex != rightIndex)
+            {
+                return leftIndex < rightIndex;
+            }
+            const auto& leftTransform = left->placedItem.Transform();
+            const auto& rightTransform = right->placedItem.Transform();
+            if (leftTransform.translation.x != rightTransform.translation.x)
+            {
+                return leftTransform.translation.x < rightTransform.translation.x;
+            }
+            return leftTransform.translation.y < rightTransform.translation.y;
+        });
+        if (!Expect(placements.size() == expected->placements.size(),
+                    output,
+                    "multi-instance placed-item identity count must match Rust"))
+        {
+            return false;
+        }
+        for (std::size_t index = 0U; index < placements.size(); ++index)
+        {
+            const auto& actualPlacement =
+                placements[index]->placedItem;
+            const auto& actualTransform = actualPlacement.Transform();
+            const auto& expectedPlacement = expected->placements[index];
+            const bool placementMatches =
+                actualPlacement.GetItemIndex() == expectedPlacement.itemIndex
+                && std::abs(actualTransform.rotationRad
+                            - expectedPlacement.rotation) < 1.0e-6
+                && std::abs(actualTransform.translation.x
+                            - expectedPlacement.x) < 5.0e-5
+                && std::abs(actualTransform.translation.y
+                            - expectedPlacement.y) < 5.0e-5;
+            if (!placementMatches)
+            {
+                output << std::setprecision(17) << "multi-instance case "
+                       << input.name << " placement " << index
+                       << " differs: Rust(item=" << expectedPlacement.itemIndex
+                       << ", rotation=" << expectedPlacement.rotation
+                       << ", x=" << expectedPlacement.x << ", y="
+                       << expectedPlacement.y << ") C++(item="
+                       << actualPlacement.GetItemIndex() << ", rotation="
+                       << actualTransform.rotationRad << ", x="
+                       << actualTransform.translation.x << ", y="
+                       << actualTransform.translation.y << ")\n";
+                return Expect(false,
+                              output,
+                              "multi-instance LBF placements must match the Rust reference");
+            }
+        }
+    }
+    return true;
+}
 }
 
 bool RunSppLbfTests(std::ostream& output)
@@ -559,6 +1148,12 @@ bool RunSppLbfTests(std::ostream& output)
         && TestSppDemandAndInvalidInputs(output)
         && TestSppJsonRoundTrip(output)
         && TestSparrowBuilderSmallInstance(output)
+        && TestSparrowBuilderZeroContainerSamplesMatchesRustError(output)
+        && TestSparrowBuilderFocusedSamplesStayAtRustZero(output)
+        && TestSparrowBuilderGrowthBeyond32AttemptsMatchesRust(output)
+        && TestSparrowBuilderRustF32SortTie(output)
+        && TestSparrowBuilderRejectsWidthCeilingEquality(output)
         && TestLegacyLbfMetricsReferenceFixture(output)
-        && TestSparrowRustReferenceMetrics(output);
+        && TestSparrowRustReferenceMetrics(output)
+        && TestSparrowRustMultiInstanceLbfParity(output);
 }

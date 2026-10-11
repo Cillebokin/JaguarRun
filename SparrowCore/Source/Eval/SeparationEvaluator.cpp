@@ -1,6 +1,5 @@
 #include "SparrowCore/Eval/SeparationEvaluator.h"
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -112,9 +111,6 @@ SeparationEvaluator::SeparationEvaluator(
         return movingHazardHandle.has_value()
             && handle == *movingHazardHandle;
     };
-    m_Filter.irrelevant = [](const jaguar::HazardEntity& entity) {
-        return entity.kind == jaguar::HazardKind::Hole;
-    };
 }
 
 SampleEval SeparationEvaluator::Evaluate(
@@ -138,36 +134,87 @@ SampleEval SeparationEvaluator::Evaluate(
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
 
+    const auto transformed =
+        m_Item->CollisionShape().TransformedRustF32(*legalTransform);
+    if (!transformed.HasValue())
+    {
+        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
+    }
+
+    float lossBound = std::numeric_limits<float>::infinity();
+    if (upperBound.has_value())
+    {
+        if (upperBound->kind == SampleKind::SAMPLE_KIND_COLLISION)
+        {
+            lossBound = upperBound->loss;
+        }
+        else if (upperBound->kind == SampleKind::SAMPLE_KIND_CLEAR)
+        {
+            lossBound = 0.0F;
+        }
+    }
+    float accumulatedLoss = 0.0F;
+    bool lossEvaluationFailed = false;
+    const auto addHazardLoss = [&](const jaguar::HazardEntity& hazard) {
+        const float remaining = lossBound == std::numeric_limits<float>::infinity()
+            ? std::numeric_limits<float>::infinity()
+            : lossBound - accumulatedLoss;
+        const auto extraLoss = m_Tracker->EvaluateCandidateHazardLoss(
+            transformed.Value(), *m_MovingIndex, hazard);
+        if (!extraLoss.HasValue())
+        {
+            lossEvaluationFailed = true;
+            return true;
+        }
+        if (hazard.kind == jaguar::HazardKind::PlacedItem
+            && !(extraLoss.Value() <= remaining))
+        {
+            return true;
+        }
+        accumulatedLoss += extraLoss.Value();
+        return accumulatedLoss > lossBound;
+    };
+
     jaguar::HazardCollector collisions;
     const auto surrogateCollision = m_Engine->CollectSurrogateCollisionsUntil(
         *surrogate,
         *legalTransform,
         collisions,
         m_Filter,
-        [](const jaguar::HazardEntity&) { return false; });
+        addHazardLoss);
     if (!surrogateCollision.HasValue())
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
     const bool surrogateHit = !collisions.Empty();
-    const auto transformed = m_Item->CollisionShape().TransformedRustF32(*legalTransform);
-    if (!transformed.HasValue())
-    {
-        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
-    }
     if (surrogateHit)
     {
         ++m_SurrogateRejectCount;
     }
+    if (surrogateCollision.Value() || lossEvaluationFailed)
+    {
+        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
+    }
+
     jaguar::HazardCollector exactCollisions;
-    m_Engine->CollectPolygonCollisionsUntil(
+    const bool stoppedDuringExactCheck = m_Engine->CollectPolygonCollisionsUntil(
         transformed.Value(),
         exactCollisions,
         m_Filter,
-        [](const jaguar::HazardEntity&) { return false; });
+        [&](const jaguar::HazardEntity& hazard) {
+            if (collisions.ContainsEntity(hazard))
+            {
+                return false;
+            }
+            return addHazardLoss(hazard);
+        });
     if (!exactCollisions.Empty())
     {
         ++m_ExactCollisionCount;
+    }
+    if (stoppedDuringExactCheck || lossEvaluationFailed)
+    {
+        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
     for (const auto& entry : exactCollisions.Entries())
     {
@@ -177,26 +224,7 @@ SampleEval SeparationEvaluator::Evaluate(
     {
         return {SampleKind::SAMPLE_KIND_CLEAR, 0.0F};
     }
-    if (upperBound.has_value()
-        && upperBound->kind == SampleKind::SAMPLE_KIND_CLEAR)
-    {
-        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
-    }
-
-    const auto loss = m_Tracker->EvaluateCandidateLoss(
-        *m_Layout, *m_Item, *legalTransform, *m_MovingIndex);
-    if (!loss.HasValue() || !std::isfinite(loss.Value()))
-    {
-        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
-    }
-    if (upperBound.has_value()
-        && upperBound->kind == SampleKind::SAMPLE_KIND_COLLISION
-        && std::isfinite(upperBound->loss)
-        && loss.Value() > upperBound->loss)
-    {
-        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
-    }
-    return {SampleKind::SAMPLE_KIND_COLLISION, std::max(loss.Value(), 1.0e-6F)};
+    return {SampleKind::SAMPLE_KIND_COLLISION, accumulatedLoss};
 }
 
 std::size_t SeparationEvaluator::EvaluationCount() const noexcept

@@ -1,0 +1,12 @@
+# generator=Sparrow Rust optimizer::minimum_strip_width
+# input=8x2 rectangle; axis-aligned allowed rotations=[0,90], oblique allowed rotations=[0,37] degrees; initial width=20
+# axis-aligned seed=0 radians at (5,3), container height f32 bits: 40ffffee,40ffffef,40fffff0
+# oblique seed=0 radians at (5,2), container height f32 bits: 40cd2d52,40cd2d53,40cd2d54
+# each triplet spans bbox.height <= container.height + diameter*1e-6; only the alternative rotation crosses the threshold
+# case container_height_f32_bits minimum_width_f32_bits
+case below_rotation_height_tolerance 40ffffee 40ffffef
+case first_f32_height_accepting_90_degrees 40ffffef 40000000
+case above_rotation_height_tolerance 40fffff0 3fffffff
+case oblique_below_rotation_height_tolerance 40cd2d52 40ffffef
+case oblique_first_f32_height_accepting_37_degrees 40cd2d53 40f2f773
+case oblique_above_rotation_height_tolerance 40cd2d54 40f2f773

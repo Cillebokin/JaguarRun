@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 
 namespace sparrow
 {
@@ -69,7 +70,7 @@ inline bool RustApproxEqualF32(float left, float right) noexcept
     return ulpDistance <= 4U;
 }
 
-inline bool IsBetterSample(const SampleEval& left, const SampleEval& right) noexcept
+inline bool IsBetterSample(const SampleEval& left, const SampleEval& right)
 {
     const int leftRank = SampleKindRank(left.kind);
     const int rightRank = SampleKindRank(right.kind);
@@ -81,19 +82,15 @@ inline bool IsBetterSample(const SampleEval& left, const SampleEval& right) noex
     {
         return false;
     }
-    if (std::isnan(left.loss))
+    if (std::isnan(left.loss) || std::isnan(right.loss))
     {
-        return false;
-    }
-    if (std::isnan(right.loss))
-    {
-        return true;
+        throw std::domain_error("SampleEval comparison requires non-NaN losses");
     }
     return !RustApproxEqualF32(left.loss, right.loss)
         && left.loss < right.loss;
 }
 
-inline bool operator<(const SampleEval& left, const SampleEval& right) noexcept
+inline bool operator<(const SampleEval& left, const SampleEval& right)
 {
     return IsBetterSample(left, right);
 }
@@ -107,10 +104,6 @@ inline bool operator==(const SampleEval& left, const SampleEval& right) noexcept
     if (left.kind == SampleKind::SAMPLE_KIND_INVALID)
     {
         return true;
-    }
-    if (std::isnan(left.loss) || std::isnan(right.loss))
-    {
-        return std::isnan(left.loss) && std::isnan(right.loss);
     }
     return left.loss == right.loss;
 }

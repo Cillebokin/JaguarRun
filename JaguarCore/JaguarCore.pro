@@ -1,6 +1,7 @@
 TEMPLATE = lib
 TARGET = JaguarCore
 CONFIG += dll c++17 warn_on skip_target_version_ext
+win32-msvc: QMAKE_CXXFLAGS += /utf-8
 QT -= core gui
 
 # Define output directories before JaguarCorePackage.pri expands its install

@@ -24,6 +24,7 @@ CONFIG += simd
 }
 
 INCLUDEPATH += $$PWD/../Include
+include($$PWD/../Package/JaguarCorePackage.pri)
 
 CONFIG(debug, debug|release) {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Debug

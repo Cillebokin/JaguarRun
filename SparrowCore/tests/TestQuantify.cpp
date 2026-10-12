@@ -1041,6 +1041,109 @@ bool TestRustMultiHazardLossAndEarlyStop(std::ostream& output)
 
     sparrow::SeparationEvaluator evaluator(
         layout, instance.Value().GetItem(3U), handles[3], tracker);
+    const jaguar::LayoutSnapshot layoutBeforeInvalidCandidate = layout.Save();
+    const float trackerLossBeforeInvalidCandidate = tracker.TotalLoss();
+    // Rust consumes f32 transforms; these finite double inputs overflow to the
+    // same +/-Inf values after the evaluator's f32 conversion.
+    const jaguar::Transform2d translationsInfiniteInRustF32[] = {
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {std::numeric_limits<double>::infinity(), 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {-std::numeric_limits<double>::infinity(), 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {0.5, std::numeric_limits<double>::infinity()}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {0.5, -std::numeric_limits<double>::infinity()}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {static_cast<double>(std::numeric_limits<float>::max()) * 2.0, 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {-static_cast<double>(std::numeric_limits<float>::max()) * 2.0, 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {0.5, static_cast<double>(std::numeric_limits<float>::max()) * 2.0}),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {0.5, -static_cast<double>(std::numeric_limits<float>::max()) * 2.0}),
+    };
+#ifndef NDEBUG
+    const auto matchesNonFiniteProfile = [&](const jaguar::Transform2d& candidate,
+                                             const std::optional<sparrow::SampleEval>& bound) {
+        try
+        {
+            static_cast<void>(evaluator.Evaluate(candidate, bound));
+        }
+        catch (const std::domain_error&)
+        {
+            return true;
+        }
+        return false;
+    };
+#else
+    const auto matchesNonFiniteProfile = [&](const jaguar::Transform2d& candidate,
+                                             const std::optional<sparrow::SampleEval>& bound) {
+        const sparrow::SampleEval result = evaluator.Evaluate(candidate, bound);
+        const bool unbounded = !bound.has_value()
+            || bound->kind == sparrow::SampleKind::SAMPLE_KIND_INVALID
+            || (bound->kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                && (std::isnan(bound->loss)
+                    || bound->loss == std::numeric_limits<float>::infinity()));
+        if (unbounded)
+        {
+            return result.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                && std::isinf(result.loss) && result.loss > 0.0F;
+        }
+        return result.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID;
+    };
+#endif
+    const std::optional<sparrow::SampleEval> nonFiniteBounds[] = {
+        std::nullopt,
+        sparrow::SampleEval{
+            sparrow::SampleKind::SAMPLE_KIND_COLLISION,
+            std::numeric_limits<float>::infinity()},
+        sparrow::SampleEval{
+            sparrow::SampleKind::SAMPLE_KIND_COLLISION,
+            std::numeric_limits<float>::quiet_NaN()},
+        sparrow::SampleEval{sparrow::SampleKind::SAMPLE_KIND_INVALID, 0.0F},
+        sparrow::SampleEval{sparrow::SampleKind::SAMPLE_KIND_COLLISION, 0.01F},
+        sparrow::SampleEval{sparrow::SampleKind::SAMPLE_KIND_CLEAR, 0.0F},
+    };
+    bool nonFiniteBoundaryMatchesRust = true;
+    for (const jaguar::Transform2d& candidate : translationsInfiniteInRustF32)
+    {
+        for (const auto& bound : nonFiniteBounds)
+        {
+            nonFiniteBoundaryMatchesRust = matchesNonFiniteProfile(candidate, bound)
+                && nonFiniteBoundaryMatchesRust;
+        }
+    }
+    const jaguar::LayoutSnapshot layoutAfterInvalidCandidate = layout.Save();
+    bool placementsUnchanged =
+        layoutAfterInvalidCandidate.placements.size()
+        == layoutBeforeInvalidCandidate.placements.size();
+    for (std::size_t index = 0U;
+         placementsUnchanged && index < layoutBeforeInvalidCandidate.placements.size();
+         ++index)
+    {
+        const jaguar::Transform2d& before =
+            layoutBeforeInvalidCandidate.placements[index].placedItem.Transform();
+        const jaguar::Transform2d& after =
+            layoutAfterInvalidCandidate.placements[index].placedItem.Transform();
+        placementsUnchanged = before.rotationRad == after.rotationRad
+            && before.translation.x == after.translation.x
+            && before.translation.y == after.translation.y;
+    }
+    if (!Expect(nonFiniteBoundaryMatchesRust
+                    && evaluator.EvaluationCount() == 48U
+                    && placementsUnchanged
+                    && tracker.TotalLoss() == trackerLossBeforeInvalidCandidate,
+                output,
+                "translations that are infinite in Rust f32 must match its profile result without mutating state"))
+    {
+        return false;
+    }
+
     const sparrow::SampleEval collision = evaluator.Evaluate(transform, std::nullopt);
     std::uint32_t lossBits = 0U;
     std::memcpy(&lossBits, &collision.loss, sizeof(lossBits));
@@ -1050,9 +1153,82 @@ bool TestRustMultiHazardLossAndEarlyStop(std::ostream& output)
                << lossBits << '\n';
     }
     if (!Expect(collision.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
-                    && lossBits == 0x4ab5c931U,
+                    && lossBits == 0x4ab5c931U
+                    && evaluator.EvaluationCount() == 49U
+                    && tracker.TotalLoss() == trackerLossBeforeInvalidCandidate,
                 output,
-                "multi-hazard weighted loss must match Rust raw bits"))
+                "multi-hazard weighted loss must match Rust raw bits after invalid-candidate recovery"))
+    {
+        return false;
+    }
+
+    sparrow::SeparationEvaluator infiniteRotationEvaluator(
+        layout, instance.Value().GetItem(3U), handles[3], tracker);
+    const jaguar::Transform2d infiniteRotations[] = {
+        jaguar::Transform2d::FromRotationTranslation(
+            std::numeric_limits<double>::infinity(), {0.5, 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            -std::numeric_limits<double>::infinity(), {0.5, 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            static_cast<double>(std::numeric_limits<float>::max()) * 2.0, {0.5, 0.5}),
+        jaguar::Transform2d::FromRotationTranslation(
+            -static_cast<double>(std::numeric_limits<float>::max()) * 2.0, {0.5, 0.5}),
+    };
+    bool infiniteRotationMatchesRust = true;
+    for (const jaguar::Transform2d& candidate : infiniteRotations)
+    {
+        for (const auto& bound : nonFiniteBounds)
+        {
+            bool panickedLikeRust = false;
+            try
+            {
+                static_cast<void>(infiniteRotationEvaluator.Evaluate(candidate, bound));
+            }
+            catch (const std::domain_error& error)
+            {
+                panickedLikeRust =
+                    std::string(error.what()).find("cos is NaN") != std::string::npos;
+            }
+            infiniteRotationMatchesRust =
+                panickedLikeRust && infiniteRotationMatchesRust;
+        }
+    }
+    const jaguar::LayoutSnapshot layoutAfterInfiniteRotation = layout.Save();
+    bool rotationFailurePreservedLayout =
+        layoutAfterInfiniteRotation.placements.size()
+        == layoutBeforeInvalidCandidate.placements.size();
+    for (std::size_t index = 0U;
+         rotationFailurePreservedLayout
+         && index < layoutBeforeInvalidCandidate.placements.size();
+         ++index)
+    {
+        const jaguar::Transform2d& before =
+            layoutBeforeInvalidCandidate.placements[index].placedItem.Transform();
+        const jaguar::Transform2d& after =
+            layoutAfterInfiniteRotation.placements[index].placedItem.Transform();
+        rotationFailurePreservedLayout = before.rotationRad == after.rotationRad
+            && before.translation.x == after.translation.x
+            && before.translation.y == after.translation.y;
+    }
+    if (!Expect(infiniteRotationMatchesRust
+                    && infiniteRotationEvaluator.EvaluationCount() == 24U
+                    && rotationFailurePreservedLayout
+                    && tracker.TotalLoss() == trackerLossBeforeInvalidCandidate,
+                output,
+                "infinite candidate rotations must fail at transform composition like Rust"))
+    {
+        return false;
+    }
+    const sparrow::SampleEval rotationRecovered =
+        infiniteRotationEvaluator.Evaluate(transform, std::nullopt);
+    std::uint32_t rotationRecoveredBits = 0U;
+    std::memcpy(&rotationRecoveredBits, &rotationRecovered.loss, sizeof(rotationRecoveredBits));
+    if (!Expect(rotationRecovered.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                    && rotationRecoveredBits == 0x4ab5c931U
+                    && infiniteRotationEvaluator.EvaluationCount() == 25U
+                    && tracker.TotalLoss() == trackerLossBeforeInvalidCandidate,
+                output,
+                "finite candidate must recover after an infinite-rotation failure"))
     {
         return false;
     }

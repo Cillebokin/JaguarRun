@@ -9,6 +9,7 @@ use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::eval::sample_eval::{SampleEval, SampleEvaluator};
 use sparrow::eval::sep_evaluator::SeparationEvaluator;
 use sparrow::quantify::tracker::CollisionTracker;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
 fn build_multi_hazard_case() -> (
@@ -236,4 +237,155 @@ fn clear_upper_bound_preserves_a_zero_loss_collision_classification() {
         panic!("a zero-loss overlap under a Clear bound must remain a collision");
     };
     assert_eq!(loss.to_bits(), 0);
+}
+
+#[test]
+fn infinite_candidate_translation_exposes_profile_boundary_and_evaluator_recovers() {
+    let (problem, tracker, keys) = build_multi_hazard_case();
+    let moving_key = keys[3];
+    let moving_item = &problem.layout.placed_items[moving_key].item;
+    let original_transforms = keys
+        .iter()
+        .map(|key| problem.layout.placed_items[*key].d_transf)
+        .collect::<Vec<_>>();
+    let original_total_loss = tracker.get_total_loss().to_bits();
+    let mut evaluator =
+        SeparationEvaluator::new(&problem.layout, moving_item, moving_key, &tracker);
+
+    let bounds = [
+        None,
+        Some(SampleEval::Collision {
+            loss: f32::INFINITY,
+        }),
+        Some(SampleEval::Collision { loss: f32::NAN }),
+        Some(SampleEval::Invalid),
+        Some(SampleEval::Collision { loss: 0.01 }),
+        Some(SampleEval::Clear { loss: 0.0 }),
+    ];
+    let translations = [
+        (f32::INFINITY, 0.5),
+        (f32::NEG_INFINITY, 0.5),
+        (0.5, f32::INFINITY),
+        (0.5, f32::NEG_INFINITY),
+    ];
+    let mut outcomes = Vec::new();
+    for translation in translations {
+        for bound in bounds {
+            outcomes.push(catch_unwind(AssertUnwindSafe(|| {
+                evaluator.evaluate_sample(DTransformation::new(0.0, translation), bound)
+            })));
+        }
+    }
+    #[cfg(debug_assertions)]
+    {
+        let panic = outcomes[0]
+            .as_ref()
+            .expect_err("Debug must assert on non-normal Exterior loss");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        assert!(
+            message.contains("overlap.is_normal"),
+            "unexpected panic: {message}"
+        );
+        assert!(outcomes.iter().all(Result::is_err));
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        for (index, outcome) in outcomes.iter().enumerate() {
+            if index % bounds.len() < 4 {
+                assert!(matches!(
+                    outcome,
+                    Ok(SampleEval::Collision { loss })
+                        if loss.is_infinite() && loss.is_sign_positive()
+                ));
+            } else {
+                assert!(matches!(outcome, Ok(SampleEval::Invalid)));
+            }
+        }
+    }
+    assert_eq!(evaluator.n_evals(), 24);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+    assert_eq!(
+        keys.iter()
+            .map(|key| problem.layout.placed_items[*key].d_transf)
+            .collect::<Vec<_>>(),
+        original_transforms,
+        "candidate evaluation must not mutate the source layout"
+    );
+
+    let recovered = evaluator.evaluate_sample(DTransformation::new(0.0, (0.5, 0.5)), None);
+    assert!(matches!(
+        recovered,
+        SampleEval::Collision { loss } if loss.to_bits() == 0x4ab5_c931
+    ));
+    assert_eq!(evaluator.n_evals(), 25);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+}
+
+#[test]
+fn infinite_candidate_rotation_panics_before_geometry_and_evaluator_recovers() {
+    let (problem, tracker, keys) = build_multi_hazard_case();
+    let moving_key = keys[3];
+    let moving_item = &problem.layout.placed_items[moving_key].item;
+    let original_transforms = keys
+        .iter()
+        .map(|key| problem.layout.placed_items[*key].d_transf)
+        .collect::<Vec<_>>();
+    let original_total_loss = tracker.get_total_loss().to_bits();
+    let mut evaluator =
+        SeparationEvaluator::new(&problem.layout, moving_item, moving_key, &tracker);
+
+    let bounds = [
+        None,
+        Some(SampleEval::Collision {
+            loss: f32::INFINITY,
+        }),
+        Some(SampleEval::Collision { loss: f32::NAN }),
+        Some(SampleEval::Invalid),
+        Some(SampleEval::Collision { loss: 0.01 }),
+        Some(SampleEval::Clear { loss: 0.0 }),
+    ];
+    let rotations = [f32::INFINITY, f32::NEG_INFINITY];
+    let mut outcomes = Vec::new();
+    for rotation in rotations {
+        for bound in bounds {
+            outcomes.push(catch_unwind(AssertUnwindSafe(|| {
+                evaluator.evaluate_sample(DTransformation::new(rotation, (0.5, 0.5)), bound)
+            })));
+        }
+    }
+    assert!(outcomes.iter().all(Result::is_err));
+    let panic = outcomes[0]
+        .as_ref()
+        .expect_err("an infinite rotation must fail while composing its transform");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    assert!(
+        message.contains("cos is NaN"),
+        "unexpected panic: {message}"
+    );
+
+    assert_eq!(evaluator.n_evals(), 12);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+    assert_eq!(
+        keys.iter()
+            .map(|key| problem.layout.placed_items[*key].d_transf)
+            .collect::<Vec<_>>(),
+        original_transforms,
+        "a failed transform composition must not mutate the source layout"
+    );
+
+    let recovered = evaluator.evaluate_sample(DTransformation::new(0.0, (0.5, 0.5)), None);
+    assert!(matches!(
+        recovered,
+        SampleEval::Collision { loss } if loss.to_bits() == 0x4ab5_c931
+    ));
+    assert_eq!(evaluator.n_evals(), 13);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
 }

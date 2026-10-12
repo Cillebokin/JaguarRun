@@ -53,7 +53,7 @@
 - Rust：计算 `epsilon = max(d1,d2)*0.01`、`penalty`、由 `max_loss` 反推 `max_unscaled_overlap = (max_loss/penalty)² - eps²) / PI`（负则 None，:28-35），调 SIMD bounded 版再加 `eps²`、`sqrt * penalty`（:37-45）。公式与标量 `quantify_collision_poly_poly`（mod.rs:15-25）同构（+eps²、sqrt、penalty），仅多上界。
 - C++ 对应：`CalculatePolygonCollisionLoss`（OverlapProxy.cpp:137-183）同公式无上界（见 S17）。**上界换算公式 C++ 无对应**——对应功能（评估短路）由 SeparationEvaluator 层的 upperBound 事后比较承担（S11 差异#1/S12 已录）。
 - 判定：【差异】（有界换算与提前退出无 C++ 对应；最终值等价）
-- 证据：simd/mod.rs:18-46 vs OverlapProxy.cpp:137-183、SeparationEvaluator.cpp:176-194。
+- 证据：simd/mod.rs:18-46 vs OverlapProxy.cpp:137-183、SeparationEvaluator.cpp:182-200。
 
 ### 与 JaguarCore 侧 SoA/AVX2 的关系（任务指定核对项）
 - **两套 SoA 互不相交**：
@@ -78,7 +78,7 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | CirclesSoA（f32 x/y/r SoA + load）及 SIMD 量化通道在 C++ 无对应物——C++ quantify 恒走标量双循环 | 【C++缺失】 | Rust simd 为 opt-in、默认构建走标量；SIMD debug_assert 只要求相对误差约 1e-3，最大 ULP 差异未测 | Cargo.toml:49、lib.rs:1、circles_soa.rs:6-37 vs OverlapProxy.cpp:108-135 |
-| 2 | 有界变体（`*_simd_bounded` 的 max_unscaled_overlap 反推 + 每 pole 提前退出 None）在 C++ 无对应 | 【差异】 | 短路是性能优化；C++ 以 SeparationEvaluator 的 upperBound 事后比较等价实现（S11/S12 已录） | simd/mod.rs:28-43、overlap_proxy_simd.rs:94-96、collision_loss.rs:51-53 vs SeparationEvaluator.cpp:188-193 |
+| 2 | 有界变体（`*_simd_bounded` 的 max_unscaled_overlap 反推 + 每 pole 提前退出 None）在 C++ 无对应 | 【差异】 | 短路是性能优化；C++ 以 SeparationEvaluator 的 upperBound 事后比较等价实现（S11/S12 已录） | simd/mod.rs:28-43、overlap_proxy_simd.rs:94-96、collision_loss.rs:51-53 vs SeparationEvaluator.cpp:194-199 |
 | 3 | SIMD 块 `reduce_sum` 树状求和 vs 标量顺序累加 | 【差异】 | 归约顺序不同；Rust debug_assert 的相对误差阈值约 1e-3，未建立 ULP 上界 | overlap_proxy_simd.rs:72,99-106 vs OverlapProxy.cpp:114-131 |
 | 4 | SIMD 标量尾巴公式与标量版/C++ 逐字一致 | 【一致】 | — | overlap_proxy_simd.rs:75-92 vs overlap_proxy.rs:13-21 |
 | 5 | `quantify_collision_poly_poly_simd_bounded` 的 epsilon/penalty/+eps²/sqrt 公式与标量版同构，C++ CalculatePolygonCollisionLoss 同公式（S17 已录） | 【一致】 | — | simd/mod.rs:25,43-45 vs OverlapProxy.cpp:147-177 |

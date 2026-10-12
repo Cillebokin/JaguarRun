@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 
 namespace
 {
@@ -123,6 +124,42 @@ SampleEval SeparationEvaluator::Evaluate(
     {
         return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
     }
+
+    // Rust's DTransformation is NotNan<f32>, so an infinite translation is
+    // representable and reaches Exterior quantification. Its Debug assertion
+    // panics on the resulting non-normal overlap; Release propagates +Inf.
+    // Preserve that profile boundary before JaguarCore's finite-transform
+    // guard converts the candidate to InvalidInput. NaN remains rejected by
+    // Rust when DTransformation is constructed and is not handled here.
+    const float rustRotation = static_cast<float>(transform.rotationRad);
+    const float rustTranslationX = static_cast<float>(transform.translation.x);
+    const float rustTranslationY = static_cast<float>(transform.translation.y);
+    // Rust composes the rotation before collision traversal; cos(+/-Inf) is
+    // NaN and rot_transl_m rejects it with expect("cos is NaN") in every profile.
+    if (std::isinf(rustRotation))
+    {
+        throw std::domain_error("cos is NaN");
+    }
+    if (std::isfinite(rustRotation)
+        && (std::isinf(rustTranslationX) || std::isinf(rustTranslationY)))
+    {
+#ifndef NDEBUG
+        throw std::domain_error("assertion failed: overlap.is_normal()");
+#else
+        const bool unboundedLoss = !upperBound.has_value()
+            || upperBound->kind == SampleKind::SAMPLE_KIND_INVALID
+            || (upperBound->kind == SampleKind::SAMPLE_KIND_COLLISION
+                && (std::isnan(upperBound->loss)
+                    || upperBound->loss == std::numeric_limits<float>::infinity()));
+        if (unboundedLoss)
+        {
+            return {SampleKind::SAMPLE_KIND_COLLISION,
+                    std::numeric_limits<float>::infinity()};
+        }
+        return {SampleKind::SAMPLE_KIND_INVALID, 0.0F};
+#endif
+    }
+
     const auto legalTransform = LegalizeTransform(transform, *m_Item);
     if (!legalTransform.has_value())
     {

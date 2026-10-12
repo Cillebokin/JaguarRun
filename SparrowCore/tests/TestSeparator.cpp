@@ -1,6 +1,8 @@
 #include "SparrowCore/Optimizer/OptimizationTerminator.h"
 #include "SparrowCore/Optimizer/Separator.h"
 #include "SparrowCore/Optimizer/SeparatorWorker.h"
+#include "SparrowCore/Optimizer/SparrowConfig.h"
+#include "SparrowCore/Optimizer/SparrowOptimizer.h"
 #include "SparrowCore/Sampling/UniformRectSampler.h"
 #include "../Source/Optimizer/SeparatorWorkerTrace.h"
 
@@ -1464,6 +1466,394 @@ bool TestUnsupportedHazardPropagatesThroughWorkerSearch(std::ostream& output)
                   output,
                   "unsupported hazard must unwind the worker search after one sample without changing layout or emitting a candidate callback");
 }
+
+bool TestMultiworkerHazardFailureRetainsWorkerRngForRetry(
+    std::ostream& output)
+{
+    const jaguar::ImporterConfig importerConfig =
+        sparrow::MakeRustDefaultImporterConfig();
+    const jaguar::Importer importer(importerConfig);
+    const jaguar::ExternalItem externalItem{
+        9802U,
+        jaguar::RotationPolicy::Discrete({0.0}),
+        jaguar::ExternalShape::Polygon({
+            {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}),
+        std::nullopt};
+    const auto item = importer.ImportItem(externalItem, 0U);
+    if (!Expect(item.HasValue(), output,
+                "multiworker failure item import failed"))
+    {
+        return false;
+    }
+    const jaguar::ExternalShape outerShape = jaguar::ExternalShape::Polygon({
+        {0.0, 0.0}, {20.0, 0.0}, {20.0, 20.0}, {0.0, 20.0}});
+    const auto plainContainer = importer.ImportContainer(
+        {9800U, outerShape, {}});
+    if (!Expect(plainContainer.HasValue(), output,
+                "multiworker sampling container import failed"))
+    {
+        return false;
+    }
+    const auto samplerResult = sparrow::UniformRectSampler::Create(
+        plainContainer.Value().CollisionShape().BoundingBox(),
+        item.Value(),
+        plainContainer.Value().CollisionShape().BoundingBox());
+    if (!Expect(samplerResult.HasValue()
+                    && samplerResult.Value().has_value(),
+                output,
+                "multiworker failure sampler must fit"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowRng workerSeedSource(1U);
+    std::vector<jaguar::Rect2d> firstCandidateBounds;
+    firstCandidateBounds.reserve(2U);
+    for (std::size_t workerIndex = 0U; workerIndex < 2U; ++workerIndex)
+    {
+        sparrow::SparrowRng workerRng(workerSeedSource.NextU64());
+        const jaguar::Transform2d candidate =
+            samplerResult.Value()->Sample(workerRng);
+        const auto shape = item.Value().CollisionShape().TransformedRustF32(
+            candidate);
+        if (!Expect(shape.HasValue(), output,
+                    "multiworker candidate transform failed"))
+        {
+            return false;
+        }
+        firstCandidateBounds.push_back(shape.Value().BoundingBox());
+    }
+    std::vector<jaguar::ExternalQualityZone> zones;
+    zones.reserve(firstCandidateBounds.size());
+    for (std::size_t index = 0U; index < firstCandidateBounds.size(); ++index)
+    {
+        const jaguar::Rect2d& bounds = firstCandidateBounds[index];
+        zones.push_back({
+            index + 1U,
+            jaguar::ExternalShape::Rectangle(
+                bounds.xMin, bounds.yMin, bounds.Width(), bounds.Height())});
+    }
+    const auto hazardContainer = importer.ImportContainer(
+        {9801U, outerShape, std::move(zones)});
+    if (!Expect(hazardContainer.HasValue(), output,
+                "multiworker worker-specific hazard import failed"))
+    {
+        return false;
+    }
+
+    const auto strip = jaguar::Strip::Create(
+        20.0, importerConfig.cdeConfig, importerConfig.shapeModifyConfig, 20.0);
+    if (!Expect(strip.HasValue(), output,
+                "multiworker base strip creation failed"))
+    {
+        return false;
+    }
+    const auto instanceResult = jaguar::SPInstance::Create(
+        {item.Value()}, {1U}, strip.Value());
+    if (!Expect(instanceResult.HasValue(), output,
+                "multiworker failure instance creation failed"))
+    {
+        return false;
+    }
+    const jaguar::SPInstance instance = instanceResult.Value();
+    auto problemResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(problemResult.HasValue(), output,
+                "multiworker failure problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(20.0).HasValue(),
+                output,
+                "multiworker failure strip resize failed"))
+    {
+        return false;
+    }
+    jaguar::Layout warmLayout(hazardContainer.Value());
+    if (!Expect(warmLayout.PlaceItem(
+                    instance.GetItem(0U),
+                    jaguar::Transform2d::FromRotationTranslation(
+                        0.0, {19.0, 1.0})).HasValue(),
+                output,
+                "multiworker overlapping warm placement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution baseSolution = problem.Save();
+    const jaguar::SPSolution initial{baseSolution.strip, warmLayout.Save()};
+    if (!Expect(problem.Restore(initial).HasValue(),
+                output,
+                "multiworker custom-container warm start restore failed"))
+    {
+        return false;
+    }
+    auto separatorResult = sparrow::Separator::Create(
+        std::move(problem), 1U);
+    if (!Expect(separatorResult.HasValue(), output,
+                "multiworker failure separator creation failed"))
+    {
+        return false;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    const float initialLoss = separator.Tracker().TotalLoss();
+    const jaguar::SPSolution before = separator.SaveSolution();
+    if (!Expect(initialLoss > 0.0F
+                    && before.layoutSnapshot.placements.size() == 1U,
+                output,
+                "multiworker warm start must have a single exterior collision"))
+    {
+        return false;
+    }
+
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 1U;
+    config.noImprovementLimit = 1U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 2U;
+    sparrow::OptimizationTerminator terminator({});
+    SeparatorRoundRecordingListener listener;
+    bool propagated = false;
+    try
+    {
+        (void)separator.Run(config, terminator, &listener);
+    }
+    catch (const std::logic_error& error)
+    {
+        propagated = std::string(error.what()) == "unsupported hazard entity";
+    }
+
+    const jaguar::SPSolution afterFailure = separator.SaveSolution();
+    const auto& beforeTransform =
+        before.layoutSnapshot.placements.front().placedItem.Transform();
+    const auto& afterTransform =
+        afterFailure.layoutSnapshot.placements.front().placedItem.Transform();
+    const bool unchanged = beforeTransform.rotationRad
+            == afterTransform.rotationRad
+        && beforeTransform.translation == afterTransform.translation
+        && separator.Tracker().TotalLoss() == initialLoss;
+    const bool failureCallbacksMatch = listener.reports.empty()
+        && listener.progress.size() == 1U
+        && listener.progress.front().iteration == 0U
+        && !listener.result.has_value();
+    if (!Expect(propagated && unchanged && failureCallbacksMatch,
+                output,
+                "two worker QZone failures must escape after initial progress without changing the master or completing callbacks"))
+    {
+        return false;
+    }
+
+    bool retryCompleted = false;
+    try
+    {
+        const auto retry = separator.Run(config, terminator, &listener);
+        retryCompleted = retry.HasValue();
+    }
+    catch (const std::logic_error&)
+    {
+    }
+    return Expect(retryCompleted && listener.result.has_value(),
+                  output,
+                  "a retry must use worker RNG states consumed before the propagated exception");
+}
+
+bool TestMultiworkerHazardStopsOptimizePhaseCallbacks(
+    std::ostream& output)
+{
+    const jaguar::ImporterConfig importerConfig =
+        sparrow::MakeRustDefaultImporterConfig();
+    const jaguar::Importer importer(importerConfig);
+    const jaguar::ExternalItem externalItem{
+        9812U,
+        jaguar::RotationPolicy::Discrete({0.0}),
+        jaguar::ExternalShape::Polygon({
+            {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}),
+        std::nullopt};
+    const auto item = importer.ImportItem(externalItem, 0U);
+    if (!Expect(item.HasValue(), output,
+                "optimizer multiworker item import failed"))
+    {
+        return false;
+    }
+    const auto outerShape = [] {
+        return jaguar::ExternalShape::Polygon({
+            {0.0, 0.0}, {20.0, 0.0}, {20.0, 20.0}, {0.0, 20.0}});
+    };
+    const auto plainContainer = importer.ImportContainer(
+        {9810U, outerShape(), {}});
+    if (!Expect(plainContainer.HasValue(), output,
+                "optimizer plain container import failed"))
+    {
+        return false;
+    }
+    const auto samplerResult = sparrow::UniformRectSampler::Create(
+        plainContainer.Value().CollisionShape().BoundingBox(),
+        item.Value(),
+        plainContainer.Value().CollisionShape().BoundingBox());
+    if (!Expect(samplerResult.HasValue()
+                    && samplerResult.Value().has_value(),
+                output,
+                "optimizer multiworker sampler must fit"))
+    {
+        return false;
+    }
+
+    // The Rust optimizer skips the construction child stream for a warm
+    // start, while the current C++ entry consumes it unconditionally. Include
+    // both phase-seed streams so this fixture isolates propagation behavior.
+    sparrow::SparrowRng rootRng(42U);
+    const std::array<std::uint64_t, 2> phaseSeeds{{
+        rootRng.NextU64(), rootRng.NextU64()}};
+    std::vector<jaguar::Rect2d> firstCandidateBounds;
+    firstCandidateBounds.reserve(4U);
+    for (const std::uint64_t phaseSeed : phaseSeeds)
+    {
+        sparrow::SparrowRng separatorSeedSource(phaseSeed);
+        for (std::size_t workerIndex = 0U; workerIndex < 2U; ++workerIndex)
+        {
+            sparrow::SparrowRng workerRng(separatorSeedSource.NextU64());
+            const jaguar::Transform2d candidate =
+                samplerResult.Value()->Sample(workerRng);
+            const auto shape = item.Value().CollisionShape().TransformedRustF32(
+                candidate);
+            if (!Expect(shape.HasValue(), output,
+                        "optimizer worker candidate transform failed"))
+            {
+                return false;
+            }
+            firstCandidateBounds.push_back(shape.Value().BoundingBox());
+        }
+    }
+
+    std::vector<jaguar::ExternalQualityZone> zones;
+    zones.reserve(firstCandidateBounds.size());
+    for (std::size_t index = 0U; index < firstCandidateBounds.size(); ++index)
+    {
+        const jaguar::Rect2d& bounds = firstCandidateBounds[index];
+        zones.push_back({
+            index + 1U,
+            jaguar::ExternalShape::Rectangle(
+                bounds.xMin, bounds.yMin, bounds.Width(), bounds.Height())});
+    }
+    const auto hazardContainer = importer.ImportContainer(
+        {9811U, outerShape(), std::move(zones)});
+    if (!Expect(hazardContainer.HasValue(), output,
+                "optimizer multiworker hazard container import failed"))
+    {
+        return false;
+    }
+    const auto strip = jaguar::Strip::Create(
+        20.0, importerConfig.cdeConfig, importerConfig.shapeModifyConfig, 20.0);
+    if (!Expect(strip.HasValue(), output,
+                "optimizer warm-start strip creation failed"))
+    {
+        return false;
+    }
+    const auto instanceResult = jaguar::SPInstance::Create(
+        {item.Value()}, {1U}, strip.Value());
+    if (!Expect(instanceResult.HasValue(), output,
+                "optimizer multiworker instance creation failed"))
+    {
+        return false;
+    }
+    jaguar::Layout warmLayout(hazardContainer.Value());
+    if (!Expect(warmLayout.PlaceItem(
+                    instanceResult.Value().GetItem(0U),
+                    jaguar::Transform2d::FromRotationTranslation(
+                        0.0, {19.0, 1.0})).HasValue(),
+                output,
+                "optimizer warm-start exterior placement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution warmStart{
+        strip.Value(), warmLayout.Save()};
+    if (!Expect(!warmLayout.IsFeasible(), output,
+                "optimizer warm-start must contain an exterior collision"))
+    {
+        return false;
+    }
+
+    class PhaseRecordingListener final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnPhase(sparrow::OptimizationPhase phase) override
+        {
+            phases.push_back(phase);
+            events.emplace_back("phase");
+        }
+
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport& report) override
+        {
+            reports.push_back(report.type);
+            events.emplace_back("report");
+        }
+
+        void OnSeparationProgress(
+            const sparrow::SeparationProgress& progress) override
+        {
+            progressIterations.push_back(progress.iteration);
+            events.emplace_back("progress");
+        }
+
+        void OnSeparationResult(
+            const sparrow::SeparationResult&) override
+        {
+            ++separationResults;
+            events.emplace_back("separation_result");
+        }
+
+        std::vector<sparrow::OptimizationPhase> phases;
+        std::vector<sparrow::OptimizationReportType> reports;
+        std::vector<std::size_t> progressIterations;
+        std::vector<std::string> events;
+        std::size_t separationResults = 0U;
+    } listener;
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    config.warmStart = warmStart;
+    config.exploration.timeLimit = std::chrono::seconds{10};
+    config.exploration.separator.strikeLimit = 1U;
+    config.exploration.separator.noImprovementLimit = 1U;
+    config.exploration.separator.nContainerSamples = 1U;
+    config.exploration.separator.nFocussedSamples = 0U;
+    config.exploration.separator.nCoordinateDescents = 1U;
+    config.exploration.separator.nWorkers = 2U;
+
+    bool propagated = false;
+    try
+    {
+        const auto result = sparrow::Optimize(
+            instanceResult.Value(), config, &listener);
+        if (!result.HasValue())
+        {
+            output << "optimizer returned error: "
+                   << result.GetError().message << '\n';
+        }
+    }
+    catch (const std::logic_error& error)
+    {
+        propagated = std::string(error.what()) == "unsupported hazard entity";
+    }
+    return Expect(propagated
+                      && listener.phases
+                             == std::vector<sparrow::OptimizationPhase>{
+                                 sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION}
+                      && listener.reports
+                             == std::vector<sparrow::OptimizationReportType>{
+                                 sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE}
+                      && listener.progressIterations
+                             == std::vector<std::size_t>{0U}
+                      && listener.events
+                             == std::vector<std::string>{
+                                 "phase", "report", "progress"}
+                      && listener.separationResults == 0U,
+                  output,
+                  "multiworker panic must escape Optimize after only Exploration, initial report, and initial separation progress callbacks");
+}
 }
 
 bool RunSeparatorTests(std::ostream& output)
@@ -1500,6 +1890,14 @@ bool RunSeparatorTests(std::ostream& output)
         return false;
     }
     if (!TestUnsupportedHazardPropagatesThroughWorkerSearch(output))
+    {
+        return false;
+    }
+    if (!TestMultiworkerHazardFailureRetainsWorkerRngForRetry(output))
+    {
+        return false;
+    }
+    if (!TestMultiworkerHazardStopsOptimizePhaseCallbacks(output))
     {
         return false;
     }

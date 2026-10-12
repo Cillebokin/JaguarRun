@@ -40,6 +40,7 @@ SOURCES += \
     $$PWD/TestQuantify.cpp \
     $$PWD/TestSeparator.cpp \
     $$PWD/TestExploration.cpp \
+    $$PWD/TestWindowsConsoleCtrlC.cpp \
     $$PWD/../Tools/SparrowCli/OptimizationSignalHandler.cpp \
     $$PWD/TestWasm.cpp \
     $$PWD/../Tools/SparrowWasm/SparrowWasm.cpp

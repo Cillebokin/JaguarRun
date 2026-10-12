@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <limits>
 #include <optional>
@@ -162,6 +163,7 @@ struct WorkerTaskResult
     sparrow::Result<WorkerRoundResult> result =
         sparrow::Result<WorkerRoundResult>::FromError(
         {jaguar::ErrorCode::InvalidInput, "worker task has no result"});
+    std::exception_ptr exception;
 };
 
 sparrow::Result<WorkerRoundResult> RunWorkerRound(
@@ -542,28 +544,44 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                      &config,
                      workerIndex,
                      workerRng = initialWorkerRng]() mutable {
-                        Result<WorkerRoundResult> worker = RunWorkerRound(
-                            workerInstance,
-                            masterSolution,
-                            masterTracker,
-                            config,
-                            workerRng);
-                        return WorkerTaskResult{
-                            workerIndex,
-                            workerRng,
-                            std::move(worker)};
+                        WorkerTaskResult task;
+                        task.index = workerIndex;
+                        try
+                        {
+                            task.result = RunWorkerRound(
+                                workerInstance,
+                                masterSolution,
+                                masterTracker,
+                                config,
+                                workerRng);
+                        }
+                        catch (...)
+                        {
+                            task.exception = std::current_exception();
+                        }
+                        task.rng = workerRng;
+                        return task;
                     }));
             }
 
+            std::exception_ptr workerException;
+            std::optional<jaguar::Error> workerError;
             for (std::future<WorkerTaskResult>& workerTask : workerTasks)
             {
                 WorkerTaskResult task = workerTask.get();
                 m_WorkerRngs[task.index] = task.rng;
+                if (task.exception != nullptr)
+                {
+                    if (workerException == nullptr)
+                        workerException = task.exception;
+                    continue;
+                }
                 const auto& workerResult = task.result;
                 if (!workerResult.HasValue())
                 {
-                    return Result<SeparatorResult>::FromError(
-                        workerResult.GetError());
+                    if (!workerError.has_value())
+                        workerError = workerResult.GetError();
+                    continue;
                 }
                 WorkerRoundResult worker = std::move(task.result.Value());
                 surrogateRejectCount += worker.surrogateRejectCount;
@@ -577,6 +595,13 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                     bestWorker = std::move(worker);
                     haveBestWorker = true;
                 }
+            }
+
+            if (workerException != nullptr)
+                std::rethrow_exception(workerException);
+            if (workerError.has_value())
+            {
+                return Result<SeparatorResult>::FromError(*workerError);
             }
 
             if (!haveBestWorker)

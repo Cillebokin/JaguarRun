@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -517,9 +518,11 @@ class ImmediateStopReferenceListener final : public sparrow::OptimizationListene
 public:
     explicit ImmediateStopReferenceListener(
         sparrow::OptimizationTerminator& terminator,
-        bool raiseSignal = false)
+        bool raiseSignal = false,
+        std::function<bool()> externalSignalTrigger = {})
         : m_Terminator(terminator),
-          m_RaiseSignal(raiseSignal)
+          m_RaiseSignal(raiseSignal),
+          m_ExternalSignalTrigger(std::move(externalSignalTrigger))
     {
     }
 
@@ -571,7 +574,15 @@ public:
             && !stoppedExploration)
         {
             stoppedExploration = true;
-            if (m_RaiseSignal)
+            if (m_ExternalSignalTrigger)
+            {
+                signalRaised = m_ExternalSignalTrigger();
+                if (!signalRaised)
+                {
+                    m_Terminator.RequestPhaseStop();
+                }
+            }
+            else if (m_RaiseSignal)
             {
                 signalRaised = std::raise(SIGINT) == 0;
             }
@@ -608,6 +619,7 @@ public:
 private:
     sparrow::OptimizationTerminator& m_Terminator;
     bool m_RaiseSignal;
+    std::function<bool()> m_ExternalSignalTrigger;
     std::string m_CurrentPhase;
 };
 
@@ -1599,7 +1611,9 @@ bool TestColdStartConstructionFailureMatchesRustReference(std::ostream& output)
                   "cold-start construction failure must preserve Rust item identity and precede phase callbacks");
 }
 
-bool TestImmediateStopOptimizeMatchesRustReference(std::ostream& output)
+bool TestImmediateStopOptimizeMatchesRustReference(
+    std::ostream& output,
+    const std::function<bool(sparrow::OptimizationTerminator&)>& signalTrigger = {})
 {
     std::ifstream instanceFile;
     for (const char* path : {
@@ -1744,7 +1758,16 @@ bool TestImmediateStopOptimizeMatchesRustReference(std::ostream& output)
         {
             return false;
         }
-        ImmediateStopReferenceListener signalListener(signalTerminator, true);
+        std::function<bool()> scopedSignalTrigger;
+        if (signalTrigger)
+        {
+            scopedSignalTrigger = [&]() {
+                return signalTrigger(signalTerminator);
+            };
+        }
+        ImmediateStopReferenceListener signalListener(
+            signalTerminator, !scopedSignalTrigger,
+            std::move(scopedSignalTrigger));
         const auto signaled = sparrow::Optimize(
             instance.Value(), config, signalTerminator, &signalListener);
         if (!Expect(signaled.HasValue()
@@ -9035,6 +9058,13 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
     }
     return true;
 }
+}
+
+bool RunImmediateStopOptimizeConsoleProbe(
+    std::ostream& output,
+    const std::function<bool(sparrow::OptimizationTerminator&)>& signalTrigger)
+{
+    return TestImmediateStopOptimizeMatchesRustReference(output, signalTrigger);
 }
 
 bool RunExplorationTests(std::ostream& output)

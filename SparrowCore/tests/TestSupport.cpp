@@ -12,9 +12,15 @@ bool RunQuantifyTests(std::ostream& output);
 bool RunSeparatorTests(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
+bool RunWindowsConsoleCtrlCProbe(int argc, char** argv, std::ostream& output);
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1)
+    {
+        return RunWindowsConsoleCtrlCProbe(argc, argv, std::cerr) ? 0 : 1;
+    }
+
     const char* version = sparrow::Version();
     if (version == nullptr || version[0] == '\0')
     {

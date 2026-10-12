@@ -1,4 +1,5 @@
 #include "SparrowCore/Optimizer/Compression.h"
+#include "SparrowCore/Optimizer/OptimizationObserver.h"
 
 #include "SparrowCore/Optimizer/Separator.h"
 
@@ -174,7 +175,8 @@ Result<CompressionResult> Compress(
     const CompressionConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
     return Compress(instance,
                     initialSolution,
@@ -182,7 +184,8 @@ Result<CompressionResult> Compress(
                     config,
                     seed,
                     terminator,
-                    listener);
+                    listener,
+                    observer);
 }
 
 Result<CompressionResult> Compress(
@@ -192,7 +195,8 @@ Result<CompressionResult> Compress(
     const CompressionConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -277,10 +281,11 @@ Result<CompressionResult> Compress(
             break;
         }
         if (listener != nullptr)
-            listener->OnCompressionProgress(step);
-        if (listener != nullptr)
+            listener->OnCompressionProgress(
+                static_cast<double>(static_cast<float>(step)));
+        if (observer != nullptr)
         {
-            listener->OnProgress(MakeProgress(
+            observer->OnProgress(MakeProgress(
                 OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION,
                 iteration,
                 bestMetrics,
@@ -336,18 +341,18 @@ Result<CompressionResult> Compress(
             iteration,
             metrics,
             loss);
-        if (listener != nullptr)
+        if (observer != nullptr)
         {
-            listener->OnProgress(progress);
+            observer->OnProgress(progress);
         }
 
         if (loss == 0.0F && metrics.feasible)
         {
             bestSolution = separated.Value().solution;
             bestMetrics = metrics;
-            if (listener != nullptr)
+            if (observer != nullptr)
             {
-                listener->OnImprovement(progress);
+                observer->OnImprovement(progress);
             }
             PublishSolutionReport(
                 history,

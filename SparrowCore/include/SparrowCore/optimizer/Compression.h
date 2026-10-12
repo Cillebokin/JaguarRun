@@ -25,7 +25,8 @@ SPARROWCORE_API Result<CompressionResult> Compress(
     const CompressionConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener = nullptr);
+    OptimizationListener* listener = nullptr,
+    OptimizationObserver* observer = nullptr);
 
 SPARROWCORE_API Result<CompressionResult> Compress(
     const jaguar::SPInstance& instance,
@@ -34,5 +35,6 @@ SPARROWCORE_API Result<CompressionResult> Compress(
     const CompressionConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener = nullptr);
+    OptimizationListener* listener = nullptr,
+    OptimizationObserver* observer = nullptr);
 }

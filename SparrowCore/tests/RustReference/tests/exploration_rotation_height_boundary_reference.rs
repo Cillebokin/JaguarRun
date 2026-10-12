@@ -94,9 +94,10 @@ fn rotation_height_boundary_trace() -> String {
 
 #[test]
 fn discrete_rotation_height_tolerance_matches_locked_rust_reference() {
+    let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
         rotation_height_boundary_trace(),
-        REFERENCE,
+        expected,
         "Rust Explore minimum-width rotation-height trace changed"
     );
 }

@@ -49,7 +49,7 @@
 
 ### JSON 反序列化
 - Rust：`SparrowConfig` **不含** `Deserialize` derive（config.rs 全文无 serde）；配置由代码常量+CLI 覆盖构造（见 cli.rs:47-57 `apply_config_overrides`）。JSON 输入只解析 `ExtSPInstance/ExtSPSolution`（io.rs:135-149，见 S22）。
-- C++：`SparrowConfig` 同样无 JSON 解析；字段由 `Tools/SparrowCli/Main.cpp:142-158` 逐个赋值。
+- C++：`SparrowConfig` 同样无 JSON 解析；字段由 `Tools/SparrowCli/Main.cpp:148-164` 逐个赋值。
 - 判定：一致（双侧配置均无 JSON 反序列化语义；任务背景中"serde vs JsonCodec"的疑点经核实不适用于 config.rs——JSON 反序列化只存在于实例/解输入，走 JaguarCore `Importer::ImportSPInstanceJson`，见 S22/S23）。
 
 ### `Validate()`（C++ 额外）

@@ -7,6 +7,7 @@ QT -= core gui
 INCLUDEPATH += $$PWD/../Include
 INCLUDEPATH += $$PWD/../../JaguarCore/Include
 INCLUDEPATH += $$PWD/../Tools/SparrowWasm
+INCLUDEPATH += $$PWD/../Tools/SparrowCli
 
 HEADERS += \
     $$PWD/../Source/Optimizer/ExplorationNormalSampler.h \
@@ -39,5 +40,6 @@ SOURCES += \
     $$PWD/TestQuantify.cpp \
     $$PWD/TestSeparator.cpp \
     $$PWD/TestExploration.cpp \
+    $$PWD/../Tools/SparrowCli/OptimizationSignalHandler.cpp \
     $$PWD/TestWasm.cpp \
     $$PWD/../Tools/SparrowWasm/SparrowWasm.cpp

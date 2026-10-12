@@ -30,5 +30,6 @@ SPARROWCORE_API Result<ExplorationResult> Explore(
     const ExplorationConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener = nullptr);
+    OptimizationListener* listener = nullptr,
+    OptimizationObserver* observer = nullptr);
 }

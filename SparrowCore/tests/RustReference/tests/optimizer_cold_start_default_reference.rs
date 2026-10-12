@@ -8,7 +8,9 @@ use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::config::ShrinkDecayStrategy;
 use sparrow::optimizer::optimize;
-use sparrow::util::listener::{OptimizationPhase, ReportType, SeparationResult, SolutionListener};
+use sparrow::util::listener::{
+    OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
+};
 use sparrow::util::terminator::Terminator;
 use std::path::Path;
 use std::sync::Arc;
@@ -55,6 +57,9 @@ struct RecordingListener {
     stop: Option<Arc<AtomicBool>>,
     stopped_exploration: bool,
     stopped_compression: bool,
+    separation_progress_count: usize,
+    first_separation_progress: Option<SeparationProgress>,
+    last_separation_progress: Option<SeparationProgress>,
 }
 
 fn report_name(report: &ReportType) -> &'static str {
@@ -115,6 +120,27 @@ impl SolutionListener for RecordingListener {
         let phase = self
             .phase
             .expect("separator result follows a phase callback");
+        let first = self
+            .first_separation_progress
+            .expect("separator reports initial progress before its result");
+        let last = self
+            .last_separation_progress
+            .expect("separator reports progress before its result");
+        self.trace.push(format!(
+            "separation_progress_summary\t{phase}\t{}\t{}\t{:.9}\t{:.9}\t{:.9}\t{}\t{:.9}\t{:.9}\t{:.9}",
+            self.separation_progress_count,
+            first.iteration,
+            first.min_loss,
+            first.strip_width,
+            first.density,
+            last.iteration,
+            last.min_loss,
+            last.strip_width,
+            last.density,
+        ));
+        self.separation_progress_count = 0;
+        self.first_separation_progress = None;
+        self.last_separation_progress = None;
         self.trace.push(format!(
             "separation\t{phase}\t{}\t{}\t{}\t{}",
             u8::from(result.success),
@@ -140,10 +166,16 @@ impl SolutionListener for RecordingListener {
         }
     }
 
+    fn report_separation_progress(&mut self, progress: SeparationProgress) {
+        self.separation_progress_count += 1;
+        self.first_separation_progress.get_or_insert(progress);
+        self.last_separation_progress = Some(progress);
+    }
+
     fn report_compression_progress(&mut self, step: f32) {
         assert!(step > 0.00001 && step <= 0.0005);
         self.trace
-            .push("compression_step\tdefault_range".to_owned());
+            .push(format!("compression_step\tvalue\t{step:.9}"));
     }
 }
 

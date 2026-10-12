@@ -157,7 +157,7 @@ fn optimize_warm_start_exploration_and_compression_match_the_checked_in_referenc
         listener
             .compression_steps
             .iter()
-            .all(|step| (*step - 0.01).abs() < 1e-7)
+            .all(|step| step.to_bits() == 0x3c23_d70a)
     );
     assert!((final_solution.strip_width() - fields[4].parse::<f32>().unwrap()).abs() < 5e-7);
     assert!((final_solution.density() - fields[5].parse::<f32>().unwrap()).abs() < 5e-7);

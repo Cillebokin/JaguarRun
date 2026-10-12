@@ -2,6 +2,7 @@
 
 #include "SparrowCore/Optimizer/Compression.h"
 #include "SparrowCore/Optimizer/Exploration.h"
+#include "SparrowCore/Optimizer/OptimizationObserver.h"
 #include "SparrowCore/Optimizer/SparrowLbfBuilder.h"
 #include "SparrowCore/Random/SparrowRng.h"
 
@@ -112,7 +113,8 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     const jaguar::SPInstance& instance,
     const SparrowConfig& config,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -140,15 +142,15 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         return Result<SparrowOptimizationResult>::FromError(
             constructed.GetError());
     }
-    if (listener != nullptr)
+    if (observer != nullptr)
     {
         const OptimizationProgress progress = MakeProgress(
             OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION,
             0U,
             constructed.Value().metrics,
             0.0F);
-        listener->OnProgress(progress);
-        listener->OnImprovement(progress);
+        observer->OnProgress(progress);
+        observer->OnImprovement(progress);
     }
 
     const std::uint64_t explorationSeed = phaseRng.NextU64();
@@ -164,7 +166,8 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         config.exploration,
         explorationSeed,
         terminator,
-        listener);
+        listener,
+        observer);
     if (!explored.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
@@ -184,7 +187,8 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
         config.compression,
         compressionSeed,
         terminator,
-        listener);
+        listener,
+        observer);
     if (!compressed.HasValue())
     {
         return Result<SparrowOptimizationResult>::FromError(
@@ -243,19 +247,23 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
 Result<SparrowOptimizationResult> Optimize(
     const jaguar::SPInstance& instance,
     const SparrowConfig& config,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
     OptimizationTerminator terminator(config.terminator);
     terminator.Start();
-    return OptimizeWithTerminator(instance, config, terminator, listener);
+    return OptimizeWithTerminator(
+        instance, config, terminator, listener, observer);
 }
 
 Result<SparrowOptimizationResult> Optimize(
     const jaguar::SPInstance& instance,
     const SparrowConfig& config,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
-    return OptimizeWithTerminator(instance, config, terminator, listener);
+    return OptimizeWithTerminator(
+        instance, config, terminator, listener, observer);
 }
 }

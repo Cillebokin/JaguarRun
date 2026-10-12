@@ -250,5 +250,5 @@ fn one_disruption_failure_relocates_multiple_contained_children_in_collector_ord
     let (actual, first_failure_order) =
         actual_trace().expect("generate actual Rust multiple-contained-relocation trace");
     assert_eq!(first_failure_order, [2, 3]);
-    assert_eq!(actual, REFERENCE);
+    assert_eq!(actual, REFERENCE.replace("\r\n", "\n"));
 }

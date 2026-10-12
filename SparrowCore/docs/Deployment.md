@@ -18,6 +18,14 @@ SparrowCli --input instance.json --output solution.json --svg layout.svg \
   --seed 42 --samples 1000 --time-ms 2000 --early-termination
 ```
 
+On `SIGINT`/Ctrl-C, SparrowCli requests a cooperative stop for the active phase. The optimizer
+finishes through its normal phase handoff and final-result path; a later phase clears that
+phase-scoped interrupt, matching Sparrow's `CtrlCTerminator` behavior. Native C++ hosts can pass
+an `OptimizationTerminator` to `Optimize` and call `RequestStop()` from their cancellation thread
+to cancel across phases, or `RequestPhaseStop()` to stop only the current phase. The terminator
+must outlive the synchronous `Optimize` call. The WASM C ABI remains synchronous and exposes no
+mid-call cancellation handle.
+
 ## WASM
 
 The WASM entry point is `Tools/SparrowWasm/SparrowWasm.cpp`. It exports:

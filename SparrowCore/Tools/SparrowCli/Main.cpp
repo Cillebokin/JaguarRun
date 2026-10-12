@@ -1,5 +1,8 @@
 #include "SparrowCore/Optimizer/SparrowOptimizer.h"
+#include "SparrowCore/Optimizer/OptimizationTerminator.h"
 #include "SparrowCore/Version.h"
+
+#include "OptimizationSignalHandler.h"
 
 #include "JaguarCore/IO/Importer.h"
 #include "JaguarCore/IO/JsonCodec.h"
@@ -160,7 +163,18 @@ int main(int argc, char** argv)
     config.terminator.maxDuration = std::chrono::milliseconds{
         static_cast<std::chrono::milliseconds::rep>(timeMs)};
 
-    const auto optimized = sparrow::Optimize(instance.Value(), config);
+    const auto optimized = [&]() {
+        sparrow::OptimizationTerminator terminator(config.terminator);
+        terminator.Start();
+        sparrow::cli::ScopedCtrlCHandler ctrlCHandler(terminator);
+        if (!ctrlCHandler.IsInstalled())
+        {
+            return sparrow::Result<sparrow::SparrowOptimizationResult>::FromError(
+                {jaguar::ErrorCode::InvalidInput,
+                 "cannot install the Ctrl-C handler"});
+        }
+        return sparrow::Optimize(instance.Value(), config, terminator);
+    }();
     if (!optimized.HasValue())
     {
         std::cerr << "optimization failed: "

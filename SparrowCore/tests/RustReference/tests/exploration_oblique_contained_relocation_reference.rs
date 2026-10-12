@@ -305,9 +305,10 @@ fn trace() -> Result<String, Box<dyn Error>> {
 
 #[test]
 fn oblique_rotation_disruption_and_contained_relocation_match_rust_trace() {
+    let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
         trace().expect("generate oblique relocation trace"),
-        REFERENCE,
+        expected,
         "actual Rust Explore oblique disruption/contained-relocation trace changed"
     );
 }

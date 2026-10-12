@@ -17,17 +17,6 @@ enum class OptimizationPhase
     OPTIMIZATION_PHASE_COMPLETE,
 };
 
-struct OptimizationProgress
-{
-    OptimizationPhase phase =
-        OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION;
-    std::size_t iteration = 0U;
-    double stripWidth = 0.0;
-    double density = 0.0;
-    float collisionLoss = 0.0F;
-    bool isFeasible = false;
-};
-
 enum class OptimizationReportType
 {
     OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE,
@@ -54,6 +43,7 @@ struct OptimizationSolutionReport
 using OptimizationHistory = std::vector<OptimizationSolutionReport>;
 
 class OptimizationListener;
+class OptimizationObserver;
 
 struct SeparationProgress
 {
@@ -101,9 +91,7 @@ public:
     virtual ~OptimizationListener();
 
     virtual void OnPhase(OptimizationPhase phase);
-    virtual void OnProgress(const OptimizationProgress& progress);
-    virtual void OnImprovement(const OptimizationProgress& progress);
-    virtual void OnSolution(const OptimizationSolutionReport& report);
+    virtual void OnSolution(const OptimizationSolutionReport& report) = 0;
     virtual void OnSeparationProgress(const SeparationProgress& progress);
     virtual void OnSeparationResult(const SeparationResult& result);
     virtual void OnCompressionProgress(double shrinkStep);

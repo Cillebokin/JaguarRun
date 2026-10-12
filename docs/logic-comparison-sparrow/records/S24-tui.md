@@ -49,13 +49,13 @@
 | 1 | 优化循环后台驱动 + 信道推送 | 范围外（归属正确） | 库同步 `Optimize`+监听器；Demo=JS 事件循环；NestLab=宿主线程；Demo 每次点击会分别为 JSON/SVG 再跑一次 Optimize | runtime.rs:35-152 vs App.js:37-58、SparrowWasm.cpp:59-90,111-142 |
 | 2 | 仪表盘渲染（状态/指标/进度条/logo） | 范围外（归 NestLab GUI）；数据面无缺口 | Demo 仅最终 SVG 与结果 JSON，且每次点击会重复优化两次；实时面板未实现 | dashboard.rs:212-543 vs App.js:44-51; SparrowWasm.cpp:111-142 |
 | 3 | 日志面板+文件双通道 | 缺失 | 库无日志框架；NestLab 需自建（监听器事件可转日志） | logging.rs:17-52 vs（无） |
-| 4 | Ctrl-C 跳过当前相位 | 库接口已覆盖，宿主接线待实现 | `RequestPhaseStop()` 中断当前 phase，`StartPhase()` 清除 phase stop；`RequestStop()` 保留为全局 quit | runtime.rs:139-141/253-256 vs OptimizationTerminator.h/.cpp |
+| 4 | Ctrl-C 跳过当前相位 | 库接口已覆盖；SparrowCli SIGINT 已接线；交互式宿主按各自事件模型接入 | `RequestPhaseStop()` 中断当前 phase，`StartPhase()` 清除 phase stop；`RequestStop()` 保留为全局 quit | runtime.rs:139-141/253-256 vs OptimizationTerminator.h/.cpp |
 | 5 | live SVG（100ms 节流→live_viewer.html） | 缺失（归 NestLab/Demo 可实现） | 监听器 OnSolution 已提供数据源，无现成导出组件 | runtime.rs:31/176-211 vs（无） |
 
 ## 结论
-TUI 的职责归属在 C++ 生态已明确：优化循环驱动由同步 API、监听器和两种 stop 请求接口支持；仪表盘与交互渲染归浏览器 Demo 与 NestLab GUI，监听器事件面提供仪表盘数据。库级"跳过当前相位"接口已补齐，仍待宿主把 OS/UI 输入接到 `RequestPhaseStop()` 并决定是否展示状态。库和 Demo 仍无日志双通道组件与 live SVG 导出；Demo 当前只覆盖最终布局可视化，并且一次点击会分别执行两次完整 Optimize 来产出 JSON 和 SVG。
+TUI 的职责归属在 C++ 生态已明确：优化循环驱动由同步 API、监听器和两种 stop 请求接口支持；仪表盘与交互渲染归浏览器 Demo 与 NestLab GUI，监听器事件面提供仪表盘数据。库级"跳过当前相位"接口已补齐，SparrowCli 的 SIGINT 已映射到 phase stop；浏览器 Demo/GUI 的 UI 输入仍由各自宿主接入 `RequestPhaseStop()` 并决定是否展示状态。库和 Demo 仍无日志双通道组件与 live SVG 导出；Demo 当前只覆盖最终布局可视化，并且一次点击会分别执行两次完整 Optimize 来产出 JSON 和 SVG。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：文件清单与行数】** tui.rs 96 + dashboard.rs 736 + runtime.rs 287 + logging.rs 52 + dashboard/tests.rs 66 + runtime/tests.rs 16 = 1253 行，与主文声称一致；tui/ 目录无其他文件（现场 ls 复验）。
-2. **【2026-10-07 更新：停止作用域接口】** TuiTerminator 的 `interrupt_phase` 在 `new_timeout` 重置而 `quit` 保留（runtime.rs:244-256）；C++ 现用 `RequestPhaseStop()` 与 `RequestStop()` 分开表达，`StartPhase()` 只清除 phase stop。S20 handoff fixture 验证了当前相位中断后压缩阶段继续。仍需宿主把 Ctrl-C/按键事件接到对应 API；Demo 当前没有进度/状态/日志交互。
+2. **【2026-10-07 更新：停止作用域接口】** TuiTerminator 的 `interrupt_phase` 在 `new_timeout` 重置而 `quit` 保留（runtime.rs:244-256）；C++ 现用 `RequestPhaseStop()` 与 `RequestStop()` 分开表达，`StartPhase()` 只清除 phase stop。S20 handoff fixture 验证了当前相位中断后压缩阶段继续。SparrowCli 的 SIGINT 已接入 phase stop；交互式 GUI/浏览器宿主的输入事件仍由各自 UI 接线；Demo 当前没有进度/状态/日志交互。
 3. **【浅覆盖补全：tui.rs 与 cli.rs 的 configure 同构】** tui.rs:70-96 的 configure 与 cli.rs:26-58 的 run 前半（时间预算三分支/早停/种子）同构（复用同一 MainCli），主文条目 5 已记"语义同 S23"，现场确认无 TUI 专属配置项遗漏（仅输出路径固定 LIVE_DIR/output 同名）。

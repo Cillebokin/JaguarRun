@@ -7,8 +7,11 @@ use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::optimizer::optimize;
 use sparrow::util::ctrlc_terminator::CtrlCTerminator;
-use sparrow::util::listener::{OptimizationPhase, ReportType, SeparationResult, SolutionListener};
+use sparrow::util::listener::{
+    OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
+};
 use sparrow::util::terminator::{BasicTerminator, Terminator};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -646,4 +649,70 @@ fn positive_time_based_compression_shrink_curve_matches_reference() {
             println!("timebased\t{index}\t{elapsed:.6}\t{step:.9}");
         }
     }
+}
+
+#[derive(Default)]
+struct PanicOnSeparationProgressListener {
+    events: Vec<&'static str>,
+}
+
+impl SolutionListener for PanicOnSeparationProgressListener {
+    fn report(&mut self, report: ReportType, _solution: &SPSolution) {
+        self.events.push(match report {
+            ReportType::ExplFeas => "report:expl_feas",
+            ReportType::ExplInfeas => "report:expl_infeas",
+            ReportType::ExplImproving => "report:expl_improving",
+            ReportType::CmprFeas => "report:cmpr_feas",
+            ReportType::Final => "report:final",
+        });
+    }
+
+    fn report_phase(&mut self, phase: OptimizationPhase) {
+        self.events.push(match phase {
+            OptimizationPhase::Exploration => "phase:exploration",
+            OptimizationPhase::Compression => "phase:compression",
+        });
+    }
+
+    fn report_separation_progress(&mut self, _progress: SeparationProgress) {
+        self.events.push("separation_progress");
+        panic!("listener panic at initial separation progress");
+    }
+
+    fn report_separation_result(&mut self, _result: SeparationResult) {
+        self.events.push("separation_result");
+    }
+}
+
+#[test]
+fn listener_panic_on_separator_progress_aborts_before_result_and_compression() {
+    let instance = read_instance("../Fixtures/RustSppOptimizeImmediateStop.json");
+    let config = DEFAULT_SPARROW_CONFIG;
+    let mut listener = PanicOnSeparationProgressListener::default();
+    let mut terminator = BasicTerminator::new();
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            instance,
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut listener,
+            &mut terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            None,
+        )
+    }));
+
+    assert!(
+        outcome.is_err(),
+        "listener panic must unwind out of optimize"
+    );
+    assert_eq!(
+        listener.events,
+        [
+            "phase:exploration",
+            "report:expl_feas",
+            "separation_progress"
+        ]
+    );
 }

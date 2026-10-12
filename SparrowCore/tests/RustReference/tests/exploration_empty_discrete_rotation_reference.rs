@@ -186,7 +186,8 @@ fn empty_discrete_rotation_panics_in_actual_explore_before_moves() {
         }
     }
     assert_eq!(
-        actual_trace, REFERENCE,
+        actual_trace,
+        REFERENCE.replace("\r\n", "\n"),
         "Rust pre-panic Explore trace changed"
     );
 

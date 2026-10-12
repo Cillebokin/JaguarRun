@@ -8,18 +8,6 @@ void OptimizationListener::OnPhase(OptimizationPhase)
 {
 }
 
-void OptimizationListener::OnProgress(const OptimizationProgress&)
-{
-}
-
-void OptimizationListener::OnImprovement(const OptimizationProgress&)
-{
-}
-
-void OptimizationListener::OnSolution(const OptimizationSolutionReport&)
-{
-}
-
 void OptimizationListener::OnSeparationProgress(const SeparationProgress&)
 {
 }

@@ -7,8 +7,9 @@ const REFERENCE: &str = include_str!("../../Fixtures/CompressionMinimumWidthRust
 fn compression_minimum_width_and_threshold_behavior_match_locked_rust_trace() {
     let actual = compression_minimum_width_trace::compression_minimum_width_trace_tsv()
         .expect("run compression minimum-width boundary oracle");
+    let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
-        actual, REFERENCE,
+        actual, expected,
         "Rust compression minimum-width boundary trace changed"
     );
 }

@@ -1,4 +1,5 @@
 #include "SparrowCore/Optimizer/Exploration.h"
+#include "SparrowCore/Optimizer/OptimizationObserver.h"
 #include "SparrowCore/Optimizer/Separator.h"
 #include "ExplorationNumeric.h"
 #include "ExplorationNormalSampler.h"
@@ -932,6 +933,7 @@ Result<ExplorationResult> ExploreImpl(
     std::uint64_t seed,
     OptimizationTerminator& terminator,
     OptimizationListener* listener,
+    OptimizationObserver* observer,
     const detail::ExplorationTraceCallback* trace)
 {
     const Result<void> configResult = config.Validate();
@@ -989,9 +991,9 @@ Result<ExplorationResult> ExploreImpl(
             bestSolution,
             0.0F,
             bestMetrics.feasible));
-    if (listener != nullptr)
+    if (observer != nullptr)
     {
-        listener->OnProgress(MakeProgress(
+        observer->OnProgress(MakeProgress(
             OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
             0U,
             bestMetrics,
@@ -1039,9 +1041,9 @@ Result<ExplorationResult> ExploreImpl(
                     totalLoss,
                     false));
         }
-        if (listener != nullptr)
+        if (observer != nullptr)
         {
-            listener->OnProgress(MakeProgress(
+            observer->OnProgress(MakeProgress(
                 OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
                 iteration,
                 metrics,
@@ -1055,9 +1057,9 @@ Result<ExplorationResult> ExploreImpl(
                 bestWidth = currentWidth;
                 bestSolution = separated.Value().solution;
                 bestMetrics = metrics;
-                if (listener != nullptr)
+                if (observer != nullptr)
                 {
-                    listener->OnImprovement(MakeProgress(
+                    observer->OnImprovement(MakeProgress(
                         OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
                         iteration,
                         metrics,
@@ -1238,10 +1240,17 @@ Result<ExplorationResult> Explore(
     const ExplorationConfig& config,
     std::uint64_t seed,
     OptimizationTerminator& terminator,
-    OptimizationListener* listener)
+    OptimizationListener* listener,
+    OptimizationObserver* observer)
 {
-    return ExploreImpl(
-        instance, initialSolution, config, seed, terminator, listener, nullptr);
+    return ExploreImpl(instance,
+                       initialSolution,
+                       config,
+                       seed,
+                       terminator,
+                       listener,
+                       observer,
+                       nullptr);
 }
 
 float detail::ExplorationMinimumStripWidthForTrace(
@@ -1258,9 +1267,16 @@ Result<ExplorationResult> detail::ExploreWithTrace(
     std::uint64_t seed,
     OptimizationTerminator& terminator,
     OptimizationListener* listener,
-    const detail::ExplorationTraceCallback& callback)
+    const detail::ExplorationTraceCallback& callback,
+    OptimizationObserver* observer)
 {
-    return ExploreImpl(
-        instance, initialSolution, config, seed, terminator, listener, &callback);
+    return ExploreImpl(instance,
+                       initialSolution,
+                       config,
+                       seed,
+                       terminator,
+                       listener,
+                       observer,
+                       &callback);
 }
 }

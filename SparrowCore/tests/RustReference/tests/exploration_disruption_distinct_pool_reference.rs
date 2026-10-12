@@ -44,6 +44,11 @@ const TEN_CANDIDATE_REFERENCE: &str =
 const FOUR_CANDIDATE_NONE_ROTATION_REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationDistinctPoolFourCandidatesNoneRotationRustTrace.tsv");
 
+fn assert_trace_matches_reference(actual: &str, reference: &str, label: &str) {
+    let normalized_reference = reference.replace("\r\n", "\n");
+    assert_eq!(actual, normalized_reference, "{label}");
+}
+
 #[derive(Default)]
 struct TraceListener {
     failures: Vec<(f32, Vec<(usize, f32, f32, f32)>)>,
@@ -374,9 +379,10 @@ fn nonempty_distinct_pool_with_single_candidate_matches_rust_trace() {
         &[1, 1],
     )
     .expect("generate actual Explore one-candidate distinct-pool trace");
-    assert_eq!(
-        actual, SINGLE_CANDIDATE_REFERENCE,
-        "actual Rust Explore one-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        SINGLE_CANDIDATE_REFERENCE,
+        "actual Rust Explore one-candidate distinct-pool trace changed",
     );
 }
 
@@ -394,9 +400,10 @@ fn nonempty_distinct_pool_with_multiple_candidates_matches_rust_trace() {
         &[2, 2, 3, 3],
     )
     .expect("generate actual Explore two-candidate distinct-pool trace");
-    assert_eq!(
-        actual, TWO_CANDIDATE_REFERENCE,
-        "actual Rust Explore non-empty distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        TWO_CANDIDATE_REFERENCE,
+        "actual Rust Explore non-empty distinct-pool trace changed",
     );
 }
 
@@ -414,9 +421,10 @@ fn nonempty_distinct_pool_with_three_candidates_matches_rust_trace() {
         &[2, 2, 3, 3],
     )
     .expect("generate actual Explore three-candidate distinct-pool trace");
-    assert_eq!(
-        actual, THREE_CANDIDATE_REFERENCE,
-        "actual Rust Explore three-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        THREE_CANDIDATE_REFERENCE,
+        "actual Rust Explore three-candidate distinct-pool trace changed",
     );
 }
 
@@ -440,9 +448,10 @@ fn nonempty_distinct_pool_with_four_candidates_matches_rust_trace() {
         &[4, 4, 4, 4, 4],
     )
     .expect("generate actual Explore four-candidate distinct-pool trace");
-    assert_eq!(
-        actual, FOUR_CANDIDATE_REFERENCE,
-        "actual Rust Explore four-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        FOUR_CANDIDATE_REFERENCE,
+        "actual Rust Explore four-candidate distinct-pool trace changed",
     );
 }
 
@@ -467,9 +476,10 @@ fn nonempty_distinct_pool_with_five_candidates_matches_rust_trace() {
         &[5, 5, 5, 5, 5, 5],
     )
     .expect("generate actual Explore five-candidate distinct-pool trace");
-    assert_eq!(
-        actual, FIVE_CANDIDATE_REFERENCE,
-        "actual Rust Explore five-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        FIVE_CANDIDATE_REFERENCE,
+        "actual Rust Explore five-candidate distinct-pool trace changed",
     );
 }
 
@@ -495,9 +505,10 @@ fn nonempty_distinct_pool_with_six_candidates_matches_rust_trace() {
         &[6, 6, 6, 6, 6, 6, 6],
     )
     .expect("generate actual Explore six-candidate distinct-pool trace");
-    assert_eq!(
-        actual, SIX_CANDIDATE_REFERENCE,
-        "actual Rust Explore six-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        SIX_CANDIDATE_REFERENCE,
+        "actual Rust Explore six-candidate distinct-pool trace changed",
     );
 }
 
@@ -524,9 +535,10 @@ fn nonempty_distinct_pool_with_seven_candidates_matches_rust_trace() {
         &[7, 7, 7, 7, 7, 7, 7, 7],
     )
     .expect("generate actual Explore seven-candidate distinct-pool trace");
-    assert_eq!(
-        actual, SEVEN_CANDIDATE_REFERENCE,
-        "actual Rust Explore seven-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        SEVEN_CANDIDATE_REFERENCE,
+        "actual Rust Explore seven-candidate distinct-pool trace changed",
     );
 }
 
@@ -556,9 +568,10 @@ fn nonempty_distinct_pool_with_eight_candidates_matches_rust_trace() {
         &[8, 8, 8, 8, 8, 8, 8, 8, 8],
     )
     .expect("generate actual Explore eight-candidate distinct-pool trace");
-    assert_eq!(
-        actual, EIGHT_CANDIDATE_REFERENCE,
-        "actual Rust Explore eight-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        EIGHT_CANDIDATE_REFERENCE,
+        "actual Rust Explore eight-candidate distinct-pool trace changed",
     );
 }
 
@@ -589,9 +602,10 @@ fn nonempty_distinct_pool_with_nine_candidates_matches_rust_trace() {
         &[9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
     )
     .expect("generate actual Explore nine-candidate distinct-pool trace");
-    assert_eq!(
-        actual, NINE_CANDIDATE_REFERENCE,
-        "actual Rust Explore nine-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        NINE_CANDIDATE_REFERENCE,
+        "actual Rust Explore nine-candidate distinct-pool trace changed",
     );
 }
 
@@ -623,9 +637,10 @@ fn nonempty_distinct_pool_with_ten_candidates_matches_rust_trace() {
         &[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
     )
     .expect("generate actual Explore ten-candidate distinct-pool trace");
-    assert_eq!(
-        actual, TEN_CANDIDATE_REFERENCE,
-        "actual Rust Explore ten-candidate distinct-pool trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        TEN_CANDIDATE_REFERENCE,
+        "actual Rust Explore ten-candidate distinct-pool trace changed",
     );
 }
 
@@ -682,8 +697,9 @@ fn none_rotation_distinct_pool_disruption_matches_rust_trace() {
             assert_eq!(fields[8], "0.000000000", "None move target angle: {line}");
         }
     }
-    assert_eq!(
-        actual, FOUR_CANDIDATE_NONE_ROTATION_REFERENCE,
-        "actual Rust Explore None-rotation trace changed"
+    assert_trace_matches_reference(
+        &actual,
+        FOUR_CANDIDATE_NONE_ROTATION_REFERENCE,
+        "actual Rust Explore None-rotation trace changed",
     );
 }

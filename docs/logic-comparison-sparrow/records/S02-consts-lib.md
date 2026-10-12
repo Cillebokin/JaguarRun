@@ -33,12 +33,12 @@
 ### `DEFAULT_EXPLORE_TIME_RATIO = 0.8` / `DEFAULT_COMPRESS_TIME_RATIO = 0.2`（Rust 31-32）
 - C++ 对应：无常量。
 - 判定：C++ 缺失（应用层语义，归属调用方）。
-- 证据与说明：Rust 在 cli.rs:40-47/tui.rs:73-84/bench.rs:56-57 把全局时间预算按 0.8/0.2 分摊到两阶段；C++ SparrowCore 要求调用方直接给 `exploration.timeLimit`/`compression.timeLimit`（SparrowConfig.h:37/61），SparrowCli 的 `--time-ms` 则映射到 `terminator.maxDuration`（Main.cpp:157-158）而非按比例分摊——时间预算分摊语义见 S23 差异 3。
+- 证据与说明：Rust 在 cli.rs:40-47/tui.rs:73-84/bench.rs:56-57 把全局时间预算按 0.8/0.2 分摊到两阶段；C++ SparrowCore 要求调用方直接给 `exploration.timeLimit`/`compression.timeLimit`（SparrowConfig.h:37/61），SparrowCli 的 `--time-ms` 则映射到 `terminator.maxDuration`（Main.cpp:163-164）而非按比例分摊——时间预算分摊语义见 S23 差异 3。
 
 ### `DEFAULT_MAX_CONSEQ_FAILS_EXPL = 10`（Rust 34）
 - C++ 对应：无常量；CLI 侧字面量。
 - 判定：一致（数值等价）。
-- 证据与说明：SparrowCli/Main.cpp:147 `config.exploration.maxConsecutiveFailures = 10U;`（early-termination 路径），与 Rust cli.rs:54 `Some(DEFAULT_MAX_CONSEQ_FAILS_EXPL)` 数值一致；库侧默认两侧均为"不限"。
+- 证据与说明：SparrowCli/Main.cpp:153 `config.exploration.maxConsecutiveFailures = 10U;`（early-termination 路径），与 Rust cli.rs:54 `Some(DEFAULT_MAX_CONSEQ_FAILS_EXPL)` 数值一致；库侧默认两侧均为"不限"。
 
 ### `DEFAULT_FAIL_DECAY_RATIO_CMPR = 0.9`（Rust 36）
 - C++ 对应：`CompressionConfig::failureDecay = 0.9`（SparrowConfig.h:60）。
@@ -53,12 +53,12 @@
 ### `DRAW_OPTIONS`（SvgDrawOptions，Rust 42-49）
 - C++ 对应：`jaguar::SvgExportOptions`（JaguarCore 侧，记录 36）。
 - 判定：差异（选项集不同，属 JaguarCore 层）。
-- 证据与说明：Rust `{GRAY 主题, quadtree:false, surrogate:false, highlight_collisions:true, draw_cd_shapes:false, highlight_cd_shapes:true}`；C++ SparrowCli 用 `svgOptions.title="SparrowCore Layout"; drawSurrogates=true`（Main.cpp:207-209）——C++ 导出打开 surrogate 绘制而 Rust 关闭，且无 quadtree/cd_shapes 选项（JaguarCore 记录 36 已记录选项差异）。SparrowCore 侧仅此一处接线。
+- 证据与说明：Rust `{GRAY 主题, quadtree:false, surrogate:false, highlight_collisions:true, draw_cd_shapes:false, highlight_cd_shapes:true}`；C++ SparrowCli 用 `svgOptions.title="SparrowCore Layout"; drawSurrogates=true`（Main.cpp:233-235）——C++ 导出打开 surrogate 绘制而 Rust 关闭，且无 quadtree/cd_shapes 选项（JaguarCore 记录 36 已记录选项差异）。SparrowCore 侧仅此一处接线。
 
 ### `LBF_SAMPLE_CONFIG = {1000, 0, 3}`（Rust 51-55）
 - C++ 对应：`SparrowConstructorConfig` 默认值（LbfConfig.h:71-73）。
 - 判定：一致。
-- 证据与说明：`nContainerSamples=1000/nFocussedSamples=0/nCoordinateDescents=3` 逐项相同；Rust 传给 `LBFBuilder::new`（bench.rs:88），C++ 作为构造配置默认值（SparrowOptimizer 路径）或 CLI `--samples` 覆盖（Main.cpp:144）。
+- 证据与说明：`nContainerSamples=1000/nFocussedSamples=0/nCoordinateDescents=3` 逐项相同；Rust 传给 `LBFBuilder::new`（bench.rs:88），C++ 作为构造配置默认值（SparrowOptimizer 路径）或 CLI `--samples` 覆盖（Main.cpp:150）。
 
 ## 逐条比对（lib.rs）
 
@@ -80,7 +80,7 @@
 ### `EXPORT_LIVE_SVG`/`EXPORT_ONLY_FINAL_SVG` 特性开关（Rust 26-39，互斥编译期检查）
 - C++ 对应：无。
 - 判定：C++ 缺失（应用层开关）。
-- 证据与说明：Rust 用 cargo feature 控制 SVG 导出粒度（cli.rs:90-98）；C++ SparrowCore 是库，SVG 导出由 CLI 的 `--svg` 显式开关（Main.cpp:196）承担，无编译期特性。
+- 证据与说明：Rust 用 cargo feature 控制 SVG 导出粒度（cli.rs:90-98）；C++ SparrowCore 是库，SVG 导出由 CLI 的 `--svg` 显式开关（Main.cpp:222）承担，无编译期特性。
 
 ### 公共类型 PItemId/LItemId
 - 判定：不适用（sparrow 侧无此类型）。
@@ -135,9 +135,9 @@
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | `DEFAULT_EXPLORE_TIME_RATIO/COMPRESS_TIME_RATIO`（0.8/0.2） | C++缺失 | 全局时间→两阶段分摊逻辑归调用方；SparrowCli 不做比例分摊 | consts.rs:31-32 vs SparrowConfig.h:37/61、Main.cpp:157 |
+| 1 | `DEFAULT_EXPLORE_TIME_RATIO/COMPRESS_TIME_RATIO`（0.8/0.2） | C++缺失 | 全局时间→两阶段分摊逻辑归调用方；SparrowCli 不做比例分摊 | consts.rs:31-32 vs SparrowConfig.h:37/61、Main.cpp:163 |
 | 2 | `LOG_LEVEL_FILTER_*` | C++缺失 | 日志分级归应用层 | consts.rs:38-40 vs（无） |
-| 3 | `DRAW_OPTIONS` vs SvgExportOptions | 差异 | C++ 默认 drawSurrogates=true（Rust false）；选项集不同属 JaguarCore 记录 36 | consts.rs:42-49 vs Main.cpp:207-209 |
+| 3 | `DRAW_OPTIONS` vs SvgExportOptions | 差异 | C++ 默认 drawSurrogates=true（Rust false）；选项集不同属 JaguarCore 记录 36 | consts.rs:42-49 vs Main.cpp:233-235 |
 | 4 | `EPOCH`/`FMT`/SVG 特性开关 | C++缺失 | 应用层设施（日志时间戳、numfmt、live/final-svg 编译开关） | lib.rs:17-39 vs（无） |
 | 5 | `SparrowRng` 内置 RNG 类及额外 `Normal01F32` helper | C++额外 | Xoshiro/SplitMix64/整数区间映射有 Rust reference 覆盖；Box–Muller helper 仅供 C++ LocalSearchSampler，不属于 Rust parity | SparrowRng.h:10-28; SparrowRng.cpp:89-110 vs cli.rs:17 |
 | 6 | PItemId/LItemId 等公共类型 | 不适用 | sparrow 侧不定义此类 ID 类型（属 jagua-rs↔JaguarCore） | lib.rs 全文 vs（无） |

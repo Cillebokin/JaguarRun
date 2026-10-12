@@ -33,6 +33,10 @@ public:
     void RequestStop() noexcept;
     // Interrupts only the active phase; StartPhase clears this request.
     void RequestPhaseStop() noexcept;
+    // Reads a caller-owned phase-stop flag, cleared by Start and StartPhase.
+    // The flag must outlive this binding; bind/unbind only while no optimizer
+    // loop is polling this terminator.
+    void SetExternalPhaseStopFlag(std::atomic<bool>* flag) noexcept;
     bool ShouldTerminate(std::size_t iteration) const noexcept;
     std::chrono::nanoseconds Elapsed() const noexcept;
 
@@ -40,6 +44,7 @@ private:
     OptimizationTerminatorConfig m_Config;
     std::chrono::steady_clock::time_point m_StartTime;
     std::optional<std::chrono::steady_clock::time_point> m_PhaseDeadline;
+    std::atomic<bool>* m_ExternalPhaseStopFlag = nullptr;
     std::atomic<bool> m_StopRequested{false};
     std::atomic<bool> m_PhaseStopRequested{false};
 };

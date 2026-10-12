@@ -22,6 +22,7 @@ HEADERS += \
     $$PWD/Include/SparrowCore/Optimizer/BppLbfOptimizer.h \
     $$PWD/Include/SparrowCore/Optimizer/OptimizationTerminator.h \
     $$PWD/Include/SparrowCore/Optimizer/OptimizationListener.h \
+    $$PWD/Include/SparrowCore/Optimizer/OptimizationObserver.h \
     $$PWD/Include/SparrowCore/Optimizer/SparrowConfig.h \
     $$PWD/Include/SparrowCore/Optimizer/Exploration.h \
     $$PWD/Source/Optimizer/ExplorationNormalSampler.h \

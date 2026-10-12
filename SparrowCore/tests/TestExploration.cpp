@@ -1,10 +1,12 @@
 #include "SparrowCore/Optimizer/Compression.h"
 #include "SparrowCore/Optimizer/Exploration.h"
+#include "SparrowCore/Optimizer/OptimizationObserver.h"
 #include "SparrowCore/Optimizer/Separator.h"
 #include "SparrowCore/Optimizer/SparrowLbfBuilder.h"
 #include "SparrowCore/Optimizer/SparrowOptimizer.h"
 #include "SparrowCore/Quantify/CollisionTracker.h"
 #include "SparrowCore/Random/SparrowRng.h"
+#include "OptimizationSignalHandler.h"
 #include "../Source/Optimizer/ExplorationNumeric.h"
 #include "../Source/Optimizer/ExplorationNormalSampler.h"
 #include "../Source/Optimizer/ExplorationTrace.h"
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <chrono>
 #include <array>
+#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -79,16 +82,6 @@ bool SameSolution(const jaguar::SPSolution& left,
 class RecordingListener final : public sparrow::OptimizationListener
 {
 public:
-    void OnProgress(const sparrow::OptimizationProgress&) override
-    {
-        ++progressCount;
-    }
-
-    void OnImprovement(const sparrow::OptimizationProgress&) override
-    {
-        ++improvementCount;
-    }
-
     void OnSolution(const sparrow::OptimizationSolutionReport& report) override
     {
         ++solutionCount;
@@ -101,12 +94,27 @@ public:
         separationWidths.push_back(progress.stripWidth);
     }
 
-    std::size_t progressCount = 0U;
-    std::size_t improvementCount = 0U;
     std::size_t solutionCount = 0U;
     sparrow::OptimizationReportType lastReportType =
         sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL;
     std::vector<double> separationWidths;
+};
+
+class RecordingObserver final : public sparrow::OptimizationObserver
+{
+public:
+    void OnProgress(const sparrow::OptimizationProgress&) override
+    {
+        ++progressCount;
+    }
+
+    void OnImprovement(const sparrow::OptimizationProgress&) override
+    {
+        ++improvementCount;
+    }
+
+    std::size_t progressCount = 0U;
+    std::size_t improvementCount = 0U;
 };
 
 class RustOptimizeReferenceListener final : public sparrow::OptimizationListener
@@ -375,6 +383,33 @@ public:
 
     void OnSeparationResult(const sparrow::SeparationResult& result) override
     {
+        if (!firstSeparationProgress.has_value()
+            || !lastSeparationProgress.has_value())
+        {
+            events.push_back({"separation_progress_summary",
+                              m_CurrentPhase,
+                              {-1.0}});
+        }
+        else
+        {
+            const auto& first = *firstSeparationProgress;
+            const auto& last = *lastSeparationProgress;
+            events.push_back({
+                "separation_progress_summary",
+                m_CurrentPhase,
+                {static_cast<double>(separationProgressCount),
+                 static_cast<double>(first.iteration),
+                 first.minimumLoss,
+                 first.stripWidth,
+                 first.density,
+                 static_cast<double>(last.iteration),
+                 last.minimumLoss,
+                 last.stripWidth,
+                 last.density}});
+        }
+        separationProgressCount = 0U;
+        firstSeparationProgress.reset();
+        lastSeparationProgress.reset();
         events.push_back({"separation",
                           m_CurrentPhase,
                           {result.success ? 1.0 : 0.0,
@@ -396,14 +431,27 @@ public:
     void OnCompressionProgress(double step) override
     {
         compressionStepInDefaultRange = compressionStepInDefaultRange
-            && step > 0.00001 && step <= 0.0005;
-        events.push_back({"compression_step", "default_range", {}});
+            && step > 0.00001
+            && step <= static_cast<double>(static_cast<float>(0.0005));
+        events.push_back({"compression_step", "value", {step}});
+    }
+
+    void OnSeparationProgress(
+        const sparrow::SeparationProgress& progress) override
+    {
+        ++separationProgressCount;
+        if (!firstSeparationProgress.has_value())
+            firstSeparationProgress = progress;
+        lastSeparationProgress = progress;
     }
 
     std::vector<ColdStartTraceEvent> events;
     bool stoppedExploration = false;
     bool stoppedCompression = false;
     bool compressionStepInDefaultRange = true;
+    std::size_t separationProgressCount = 0U;
+    std::optional<sparrow::SeparationProgress> firstSeparationProgress;
+    std::optional<sparrow::SeparationProgress> lastSeparationProgress;
 
 private:
     sparrow::OptimizationTerminator& m_Terminator;
@@ -414,14 +462,6 @@ class ConstructionFailureListener final : public sparrow::OptimizationListener
 {
 public:
     void OnPhase(sparrow::OptimizationPhase) override { ++callbackCount; }
-    void OnProgress(const sparrow::OptimizationProgress&) override
-    {
-        ++callbackCount;
-    }
-    void OnImprovement(const sparrow::OptimizationProgress&) override
-    {
-        ++callbackCount;
-    }
     void OnSolution(const sparrow::OptimizationSolutionReport&) override
     {
         ++callbackCount;
@@ -439,12 +479,47 @@ public:
     std::size_t callbackCount = 0U;
 };
 
+class ThrowOnSeparationProgressListener final
+    : public sparrow::OptimizationListener
+{
+public:
+    void OnPhase(sparrow::OptimizationPhase phase) override
+    {
+        events.push_back(
+            phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION
+                ? "phase:exploration" : "phase:compression");
+    }
+
+    void OnSolution(
+        const sparrow::OptimizationSolutionReport& report) override
+    {
+        events.push_back(std::string{"report:"}
+                         + ColdStartReportName(report.type));
+    }
+
+    void OnSeparationProgress(
+        const sparrow::SeparationProgress&) override
+    {
+        events.push_back("separation_progress");
+        throw std::runtime_error("listener exception at initial separation progress");
+    }
+
+    void OnSeparationResult(const sparrow::SeparationResult&) override
+    {
+        events.push_back("separation_result");
+    }
+
+    std::vector<std::string> events;
+};
+
 class ImmediateStopReferenceListener final : public sparrow::OptimizationListener
 {
 public:
     explicit ImmediateStopReferenceListener(
-        sparrow::OptimizationTerminator& terminator)
-        : m_Terminator(terminator)
+        sparrow::OptimizationTerminator& terminator,
+        bool raiseSignal = false)
+        : m_Terminator(terminator),
+          m_RaiseSignal(raiseSignal)
     {
     }
 
@@ -496,7 +571,14 @@ public:
             && !stoppedExploration)
         {
             stoppedExploration = true;
-            m_Terminator.RequestPhaseStop();
+            if (m_RaiseSignal)
+            {
+                signalRaised = std::raise(SIGINT) == 0;
+            }
+            else
+            {
+                m_Terminator.RequestPhaseStop();
+            }
         }
     }
 
@@ -519,12 +601,49 @@ public:
 
     std::vector<ColdStartTraceEvent> events;
     bool stoppedExploration = false;
+    bool signalRaised = false;
     std::size_t separationResultCount = 0U;
     std::size_t compressionStepCount = 0U;
 
 private:
     sparrow::OptimizationTerminator& m_Terminator;
+    bool m_RaiseSignal;
     std::string m_CurrentPhase;
+};
+
+class HostCancellationListener final : public sparrow::OptimizationListener
+{
+public:
+    explicit HostCancellationListener(
+        sparrow::OptimizationTerminator& terminator)
+        : m_Terminator(terminator)
+    {
+    }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport& report) override
+    {
+        if (requested || report.phase
+                == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE)
+        {
+            return;
+        }
+        std::thread hostThread([this]() {
+            m_Terminator.RequestStop();
+        });
+        hostThread.join();
+        requested = true;
+    }
+
+    void OnSeparationResult(const sparrow::SeparationResult&) override
+    {
+        ++separationResultCount;
+    }
+
+    bool requested = false;
+    std::size_t separationResultCount = 0U;
+
+private:
+    sparrow::OptimizationTerminator& m_Terminator;
 };
 
 class PhaseTimeoutReferenceListener final : public sparrow::OptimizationListener
@@ -549,16 +668,6 @@ public:
         else if (phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION)
             currentPhase = "compression";
         events.push_back({"phase", currentPhase, {}});
-    }
-
-    void OnProgress(const sparrow::OptimizationProgress& progress) override
-    {
-        if (progress.phase
-            == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE)
-        {
-            ++completeProgressCount;
-            completionBoundaryEvents.emplace_back("complete_progress");
-        }
     }
 
     void OnSolution(const sparrow::OptimizationSolutionReport& report) override
@@ -649,7 +758,6 @@ public:
     std::vector<std::string> completionBoundaryEvents;
     std::size_t separationResultCount = 0U;
     std::size_t compressionStepCount = 0U;
-    std::size_t completeProgressCount = 0U;
     std::size_t finalReportCount = 0U;
     std::optional<sparrow::OptimizationSolutionReport> finalReport;
     bool explorationTimeoutCallbackDelayed = false;
@@ -670,6 +778,8 @@ public:
         : m_Terminator(terminator)
     {
     }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport&) override {}
 
     void OnCompressionProgress(double step) override
     {
@@ -1263,6 +1373,7 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
         if (!Expect(event.type == "config" || event.type == "phase"
                         || event.type == "report" || event.type == "placement"
                         || event.type == "separation"
+                        || event.type == "separation_progress_summary"
                         || event.type == "compression_step",
                     output,
                     "Rust default cold-start fixture contains an unknown event"))
@@ -1273,6 +1384,31 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
     }
 
     bool traceMatches = listener.events.size() == expectedEvents.size();
+    if (!traceMatches)
+    {
+        output << "Default Rust cold-start trace sizes: expected "
+               << expectedEvents.size() << " actual " << listener.events.size()
+               << '\n';
+        const std::size_t sharedCount = std::min(expectedEvents.size(),
+                                                  listener.events.size());
+        for (std::size_t index = sharedCount;
+             index < std::max(expectedEvents.size(), listener.events.size());
+             ++index)
+        {
+            if (index < expectedEvents.size())
+            {
+                output << "  expected extra " << index << ' '
+                       << expectedEvents[index].type << ':'
+                       << expectedEvents[index].label << '\n';
+            }
+            if (index < listener.events.size())
+            {
+                output << "  actual extra " << index << ' '
+                       << listener.events[index].type << ':'
+                       << listener.events[index].label << '\n';
+            }
+        }
+    }
     for (std::size_t index = 0U;
          traceMatches && index < listener.events.size();
          ++index)
@@ -1282,6 +1418,11 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
         if (expected.type != observed.type || expected.label != observed.label
             || expected.values.size() != observed.values.size())
         {
+            output << "Default Rust cold-start mismatch at event " << index
+                   << ": expected " << expected.type << ':' << expected.label
+                   << " (" << expected.values.size() << " values) actual "
+                   << observed.type << ':' << observed.label << " ("
+                   << observed.values.size() << " values)\n";
             traceMatches = false;
             break;
         }
@@ -1293,6 +1434,20 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
             if (expected.type == "config" || expected.type == "separation")
             {
                 tolerance = 0.0;
+            }
+            else if (expected.type == "separation_progress_summary")
+            {
+                tolerance = valueIndex == 0U || valueIndex == 1U
+                    || valueIndex == 5U ? 0.0
+                    : valueIndex == 3U || valueIndex == 4U
+                        || valueIndex == 7U || valueIndex == 8U
+                        ? 1.0e-5
+                        : valueIndex == 2U || valueIndex == 6U
+                            ? 2.0e-3 : 1.0e-6;
+            }
+            else if (expected.type == "compression_step")
+            {
+                tolerance = 1.0e-6;
             }
             else if (expected.type == "report")
             {
@@ -1572,9 +1727,95 @@ bool TestImmediateStopOptimizeMatchesRustReference(std::ostream& output)
             }
         }
     }
-    return Expect(traceMatches,
+    if (!Expect(traceMatches,
+                output,
+                "immediate-stop, compression handoff, and minimum-width trace must match Rust"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator signalTerminator(config.terminator);
+    signalTerminator.Start();
+    {
+        sparrow::cli::ScopedCtrlCHandler signalHandler(signalTerminator);
+        if (!Expect(signalHandler.IsInstalled(),
+                output,
+                "CLI must install a Ctrl-C handler for the active optimizer"))
+        {
+            return false;
+        }
+        ImmediateStopReferenceListener signalListener(signalTerminator, true);
+        const auto signaled = sparrow::Optimize(
+            instance.Value(), config, signalTerminator, &signalListener);
+        if (!Expect(signaled.HasValue()
+                    && signaled.Value().metrics.feasible
+                    && signalListener.stoppedExploration
+                    && signalListener.signalRaised
+                    && signalListener.compressionStepCount == 1U
+                    && signalListener.separationResultCount == 1U,
+                output,
+                "SIGINT must stop exploration and let compression resume after phase reset"))
+        {
+            return false;
+        }
+        bool signalTraceMatches = signalListener.events.size() == expectedEvents.size();
+        for (std::size_t index = 0U;
+             signalTraceMatches && index < signalListener.events.size();
+             ++index)
+        {
+            const auto& expected = expectedEvents[index];
+            const auto& observed = signalListener.events[index];
+            if (expected.type != observed.type || expected.label != observed.label
+                || expected.values.size() != observed.values.size())
+            {
+                signalTraceMatches = false;
+                break;
+            }
+            for (std::size_t valueIndex = 0U;
+                 valueIndex < expected.values.size();
+                 ++valueIndex)
+            {
+                double tolerance = 0.0;
+                if (expected.type == "report")
+                {
+                    tolerance = valueIndex == 0U ? 0.0 : 1.0e-5;
+                }
+                else if (expected.type == "placement")
+                {
+                    tolerance = valueIndex == 0U ? 0.0
+                        : valueIndex == 1U ? 1.0e-6 : 5.0e-5;
+                }
+                else if (expected.type == "step")
+                {
+                    tolerance = 1.0e-6;
+                }
+                if (std::abs(expected.values[valueIndex]
+                             - observed.values[valueIndex]) > tolerance)
+                {
+                    signalTraceMatches = false;
+                    break;
+                }
+            }
+        }
+        if (!Expect(signalTraceMatches,
+                output,
+                "OS Ctrl-C trace must match the Rust phase-interrupt reference"))
+        {
+            return false;
+        }
+    }
+
+    sparrow::OptimizationTerminator hostTerminator(config.terminator);
+    hostTerminator.Start();
+    HostCancellationListener hostListener(hostTerminator);
+    const auto hostCancelled = sparrow::Optimize(
+        instance.Value(), config, hostTerminator, &hostListener);
+    return Expect(hostCancelled.HasValue()
+                      && hostCancelled.Value().metrics.feasible
+                      && hostListener.requested
+                      && hostListener.separationResultCount == 0U,
                   output,
-                  "immediate-stop, compression handoff, and minimum-width trace must match Rust");
+                  "a host thread must be able to cancel an active optimization through the external terminator");
 }
 
 bool TestZeroPhaseTimeoutSemantics(std::ostream& output)
@@ -1592,6 +1833,60 @@ bool TestZeroPhaseTimeoutSemantics(std::ostream& output)
     return Expect(terminator.ShouldTerminate(0U),
                   output,
                   "zero phase timeout must expire on a poll after its deadline, matching Rust BasicTerminator");
+}
+
+bool TestListenerExceptionDuringSeparationProgressMatchesRust(
+    std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "../SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppOptimizeImmediateStop.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(), output,
+                "listener exception input fixture cannot be opened"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(), output,
+                "listener exception input must import with Rust defaults"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    ThrowOnSeparationProgressListener listener;
+    bool exceptionEscaped = false;
+    try
+    {
+        (void)sparrow::Optimize(
+            instance.Value(), config, terminator, &listener);
+    }
+    catch (const std::runtime_error&)
+    {
+        exceptionEscaped = true;
+    }
+
+    const std::vector<std::string> expectedEvents{
+        "phase:exploration", "report:expl_feas", "separation_progress"};
+    return Expect(exceptionEscaped && listener.events == expectedEvents,
+                  output,
+                  "listener exception must escape at the matching Rust progress boundary without result or next-phase callbacks");
 }
 
 bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
@@ -1649,7 +1944,6 @@ bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
         "final_report"};
     if (!Expect(listener.completionBoundaryEvents
                     == expectedCompletionBoundary
-                    && listener.completeProgressCount == 0U
                     && listener.finalReportCount == 1U
                     && listener.finalReport.has_value()
                     && listener.finalReport->phase
@@ -2378,7 +2672,9 @@ bool TestOptimizeCompressionMatchesRustReference(std::ostream& output)
         listener.compressionSteps.size() == expectedCompressionSteps
         && std::all_of(listener.compressionSteps.begin(),
                        listener.compressionSteps.end(),
-                       [](double step) { return std::abs(step - 0.01) < 1.0e-6; });
+                       [](double step) {
+                           return step == static_cast<double>(0.01F);
+                       });
     const bool eventsMatch = listener.phases == expectedPhaseList
         && listener.reports == expectedReportList;
     if (!metricsMatch || !placementMatches || !compressionStepsMatch || !eventsMatch)
@@ -5572,8 +5868,6 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
         malformedOptimizePanicked = true;
     }
     if (!Expect(malformedOptimizePanicked && !malformedOptimizeReturned
-                    && malformedListener.progressCount == 0U
-                    && malformedListener.improvementCount == 0U
                     && malformedListener.solutionCount == 0U,
                 output,
                 "inconsistent CDE warm start must fail before callbacks as Rust does"))
@@ -5671,8 +5965,6 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
         partialOptimizePanicked = true;
     }
     if (!Expect(partialOptimizePanicked && !partialOptimizeReturned
-                    && partialListener.progressCount == 0U
-                    && partialListener.improvementCount == 0U
                     && partialListener.solutionCount == 0U,
                 output,
                 "partial CDE warm start must fail before callbacks as Rust does"))
@@ -5800,8 +6092,6 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
         outOfRangeOptimizeThrew = true;
     }
     if (!Expect(outOfRangeOptimizeThrew && !outOfRangeOptimizeReturned
-                    && outOfRangeListener.progressCount == 0U
-                    && outOfRangeListener.improvementCount == 0U
                     && outOfRangeListener.solutionCount == 0U,
                 output,
                 "out-of-range warm start must fail before callbacks as Rust does"))
@@ -5907,8 +6197,6 @@ bool TestWarmStartRejectionBoundariesMatchRust(std::ostream& output)
         orderedOptimizeThrew = true;
     }
     if (!Expect(orderedOptimizeThrew && !orderedOptimizeReturned
-                    && orderedListener.progressCount == 0U
-                    && orderedListener.improvementCount == 0U
                     && orderedListener.solutionCount == 0U,
                 output,
                 "ordered out-of-range warm start must fail before callbacks as Rust does"))
@@ -8689,6 +8977,10 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
     class Progress final : public sparrow::OptimizationListener
     {
     public:
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport&) override
+        {
+        }
         void OnCompressionProgress(double) override { ++count; }
         std::size_t count = 0U;
     };
@@ -9001,6 +9293,10 @@ bool RunExplorationTests(std::ostream& output)
     {
         return false;
     }
+    if (!TestListenerExceptionDuringSeparationProgressMatchesRust(output))
+    {
+        return false;
+    }
     if (!TestPositiveTimeoutOptimizeMatchesRustReference(output))
     {
         return false;
@@ -9193,8 +9489,19 @@ bool RunExplorationTests(std::ostream& output)
         17U,
         failurePoolTerminator,
         &failurePoolListener);
+    const std::size_t failurePoolInfeasibleReports =
+        failurePoolResult.HasValue()
+        ? static_cast<std::size_t>(std::count_if(
+              failurePoolResult.Value().history.begin(),
+              failurePoolResult.Value().history.end(),
+              [](const sparrow::OptimizationSolutionReport& report) {
+                  return report.type == sparrow::OptimizationReportType::
+                      OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE;
+              }))
+        : 0U;
     if (!Expect(failurePoolResult.HasValue()
-                    && failurePoolListener.progressCount == 3U,
+                    && failurePoolResult.Value().history.size() == 3U
+                    && failurePoolInfeasibleReports == 2U,
                 output,
                 "failure termination must count attempts independently of pool capacity"))
     {
@@ -9304,6 +9611,7 @@ bool RunExplorationTests(std::ostream& output)
     explorationConfig.separator.nContainerSamples = 32U;
     explorationConfig.separator.nFocussedSamples = 16U;
     RecordingListener listener;
+    RecordingObserver observer;
     sparrow::OptimizationTerminator explorationTerminator({
         16U,
         std::chrono::milliseconds{2000}});
@@ -9313,7 +9621,8 @@ bool RunExplorationTests(std::ostream& output)
         explorationConfig,
         42U,
         explorationTerminator,
-        &listener);
+        &listener,
+        &observer);
     if (!Expect(explored.HasValue() && explored.Value().metrics.feasible,
                 output,
                 "exploration must preserve a feasible best solution"))
@@ -9337,9 +9646,10 @@ bool RunExplorationTests(std::ostream& output)
         compressionConfig,
         42U,
         compressionTerminator,
-        &listener);
+        &listener,
+        &observer);
     if (!Expect(compressed.HasValue() && compressed.Value().metrics.feasible
-                    && listener.progressCount > 0U,
+                    && observer.progressCount > 0U,
                   output,
                   "compression and listener must complete with valid metrics"))
     {
@@ -9360,7 +9670,7 @@ bool RunExplorationTests(std::ostream& output)
     optimizerConfig.terminator.maxIterations = 32U;
     optimizerConfig.terminator.maxDuration = std::chrono::milliseconds{2000};
     const auto optimized = sparrow::Optimize(
-        instance.Value(), optimizerConfig, &listener);
+        instance.Value(), optimizerConfig, &listener, &observer);
     if (!Expect(optimized.HasValue() && optimized.Value().metrics.feasible,
                 output,
                 "top-level Sparrow optimizer must return a feasible solution"))
@@ -9370,7 +9680,8 @@ bool RunExplorationTests(std::ostream& output)
     if (!Expect(!optimized.Value().history.empty()
                     && optimized.Value().history.back().type
                            == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
-                    && listener.solutionCount > 0U,
+                    && listener.solutionCount > 0U
+                    && observer.improvementCount > 0U,
                 output,
                 "optimizer must expose Rust-compatible solution history"))
     {

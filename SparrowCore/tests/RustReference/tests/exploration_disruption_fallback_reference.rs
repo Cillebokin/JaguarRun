@@ -282,8 +282,9 @@ fn trace() -> Result<String, Box<dyn Error>> {
 #[test]
 fn empty_distinct_pool_uses_rust_fallback_and_preserves_rng_trace() {
     let actual = trace().expect("generate actual Explore fallback trace");
+    let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
-        actual, REFERENCE,
+        actual, expected,
         "actual Rust Explore empty-distinct-pool fallback trace changed"
     );
 }

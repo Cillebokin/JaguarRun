@@ -16,4 +16,8 @@ PRE_TARGETDEPS += $$SPARROWCORE_BUILD_DIR/bin/SparrowCore.lib
 PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCore.lib
 
 SOURCES += \
-    $$PWD/Main.cpp
+    $$PWD/Main.cpp \
+    $$PWD/OptimizationSignalHandler.cpp
+
+HEADERS += \
+    $$PWD/OptimizationSignalHandler.h

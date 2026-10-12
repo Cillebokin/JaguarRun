@@ -16,7 +16,7 @@
 - 证据与说明：
   - None 分支：Rust `LBFBuilder::new(instance, next_rng(), LBF_SAMPLE_CONFIG).construct()?`（:42）→ C++ `ConstructSparrowInitialSolution(instance, constructorConfig)`（:118，构造流程=LbfBuilder，见第三节）。
   - Some 分支：Rust `SPProblem::new(instance).expect(...); prob.restore(init_sol)`（:47-49）；Rust Restore 仍执行布局/CDE 一致性断言，但 optimize 不额外要求完整需求、当前实例中的同索引 item 定义或无碰撞布局。C++ `MakeWarmStart` 调用 `SPProblem::Restore`：布局结构错误可返回 Result，需求扣减的 Debug 下溢与越界 item index 走 C++ exception；越界索引目前已逐 profile 对照失败后布局、strip、需求状态和回调截止点。随后将 `remainingDemand`、`ValidateSPSolution` 与 `layout.IsFeasible()` 合并计算 `metrics.feasible`，这些指标条件本身不会拒绝 warm start。已核验的超量需求、同索引替代轮廓、动态 hazard 全空/部分缺失与身份差异、六种 CDE hazard 字段变异，以及越界索引单项/前序有效项顺序的 Debug/Release 状态及失败时点见 [S06 Restore 调用链对照](S06-explore.md#restore-调用链对照与实现2026-10-10)。C++ 对全空或部分缺失 hazard 的 Release tracker 初始化失败在 warm-start 预检处抛 `logic_error`，对应 Rust 后续 tracker panic；这只是该固定快照的映射，不概括其他损坏快照。判定：列出的 Restore 边界已定向对齐，未审计快照形状仍未定论。
-  - C++ 额外：构造成功的 `OnProgress/OnImprovement`（CONSTRUCTION 相位，:124-133）。
+  - C++ 扩展：构造成功后，只有显式传入 `OptimizationObserver` 才会收到 `OnProgress/OnImprovement`（CONSTRUCTION 相位，当前 `SparrowOptimizer.cpp` 构造后分支）；这不属于原生 `OptimizationListener` 事件面。
 
 ### 探索阶段（mod.rs:55-59）
 - C++ 对应：SparrowOptimizer.cpp:138-156。

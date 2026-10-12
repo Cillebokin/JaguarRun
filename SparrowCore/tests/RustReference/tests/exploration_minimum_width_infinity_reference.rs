@@ -124,9 +124,10 @@ fn exploration_minimum_width_infinity_trace() -> String {
 
 #[test]
 fn all_discrete_rotations_too_tall_preserves_infinite_minimum_width() {
+    let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
         exploration_minimum_width_infinity_trace(),
-        REFERENCE,
+        expected,
         "Rust Explore minimum-width infinity trace changed"
     );
 }

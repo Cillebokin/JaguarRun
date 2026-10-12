@@ -168,7 +168,8 @@ fn unplaced_cutoff_item_leaves_empty_large_pool_and_panics_before_moves() {
         }
     }
     assert_eq!(
-        actual_trace, REFERENCE,
+        actual_trace,
+        REFERENCE.replace("\r\n", "\n"),
         "Rust pre-panic pool/RNG trace changed"
     );
 

@@ -56,5 +56,6 @@ Result<ExplorationResult> ExploreWithTrace(
     std::uint64_t seed,
     OptimizationTerminator& terminator,
     OptimizationListener* listener,
-    const ExplorationTraceCallback& callback);
+    const ExplorationTraceCallback& callback,
+    OptimizationObserver* observer = nullptr);
 }

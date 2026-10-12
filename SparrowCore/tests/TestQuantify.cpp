@@ -748,6 +748,157 @@ bool TestExteriorHazardRawLossMatchesRust(std::ostream& output)
                   "Exterior hazard loss must match the Rust raw f32 bits");
 }
 
+bool TestFiniteExteriorCentroidDistanceOverflowMatchesRust(std::ostream& output)
+{
+    std::ifstream fixture(
+        "SparrowCore/Tests/Fixtures/CollisionLossFiniteDistanceOverflowRust.json");
+    if (!fixture.is_open())
+    {
+        fixture.open(
+            "../SparrowCore/Tests/Fixtures/CollisionLossFiniteDistanceOverflowRust.json");
+    }
+    if (!Expect(fixture.is_open(), output,
+                "finite-distance-overflow Rust fixture could not be opened"))
+    {
+        return false;
+    }
+
+    const std::string json{std::istreambuf_iterator<char>(fixture),
+                           std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "finite-distance-overflow Rust fixture import failed"))
+    {
+        output << "  error: " << instance.GetError().message << '\n';
+        return false;
+    }
+
+    std::vector<jaguar::Item> items;
+    std::vector<std::size_t> demands;
+    items.reserve(instance.Value().ItemCount());
+    demands.reserve(instance.Value().ItemCount());
+    for (std::size_t index = 0U; index < instance.Value().ItemCount(); ++index)
+    {
+        items.push_back(instance.Value().GetItem(index));
+        demands.push_back(instance.Value().ItemDemand(index));
+    }
+    jaguar::Strip strip = instance.Value().BaseStrip();
+    if (!Expect(strip.SetWidth(4.0e12).HasValue(), output,
+                "finite-distance-overflow strip width setup failed"))
+    {
+        return false;
+    }
+    const auto explicitWidthInstance = jaguar::SPInstance::Create(
+        std::move(items), std::move(demands), strip);
+    if (!Expect(explicitWidthInstance.HasValue(), output,
+                "finite-distance-overflow explicit-width instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(explicitWidthInstance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "finite-distance-overflow problem creation failed"))
+    {
+        output << "  error: " << problemResult.GetError().message << '\n';
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const jaguar::Transform2d originalTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {2.0e12, 1.0e12});
+    const auto movingHandle = problem.PlaceItem({0U, originalTransform});
+    if (!Expect(movingHandle.HasValue(), output,
+                "finite-distance-overflow item placement failed"))
+    {
+        return false;
+    }
+
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                output,
+                "finite-distance-overflow layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output,
+                "finite-distance-overflow tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    const std::uint32_t originalLossBits = [&tracker]() {
+        const float loss = tracker.TotalLoss();
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &loss, sizeof(bits));
+        return bits;
+    }();
+
+    sparrow::SeparationEvaluator evaluator(
+        layout,
+        instance.Value().GetItem(0U),
+        movingHandle.Value(),
+        tracker);
+    const jaguar::Transform2d farButFinite =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.9e19, 1.0e12});
+    bool debugThrew = false;
+    sparrow::SampleEval farEvaluation{};
+    try
+    {
+        farEvaluation = evaluator.Evaluate(farButFinite, std::nullopt);
+    }
+    catch (const std::domain_error& error)
+    {
+        debugThrew = true;
+        if (!Expect(std::string(error.what()).find("overlap.is_normal")
+                        != std::string::npos,
+                    output,
+                    "finite centroid overflow must preserve the Rust assertion message"))
+        {
+            return false;
+        }
+    }
+
+#ifndef NDEBUG
+    if (!Expect(debugThrew, output,
+                "Debug must assert when finite centroid distance overflows"))
+    {
+        return false;
+    }
+#else
+    if (!Expect(!debugThrew
+                    && farEvaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                    && std::isinf(farEvaluation.loss)
+                    && farEvaluation.loss > 0.0F,
+                output,
+                "Release must preserve the Rust positive-infinity collision result"))
+    {
+        return false;
+    }
+#endif
+
+    if (!Expect(evaluator.EvaluationCount() == 1U,
+                output,
+                "overflow evaluation must be counted exactly once"))
+    {
+        return false;
+    }
+    const sparrow::SampleEval recovered = evaluator.Evaluate(
+        originalTransform, std::nullopt);
+    std::uint32_t recoveredLossBits = 0U;
+    std::memcpy(&recoveredLossBits, &recovered.loss, sizeof(recoveredLossBits));
+    const float finalTotalLoss = tracker.TotalLoss();
+    std::uint32_t finalLossBits = 0U;
+    std::memcpy(&finalLossBits, &finalTotalLoss, sizeof(finalLossBits));
+    return Expect(recovered.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                      && recoveredLossBits == 0U
+                      && evaluator.EvaluationCount() == 2U
+                      && finalLossBits == originalLossBits,
+                  output,
+                  "evaluator must recover with unchanged layout/tracker after overflow");
+}
+
 bool TestSeparationEvaluatorPreservesTinyCollisionLoss(std::ostream& output)
 {
     jaguar::SurrogateConfig surrogateConfig{};
@@ -1511,6 +1662,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
+        && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestSeparationEvaluatorPreservesTinyCollisionLoss(output)
         && TestRustMultiHazardLossAndEarlyStop(output)
         && TestSeparationEvaluatorIgnoresItsCurrentHazard(output)

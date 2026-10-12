@@ -239,6 +239,76 @@ fn clear_upper_bound_preserves_a_zero_loss_collision_classification() {
     assert_eq!(loss.to_bits(), 0);
 }
 
+fn build_finite_exterior_distance_overflow_case()
+-> (SPProblem, CollisionTracker, jagua_rs::entities::PItemKey) {
+    let (external_instance, _) = sparrow::util::io::read_spp_input(Path::new(
+        "../Fixtures/CollisionLossFiniteDistanceOverflowRust.json",
+    ))
+    .expect("read finite-distance-overflow reference instance");
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let mut instance = import_instance(&importer, &external_instance)
+        .expect("import finite-distance-overflow reference instance");
+    instance.base_strip.width = 4.0e12;
+    let mut problem = SPProblem::new(instance).expect("create finite-distance-overflow problem");
+    let key = problem.place_item(SPPlacement {
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (2.0e12, 1.0e12)),
+    });
+    let tracker = CollisionTracker::new(&problem.layout);
+    (problem, tracker, key)
+}
+
+#[test]
+fn finite_exterior_centroid_distance_overflow_exposes_profile_boundary() {
+    let (problem, tracker, key) = build_finite_exterior_distance_overflow_case();
+    let moving_item = &problem.layout.placed_items[key].item;
+    let original_transform = problem.layout.placed_items[key].d_transf;
+    let original_total_loss = tracker.get_total_loss().to_bits();
+    let mut evaluator = SeparationEvaluator::new(&problem.layout, moving_item, key, &tracker);
+    let far_but_finite = DTransformation::new(0.0, (1.9e19, 1.0e12));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        evaluator.evaluate_sample(far_but_finite, None)
+    }));
+
+    #[cfg(debug_assertions)]
+    {
+        let panic = outcome
+            .as_ref()
+            .expect_err("Debug must assert when finite centroid distance overflows");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        assert!(
+            message.contains("overlap.is_normal"),
+            "unexpected panic: {message}"
+        );
+    }
+    #[cfg(not(debug_assertions))]
+    assert!(matches!(
+        outcome,
+        Ok(SampleEval::Collision { loss }) if loss.is_infinite() && loss.is_sign_positive()
+    ));
+
+    assert_eq!(evaluator.n_evals(), 1);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+    assert_eq!(
+        problem.layout.placed_items[key].d_transf,
+        original_transform
+    );
+
+    let recovered = evaluator.evaluate_sample(original_transform, None);
+    assert!(matches!(recovered, SampleEval::Clear { loss } if loss.to_bits() == 0));
+    assert_eq!(evaluator.n_evals(), 2);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+}
+
 #[test]
 fn infinite_candidate_translation_exposes_profile_boundary_and_evaluator_recovers() {
     let (problem, tracker, keys) = build_multi_hazard_case();

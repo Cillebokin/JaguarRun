@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -229,6 +230,13 @@ float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
     }
 
     const float shapePenalty = ShapePenalty(shape, shape);
+    if (std::isinf(overlap) && overlap > 0.0F
+        && std::isfinite(shapePenalty) && shapePenalty > 0.0F)
+    {
+        // Rust Release preserves positive infinity when a finite centroid
+        // distance overflows in f32; do not collapse this collision to zero.
+        return std::numeric_limits<float>::infinity();
+    }
     if (!std::isfinite(overlap) || overlap <= 0.0F
         || !std::isfinite(shapePenalty) || shapePenalty <= 0.0F)
     {

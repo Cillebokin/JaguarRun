@@ -1,0 +1,15 @@
+{
+  "name": "sparrow-rust-cpp-collision-loss-finite-distance-overflow",
+  "items": [
+    {
+      "id": 960,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "continuous"}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[-1500000000000, -500000000000], [1500000000000, -500000000000], [1500000000000, 500000000000], [-1500000000000, 500000000000]]
+      }
+    }
+  ],
+  "strip_height": 2000000000000
+}

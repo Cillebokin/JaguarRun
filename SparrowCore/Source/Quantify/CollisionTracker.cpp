@@ -452,6 +452,16 @@ Result<float> CollisionTracker::EvaluateCandidateHazardLoss(
         throw std::logic_error("unsupported hazard entity");
     }
 
+    if (hazard.kind == jaguar::HazardKind::Exterior
+        && result == std::numeric_limits<float>::infinity())
+    {
+#ifndef NDEBUG
+        throw std::domain_error("assertion failed: overlap.is_normal()");
+#else
+        return Result<float>::FromValue(result);
+#endif
+    }
+
     if (!std::isfinite(result))
     {
         return Result<float>::FromError(

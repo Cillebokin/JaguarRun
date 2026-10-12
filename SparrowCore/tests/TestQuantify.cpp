@@ -899,6 +899,149 @@ bool TestFiniteExteriorCentroidDistanceOverflowMatchesRust(std::ostream& output)
                   "evaluator must recover with unchanged layout/tracker after overflow");
 }
 
+bool TestFiniteExteriorWeightOverflowMatchesRust(std::ostream& output)
+{
+    std::ifstream fixture(
+        "SparrowCore/Tests/Fixtures/CollisionLossFiniteWeightOverflowRust.json");
+    if (!fixture.is_open())
+    {
+        fixture.open(
+            "../SparrowCore/Tests/Fixtures/CollisionLossFiniteWeightOverflowRust.json");
+    }
+    if (!Expect(fixture.is_open(), output,
+                "finite-weight-overflow Rust fixture could not be opened"))
+    {
+        return false;
+    }
+
+    const std::string json{std::istreambuf_iterator<char>(fixture),
+                           std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "finite-weight-overflow Rust fixture import failed"))
+    {
+        output << "  error: " << instance.GetError().message << '\n';
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "finite-weight-overflow problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(2.0).HasValue(), output,
+                "finite-weight-overflow strip resize failed"))
+    {
+        return false;
+    }
+    const jaguar::Transform2d exteriorTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.75, 1.0});
+    const auto movingHandle = problem.PlaceItem({0U, exteriorTransform});
+    if (!Expect(movingHandle.HasValue(), output,
+                "finite-weight-overflow placement failed"))
+    {
+        return false;
+    }
+
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(), output,
+                "finite-weight-overflow layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output,
+                "finite-weight-overflow tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    const float originalTotalLoss = tracker.TotalLoss();
+    if (!Expect(std::isfinite(tracker.ContainerLoss(0U))
+                    && tracker.ContainerLoss(0U) > 0.0F,
+                output,
+                "fixture must begin with a finite Exterior collision loss"))
+    {
+        return false;
+    }
+    for (std::size_t update = 0U; update < 128U; ++update)
+    {
+        tracker.UpdateWeights();
+    }
+    const float weight = tracker.ContainerWeight(0U);
+    if (!Expect(std::isinf(weight) && weight > 0.0F
+                    && std::isinf(tracker.TotalWeightedLoss()),
+                output,
+                "finite GLS updates must overflow the Exterior weight to positive infinity"))
+    {
+        return false;
+    }
+
+    const auto rawCandidate = instance.Value().GetItem(0U)
+        .CollisionShape().TransformedRustF32(exteriorTransform);
+    if (!Expect(rawCandidate.HasValue(), output,
+                "finite-weight-overflow candidate transform failed"))
+    {
+        return false;
+    }
+    const float rawLoss = sparrow::CalculateContainerPenalty(
+        rawCandidate.Value(), layout.Save().container.CollisionShape().BoundingBox());
+    if (!Expect(std::isfinite(rawLoss) && rawLoss > 0.0F
+                    && std::isinf(rawLoss * weight),
+                output,
+                "normal finite Exterior loss times the accumulated finite-state weight must overflow"))
+    {
+        return false;
+    }
+
+    sparrow::SeparationEvaluator evaluator(
+        layout, instance.Value().GetItem(0U), movingHandle.Value(), tracker);
+    bool debugThrew = false;
+    std::string debugMessage;
+    sparrow::SampleEval evaluation{};
+    try
+    {
+        evaluation = evaluator.Evaluate(exteriorTransform, std::nullopt);
+    }
+    catch (const std::domain_error& error)
+    {
+        debugThrew = true;
+        debugMessage = error.what();
+    }
+    if (!Expect(!debugThrew
+                    && evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                    && std::isinf(evaluation.loss) && evaluation.loss > 0.0F,
+                output,
+                "finite-overlap weighted-loss overflow must remain Collision(+Inf) in both profiles"))
+    {
+        if (debugThrew)
+        {
+            output << "  unexpected Debug exception: " << debugMessage << '\n';
+        }
+        return false;
+    }
+
+    const jaguar::Transform2d recoveredTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0});
+    const sparrow::SampleEval recovered =
+        evaluator.Evaluate(recoveredTransform, std::nullopt);
+    const float finalTotalLoss = tracker.TotalLoss();
+    return Expect(recovered.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                      && recovered.loss == 0.0F
+                      && evaluator.EvaluationCount() == 2U
+                      && finalTotalLoss == originalTotalLoss
+                      && tracker.ContainerWeight(0U) == weight
+                      && layout.Save().placements[0].placedItem.Transform()
+                             .translation.x == exteriorTransform.translation.x
+                      && layout.Save().placements[0].placedItem.Transform()
+                             .translation.y == exteriorTransform.translation.y,
+                  output,
+                  "finite-weight-overflow evaluation must recover without mutating layout or tracker losses");
+}
+
 bool TestSeparationEvaluatorPreservesTinyCollisionLoss(std::ostream& output)
 {
     jaguar::SurrogateConfig surrogateConfig{};
@@ -1663,6 +1806,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
+        && TestFiniteExteriorWeightOverflowMatchesRust(output)
         && TestSeparationEvaluatorPreservesTinyCollisionLoss(output)
         && TestRustMultiHazardLossAndEarlyStop(output)
         && TestSeparationEvaluatorIgnoresItsCurrentHazard(output)

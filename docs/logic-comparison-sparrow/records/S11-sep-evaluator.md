@@ -62,7 +62,7 @@
 
 ## 结论
 
-SeparationEvaluator 的上界解析、surrogate/precise 两段检测、移动件自身过滤、正损失短路及 Clear 上界的零损失碰撞分类均有 Rust/C++ 定向 reference。三项 PlacedItem hazard 的指定累计顺序 raw bits 为 `0x4ab5c931`，逆序敏感性由 Rust oracle 给出 `0x4ab5c932`，低于 `1e-6` 的候选损失下限已移除，非对称方形/矩形的 11 个候选位模式一致。Rust f32 候选平移和旋转各分量 `±Inf` 的指定输入均覆盖 Debug/Release、上界、状态不变与有限恢复；C++ 还核对有限 double 转 f32 无穷的入口映射。旋转异常发生在变换合成，平移异常结果则由 evaluator 入口映射；这些 fixtures 不证明 C++ 几何公式对任意非有限输入普遍等价。多个无穷分量组合、有限输入溢出、其他几何/pole 集合和退化公式输入仍未外推。`LegalizeTransform` 的边界见补充审计，损失公式和其他限制详见 S12。
+SeparationEvaluator 的上界解析、surrogate/precise 两段检测、移动件自身过滤、正损失短路及 Clear 上界的零损失碰撞分类均有 Rust/C++ 定向 reference。三项 PlacedItem hazard 的指定累计顺序 raw bits 为 `0x4ab5c931`，逆序敏感性由 Rust oracle 给出 `0x4ab5c932`，低于 `1e-6` 的候选损失下限已移除，非对称方形/矩形的 11 个候选位模式一致。Rust f32 候选平移和旋转各分量 `±Inf` 的指定输入均覆盖 Debug/Release、上界、状态不变与有限恢复；C++ 还核对有限 double 转 f32 无穷的入口映射。旋转异常发生在变换合成，平移异常结果则由 evaluator 入口映射；这些 fixtures 不证明 C++ 几何公式对任意非有限输入普遍等价。多个无穷分量组合、S12 已测的两条有限输入边界之外的其他溢出、其他几何/pole 集合和退化公式输入仍未外推。`LegalizeTransform` 的边界见补充审计，损失公式和其他限制详见 S12。
 
 ### 补充审计（2026-09-29，实体句柄专项）
 **【任务指定核对项】SeparationEvaluator 私有引擎的实体句柄（2026-09-29 修复，commit 6910145）现场复验**：

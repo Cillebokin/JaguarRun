@@ -25,5 +25,5 @@ SPARROWCORE_API float CalculatePolygonCollisionLoss(
 
 SPARROWCORE_API float CalculateContainerPenalty(
     const jaguar::SimplePolygon& shape,
-    const jaguar::Rect2d& containerBounds) noexcept;
+    const jaguar::Rect2d& containerBounds);
 }

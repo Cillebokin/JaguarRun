@@ -455,11 +455,10 @@ Result<float> CollisionTracker::EvaluateCandidateHazardLoss(
     if (hazard.kind == jaguar::HazardKind::Exterior
         && result == std::numeric_limits<float>::infinity())
     {
-#ifndef NDEBUG
-        throw std::domain_error("assertion failed: overlap.is_normal()");
-#else
+        // CalculateContainerPenalty raises the Debug assertion only when the
+        // overlap itself is non-normal. An infinite result reaching here came
+        // from the later final-loss or weight multiplication stage.
         return Result<float>::FromValue(result);
-#endif
     }
 
     if (!std::isfinite(result))

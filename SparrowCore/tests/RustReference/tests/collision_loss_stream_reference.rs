@@ -8,6 +8,7 @@ use jagua_rs::probs::spp::io::import_instance;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::eval::sample_eval::{SampleEval, SampleEvaluator};
 use sparrow::eval::sep_evaluator::SeparationEvaluator;
+use sparrow::quantify::quantify_collision_poly_container;
 use sparrow::quantify::tracker::CollisionTracker;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
@@ -304,6 +305,74 @@ fn finite_exterior_centroid_distance_overflow_exposes_profile_boundary() {
     );
 
     let recovered = evaluator.evaluate_sample(original_transform, None);
+    assert!(matches!(recovered, SampleEval::Clear { loss } if loss.to_bits() == 0));
+    assert_eq!(evaluator.n_evals(), 2);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+}
+
+fn build_finite_exterior_weight_overflow_case()
+-> (SPProblem, CollisionTracker, jagua_rs::entities::PItemKey) {
+    let (external_instance, _) = sparrow::util::io::read_spp_input(Path::new(
+        "../Fixtures/CollisionLossFiniteWeightOverflowRust.json",
+    ))
+    .expect("read finite-weight-overflow reference instance");
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let mut instance = import_instance(&importer, &external_instance)
+        .expect("import finite-weight-overflow reference instance");
+    instance.base_strip.width = 2.0;
+    let mut problem = SPProblem::new(instance).expect("create finite-weight-overflow problem");
+    let key = problem.place_item(SPPlacement {
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.75, 1.0)),
+    });
+    let tracker = CollisionTracker::new(&problem.layout);
+    (problem, tracker, key)
+}
+
+#[test]
+fn finite_exterior_weight_overflow_remains_collision() {
+    let (problem, mut tracker, key) = build_finite_exterior_weight_overflow_case();
+    let moving_item = &problem.layout.placed_items[key].item;
+    let original_transform = problem.layout.placed_items[key].d_transf;
+    let original_total_loss = tracker.get_total_loss().to_bits();
+    let transform = original_transform;
+    let mut candidate = moving_item.shape_cd.as_ref().clone();
+    candidate.transform_from(moving_item.shape_cd.as_ref(), &transform.compose());
+    let container_bbox = problem.layout.container.outer_cd.bbox;
+    let raw_loss = quantify_collision_poly_container(&candidate, container_bbox);
+    assert!(raw_loss.is_finite() && raw_loss.is_normal() && raw_loss > 0.0);
+    assert!(tracker.get_container_loss(key).is_finite());
+
+    for _ in 0..128 {
+        tracker.update_weights();
+    }
+    let weight = tracker.get_container_weight(key);
+    assert!(weight.is_infinite() && weight.is_sign_positive());
+    assert!((raw_loss * weight).is_infinite());
+    assert!(tracker.get_total_weighted_loss().is_infinite());
+
+    let mut evaluator = SeparationEvaluator::new(&problem.layout, moving_item, key, &tracker);
+    let evaluation = evaluator.evaluate_sample(transform, None);
+    assert!(
+        matches!(
+            evaluation,
+            SampleEval::Collision { loss } if loss.is_infinite() && loss.is_sign_positive()
+        ),
+        "unexpected evaluator classification for finite raw loss {raw_loss} and weight {weight}: {evaluation:?}"
+    );
+    assert_eq!(evaluator.n_evals(), 1);
+    assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);
+    assert_eq!(
+        problem.layout.placed_items[key].d_transf,
+        original_transform
+    );
+
+    let recovered = evaluator.evaluate_sample(DTransformation::new(0.0, (1.0, 1.0)), None);
     assert!(matches!(recovered, SampleEval::Clear { loss } if loss.to_bits() == 0));
     assert_eq!(evaluator.n_evals(), 2);
     assert_eq!(tracker.get_total_loss().to_bits(), original_total_loss);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace
 {
@@ -184,7 +185,7 @@ float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
 }
 
 float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
-                                const jaguar::Rect2d& containerBounds) noexcept
+                                const jaguar::Rect2d& containerBounds)
 {
     const jaguar::Rect2d shapeBounds = shape.BoundingBox();
     if (!IsFiniteRect(shapeBounds) || !IsFiniteRect(containerBounds))
@@ -233,9 +234,12 @@ float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
     if (std::isinf(overlap) && overlap > 0.0F
         && std::isfinite(shapePenalty) && shapePenalty > 0.0F)
     {
-        // Rust Release preserves positive infinity when a finite centroid
-        // distance overflows in f32; do not collapse this collision to zero.
+#ifndef NDEBUG
+        throw std::domain_error("assertion failed: overlap.is_normal()");
+#else
+        // Rust Release preserves positive infinity when overlap overflows.
         return std::numeric_limits<float>::infinity();
+#endif
     }
     if (!std::isfinite(overlap) || overlap <= 0.0F
         || !std::isfinite(shapePenalty) || shapePenalty <= 0.0F)
@@ -244,6 +248,12 @@ float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
     }
 
     const float result = 2.0F * std::sqrt(overlap) * shapePenalty;
+    if (std::isinf(result) && result > 0.0F)
+    {
+        // Rust asserts that overlap is normal, but does not assert the final
+        // loss. Keep a later-stage positive-infinity result in both profiles.
+        return result;
+    }
     if (!std::isfinite(result) || result <= 0.0F)
     {
         return 0.0F;

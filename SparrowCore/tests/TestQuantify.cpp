@@ -434,6 +434,100 @@ bool TestSubnormalPolygonLossBranch(std::ostream& output)
 #endif
 }
 
+bool TestFiniteTransformOverflowingContainerBboxAreaMatchesRust(
+    std::ostream& output)
+{
+    constexpr double side = 1.2e19;
+    constexpr double half = side * 0.5;
+    const auto sourceResult = jaguar::SimplePolygon::Create({
+        {-half, -half}, {half, -half}, {half, half}, {-half, half}});
+    if (!Expect(sourceResult.HasValue(), output,
+                "finite large source square must construct"))
+    {
+        return false;
+    }
+
+    jaguar::SimplePolygon source = sourceResult.Value();
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.poleLimits = {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+    if (!Expect(source.GenerateSurrogate(surrogateConfig).HasValue(),
+                output,
+                "finite large source square surrogate must construct"))
+    {
+        return false;
+    }
+
+    const float translation = std::ldexp(1.5F, 86);
+    if (!Expect(FloatBits(translation) == 0x6ac00000U,
+                output,
+                "candidate translation must use the locked Rust f32 value"))
+    {
+        return false;
+    }
+    const jaguar::Transform2d candidateTransform =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {static_cast<double>(translation),
+                  static_cast<double>(translation)});
+    const auto candidate = source.TransformedRustF32(candidateTransform);
+    if (!Expect(candidate.HasValue(), output,
+                "finite candidate transform must preserve a valid bbox"))
+    {
+        return false;
+    }
+
+    const jaguar::Rect2d& candidateBounds = candidate.Value().BoundingBox();
+    const float width = static_cast<float>(candidateBounds.xMax)
+        - static_cast<float>(candidateBounds.xMin);
+    const float height = static_cast<float>(candidateBounds.yMax)
+        - static_cast<float>(candidateBounds.yMin);
+    const float bboxArea = width * height;
+    if (!Expect(source.Area() > 0.0 && std::isfinite(source.Area())
+                    && source.Diameter() > 0.0
+                    && std::isfinite(source.Diameter())
+                    && FloatBits(static_cast<float>(source.Area())) == 0x7ed8aac7U
+                    && FloatBits(static_cast<float>(source.Diameter())) == 0x5f6b838cU
+                    && FloatBits(width) == 0x5f800000U
+                    && FloatBits(height) == 0x5f800000U
+                    && std::isinf(bboxArea),
+                output,
+                "finite source and transform must reach an infinite candidate bbox area"))
+    {
+        output << "  C++ bits: source_area=0x" << std::hex
+               << FloatBits(static_cast<float>(source.Area()))
+               << " diameter=0x" << FloatBits(static_cast<float>(source.Diameter()))
+               << " width=0x" << FloatBits(width)
+               << " height=0x" << FloatBits(height)
+               << " area=0x" << FloatBits(bboxArea) << std::dec << '\n';
+        return false;
+    }
+
+    const jaguar::Rect2d containerBounds{-1.0, -1.0, 1.0, 1.0};
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(sparrow::CalculateContainerPenalty(
+            candidate.Value(), containerBounds));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug must surface Rust's non-normal overlap assertion");
+#else
+    const float loss = sparrow::CalculateContainerPenalty(
+        candidate.Value(), containerBounds);
+    return Expect(loss == std::numeric_limits<float>::infinity()
+                      && FloatBits(loss) == 0x7f800000U,
+                  output,
+                  "Release must preserve Rust's positive-infinity container loss");
+#endif
+}
+
 bool TestSubnormalLossThroughSeparationEvaluator(std::ostream& output)
 {
     constexpr double side = 1.0e-20;
@@ -2971,6 +3065,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestOverlapProxy(output)
         && TestExtremeEpsilonOverlapProxyBoundary(output)
         && TestSubnormalPolygonLossBranch(output)
+        && TestFiniteTransformOverflowingContainerBboxAreaMatchesRust(output)
         && TestSubnormalContainerLossThroughEvaluator(output)
         && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)

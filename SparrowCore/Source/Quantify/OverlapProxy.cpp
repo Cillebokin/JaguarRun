@@ -154,10 +154,6 @@ float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
     const float shapeWidth = shapeXMax - shapeXMin;
     const float shapeHeight = shapeYMax - shapeYMin;
     const float shapeArea = shapeWidth * shapeHeight;
-    if (!std::isfinite(shapeArea) || shapeArea <= 0.0F)
-    {
-        return 0.0F;
-    }
 
     const float containerXMin = static_cast<float>(containerBounds.xMin);
     const float containerYMin = static_cast<float>(containerBounds.yMin);

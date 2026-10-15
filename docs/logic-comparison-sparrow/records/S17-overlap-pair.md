@@ -39,7 +39,7 @@
   4. 无交集分支：Rust `s_bbox.area() + s_bbox.centroid().distance_to(&c_bbox.centroid())`（mod.rs:45）。C++ `shapeArea + RectCentroidDistance(shapeBounds, containerBounds)`（cpp:183-184）；centroid 坐标 `(min+max)*0.5F`（f32）→ dx/dy → `sqrt(dx*dx+dy*dy)`。Rust 用 `f32::midpoint`（jagua-rs rect.rs:262-267），C++ 用 `(a+b)*0.5F`，极值处仍有待对照的运算路径差异；distance 的平方和开方结构对应。【差异】
   5. penalty：Rust `calc_shape_penalty(s, s)`（自乘）。C++ `ShapePenalty(shape, shape)`（cpp:192）✓。
   6. 结果：Rust `2.0 * overlap.sqrt() * penalty`（mod.rs:52）。C++ `2.0F * sqrt(overlap) * shapePenalty`（cpp:193）✓。
-- C++ 保留 `IsFiniteRect` 和 `shapeArea` 非有限/非正的前置防御（cpp:9-17,144-160）；但不再把公式 `overlap` 或最终结果的非有限/非正值归零。Rust 对 overlap 执行 `debug_assert!(overlap.is_normal())`，C++ Debug 在对应位置抛同消息 `std::domain_error`，Release 保留 IEEE 运算。`shapeArea` 防御条件尚未证明能由合法导入形状触发，也未与 Rust malformed 公共字段状态配成等价 API 输入。
+- C++ 保留 `IsFiniteRect` 对非有限矩形/包围盒的入口防御（cpp:9-17），但已移除 `shapeArea` 非有限/非正前置守卫。Rust/C++ reference 证明：有效有限方形经有限平移后，bbox 宽高均为 `2^64`，f32 面积溢出为 `+Inf`；旧守卫返回 `0`，与 Rust Debug 的 `overlap.is_normal()` 失败及 Release `+Inf` 均不符。删除后，C++ Debug/Release 分别对应 Rust 断言边界和 `+Inf` 结果。负面积对有效有序 bbox 不可达；bbox 面积乘法下溢为零尚未证明可达或不可达。无效矩形/包围盒防御仍未与 Rust malformed 公共字段状态配成等价 API 输入。
 - 判定：【公式分支按已测 profile 对齐】（centroid 运算路径与输入/表示防御仍单列）
 - 证据：mod.rs:36-53 vs OverlapProxy.cpp:9-17,141-194、jagua-rs rect.rs:229-241,262-272、point.rs:47-49。
 
@@ -91,7 +91,7 @@
 |---|---|---|---|---|
 | 1 | pair_matrix 物理布局与总和次序：C++ 已改为 Rust 上三角行顺序；N=4 cancellation case 精确得到 Rust `16,777,218` | 【已闭合】 | tracker 全量求和不再因布局改变舍入 | pair_matrix.rs:36-49; pair_matrix_reference.rs; TestQuantify.cpp |
 | 2 | overlap_area_proxy 的变换入口：Rust 收已变换 surrogate 无变换；C++ 带 Transform 参数经 ApplyRustF32（当前调用全 Identity 或已变换对） | 【差异】 | 结果等价（Identity 恒等、f32 路径） | overlap_proxy.rs:8 vs OverlapProxy.cpp:79-83,27-28 |
-| 3 | OverlapProxy 公式中间值：C++ 曾按 isfinite/<=0 归零；现移除公式级归零并对应 Rust Debug 断言、Release IEEE 传播 | 【所测 profile 边界已闭合】 | 两条实际导入 evaluator subnormal 路径和一条直接 helper NaN 用例对照；无效矩形/包围盒、非有限或非正 shapeArea、空 surrogate 等调用/表示防御未证明等价 | `overlap_proxy_nonfinite_reference.rs`; `OverlapProxy.cpp:79-194`; `TestQuantify.cpp`; S12 #6 |
+| 3 | OverlapProxy 公式中间值：公式级归零已移除；有限有效形状经有限变换可令 bbox `shapeArea=+Inf`，其前置守卫已删除 | 【所测 profile 边界已闭合】 | 两条实际导入 evaluator subnormal 路径、helper NaN 和有限变换导致 bbox 面积溢出均有 Debug/Release 对照；溢出用例是低层 helper，不是完整 evaluator。面积乘法下溢为零仍未定；无效矩形/包围盒和空 surrogate 输入/表示防御未证明等价 | `shape_area_guard_reachability_reference.rs`; `overlap_proxy_nonfinite_reference.rs`; `OverlapProxy.cpp:79-194`; `TestQuantify.cpp`; S12 #6 |
 | 4 | PairMatrix 长度溢出：Debug 失败边界与 Release 回绕结果均按 Rust 算术复现，语言异常类型映射 | 【已闭合】 | SIZE_MAX Debug 抛出边界异常；Release 产生空 backing Vec，后续访问再 bounds-fail | PairMatrix.cpp; pair_matrix_reference.rs; TestQuantify.cpp |
 | 5 | TotalLoss/TotalWeightedLoss 与 `WeightedLoss` 的非有限值过滤 | 【已闭合】 | NaN、±Inf 按 Rust 的原始浮点加法/乘法传播 | PairMatrix.cpp; tracker_weight_reference.rs; TestQuantify.cpp |
 | 6 | container centroid：Rust `f32::midpoint` vs C++ `(min+max)*0.5F` | 【差异】 | 亚 ulp 级，仅极值可见 | jagua-rs rect.rs:262-267 vs OverlapProxy.cpp:63-70 |
@@ -100,11 +100,11 @@
 | 9 | 精度路径：C++ 存储 double、部分运算前转 f32；Rust 量化使用 f32 | 【源码对应】 | trace 中虽存有 `loss_f32_bits` 字段，消费测试按容差比较，不能据此称为位级锁定 | OverlapProxy.cpp:30-38,55-57,116-118,150-156 vs overlap_proxy.rs/mod.rs |
 | 10 | `CalculateOverlapProxy` epsilon 调用契约 | 【已闭合】 | C++ 现在要求显式 epsilon；扩展调用点显式传 `0.01F` | OverlapProxy.h:12-17 vs overlap_proxy.rs:7-8 |
 
-Fixture 与断言：Rust `pair_matrix_reference.rs` 直接编译锁定的 Sparrow `pair_matrix.rs`，验证 N=4 物理顺序、loss fold、Debug/Release 越界和 `usize::MAX` 算术；C++ `TestQuantify.cpp` 验证 N=4 顺序敏感总和、profile-specific 越界、溢出和 NaN/Inf 传播。新增 `overlap_proxy_nonfinite_reference.rs` 与对应 C++ 定向断言核对非正规公式边界；普通 `TestOverlapProxy` 的几何损失仍是 C++ 容差断言，不是完整 Rust raw-bit oracle，其他既有 separator trace 也保留原记录的容差范围。
+Fixture 与断言：Rust `pair_matrix_reference.rs` 直接编译锁定的 Sparrow `pair_matrix.rs`，验证 N=4 物理顺序、loss fold、Debug/Release 越界和 `usize::MAX` 算术；C++ `TestQuantify.cpp` 验证 N=4 顺序敏感总和、profile-specific 越界、溢出和 NaN/Inf 传播。`overlap_proxy_nonfinite_reference.rs` 与对应 C++ 定向断言核对非正规公式边界；`shape_area_guard_reachability_reference.rs` 与 `TestFiniteTransformOverflowingContainerBboxAreaMatchesRust` 核对有效有限输入经有限变换后 `shapeArea=+Inf` 的 Debug/Release 行为。普通 `TestOverlapProxy` 的几何损失仍是 C++ 容差断言，不是完整 Rust raw-bit oracle，其他既有 separator trace 也保留原记录的容差范围。
 
 ## 结论
 
-PairMatrix 的合法索引映射、物理遍历顺序、总损失 fold、profile-specific 越界和长度溢出行为已按当前锁定 Rust 基线对齐并有 Debug/Release 参考。量化公式对本轮列明的 non-normal 分支也已通过 Debug/Release reference：C++ 公式层不再把这些值折成零，Debug 对应 Rust 断言、Release 继续 IEEE 运算。整体几何仍非逐位闭合，容器 centroid 的 `f32::midpoint` 与 C++ 算术路径仍有差异；无效/缺失 surrogate、矩形和 `shapeArea` 防御也没有证明 Rust/C++ API 输入等价。
+PairMatrix 的合法索引映射、物理遍历顺序、总损失 fold、profile-specific 越界和长度溢出行为已按当前锁定 Rust 基线对齐并有 Debug/Release 参考。量化公式对列明的 non-normal 分支也已通过 Debug/Release reference；新增有限变换溢出 fixture 证明旧 `shapeArea` 前置守卫可改变有效输入结果，现已删除并对齐 Rust profile 行为。整体几何仍非逐位闭合，容器 centroid 的 `f32::midpoint` 与 C++ 算术路径仍有差异；面积下溢为零、无效/缺失 surrogate 和矩形的 API 表示差异仍未完全闭合。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：53+27+49 行逐项覆盖】** quantify/mod.rs（3 pub fn + 2 模块声明 + calc_shape_penalty）、overlap_proxy.rs（overlap_area_proxy 单函数）、pair_matrix.rs（结构/new/Index/IndexMut/calc_idx）——主文 7 小节全覆盖；`#[inline(always)]` 属性能标注。

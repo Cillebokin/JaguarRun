@@ -1,0 +1,25 @@
+{
+  "name": "rust-offset-evaluator",
+  "min_item_separation": 0.5,
+  "items": [
+    {
+      "id": 1801,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [6, 0], [6, 2], [2, 2], [2, 6], [0, 6]]
+      }
+    },
+    {
+      "id": 1802,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [6, 0], [6, 2], [2, 2], [2, 6], [0, 6]]
+      }
+    }
+  ],
+  "strip_height": 8
+}

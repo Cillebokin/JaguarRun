@@ -130,12 +130,13 @@ std::optional<OverlayAdapter> makeOverlayAdapter(const SimplePolygon& shape,
     return adapter;
 }
 
-bool isStrictlyConvexCounterClockwise(
+bool isCounterClockwiseAndNonCollinear(
     const std::vector<OverlayPoint>& points) noexcept
 {
     if (points.size() < 3U)
         return false;
 
+    long double signedAreaTwice = 0.0L;
     for (std::size_t i = 0U; i < points.size(); ++i)
     {
         const OverlayPoint& previous = points[(i + points.size() - 1U) % points.size()];
@@ -149,15 +150,162 @@ bool isStrictlyConvexCounterClockwise(
             static_cast<std::int64_t>(next.x) - current.x;
         const std::int64_t secondY =
             static_cast<std::int64_t>(next.y) - current.y;
-        if (firstX * secondY - firstY * secondX <= 0)
+        if (firstX * secondY - firstY * secondX == 0)
             return false;
+        signedAreaTwice += static_cast<long double>(current.x) * next.y -
+                           static_cast<long double>(current.y) * next.x;
     }
-    return true;
+    return signedAreaTwice > 0.0L;
 }
 
-// A strict convex exterior expanded by round joins remains one simple
-// contour, so this path only needs the Rust outline grid and join rules.
-std::optional<SimplePolygon> convexInflateWithIOverlayOutlineRules(
+bool isConvexCounterClockwise(const SimplePolygon& shape, double distance)
+{
+    if (shape.VertexCount() < 3U)
+        return false;
+
+    const auto adapter = makeOverlayAdapter(shape, distance);
+    if (!adapter.has_value())
+        return false;
+
+    std::vector<OverlayPoint> points;
+    points.reserve(shape.VertexCount());
+    for (const Point2d& point : shape.Vertices())
+    {
+        const auto converted = adapter->toInt(point);
+        if (!converted.has_value())
+            return false;
+        if (points.empty() || points.back() != *converted)
+            points.push_back(*converted);
+    }
+    if (points.size() > 1U && points.front() == points.back())
+        points.pop_back();
+    if (points.size() < 3U)
+        return false;
+
+    long double signedAreaTwice = 0.0L;
+    bool hasPositiveTurn = false;
+    for (std::size_t i = 0U; i < points.size(); ++i)
+    {
+        const OverlayPoint& previous = points[(i + points.size() - 1U) % points.size()];
+        const OverlayPoint& current = points[i];
+        const OverlayPoint& next = points[(i + 1U) % points.size()];
+        const long double firstX =
+            static_cast<long double>(current.x) - previous.x;
+        const long double firstY =
+            static_cast<long double>(current.y) - previous.y;
+        const long double secondX =
+            static_cast<long double>(next.x) - current.x;
+        const long double secondY =
+            static_cast<long double>(next.y) - current.y;
+        const long double turn = firstX * secondY - firstY * secondX;
+        if (turn < 0.0L)
+            return false;
+        hasPositiveTurn = hasPositiveTurn || turn > 0.0L;
+        signedAreaTwice +=
+            static_cast<long double>(current.x) * next.y -
+            static_cast<long double>(current.y) * next.x;
+    }
+    return hasPositiveTurn && signedAreaTwice > 0.0L;
+}
+
+std::optional<SimplePolygon> rotateConvexContourToIOverlayStart(
+    const SimplePolygon& polygon,
+    const SimplePolygon& source,
+    double distance)
+{
+    if (polygon.VertexCount() < 3U)
+        return std::nullopt;
+
+    const auto adapter = makeOverlayAdapter(source, distance);
+    if (!adapter.has_value())
+        return std::nullopt;
+
+    std::vector<Point2d> ordered = polygon.Vertices();
+    std::vector<OverlayPoint> quantized;
+    quantized.reserve(ordered.size());
+    for (const Point2d& point : ordered)
+    {
+        const auto converted = adapter->toInt(point);
+        if (!converted.has_value())
+            return std::nullopt;
+        quantized.push_back(*converted);
+    }
+
+    if (ordered.size() > 1U && quantized.front() == quantized.back())
+    {
+        ordered.pop_back();
+        quantized.pop_back();
+    }
+    bool removed = true;
+    while (removed && ordered.size() > 3U)
+    {
+        removed = false;
+        for (std::size_t i = 0U; i < ordered.size(); ++i)
+        {
+            const std::size_t previous =
+                (i + ordered.size() - 1U) % ordered.size();
+            const std::size_t next = (i + 1U) % ordered.size();
+            const OverlayPoint& a = quantized[previous];
+            const OverlayPoint& b = quantized[i];
+            const OverlayPoint& c = quantized[next];
+            const long double firstX =
+                static_cast<long double>(b.x) - a.x;
+            const long double firstY =
+                static_cast<long double>(b.y) - a.y;
+            const long double secondX =
+                static_cast<long double>(c.x) - b.x;
+            const long double secondY =
+                static_cast<long double>(c.y) - b.y;
+            const long double between =
+                (static_cast<long double>(b.x) - a.x) *
+                    (static_cast<long double>(b.x) - c.x) +
+                (static_cast<long double>(b.y) - a.y) *
+                    (static_cast<long double>(b.y) - c.y);
+            if (b == a || b == c ||
+                (firstX * secondY - firstY * secondX == 0.0L &&
+                 between <= 0.0L))
+            {
+                ordered.erase(ordered.begin() +
+                              static_cast<std::ptrdiff_t>(i));
+                quantized.erase(quantized.begin() +
+                                static_cast<std::ptrdiff_t>(i));
+                removed = true;
+                break;
+            }
+        }
+    }
+    if (ordered.size() < 3U)
+        return std::nullopt;
+
+    std::size_t first = 0U;
+    for (std::size_t i = 1U; i < quantized.size(); ++i)
+    {
+        if (quantized[i].x < quantized[first].x ||
+            (quantized[i].x == quantized[first].x &&
+             quantized[i].y > quantized[first].y))
+        {
+            first = i;
+        }
+    }
+    const std::int32_t minX = quantized[first].x;
+    const auto minXCount = std::count_if(
+        quantized.begin(), quantized.end(), [minX](const OverlayPoint& point) {
+            return point.x == minX;
+        });
+    const std::size_t start = minXCount == 1U
+                                  ? (first + ordered.size() - 1U) % ordered.size()
+                                  : first;
+    std::rotate(ordered.begin(), ordered.begin() + start, ordered.end());
+    const auto imported = detail::createRustImportedOffsetPolygon(
+        std::move(ordered));
+    if (!imported.HasValue())
+        return std::nullopt;
+    return imported.Value();
+}
+
+// A simple counter-clockwise exterior expanded by round joins keeps the same
+// outline traversal when its offset contour does not self-intersect.
+std::optional<SimplePolygon> counterClockwiseInflateWithIOverlayOutlineRules(
     const SimplePolygon& shape, double distance)
 {
     if (shape.VertexCount() < 3U || !(distance > 0.0))
@@ -179,7 +327,7 @@ std::optional<SimplePolygon> convexInflateWithIOverlayOutlineRules(
     }
     if (source.size() > 1U && source.front() == source.back())
         source.pop_back();
-    if (!isStrictlyConvexCounterClockwise(source))
+    if (!isCounterClockwiseAndNonCollinear(source))
         return std::nullopt;
 
     constexpr double roundRatio = 0.1;
@@ -213,57 +361,95 @@ std::optional<SimplePolygon> convexInflateWithIOverlayOutlineRules(
         sections.push_back({a, b, *aTop, *bTop, direction});
     }
 
+    std::vector<std::optional<OverlayPoint>> concaveJoins(sections.size());
+    for (std::size_t i = 0U; i < sections.size(); ++i)
+    {
+        const OverlaySection& previous =
+            sections[(i + sections.size() - 1U) % sections.size()];
+        const OverlaySection& next = sections[i];
+        const double turn =
+            previous.direction.x * next.direction.y -
+            previous.direction.y * next.direction.x;
+        if (turn < 0.0)
+        {
+            const Point2d previousOffsetEnd =
+                adapter->toFloat(previous.bTop);
+            const Point2d nextOffsetStart = adapter->toFloat(next.aTop);
+            const double deltaX = nextOffsetStart.x - previousOffsetEnd.x;
+            const double deltaY = nextOffsetStart.y - previousOffsetEnd.y;
+            const double parameter =
+                (deltaX * next.direction.y - deltaY * next.direction.x) /
+                turn;
+            concaveJoins[i] = adapter->toInt(
+                {previousOffsetEnd.x + previous.direction.x * parameter,
+                 previousOffsetEnd.y + previous.direction.y * parameter});
+            if (!concaveJoins[i].has_value())
+                return std::nullopt;
+        }
+    }
+
     std::vector<OverlayPoint> outline;
     outline.reserve(source.size() * 18U);
     for (std::size_t i = 0U; i < sections.size(); ++i)
     {
-        const OverlaySection& previous = sections[i];
-        const OverlaySection& next = sections[(i + 1U) % sections.size()];
-        outline.push_back(previous.aTop);
-        outline.push_back(previous.bTop);
+        const OverlaySection& previous =
+            sections[(i + sections.size() - 1U) % sections.size()];
+        const OverlaySection& next = sections[i];
 
         const double dot = previous.direction.x * next.direction.x +
                            previous.direction.y * next.direction.y;
-        if (limitDotProduct < dot)
+        if (concaveJoins[i].has_value())
         {
-            outline.push_back(next.aTop);
-            continue;
+            outline.push_back(*concaveJoins[i]);
         }
-
-        const double angle = std::acos(dot);
-        const auto segmentCount = static_cast<std::size_t>(
-            angle / roundRatio + 0.5);
-        if (segmentCount == 0U)
-            return std::nullopt;
-        const double deltaAngle = angle / static_cast<double>(segmentCount);
-        const double rotationAngle = rotationDirection * deltaAngle;
-        const double rotationSin = std::sin(rotationAngle);
-        const double rotationCos = std::cos(rotationAngle);
-        const double centerX = adapter->toFloat(previous.b).x;
-        const double centerY = adapter->toFloat(previous.b).y;
-        double vectorX = -previous.direction.y;
-        double vectorY = previous.direction.x;
-        OverlayPoint last = previous.bTop;
-        for (std::size_t step = 1U; step < segmentCount; ++step)
+        else if (limitDotProduct < dot)
         {
-            const double rotatedX = rotationCos * vectorX - rotationSin * vectorY;
-            const double rotatedY = rotationSin * vectorX + rotationCos * vectorY;
-            vectorX = rotatedX;
-            vectorY = rotatedY;
-            const Point2d point{
-                centerX + vectorX * signedRadius,
-                centerY + vectorY * signedRadius};
-            const auto converted = adapter->toInt(point);
-            if (!converted.has_value())
+            outline.push_back(previous.bTop);
+            outline.push_back(next.aTop);
+        }
+        else
+        {
+            const double angle = std::acos(dot);
+            const auto segmentCount = static_cast<std::size_t>(
+                angle / roundRatio + 0.5);
+            if (segmentCount == 0U)
                 return std::nullopt;
-            if (last != *converted)
+
+            outline.push_back(previous.bTop);
+            const double deltaAngle = angle / static_cast<double>(segmentCount);
+            const double rotationAngle = rotationDirection * deltaAngle;
+            const double rotationSin = std::sin(rotationAngle);
+            const double rotationCos = std::cos(rotationAngle);
+            const double centerX = adapter->toFloat(previous.b).x;
+            const double centerY = adapter->toFloat(previous.b).y;
+            double vectorX = -previous.direction.y;
+            double vectorY = previous.direction.x;
+            OverlayPoint last = previous.bTop;
+            for (std::size_t step = 1U; step < segmentCount; ++step)
             {
-                outline.push_back(*converted);
-                last = *converted;
+                const double rotatedX =
+                    rotationCos * vectorX - rotationSin * vectorY;
+                const double rotatedY =
+                    rotationSin * vectorX + rotationCos * vectorY;
+                vectorX = rotatedX;
+                vectorY = rotatedY;
+                const Point2d point{
+                    centerX + vectorX * signedRadius,
+                    centerY + vectorY * signedRadius};
+                const auto converted = adapter->toInt(point);
+                if (!converted.has_value())
+                    return std::nullopt;
+                if (last != *converted)
+                {
+                    outline.push_back(*converted);
+                    last = *converted;
+                }
             }
+            if (last != next.aTop)
+                outline.push_back(next.aTop);
         }
-        if (last != next.aTop)
-            outline.push_back(next.aTop);
+        const std::size_t nextCorner = (i + 1U) % sections.size();
+        outline.push_back(concaveJoins[nextCorner].value_or(next.bTop));
     }
 
     if (outline.size() < 3U)
@@ -293,7 +479,6 @@ std::optional<SimplePolygon> convexInflateWithIOverlayOutlineRules(
     points.reserve(outline.size());
     for (const OverlayPoint& point : outline)
         points.push_back(adapter->toFloat(point));
-
     const auto polygon = detail::createRustImportedOffsetPolygon(std::move(points));
     if (!polygon.HasValue())
         return std::nullopt;
@@ -571,7 +756,8 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
     if (offset.mode == ShapeModifyMode::Inflate)
     {
         const auto convexOffset =
-            convexInflateWithIOverlayOutlineRules(shape, offset.distance);
+            counterClockwiseInflateWithIOverlayOutlineRules(
+                shape, offset.distance);
         if (convexOffset.has_value())
         {
             return Result<std::vector<SimplePolygon>>::FromValue(
@@ -579,7 +765,7 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
         }
     }
 
-    const auto skeletonOffsets = detail::roundedStraightSkeletonOffsets(
+    auto skeletonOffsets = detail::roundedStraightSkeletonOffsets(
         shape,
         offset.mode == ShapeModifyMode::Inflate
             ? offset.distance
@@ -618,6 +804,28 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
                 {ErrorCode::OffsetFailed,
                  "straight-skeleton offset does not preserve the requested relation"});
         }
+    }
+
+    if (offset.mode == ShapeModifyMode::Deflate &&
+        isConvexCounterClockwise(shape, offset.distance))
+    {
+        std::vector<SimplePolygon> ordered;
+        ordered.reserve(skeletonOffsets.Value().size());
+        for (const SimplePolygon& polygon : skeletonOffsets.Value())
+        {
+            if (samePolygonCycle(shape.Vertices(), polygon.Vertices()))
+            {
+                ordered.push_back(polygon);
+                continue;
+            }
+
+            const auto canonical =
+                rotateConvexContourToIOverlayStart(
+                    polygon, shape, offset.distance);
+            ordered.push_back(canonical.value_or(polygon));
+        }
+        skeletonOffsets = Result<std::vector<SimplePolygon>>::FromValue(
+            std::move(ordered));
     }
     return skeletonOffsets;
 }

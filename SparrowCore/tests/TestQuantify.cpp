@@ -43,6 +43,13 @@ std::uint32_t FloatBits(float value) noexcept
     return bits;
 }
 
+float FloatFromBits(std::uint32_t bits) noexcept
+{
+    float value = 0.0F;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 std::uint64_t PolygonF32BitsHash(const jaguar::SimplePolygon& polygon)
 {
     std::uint64_t hash = 0xcbf29ce484222325ULL;
@@ -1059,6 +1066,272 @@ bool TestStrictConvexInflateContourOrderMatchesRust(std::ostream& output)
                           == 0x30b539c7ccd489c5ULL,
                   output,
                   "sub-ULP offset bits and contour start must match Rust");
+}
+
+bool TestConcaveInflateContourBitsMatchRust(std::ostream& output)
+{
+    const auto shape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {6.0, 0.0}, {6.0, 2.0},
+        {2.0, 2.0}, {2.0, 6.0}, {0.0, 6.0}});
+    if (!Expect(shape.HasValue(), output,
+                "concave offset reference fixture must construct"))
+    {
+        return false;
+    }
+
+    const auto offset = jaguar::OffsetShape(
+        shape.Value(), jaguar::ShapeModifyMode::Inflate, 0.25);
+    if (!Expect(offset.HasValue(), output,
+                "concave offset reference fixture must inflate"))
+    {
+        return false;
+    }
+
+    const jaguar::SimplePolygon& polygon = offset.Value();
+    const std::uint64_t actualHash = PolygonF32BitsHash(polygon);
+    const std::uint32_t actualAreaBits =
+        FloatBits(static_cast<float>(polygon.Area()));
+    const std::uint32_t actualBboxBits = FloatBits(static_cast<float>(
+        polygon.BoundingBox().AreaRustF32()));
+    if (!Expect(polygon.VertexCount() == 86U &&
+                    actualAreaBits == 0x41d175dbU &&
+                    actualBboxBits == 0x42290000U &&
+                    actualHash == 0xbf324096dceae641ULL,
+                output,
+                "concave Inflate contour bits must match Rust"))
+    {
+        output << "  concave L count: " << polygon.VertexCount()
+               << " hash: " << std::hex << actualHash
+               << " area bits: " << actualAreaBits
+               << " bbox bits: " << actualBboxBits << std::dec << '\n';
+        return false;
+    }
+    return true;
+}
+
+bool TestConvexDeflateContourBitsMatchRust(std::ostream& output)
+{
+    const auto shape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {4.0, 0.0}, {5.0, 2.0},
+        {2.0, 4.0}, {-1.0, 2.0}});
+    if (!Expect(shape.HasValue(), output,
+                "convex offset reference fixture must construct"))
+    {
+        return false;
+    }
+
+    const auto offset = jaguar::OffsetShape(
+        shape.Value(), jaguar::ShapeModifyMode::Deflate, 0.3);
+    if (!Expect(offset.HasValue(), output,
+                "convex offset reference fixture must deflate"))
+    {
+        return false;
+    }
+
+    const jaguar::SimplePolygon& polygon = offset.Value();
+    const std::uint64_t actualHash = PolygonF32BitsHash(polygon);
+    const std::uint32_t actualAreaBits =
+        FloatBits(static_cast<float>(polygon.Area()));
+    const std::uint32_t actualBboxBits = FloatBits(static_cast<float>(
+        polygon.BoundingBox().AreaRustF32()));
+    if (!Expect(polygon.VertexCount() == 5U &&
+                    actualAreaBits == 0x413a00b7U &&
+                    actualBboxBits == 0x418ba0c6U &&
+                    actualHash == 0x1710858bdb9fdb5fULL,
+                output,
+                "convex Deflate contour bits must match Rust"))
+    {
+        output << "  convex pentagon count: " << polygon.VertexCount()
+               << " hash: " << std::hex << actualHash
+               << " area bits: " << actualAreaBits
+               << " bbox bits: " << actualBboxBits << std::dec << '\n';
+        return false;
+    }
+    return true;
+}
+
+bool TestOffsetOrientationDegenerateScaleMatchesRust(std::ostream& output)
+{
+    const auto check = [&output](std::vector<jaguar::Point2d> vertices,
+                                 jaguar::ShapeModifyMode mode,
+                                 double distance,
+                                 std::size_t expectedCount,
+                                 std::uint32_t expectedAreaBits,
+                                 std::uint32_t expectedBboxBits,
+                                 std::uint64_t expectedHash,
+                                 const char* label) {
+        const auto shape = jaguar::SimplePolygon::Create(std::move(vertices));
+        if (!Expect(shape.HasValue(), output,
+                    "offset boundary reference fixture must construct"))
+        {
+            return false;
+        }
+        const auto offset = jaguar::OffsetShape(shape.Value(), mode, distance);
+        if (!Expect(offset.HasValue(), output,
+                    "offset boundary reference fixture must offset"))
+        {
+            return false;
+        }
+
+        const jaguar::SimplePolygon& polygon = offset.Value();
+        const std::uint32_t areaBits =
+            FloatBits(static_cast<float>(polygon.Area()));
+        const std::uint32_t bboxBits = FloatBits(static_cast<float>(
+            polygon.BoundingBox().AreaRustF32()));
+        const std::uint64_t hash = PolygonF32BitsHash(polygon);
+        if (!Expect(polygon.VertexCount() == expectedCount &&
+                        areaBits == expectedAreaBits &&
+                        bboxBits == expectedBboxBits && hash == expectedHash,
+                    output, "offset boundary contour bits must match Rust"))
+        {
+            output << "  " << label << " count: " << polygon.VertexCount()
+                   << " hash: " << std::hex << hash
+                   << " area bits: " << areaBits
+                   << " bbox bits: " << bboxBits << std::dec << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    if (!check({{-1.0, 2.0}, {2.0, 4.0}, {5.0, 2.0},
+                {4.0, 0.0}, {0.0, 0.0}},
+               jaguar::ShapeModifyMode::Deflate, 0.3, 5U,
+               0x413a00b7U, 0x418ba0c6U, 0x1710858bdb9fdb5fULL,
+               "clockwise convex pentagon") ||
+        !check({{0.0, 0.0}, {2.0, 0.0}, {4.0, 0.0}, {5.0, 2.0},
+                {2.0, 4.0}, {-1.0, 2.0}},
+               jaguar::ShapeModifyMode::Deflate, 0.3, 5U,
+               0x413a00b7U, 0x418ba0c6U, 0x1710858bdb9fdb5fULL,
+               "collinear convex pentagon"))
+    {
+        return false;
+    }
+
+    const double sideBelow = static_cast<double>(FloatFromBits(0x4635008cU));
+    const double sideAbove = static_cast<double>(FloatFromBits(0x4635008eU));
+    const auto square = [](double side) {
+        return std::vector<jaguar::Point2d>{{0.0, 0.0}, {side, 0.0},
+                                             {side, side}, {0.0, side}};
+    };
+    return check(square(sideBelow), jaguar::ShapeModifyMode::Inflate, 0.5,
+                 68U, 0x4cfffedbU, 0x4cfffedcU, 0x2b698cbf3a05d425ULL,
+                 "scale below adapter exponent boundary") &&
+           check(square(sideAbove), jaguar::ShapeModifyMode::Inflate, 0.5,
+                 68U, 0x4cfffee1U, 0x4cfffee2U, 0x4248ff4142d7c2d5ULL,
+                 "scale above adapter exponent boundary");
+}
+
+bool TestSppImportedOffsetReachesSeparationEvaluator(std::ostream& output)
+{
+    std::ifstream fixture(
+        "SparrowCore/Tests/Fixtures/ShapeOffsetEvaluatorSpp.json");
+    if (!fixture.is_open())
+    {
+        fixture.open(
+            "../SparrowCore/Tests/Fixtures/ShapeOffsetEvaluatorSpp.json");
+    }
+    if (!Expect(fixture.is_open(), output,
+                "SPP offset/evaluator reference fixture could not be opened"))
+    {
+        return false;
+    }
+
+    const std::string json{std::istreambuf_iterator<char>(fixture),
+                           std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(json);
+    if (!Expect(imported.HasValue(), output,
+                "SPP offset/evaluator reference fixture import failed"))
+    {
+        output << "  import error: " << imported.GetError().message << '\n';
+        return false;
+    }
+
+    const jaguar::SimplePolygon& collisionShape =
+        imported.Value().GetItem(1U).CollisionShape();
+    if (!Expect(collisionShape.VertexCount() == 10U &&
+                    FloatBits(static_cast<float>(collisionShape.Area())) ==
+                        0x41d1a88cU &&
+                    FloatBits(static_cast<float>(
+                        collisionShape.BoundingBox().AreaRustF32())) ==
+                        0x42290000U &&
+                    PolygonF32BitsHash(collisionShape) ==
+                        0x1bed85a4ace8dc97ULL,
+                output,
+                "SPP import must create the Rust offset collision contour"))
+    {
+        output << "  imported collision shape count: "
+               << collisionShape.VertexCount() << " hash: " << std::hex
+               << PolygonF32BitsHash(collisionShape) << " area bits: "
+               << FloatBits(static_cast<float>(collisionShape.Area()))
+               << " bbox bits: "
+               << FloatBits(static_cast<float>(
+                      collisionShape.BoundingBox().AreaRustF32()))
+               << std::dec << '\n';
+        return false;
+    }
+
+    std::vector<jaguar::Item> items;
+    std::vector<std::size_t> demands;
+    items.reserve(imported.Value().ItemCount());
+    demands.reserve(imported.Value().ItemCount());
+    for (std::size_t index = 0U; index < imported.Value().ItemCount(); ++index)
+    {
+        items.push_back(imported.Value().GetItem(index));
+        demands.push_back(imported.Value().ItemDemand(index));
+    }
+    jaguar::Strip strip = imported.Value().BaseStrip();
+    if (!Expect(strip.SetWidth(16.0).HasValue(), output,
+                "SPP offset/evaluator strip width setup failed"))
+    {
+        return false;
+    }
+    const auto explicitWidthInstance = jaguar::SPInstance::Create(
+        std::move(items), std::move(demands), strip);
+    if (!Expect(explicitWidthInstance.HasValue(), output,
+                "SPP offset/evaluator explicit-width instance creation failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(explicitWidthInstance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "SPP offset/evaluator problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const jaguar::Transform2d transform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {5.0, 4.0});
+    const auto firstHandle = problem.PlaceItem({0U, transform});
+    const auto movingHandle = problem.PlaceItem({1U, transform});
+    if (!Expect(firstHandle.HasValue() && movingHandle.HasValue(), output,
+                "SPP offset/evaluator item placements failed"))
+    {
+        return false;
+    }
+
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(), output,
+                "SPP offset/evaluator layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output,
+                "SPP offset/evaluator tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    sparrow::SeparationEvaluator evaluator(
+        layout, problem.Instance().GetItem(1U), movingHandle.Value(), tracker);
+    const sparrow::SampleEval evaluation = evaluator.Evaluate(transform, std::nullopt);
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION &&
+                      FloatBits(evaluation.loss) == 0x4262ee64U &&
+                      FloatBits(tracker.PairLoss(0U, 1U)) == 0x4221ca2fU,
+                  output,
+                  "SPP-imported offset geometry must preserve the Rust evaluator result");
 }
 
 bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
@@ -2176,6 +2449,10 @@ bool RunQuantifyTests(std::ostream& output)
         && TestExteriorHazardRawLossMatchesRust(output)
         && TestFinalMultiplyOverflowSquareMatchesRustConstruction(output)
         && TestStrictConvexInflateContourOrderMatchesRust(output)
+        && TestConcaveInflateContourBitsMatchRust(output)
+        && TestConvexDeflateContourBitsMatchRust(output)
+        && TestOffsetOrientationDegenerateScaleMatchesRust(output)
+        && TestSppImportedOffsetReachesSeparationEvaluator(output)
         && TestFiniteSeparationOffsetFinalMultiplyBoundary(output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestFiniteExteriorWeightOverflowMatchesRust(output)

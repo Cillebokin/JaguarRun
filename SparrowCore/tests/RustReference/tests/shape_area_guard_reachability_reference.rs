@@ -54,3 +54,50 @@ fn finite_candidate_translation_can_overflow_bbox_area_in_container_loss() {
         assert_eq!(loss.to_bits(), 0x7f80_0000);
     }
 }
+
+#[test]
+fn nonpositive_bbox_area_is_reachable_only_through_malformed_public_bbox_state() {
+    let mut shape = finite_large_square();
+    shape.bbox = Rect {
+        x_min: 0.0,
+        y_min: 0.0,
+        x_max: 0.0,
+        y_max: 0.0,
+    };
+    assert_eq!(shape.bbox.area(), 0.0);
+
+    let container = Rect::try_new(-1.0, -1.0, 1.0, 1.0).unwrap();
+    let loss = catch_unwind(AssertUnwindSafe(|| {
+        quantify_collision_poly_container(&shape, container)
+    }));
+    if cfg!(debug_assertions) {
+        let panic = loss.expect_err("Debug must assert on zero container overlap");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        assert!(message.contains("overlap.is_normal()"), "{message}");
+    } else {
+        let loss = loss.expect("Release must continue the zero-area formula");
+        assert_eq!(loss.to_bits(), 0x0000_0000);
+    }
+
+    let mut negative_area_shape = finite_large_square();
+    negative_area_shape.bbox = Rect {
+        x_min: 1.0,
+        y_min: 0.0,
+        x_max: 0.0,
+        y_max: 1.0,
+    };
+    assert_eq!(negative_area_shape.bbox.area(), -1.0);
+    let unit_container = Rect::try_new(0.0, 0.0, 1.0, 1.0).unwrap();
+    let loss = catch_unwind(AssertUnwindSafe(|| {
+        quantify_collision_poly_container(&negative_area_shape, unit_container)
+    }))
+    .expect("negative overlap is normal, so both profiles reach sqrt");
+    assert!(
+        loss.is_nan(),
+        "sqrt of the negative overlap must produce NaN"
+    );
+}

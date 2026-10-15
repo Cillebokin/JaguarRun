@@ -2,7 +2,7 @@ use jagua_rs::entities::{Container, Layout};
 use jagua_rs::geometry::fail_fast::SPSurrogateConfig;
 use jagua_rs::geometry::geo_traits::Transformable;
 use jagua_rs::geometry::primitives::{Point, Rect, SPolygon};
-use jagua_rs::geometry::shape_modification::{ShapeModifyConfig, ShapeModifyMode};
+use jagua_rs::geometry::shape_modification::{ShapeModifyConfig, ShapeModifyMode, offset_shape};
 use jagua_rs::geometry::{DTransformation, OriginalShape};
 use jagua_rs::io::ext_repr::{ExtItem, ExtOrientation, ExtRotation, ExtSPolygon, ExtShape};
 use jagua_rs::io::import::Importer;
@@ -12,6 +12,22 @@ use sparrow::eval::sep_evaluator::SeparationEvaluator;
 use sparrow::quantify::quantify_collision_poly_container;
 use sparrow::quantify::tracker::CollisionTracker;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+
+fn polygon_f32_bits_hash(polygon: &SPolygon) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for Point(x, y) in &polygon.vertices {
+        for byte in x
+            .to_bits()
+            .to_le_bytes()
+            .into_iter()
+            .chain(y.to_bits().to_le_bytes())
+        {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
 
 fn overflow_square_points() -> (f32, Vec<Point>) {
     let bbox_area = f32::MAX * 0.49999;
@@ -158,6 +174,74 @@ fn finite_item_separation_offset_reaches_container_loss_final_multiply_overflow(
 }
 
 #[test]
+fn strict_convex_inflate_contour_order_matches_reference() {
+    let probe_shape = SPolygon::new(vec![
+        Point(-3.0, -2.0),
+        Point(8.0, -1.0),
+        Point(7.0, 6.0),
+        Point(-4.0, 5.0),
+    ])
+    .expect("ordinary convex probe shape must construct");
+    let probe_offset = offset_shape(&probe_shape, ShapeModifyMode::Inflate, 1.25)
+        .expect("ordinary convex probe offset must succeed");
+    assert_eq!(probe_offset.vertices.len(), 66);
+    assert_eq!(probe_offset.area.to_bits(), 0x43003100);
+    assert_eq!(probe_offset.bbox.area().to_bits(), 0x431839f6);
+    assert_eq!(polygon_f32_bits_hash(&probe_offset), 0x3eeb7f64793c4728);
+
+    let rotated_probe = SPolygon::new(vec![
+        Point(8.0, -1.0),
+        Point(7.0, 6.0),
+        Point(-4.0, 5.0),
+        Point(-3.0, -2.0),
+    ])
+    .expect("rotated ordinary convex probe shape must construct");
+    let rotated_offset = offset_shape(&rotated_probe, ShapeModifyMode::Inflate, 1.25)
+        .expect("rotated ordinary convex probe offset must succeed");
+    assert_eq!(rotated_offset.vertices.len(), 66);
+    assert_eq!(rotated_offset.area.to_bits(), 0x43003100);
+    assert_eq!(rotated_offset.bbox.area().to_bits(), 0x431839f6);
+    assert_eq!(polygon_f32_bits_hash(&rotated_offset), 0x3eeb7f64793c4728);
+
+    let other_probe = SPolygon::new(vec![
+        Point(-2.0, -3.0),
+        Point(9.0, -1.0),
+        Point(6.0, 7.0),
+        Point(-5.0, 4.0),
+    ])
+    .expect("second convex probe shape must construct");
+    let other_offset = offset_shape(&other_probe, ShapeModifyMode::Inflate, 1.25)
+        .expect("second convex probe offset must succeed");
+    assert_eq!(other_offset.vertices.len(), 66);
+    assert_eq!(other_offset.area.to_bits(), 0x430f53e0);
+    assert_eq!(other_offset.bbox.area().to_bits(), 0x434e36c0);
+    assert_eq!(polygon_f32_bits_hash(&other_offset), 0xc89c2d67a1a13ff5);
+
+    let large_square = SPolygon::new(vec![
+        Point(1_000_000.0, 1_000_000.0),
+        Point(2_000_000.0, 1_000_000.0),
+        Point(2_000_000.0, 2_000_000.0),
+        Point(1_000_000.0, 2_000_000.0),
+    ])
+    .expect("large square must construct");
+    let sub_ulp_offset = offset_shape(&large_square, ShapeModifyMode::Inflate, 0.01)
+        .expect("sub-ULP offset must succeed");
+    assert_eq!(sub_ulp_offset.vertices.len(), 4);
+    assert_eq!(
+        sub_ulp_offset.vertices,
+        vec![
+            Point(1_000_000.0, 2_000_000.0),
+            Point(1_000_000.0, 1_000_000.0),
+            Point(2_000_000.0, 1_000_000.0),
+            Point(2_000_000.0, 2_000_000.0),
+        ]
+    );
+    assert_eq!(sub_ulp_offset.area.to_bits(), 0x5368d4a5);
+    assert_eq!(sub_ulp_offset.bbox.area().to_bits(), 0x5368d4a5);
+    assert_eq!(polygon_f32_bits_hash(&sub_ulp_offset), 0x30b539c7ccd489c5);
+}
+
+#[test]
 fn finite_imported_item_reaches_container_loss_final_multiply_overflow() {
     let config = DEFAULT_SPARROW_CONFIG;
     let radius = (f32::MAX * 0.15).sqrt();
@@ -190,6 +274,35 @@ fn finite_imported_item_reaches_container_loss_final_multiply_overflow() {
             0,
         )
         .expect("finite offset must import as an item");
+    let original = item.shape_orig.as_ref();
+    assert_eq!(original.shape.vertices.len(), 4);
+    assert_eq!(polygon_f32_bits_hash(&original.shape), 0x08cf09db1f0044d5);
+    let transformed = original
+        .shape
+        .transform_clone(&original.pre_transform.compose());
+    assert_eq!(transformed.vertices.len(), 4);
+    assert_eq!(polygon_f32_bits_hash(&transformed), 0x08cf09db1f0044d5);
+    let offset = offset_shape(
+        &transformed,
+        original.modify_mode,
+        original.modify_config.offset.expect("offset must be set"),
+    )
+    .expect("Rust offset stage must succeed");
+    assert_eq!(offset.vertices.len(), 68);
+    assert_eq!(offset.area.to_bits(), 0x7ef0e310);
+    assert_eq!(offset.bbox.area().to_bits(), 0x7f19999a);
+    assert_eq!(polygon_f32_bits_hash(&offset), 0xd2af3ad80f009765);
+    let converted = original
+        .convert_to_internal()
+        .expect("Rust internal conversion must succeed");
+    assert_eq!(converted.vertices.len(), 50);
+    assert_eq!(converted.area.to_bits(), 0x7ef12454);
+    assert_eq!(converted.bbox.area().to_bits(), 0x7f19999a);
+    assert_eq!(polygon_f32_bits_hash(&converted), 0x43ff76136e8088d1);
+    assert_eq!(
+        polygon_f32_bits_hash(item.shape_cd.as_ref()),
+        0x43ff76136e8088d1
+    );
     let container_shape = SPolygon::from(Rect::try_new(0.0, 0.0, 2.0, 2.0).unwrap());
     let container = Container::new(
         OriginalShape {

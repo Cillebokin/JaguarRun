@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 void runShapeModificationTests()
 {
@@ -100,7 +101,10 @@ void runShapeModificationTests()
     const auto subUlpInflate = jaguar::OffsetShape(
         largeSquare.Value(), jaguar::ShapeModifyMode::Inflate, 0.01);
     assert(subUlpInflate.HasValue());
-    assert(subUlpInflate.Value().Vertices() == largeSquare.Value().Vertices());
+    const std::vector<jaguar::Point2d> expectedSubUlpVertices = {
+        {1000000.0, 2000000.0}, {1000000.0, 1000000.0},
+        {2000000.0, 1000000.0}, {2000000.0, 2000000.0}};
+    assert(subUlpInflate.Value().Vertices() == expectedSubUlpVertices);
     assert(subUlpInflate.Value().Area() == largeSquare.Value().Area());
     const auto subUlpDeflate = jaguar::OffsetShape(
         largeSquare.Value(), jaguar::ShapeModifyMode::Deflate, 0.01);

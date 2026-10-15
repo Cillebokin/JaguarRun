@@ -7,6 +7,7 @@
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/Entities/Container.h"
 #include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Geometry/ShapeModification.h"
 #include "JaguarCore/IO/Importer.h"
 #include "JaguarCore/Problems/Spp.h"
 
@@ -33,6 +34,33 @@ bool Expect(bool condition, std::ostream& output, const char* message)
     }
     output << "QUANTIFY TEST FAILURE: " << message << '\n';
     return false;
+}
+
+std::uint32_t FloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+std::uint64_t PolygonF32BitsHash(const jaguar::SimplePolygon& polygon)
+{
+    std::uint64_t hash = 0xcbf29ce484222325ULL;
+    for (const jaguar::Point2d& point : polygon.Vertices())
+    {
+        for (const float value : {static_cast<float>(point.x),
+                                  static_cast<float>(point.y)})
+        {
+            std::uint32_t bits = 0U;
+            std::memcpy(&bits, &value, sizeof(bits));
+            for (unsigned int byteIndex = 0U; byteIndex < 4U; ++byteIndex)
+            {
+                hash ^= static_cast<std::uint8_t>(bits >> (byteIndex * 8U));
+                hash *= 0x100000001b3ULL;
+            }
+        }
+    }
+    return hash;
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index,
@@ -950,6 +978,89 @@ bool TestFinalMultiplyOverflowSquareMatchesRustConstruction(
                   "a non-finite external centering transform must still stop import before evaluation");
 }
 
+bool TestStrictConvexInflateContourOrderMatchesRust(std::ostream& output)
+{
+    const auto checkOffset = [&output](
+                                std::vector<jaguar::Point2d> vertices,
+                                std::uint32_t areaBits,
+                                std::uint32_t bboxBits,
+                                std::uint64_t hash,
+                                const char* label) {
+        const auto shape = jaguar::SimplePolygon::Create(std::move(vertices));
+        if (!Expect(shape.HasValue(), output,
+                    "strict-convex offset reference fixture must construct"))
+        {
+            return false;
+        }
+        const auto offset = jaguar::OffsetShape(
+            shape.Value(), jaguar::ShapeModifyMode::Inflate, 1.25);
+        if (!Expect(offset.HasValue(), output,
+                    "strict-convex offset reference fixture must inflate"))
+        {
+            return false;
+        }
+
+        const jaguar::SimplePolygon& polygon = offset.Value();
+        const std::uint64_t actualHash = PolygonF32BitsHash(polygon);
+        const std::uint32_t actualAreaBits =
+            FloatBits(static_cast<float>(polygon.Area()));
+        const std::uint32_t actualBboxBits = FloatBits(static_cast<float>(
+            polygon.BoundingBox().AreaRustF32()));
+        if (!Expect(polygon.VertexCount() == 66U &&
+                        actualAreaBits == areaBits &&
+                        actualBboxBits == bboxBits && actualHash == hash,
+                    output,
+                    "strict-convex offset vertex order and metrics must match Rust"))
+        {
+            output << "  " << label << " count: " << polygon.VertexCount()
+                   << " hash: " << std::hex << actualHash
+                   << " area bits: " << actualAreaBits
+                   << " bbox bits: " << actualBboxBits << std::dec << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    if (!checkOffset({{-3.0, -2.0}, {8.0, -1.0}, {7.0, 6.0}, {-4.0, 5.0}},
+                     0x43003100U, 0x431839f6U, 0x3eeb7f64793c4728ULL,
+                     "skew quadrilateral") ||
+        !checkOffset({{8.0, -1.0}, {7.0, 6.0}, {-4.0, 5.0}, {-3.0, -2.0}},
+                     0x43003100U, 0x431839f6U, 0x3eeb7f64793c4728ULL,
+                     "rotated vertex start") ||
+        !checkOffset({{-2.0, -3.0}, {9.0, -1.0}, {6.0, 7.0}, {-5.0, 4.0}},
+                     0x430f53e0U, 0x434e36c0U, 0xc89c2d67a1a13ff5ULL,
+                     "independent skew quadrilateral"))
+    {
+        return false;
+    }
+
+    const auto largeSquare = jaguar::SimplePolygon::Create({
+        {1000000.0, 1000000.0}, {2000000.0, 1000000.0},
+        {2000000.0, 2000000.0}, {1000000.0, 2000000.0}});
+    if (!Expect(largeSquare.HasValue(), output,
+                "sub-ULP offset square must construct"))
+    {
+        return false;
+    }
+    const auto subUlpOffset = jaguar::OffsetShape(
+        largeSquare.Value(), jaguar::ShapeModifyMode::Inflate, 0.01);
+    if (!Expect(subUlpOffset.HasValue(), output,
+                "sub-ULP convex offset must succeed"))
+    {
+        return false;
+    }
+    const std::vector<jaguar::Point2d> expectedSubUlpVertices = {
+        {1000000.0, 2000000.0}, {1000000.0, 1000000.0},
+        {2000000.0, 1000000.0}, {2000000.0, 2000000.0}};
+    return Expect(subUlpOffset.Value().Vertices() == expectedSubUlpVertices &&
+                      FloatBits(static_cast<float>(subUlpOffset.Value().Area()))
+                          == 0x5368d4a5U &&
+                      PolygonF32BitsHash(subUlpOffset.Value())
+                          == 0x30b539c7ccd489c5ULL,
+                  output,
+                  "sub-ULP offset bits and contour start must match Rust");
+}
+
 bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
 {
     const float radius = std::sqrt(std::numeric_limits<float>::max() * 0.15F);
@@ -974,6 +1085,71 @@ bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
         if (!item.HasValue())
             output << "  finite-separation C++ item import error: "
                    << item.GetError().message << '\n';
+        return false;
+    }
+
+    const jaguar::OriginalShape& original = item.Value().GetOriginalShape();
+    if (!Expect(original.shape.VertexCount() == 4U &&
+                    PolygonF32BitsHash(original.shape) == 0x08cf09db1f0044d5ULL,
+                output,
+                "original item geometry bits must match the Rust input stage"))
+    {
+        return false;
+    }
+    const auto transformed =
+        original.shape.TransformedRustF32(original.preTransform);
+    if (!transformed.HasValue())
+        return false;
+    if (!Expect(transformed.Value().VertexCount() == 4U &&
+                    PolygonF32BitsHash(transformed.Value()) == 0x08cf09db1f0044d5ULL,
+                output,
+                "transformed item geometry bits must match the Rust transform stage"))
+    {
+        return false;
+    }
+    if (!Expect(original.modifyConfig.offset.has_value(),
+                output,
+                "finite separation must install an offset in OriginalShape"))
+    {
+        return false;
+    }
+    const auto offset = jaguar::OffsetShape(
+        transformed.Value(), original.modifyMode,
+        *original.modifyConfig.offset);
+    if (!offset.HasValue())
+        return false;
+    const std::uint64_t offsetHash = PolygonF32BitsHash(offset.Value());
+    const float offsetArea = static_cast<float>(offset.Value().Area());
+    const std::uint32_t offsetAreaBits = FloatBits(offsetArea);
+    if (!Expect(offset.Value().VertexCount() == 68U &&
+                    offsetHash == 0xd2af3ad80f009765ULL &&
+                    offsetAreaBits == 0x7ef0e310U &&
+                    FloatBits(static_cast<float>(
+                        offset.Value().BoundingBox().AreaRustF32())) == 0x7f19999aU,
+                output,
+                "offset vertex sequence and metrics must match the Rust buffer stage"))
+    {
+        output << "  offset hash: " << std::hex << offsetHash
+               << " area bits: " << offsetAreaBits
+               << std::dec << '\n';
+        return false;
+    }
+    const auto converted = original.ConvertToInternal();
+    if (!converted.HasValue())
+        return false;
+    if (!Expect(converted.Value().VertexCount() == 50U &&
+                    FloatBits(static_cast<float>(converted.Value().Area()))
+                        == 0x7ef12454U &&
+                    FloatBits(static_cast<float>(
+                        converted.Value().BoundingBox().AreaRustF32())) == 0x7f19999aU &&
+                    PolygonF32BitsHash(converted.Value()) == 0x43ff76136e8088d1ULL &&
+                    PolygonF32BitsHash(item.Value().CollisionShape())
+                        == 0x43ff76136e8088d1ULL,
+                output,
+                "converted and collision geometry bits must match the Rust stages"))
+    {
+        output << "  converted hash: " << std::hex
+               << PolygonF32BitsHash(converted.Value()) << std::dec << '\n';
         return false;
     }
 
@@ -1045,27 +1221,32 @@ bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
     const float firstProduct = 2.0F * std::sqrt(overlap);
     const float formulaLoss = sparrow::CalculateContainerPenalty(
         candidateShape.Value(), containerBounds);
-    const auto floatBits = [](float value) {
-        std::uint32_t bits = 0U;
-        std::memcpy(&bits, &value, sizeof(bits));
-        return bits;
-    };
+    const std::uint32_t bboxBits = FloatBits(bboxArea);
+    const std::uint32_t shapeBits = FloatBits(shapeArea);
+    const std::uint32_t overlapBits = FloatBits(overlap);
+    const std::uint32_t penaltyBits = FloatBits(penalty);
+    const std::uint32_t firstProductBits = FloatBits(firstProduct);
     if (!Expect(std::isfinite(bboxArea)
                     && bboxArea > std::numeric_limits<float>::max() * 0.5F
                     && std::isfinite(shapeArea)
                     && std::isfinite(overlap) && overlap > 0.0F
                     && std::isfinite(penalty) && penalty > 0.0F
                     && std::isfinite(firstProduct) && firstProduct > 0.0F
+                    && bboxBits == 0x7f19999aU
+                    && shapeBits == 0x7ef12454U
+                    && overlapBits == 0x7f199d89U
+                    && penaltyBits == 0x5f2fb00cU
+                    && firstProductBits == 0x5fc64e82U
                     && std::isinf(firstProduct * penalty)
                     && std::isinf(formulaLoss) && formulaLoss > 0.0F,
                 output,
-                "finite C++ formula operands must overflow on the same final multiply as Rust"))
+                "finite C++ formula operands must match Rust and overflow on the same final multiply"))
     {
-        output << "  C++ bits: bbox=" << std::hex << floatBits(bboxArea)
-               << " shape=" << floatBits(shapeArea)
-               << " overlap=" << floatBits(overlap)
-               << " penalty=" << floatBits(penalty)
-               << " first_product=" << floatBits(firstProduct) << std::dec << '\n';
+        output << "  C++ bits: bbox=" << std::hex << bboxBits
+               << " shape=" << shapeBits
+               << " overlap=" << overlapBits
+               << " penalty=" << penaltyBits
+               << " first_product=" << firstProductBits << std::dec << '\n';
         return false;
     }
 
@@ -1994,6 +2175,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
         && TestFinalMultiplyOverflowSquareMatchesRustConstruction(output)
+        && TestStrictConvexInflateContourOrderMatchesRust(output)
         && TestFiniteSeparationOffsetFinalMultiplyBoundary(output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestFiniteExteriorWeightOverflowMatchesRust(output)

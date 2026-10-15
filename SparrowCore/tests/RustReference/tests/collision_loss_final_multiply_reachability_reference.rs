@@ -220,11 +220,16 @@ fn finite_imported_item_reaches_container_loss_final_multiply_overflow() {
     let evaluation = evaluator.evaluate_sample(placement, None);
 
     assert!(separation.is_finite());
-    assert!(separation.is_finite());
     assert!(item_shape.area.is_finite() && item_shape.bbox.area().is_finite());
+    assert!(!item_shape.centroid().0.is_finite() || !item_shape.centroid().1.is_finite());
     assert!(item_shape.bbox.area() > f32::MAX * 0.5);
     assert!(overlap.is_finite() && overlap.is_normal());
     assert!(penalty.is_finite() && first_product.is_finite());
+    assert_eq!(item_shape.bbox.area().to_bits(), 0x7f19999a);
+    assert_eq!(item_shape.area.to_bits(), 0x7ef12454);
+    assert_eq!(overlap.to_bits(), 0x7f199d89);
+    assert_eq!(penalty.to_bits(), 0x5f2fb00c);
+    assert_eq!(first_product.to_bits(), 0x5fc64e82);
     assert!((first_product * penalty).is_infinite());
     assert_eq!(formula_loss, f32::INFINITY);
     assert_eq!(

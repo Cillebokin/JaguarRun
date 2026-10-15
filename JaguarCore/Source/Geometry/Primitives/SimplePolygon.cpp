@@ -241,7 +241,7 @@ JAGUARCORE_API Result<SimplePolygon> SimplePolygon::Create(
     const Rect2d boundingBox = makeBoundingBox(points);
     const Point2d centroid = makeCentroidRustF32(points, area);
     const float diameter = makeDiameterRustF32(points);
-    if (!std::isfinite(area) || !centroid.IsFinite() ||
+    if (!std::isfinite(area) ||
         !std::isfinite(boundingBox.xMin) || !std::isfinite(boundingBox.yMin) ||
         !std::isfinite(boundingBox.xMax) || !std::isfinite(boundingBox.yMax) ||
         !std::isfinite(diameter))

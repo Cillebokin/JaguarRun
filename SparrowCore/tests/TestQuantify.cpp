@@ -899,7 +899,7 @@ bool TestFiniteExteriorCentroidDistanceOverflowMatchesRust(std::ostream& output)
                   "evaluator must recover with unchanged layout/tracker after overflow");
 }
 
-bool TestFinalMultiplyOverflowSquareIsRejectedBeforeEvaluation(
+bool TestFinalMultiplyOverflowSquareMatchesRustConstruction(
     std::ostream& output)
 {
     const float bboxArea = std::numeric_limits<float>::max() * 0.49999F;
@@ -914,25 +914,50 @@ bool TestFinalMultiplyOverflowSquareIsRejectedBeforeEvaluation(
         return false;
     }
 
-    const auto polygon = jaguar::SimplePolygon::Create({
+    const std::vector<jaguar::Point2d> points{
         {-halfSide, -halfSide},
         {halfSide, -halfSide},
         {halfSide, halfSide},
         {-halfSide, halfSide},
-    });
-    return Expect(!polygon.HasValue()
-                      && polygon.GetError().code
-                             == jaguar::ErrorCode::InvalidInput,
+    };
+    const auto polygon = jaguar::SimplePolygon::Create(points);
+    if (!Expect(polygon.HasValue(), output,
+                "Rust accepts a finite-vertex polygon with a non-finite lazy centroid"))
+    {
+        if (!polygon.HasValue())
+            output << "  polygon error: " << polygon.GetError().message << '\n';
+        return false;
+    }
+
+    const jaguar::Point2d centroid = polygon.Value().Centroid();
+    if (!Expect(std::isfinite(polygon.Value().Area())
+                    && std::isfinite(polygon.Value().BoundingBox().AreaRustF32())
+                    && std::isfinite(polygon.Value().Diameter())
+                    && !centroid.IsFinite(),
                   output,
-                  "Rust-direct-only overflow square must fail JaguarCore's finite-centroid validation before S12 evaluation");
+                  "finite polygon construction must preserve Rust's lazy non-finite centroid result"))
+    {
+        return false;
+    }
+
+    jaguar::ExternalItem external{};
+    external.id = 4U;
+    external.rotation = jaguar::RotationPolicy::Continuous();
+    external.shape = jaguar::ExternalShape::SimplePolygon(points);
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportItem(external, 0U);
+    return Expect(!imported.HasValue(), output,
+                  "a non-finite external centering transform must still stop import before evaluation");
 }
 
 bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
 {
     const float radius = std::sqrt(std::numeric_limits<float>::max() * 0.15F);
     const float separation = radius * 2.0F;
-    jaguar::ImporterConfig importerConfig{};
+    jaguar::ImporterConfig importerConfig =
+        sparrow::MakeRustDefaultImporterConfig();
     importerConfig.minItemSeparation = static_cast<double>(separation);
+    importerConfig.cdeConfig.quadtreeDepth = 0U;
     importerConfig.cdeConfig.itemSurrogateConfig.poleLimits =
         {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
     const jaguar::Importer importer(importerConfig);
@@ -943,18 +968,123 @@ bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
     external.shape = jaguar::ExternalShape::Rectangle(
         -5.0e11, -5.0e11, 1.0e12, 1.0e12);
     const auto item = importer.ImportItem(external, 0U);
-    if (item.HasValue())
+    if (!Expect(item.HasValue(), output,
+                "Rust imports the finite offset polygon and reaches Collision(+Inf)"))
     {
-        return Expect(false,
-                      output,
-                      "Rust accepts this finite offset item and reaches Collision(+Inf), so C++ must not reject it before S12 evaluation");
+        if (!item.HasValue())
+            output << "  finite-separation C++ item import error: "
+                   << item.GetError().message << '\n';
+        return false;
     }
 
-    output << "  finite-separation C++ item import error: "
-           << item.GetError().message << '\n';
-    return Expect(item.GetError().code == jaguar::ErrorCode::OffsetFailed,
+    const jaguar::SimplePolygon& itemShape = item.Value().CollisionShape();
+    if (!Expect(!itemShape.Centroid().IsFinite()
+                    && itemShape.Area() > 0.0
+                    && std::isfinite(itemShape.Area())
+                    && itemShape.BoundingBox().AreaRustF32()
+                           > std::numeric_limits<float>::max() * 0.5F,
+                output,
+                "finite offset item must preserve Rust's non-finite centroid and finite geometry metrics"))
+    {
+        return false;
+    }
+
+    const auto containerPolygon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}});
+    if (!Expect(containerPolygon.HasValue(), output,
+                "small manual container polygon creation failed"))
+    {
+        return false;
+    }
+    const auto container = jaguar::Container::Create(
+        1U,
+        {containerPolygon.Value(), jaguar::Transform2d::Identity(),
+         jaguar::ShapeModifyMode::Deflate, {}},
+        {},
+        importerConfig.cdeConfig);
+    if (!Expect(container.HasValue(), output,
+                "small manual container creation failed"))
+    {
+        return false;
+    }
+
+    jaguar::Layout layout(container.Value());
+    const jaguar::Transform2d placement =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0});
+    const auto movingHandle = layout.PlaceItem(item.Value(), placement);
+    if (!Expect(movingHandle.HasValue(), output,
+                "finite offset item placement failed"))
+    {
+        return false;
+    }
+
+    const auto candidateShape = itemShape.TransformedRustF32(placement);
+    if (!Expect(candidateShape.HasValue(), output,
+                "finite offset candidate transform failed"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d& containerBounds =
+        container.Value().CollisionShape().BoundingBox();
+    const auto intersection =
+        candidateShape.Value().BoundingBox().Intersection(containerBounds);
+    if (!Expect(intersection.has_value(), output,
+                "finite offset candidate must intersect the manual container bounds"))
+    {
+        return false;
+    }
+    const float bboxArea = static_cast<float>(
+        candidateShape.Value().BoundingBox().AreaRustF32());
+    const float shapeArea = static_cast<float>(itemShape.Area());
+    const float overlap =
+        (bboxArea - static_cast<float>(intersection->AreaRustF32()))
+        + 0.0001F * bboxArea;
+    const float hullArea = static_cast<float>(
+        itemShape.GetSurrogate()->ConvexHullArea());
+    const float penalty = std::sqrt(std::sqrt(hullArea) * std::sqrt(hullArea));
+    const float firstProduct = 2.0F * std::sqrt(overlap);
+    const float formulaLoss = sparrow::CalculateContainerPenalty(
+        candidateShape.Value(), containerBounds);
+    const auto floatBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    if (!Expect(std::isfinite(bboxArea)
+                    && bboxArea > std::numeric_limits<float>::max() * 0.5F
+                    && std::isfinite(shapeArea)
+                    && std::isfinite(overlap) && overlap > 0.0F
+                    && std::isfinite(penalty) && penalty > 0.0F
+                    && std::isfinite(firstProduct) && firstProduct > 0.0F
+                    && std::isinf(firstProduct * penalty)
+                    && std::isinf(formulaLoss) && formulaLoss > 0.0F,
+                output,
+                "finite C++ formula operands must overflow on the same final multiply as Rust"))
+    {
+        output << "  C++ bits: bbox=" << std::hex << floatBits(bboxArea)
+               << " shape=" << floatBits(shapeArea)
+               << " overlap=" << floatBits(overlap)
+               << " penalty=" << floatBits(penalty)
+               << " first_product=" << floatBits(firstProduct) << std::dec << '\n';
+        return false;
+    }
+
+    const auto tracker = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(tracker.HasValue(), output,
+                "finite offset collision tracker creation failed"))
+    {
+        return false;
+    }
+
+    sparrow::SeparationEvaluator evaluator(
+        layout, item.Value(), movingHandle.Value(), tracker.Value());
+    const sparrow::SampleEval evaluation = evaluator.Evaluate(placement, std::nullopt);
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                      && std::isinf(evaluation.loss)
+                      && evaluation.loss > 0.0F
+                      && evaluator.EvaluationCount() == 1U,
                   output,
-                  "the matched finite-offset item should report the offset reimport failure that blocks C++ from S12 evaluation");
+                  "finite offset item must reach the evaluator and match Rust Collision(+Inf)");
 }
 
 bool TestFiniteExteriorWeightOverflowMatchesRust(std::ostream& output)
@@ -1863,7 +1993,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
-        && TestFinalMultiplyOverflowSquareIsRejectedBeforeEvaluation(output)
+        && TestFinalMultiplyOverflowSquareMatchesRustConstruction(output)
         && TestFiniteSeparationOffsetFinalMultiplyBoundary(output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestFiniteExteriorWeightOverflowMatchesRust(output)

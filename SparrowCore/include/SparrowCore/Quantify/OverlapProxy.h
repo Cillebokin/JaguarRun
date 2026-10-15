@@ -19,10 +19,13 @@ SPARROWCORE_API float CalculateOverlapProxy(
 // Quantifies an already colliding pair using Sparrow's polygon loss formula.
 // The low-level overload above intentionally remains available for callers
 // that need the raw pole proxy.
+// Throws std::logic_error if either polygon has no generated surrogate.
 SPARROWCORE_API float CalculatePolygonCollisionLoss(
     const jaguar::SimplePolygon& first,
     const jaguar::SimplePolygon& second);
 
+// Throws std::logic_error if the shape has no generated surrogate after its
+// container-overlap calculation reaches the shape-penalty stage.
 SPARROWCORE_API float CalculateContainerPenalty(
     const jaguar::SimplePolygon& shape,
     const jaguar::Rect2d& containerBounds);

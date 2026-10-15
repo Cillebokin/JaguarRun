@@ -43,17 +43,24 @@ float CirclePairContribution(const jaguar::Circle2d& first,
     return decayedPenalty * minimumRadius;
 }
 
-float ShapePenalty(const jaguar::SimplePolygon& first,
-                   const jaguar::SimplePolygon& second) noexcept
+const jaguar::Surrogate& RequireSurrogate(const jaguar::SimplePolygon& shape)
 {
-    const jaguar::Surrogate* firstSurrogate = first.GetSurrogate();
-    const jaguar::Surrogate* secondSurrogate = second.GetSurrogate();
-    if (firstSurrogate == nullptr || secondSurrogate == nullptr)
+    const jaguar::Surrogate* surrogate = shape.GetSurrogate();
+    if (surrogate == nullptr)
     {
-        return 0.0F;
+        throw std::logic_error("surrogate not generated");
     }
-    const float firstArea = static_cast<float>(firstSurrogate->ConvexHullArea());
-    const float secondArea = static_cast<float>(secondSurrogate->ConvexHullArea());
+
+    return *surrogate;
+}
+
+float ShapePenalty(const jaguar::SimplePolygon& first,
+                   const jaguar::SimplePolygon& second)
+{
+    const jaguar::Surrogate& firstSurrogate = RequireSurrogate(first);
+    const jaguar::Surrogate& secondSurrogate = RequireSurrogate(second);
+    const float firstArea = static_cast<float>(firstSurrogate.ConvexHullArea());
+    const float secondArea = static_cast<float>(secondSurrogate.ConvexHullArea());
     return std::sqrt(std::sqrt(firstArea) * std::sqrt(secondArea));
 }
 
@@ -104,13 +111,6 @@ float CalculateOverlapProxy(const jaguar::Surrogate& first,
 float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
                                     const jaguar::SimplePolygon& second)
 {
-    const jaguar::Surrogate* firstSurrogate = first.GetSurrogate();
-    const jaguar::Surrogate* secondSurrogate = second.GetSurrogate();
-    if (firstSurrogate == nullptr || secondSurrogate == nullptr)
-    {
-        return 0.0F;
-    }
-
     const float firstDiameter = static_cast<float>(first.Diameter());
     const float secondDiameter = static_cast<float>(second.Diameter());
     const float diameter = std::max(firstDiameter, secondDiameter);
@@ -119,10 +119,13 @@ float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
     const float epsilon = static_cast<float>(diameter)
         * epsilonDiameterRatio;
 
+    const jaguar::Surrogate& firstSurrogate = RequireSurrogate(first);
+    const jaguar::Surrogate& secondSurrogate = RequireSurrogate(second);
+
     const float rawProxy = CalculateOverlapProxy(
-        *firstSurrogate,
+        firstSurrogate,
         jaguar::Transform2d::Identity(),
-        *secondSurrogate,
+        secondSurrogate,
         jaguar::Transform2d::Identity(),
         epsilon);
     const float overlapProxy = rawProxy + epsilon * epsilon;

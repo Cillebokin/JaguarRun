@@ -334,6 +334,70 @@ bool TestOverlapProxy(std::ostream& output)
                   "container loss must match Sparrow's bounding-box formula");
 }
 
+bool TestMissingSurrogateLossBoundaryMatchesRust(std::ostream& output)
+{
+    const auto missingResult = jaguar::SimplePolygon::Create({
+        {-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}});
+    const auto presentResult = jaguar::SimplePolygon::Create({
+        {-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}});
+    if (!Expect(missingResult.HasValue() && presentResult.HasValue(),
+                output,
+                "valid squares without surrogates must construct"))
+    {
+        return false;
+    }
+
+    jaguar::SimplePolygon missing = missingResult.Value();
+    jaguar::SimplePolygon present = presentResult.Value();
+    jaguar::SurrogateConfig config{};
+    config.poleLimits = {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+    if (!Expect(missing.GetSurrogate() == nullptr
+                    && present.GenerateSurrogate(config).HasValue()
+                    && present.GetSurrogate() != nullptr,
+                output,
+                "fixture must contain one generated and one absent surrogate"))
+    {
+        return false;
+    }
+
+    const auto container = jaguar::Rect2d::Create(-2.0, -2.0, 2.0, 2.0);
+    if (!Expect(container.HasValue(), output,
+                "finite container bounds must construct"))
+    {
+        return false;
+    }
+
+    const auto throwsForMissingSurrogate = [](const auto& call) {
+        try
+        {
+            call();
+        }
+        catch (const std::logic_error& error)
+        {
+            return std::string(error.what()) == "surrogate not generated";
+        }
+        return false;
+    };
+
+    const bool missingFirstThrows = throwsForMissingSurrogate([&]() {
+        static_cast<void>(sparrow::CalculatePolygonCollisionLoss(missing, present));
+    });
+    const bool missingSecondThrows = throwsForMissingSurrogate([&]() {
+        static_cast<void>(sparrow::CalculatePolygonCollisionLoss(present, missing));
+    });
+    const bool missingContainerThrows = throwsForMissingSurrogate([&]() {
+        static_cast<void>(sparrow::CalculateContainerPenalty(
+            missing, container.Value()));
+    });
+
+    return Expect(missingFirstThrows && missingSecondThrows
+                      && missingContainerThrows
+                      && missing.GetSurrogate() == nullptr
+                      && present.GetSurrogate() != nullptr,
+                  output,
+                  "missing surrogate must throw at both Rust loss boundaries without mutation");
+}
+
 bool TestExtremeEpsilonOverlapProxyBoundary(std::ostream& output)
 {
     const jaguar::Item item = MakeItem(90U, 2.0, 2.0);
@@ -3193,6 +3257,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestPairMatrixPreservesNonFiniteLossArithmetic(output)
         && TestPairMatrixOverflowMatchesRustProfile(output)
         && TestOverlapProxy(output)
+        && TestMissingSurrogateLossBoundaryMatchesRust(output)
         && TestExtremeEpsilonOverlapProxyBoundary(output)
         && TestSubnormalPolygonLossBranch(output)
         && TestFiniteTransformOverflowingContainerBboxAreaMatchesRust(output)

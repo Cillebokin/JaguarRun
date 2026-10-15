@@ -18,7 +18,7 @@
 - C++ 对应：`Create`（cpp:67-76）+ 私有 `BuildFromLayout`（cpp:770-863）。
 - 索引建立：Rust `l.placed_items.keys().enumerate()` 建 pk→idx（tracker.rs:30-32）。C++ 按 `snapshot.placements` 顺序填 `m_Handles`（cpp:783-787）——顺序一致（placement 顺序）✓。
 - loss 重算：Rust 对每个 pk 调 `recompute_loss_for_item`（tracker.rs:38-40），逐项重置该行后 CDE 收集。C++ `BuildFromLayout` 现也在每个 item 收集前清零整条共享 pair 行，再调用 JaguarCore 碰撞引擎并填 pair/container loss；与 Rust 扫描次序相同。
-- 非对称检测边界：后处理 item 的清行会覆盖共享 pair 槽；C++ 现已执行相同转移。Rust 自身承认某些边界输入可能出现单向碰撞发现（util/assertions.rs:42-45,104-106）。本轮 nested-square 位置/角度探测没有找到 live 单向发现样本，因此只确认 C++ 代码级状态转移与 Rust 源码一致，尚无该触发条件的跨语言运行时 fixture。
+- 非对称检测边界：后处理 item 的清行会覆盖共享 pair 槽；C++ 现已执行相同转移。Rust 自身保留“非对称碰撞”告警分支（util/assertions.rs:42-45,104-106），但截至 2026-10-15 仍未找到可触发的实际几何。新增搜索覆盖锁定 Rust CDE 的直接双向收集、完整 Layout/Tracker、quadtree 分割线及多种边界几何；范围、数量和限制见下方“单向发现样本搜索”。因此目前只能确认 C++ 代码级清行状态转移与 Rust 源码一致，不能声称该运行时触发条件已验证。
 - hazard 收集对（核对任务指定项）：Rust 用 jagua-rs CDE：`BasicHazardCollector::with_capacity(len+1)` + `l.cde().collect_poly_collisions(shape, &mut collector)` + `collector.remove_by_entity(&HazardEntity::from((pk, pi)))` 移除自身（tracker.rs:59-62）。C++ 把 placements 注册为 hazards（带各自 handle，cpp:801-821），`HazardFilter::irrelevantHandle` 排除自身 handle（cpp:823-831），再调用 `CollectPolygonCollisionsUntil`（cpp:832-837）。两侧均收集该 item 与其它 item/Exterior 的当前碰撞集合；C++ 从容器 collision engine 获取 Exterior hazard（cpp:854-858）。【一致】（渠道不同、内容等价）
 - 自身排除：Rust `remove_by_entity`（按实体）；C++ 按 handle 过滤（BuildFromLayout cpp:825-831；UpdateMovedItem cpp:200-206）✓。
 - `debug_assert!(tracker_matches_layout(&ot, l))`（tracker.rs:42）→ C++ 无逐行一致性自检，改为 UpdateMovedItem/Restore 中的显式对账校验。【差异】（既定 debug_assert→无/显式校验）
@@ -123,13 +123,37 @@
 | 9 | C++ `EvaluateCandidateLoss` 两重载（Rust 对应逻辑在 eval/collision_loss.rs，S12 已录）；无 layout 重载用裸 `CalculateOverlapProxy` 无 shape penalty | 【C++ 额外】/【差异】 | 生产走 layout 重载，与 Rust bounded 版对应 | CollisionTracker.cpp:534-696 vs collision_loss.rs:62-96 |
 | 10 | `restore_but_keep_weights`：loss 取快照、weight 保留——两侧一致 | 【一致】 | — | tracker.rs:85-95 vs CollisionTracker.cpp:266-366 |
 | 11 | 无效 key/index：Rust 用 stale `PItemKey` 访问 `SecondaryMap` 时 panic；C++ 数值 getter 先前对越界返回 0，现改为 checked access 抛 `std::out_of_range` | 【getter 越界已闭合为语言异常映射】 | Rust stale-key Debug/Release panic 与 C++ 越界 exception 均不会伪装成 0 loss/weight；RustReference stale key 与 C++ 六类 getter 检查已加入。`IndexForHandle` 的 optional 仍是内部查找 API，没有 Rust 公共同形接口 | tracker.rs:157-186 vs CollisionTracker.cpp:352-418; tracker_weight_reference.rs; TestQuantify.cpp |
-| 12 | 初建 tracker 时共享 pair 槽的逐行清零：Rust 后处理项会清除该 pair，C++ 现已清除 | 【源码语义已修复；触发 fixture 未得】 | 单向发现时结果取后处理方向；当前 nested-square 角度/位置探测未产生单向发现，运行时 parity 仍未由该触发条件直接验证 | tracker.rs:47-56; util/assertions.rs:42-45,104-106 vs CollisionTracker.cpp BuildFromLayout
+| 12 | 初建 tracker 时共享 pair 槽的逐行清零：Rust 后处理项会清除该 pair，C++ 现已清除 | 【源码语义已修复；触发 fixture 未得】 | 若 CDE 仅单向报告 pair，最终共享 loss 由后处理行决定；截至 2026-10-15 的定向与系统搜索均未触发，Tracker 端到端状态仍缺该触发条件的直接运行时验证 | tracker.rs:47-56; util/assertions.rs:42-45,104-106 vs CollisionTracker.cpp BuildFromLayout
 
-Fixture 与断言：Rust `tracker_weight_reference.rs` 覆盖 20 次有限权重 golden、NaN/±Inf loss 与 GLS floor、stale key 的六种 getter panic，以及三件布局中每个 pair/container entry 在 moved-row 更新前后的 loss/weight；Rust `collision_loss_unsupported_hazard_reference.rs` 增加 Tracker 初始化 Hole/QZone panic 与 moved-row Hole panic 后的 key/清零状态断言。C++ `TestQuantify.cpp` 对应核对全矩阵、六种越界 getter、untouched pair 与 handle 替换，并核对 Tracker 初始化 Hole/QZone 与 moved-row Hole 失败。Rust/C++ 全量测试均在 Debug/Release 执行。CDE 单向发现几何仍未找到。SeparatorRoundRustTrace.tsv 的一般 optimizer loss/weight 仍按 2e-2/5e-2 容差比较；RustSppCompressWorkerMove.json 不外推至任意随机 move。
+### 单向发现样本搜索（2026-10-15）
+
+使用 `SparrowCore/Tests/RustReference/Cargo.lock` 锁定的 jagua-rs 0.9.0（`f5e2b5ffd14931f17a20ce283a2122e877953ceb`）源码，以真实 `CDEngine::collect_poly_collisions`（`cd_engine.rs:273-319`）对同一对多边形分别执行 A→B 与 B→A。底层 CDE 探测每组注册 Exterior hazard 和两个 Interior-scope `Hole` hazard；`HazardEntity::scope` 将 `Hole` 与 Tracker 使用的 `PlacedItem` 同归为 Interior（`hazard.rs:40-64`）。随后另做了真实 Layout/Tracker 搜索，结果见下文。
+
+已完成且未触发单向收集的确定性搜索：
+
+- 20,000 组近接触旋转矩形，quadtree depth=6、`cd_threshold=0`。
+- 3,000 组 65–192 顶点正多边形近接触样本，使用 Sparrow 默认 CDE depth=4、`cd_threshold=64`。
+- 10,000 组 67–118 顶点不规则径向多边形，使用默认 depth/threshold（depth=4、`cd_threshold=64`）；此直接精确收集路径不读取 surrogate 配置。
+- 100,000 组边界落在 0.5 网格上的轴对齐矩形对，容器为 dyadic 方形、depth=8、`cd_threshold=0`。
+- 最多 35,000 组高坐标偏移旋转矩形，坐标尺度覆盖 `2^24` 至 `2^60`，形状从原点的有效模板经 Rust `transform_clone` 放置；depth=6、`cd_threshold=0`，并交替 hazard 注册顺序。超出容器 bbox 的样本跳过。
+- 另对 5,000,000 组共享端点边、5,000,000 组构造交叉边及 5,000,000 组有限大坐标交叉边直接比较 `Edge::collides_with` 两个参数方向，均未得到方向性边相交样本。
+- 另以当前 Sparrow `Importer` 构造真实 item 与容器，建立 12 个完整 `Layout`；每个布局放置 48 个 item，来自 4 种 94–124 条 collision edge 的不规则多边形，按固定 RNG 种子生成旋转和平移，共比较 13,536 个 pair。对每个 pair 检查真实 `PlacedItem` hazard 的双向 CDE collector，并核对 `CollisionTracker::new` 的共享 pair loss。
+- 另做 24 个近接触完整 Layout，每个布局包含 9 对 importer 生成的复杂 item；按实际 collision contour 的支撑方向把每对放到 0.0001–0.1 的轻微重叠范围，并保留同布局其余 item hazards，共检查 216 对。两向 collector 与 Tracker loss 均逐对核对。
+
+真实 Layout/Tracker 搜索在 Debug 与 Release 均完成，13,752 个 pair 没有单向发现，且 Tracker pair loss 与双向 collector 的结果一致。可用以下命令重跑这两组固定搜索：
+
+```powershell
+cargo test --release --locked --manifest-path SparrowCore\Tests\RustReference\Cargo.toml --test cde_layout_direction_search_reference -- --ignored --nocapture
+cargo test --locked --manifest-path SparrowCore\Tests\RustReference\Cargo.toml --test cde_layout_direction_search_reference -- --ignored --nocapture
+```
+
+搜索 harness `SparrowCore/Tests/RustReference/tests/cde_layout_direction_search_reference.rs` 标记为 ignored，避免把约 36 秒的 Debug 探测加入每次常规全量测试。结论仍严格限定为以上确定性搜索域：它们不能证明所有合法多边形、所有容器树状态或所有浮点边界下该分支不可达。原始 `tracker_matches_layout` 告警是源码中的防御性处理，当前没有几何证据证明其触发。下一步若继续，应围绕 `cd_engine.rs` 的 `almost_relation_to` containment 路径、`qt_hazard.rs` 的 Partial/Entire 分区分类及 `qt_node.rs` 的 query quadrant 裁剪，构造源码分支级候选；命中后再固化 Rust/C++ 双向 collector 与最终 pair loss golden。在此之前保留为“未验证”，不增加虚构的 Rust/C++ golden。
+
+Fixture 与断言：Rust `tracker_weight_reference.rs` 覆盖 20 次有限权重 golden、NaN/±Inf loss 与 GLS floor、stale key 的六种 getter panic，以及三件布局中每个 pair/container entry 在 moved-row 更新前后的 loss/weight；Rust `collision_loss_unsupported_hazard_reference.rs` 增加 Tracker 初始化 Hole/QZone panic 与 moved-row Hole panic 后的 key/清零状态断言。C++ `TestQuantify.cpp` 对应核对全矩阵、六种越界 getter、untouched pair 与 handle 替换，并核对 Tracker 初始化 Hole/QZone 与 moved-row Hole 失败。当前单向搜索 harness 在 Rust Debug/Release 手动运行，不是 Rust/C++ parity golden。SeparatorRoundRustTrace.tsv 的一般 optimizer loss/weight 仍按 2e-2/5e-2 容差比较；RustSppCompressWorkerMove.json 不外推至任意随机 move。
 
 ## 结论
 
-Tracker 的 PairMatrix 次序、raw loss/weighted-loss 运算、GLS NaN/±Inf floor、moved-row 更新、getter 越界和 unsupported-hazard 失败状态已有直接 Rust/C++ Debug/Release 测试。BuildFromLayout 已复刻 Rust 每项重算前清空共享 pair 行；本轮仍未找到触发 CDE 单向发现的实际几何，因此该窄边界保留未验证状态。C++ Restore 仍有布局 handle/尺寸/feasibility 校验；每次 moved-row 更新新建并注册临时 collision engine，耗时未量化。一般 optimizer trace 仍按已登记容差比较。
+Tracker 的 PairMatrix 次序、raw loss/weighted-loss 运算、GLS NaN/±Inf floor、moved-row 更新、getter 越界和 unsupported-hazard 失败状态已有直接 Rust/C++ Debug/Release 测试。BuildFromLayout 已复刻 Rust 每项重算前清空共享 pair 行；定向 CDE 搜索未找到单向发现样本，Tracker 端到端触发仍未验证。C++ Restore 仍有布局 handle/尺寸/feasibility 校验；每次 moved-row 更新新建并注册临时 collision engine，耗时未量化。一般 optimizer trace 仍按已登记容差比较。
 
 ### 补充审计（2026-09-29，实体句柄专项；以下行号为当时记录）
 **【任务指定核对项】CollisionTracker 私有引擎的 hazard 实体句柄（2026-09-29 修复，commit 6910145）现场复验**：

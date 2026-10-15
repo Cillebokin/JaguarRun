@@ -899,6 +899,64 @@ bool TestFiniteExteriorCentroidDistanceOverflowMatchesRust(std::ostream& output)
                   "evaluator must recover with unchanged layout/tracker after overflow");
 }
 
+bool TestFinalMultiplyOverflowSquareIsRejectedBeforeEvaluation(
+    std::ostream& output)
+{
+    const float bboxArea = std::numeric_limits<float>::max() * 0.49999F;
+    const float side = std::sqrt(bboxArea);
+    const float halfSide = side * 0.5F;
+    const float actualBoxArea = side * side;
+    const float diameterSquared = actualBoxArea + actualBoxArea;
+    if (!Expect(std::isfinite(actualBoxArea) && std::isfinite(diameterSquared),
+                output,
+                "overflow fixture must have finite area and diameter"))
+    {
+        return false;
+    }
+
+    const auto polygon = jaguar::SimplePolygon::Create({
+        {-halfSide, -halfSide},
+        {halfSide, -halfSide},
+        {halfSide, halfSide},
+        {-halfSide, halfSide},
+    });
+    return Expect(!polygon.HasValue()
+                      && polygon.GetError().code
+                             == jaguar::ErrorCode::InvalidInput,
+                  output,
+                  "Rust-direct-only overflow square must fail JaguarCore's finite-centroid validation before S12 evaluation");
+}
+
+bool TestFiniteSeparationOffsetFinalMultiplyBoundary(std::ostream& output)
+{
+    const float radius = std::sqrt(std::numeric_limits<float>::max() * 0.15F);
+    const float separation = radius * 2.0F;
+    jaguar::ImporterConfig importerConfig{};
+    importerConfig.minItemSeparation = static_cast<double>(separation);
+    importerConfig.cdeConfig.itemSurrogateConfig.poleLimits =
+        {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+    const jaguar::Importer importer(importerConfig);
+
+    jaguar::ExternalItem external{};
+    external.id = 3U;
+    external.rotation = jaguar::RotationPolicy::Continuous();
+    external.shape = jaguar::ExternalShape::Rectangle(
+        -5.0e11, -5.0e11, 1.0e12, 1.0e12);
+    const auto item = importer.ImportItem(external, 0U);
+    if (item.HasValue())
+    {
+        return Expect(false,
+                      output,
+                      "Rust accepts this finite offset item and reaches Collision(+Inf), so C++ must not reject it before S12 evaluation");
+    }
+
+    output << "  finite-separation C++ item import error: "
+           << item.GetError().message << '\n';
+    return Expect(item.GetError().code == jaguar::ErrorCode::OffsetFailed,
+                  output,
+                  "the matched finite-offset item should report the offset reimport failure that blocks C++ from S12 evaluation");
+}
+
 bool TestFiniteExteriorWeightOverflowMatchesRust(std::ostream& output)
 {
     std::ifstream fixture(
@@ -1805,6 +1863,8 @@ bool RunQuantifyTests(std::ostream& output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
+        && TestFinalMultiplyOverflowSquareIsRejectedBeforeEvaluation(output)
+        && TestFiniteSeparationOffsetFinalMultiplyBoundary(output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestFiniteExteriorWeightOverflowMatchesRust(output)
         && TestSeparationEvaluatorPreservesTinyCollisionLoss(output)

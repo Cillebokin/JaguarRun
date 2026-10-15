@@ -1,5 +1,9 @@
 #include "SparrowCore/Optimizer/Separator.h"
 
+#ifndef NDEBUG
+#include <cassert>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -207,6 +211,9 @@ sparrow::Result<WorkerRoundResult> RunWorkerRound(
         return sparrow::Result<WorkerRoundResult>::FromError(
             trackerRestored.GetError());
     }
+#ifndef NDEBUG
+    tracker.DebugAssertMatchesLayout(layout.Value());
+#endif
 
     std::vector<std::size_t> candidates;
     candidates.reserve(tracker.ItemCount());
@@ -250,6 +257,9 @@ sparrow::Result<WorkerRoundResult> RunWorkerRound(
         {
             continue;
         }
+#ifndef NDEBUG
+        tracker.DebugAssertMatchesLayout(layout.Value());
+#endif
         ++moveCount;
 
         const auto removed = problem.RemoveItem(previousHandle);
@@ -417,6 +427,14 @@ Result<jaguar::PlacedItemHandle> Separator::MoveItem(
              "separator move transform is invalid"});
     }
     const jaguar::SPSolution previous = m_Problem.Save();
+#ifndef NDEBUG
+    const auto layoutBeforeMove = BuildLayout(previous);
+    assert(layoutBeforeMove.HasValue());
+    if (layoutBeforeMove.HasValue())
+    {
+        m_Tracker.DebugAssertMatchesLayout(layoutBeforeMove.Value());
+    }
+#endif
     const auto removed = m_Problem.RemoveItem(handle);
     if (!removed.HasValue())
     {

@@ -57,7 +57,7 @@
 ### `move_item`（separator.rs:266-297）
 - C++ 对应：`Separator::MoveItem`（Separator.cpp:407-451）。
 - 判定：一致（语义级；快照/回滚防御为 C++ 额外）。
-- 证据与说明：Rust：读 old loss/weighted loss（debug 打印）→ `prob.remove_item(pk)` → `place_item(SPPlacement{d_transf, item_idx})` → `ct.register_item_move(&layout, pk, new_pk)`（:269-283）。C++：`RemoveItem(handle)`（:417-423）→ `PlaceItem({removed.itemIndex, transform})`（:424-430）→ `m_Tracker.UpdateMovedItem(layout, handle, placed)`（:441-449），两侧时序一致。差异：C++ 在每步前保存 `previous` 解（:417），PlaceItem/建 layout/更新 tracker 任一失败即 `m_Problem.Restore(previous)` + 必要时 `RebuildTracker()`（:427-449）——Rust 依赖内部不变式（register 失败即 panic）。判定：C++ 额外（错误恢复路径）。C++ 入口 `transform.IsFinite()` 校验（:411-416）对应 Rust 无校验。`tracker_matches_layout` debug_assert（:267/294）无对应（debug 层）。
+- 证据与说明：Rust：读 old loss/weighted loss（debug 打印）→ `prob.remove_item(pk)` → `place_item(SPPlacement{d_transf, item_idx})` → `ct.register_item_move(&layout, pk, new_pk)`（:269-283）。C++：`RemoveItem(handle)`（:417-423）→ `PlaceItem({removed.itemIndex, transform})`（:424-430）→ `m_Tracker.UpdateMovedItem(layout, handle, placed)`（:441-449），两侧时序一致。差异：C++ 在每步前保存 `previous` 解（:417），PlaceItem/建 layout/更新 tracker 任一失败即 `m_Problem.Restore(previous)` + 必要时 `RebuildTracker()`（:427-449）——Rust 依赖内部不变式（register 失败即 panic）。判定：C++ 额外（错误恢复路径）。C++ 入口 `transform.IsFinite()` 校验（:411-416）对应 Rust 无校验。`tracker_matches_layout` debug_assert（:267/294）现由 C++ Debug-only 对照检查覆盖：worker round 与 `Separator::MoveItem` 在 move 前执行，`UpdateMovedItem` 在更新后执行。
   - 注意一个 API 形态差异：Rust `move_item` 返回 new_pk 供 explore 的 contained-relocation 循环使用（explore.rs:421-442）；C++ `MoveItem` 返回 `Result<PlacedItemHandle>`（Separator.h:45-47）同样供 Exploration.cpp:728-755 使用：一致。
 
 ### `change_strip_width`（separator.rs:299-337）

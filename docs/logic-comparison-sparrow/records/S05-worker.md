@@ -45,7 +45,7 @@
 ### `move_item`（worker.rs:68-91）
 - C++ 对应：并入 `RunWorkerRound` 的 remove/place/UpdateMovedItem（Separator.cpp:253-283，S04 条目 6 已比）。
 - 判定：一致（语义级）。
-- 证据与说明：时序与返回值语义双侧一致。Rust 的三处 `debug_assert!`（tracker_matches_layout、old_l>0、`new_w_l <= old_w_l * 1.001`，worker.rs:69-88）在 C++ 无对应（debug 层；其中"weighted loss 不增"不变式在 C++ 无断言——2026-09-23 计划以测试间接覆盖）。`debug!` 打印（:86）无对应（观测层）。
+- 证据与说明：时序与返回值语义双侧一致。Rust worker 的 `tracker_matches_layout` 在 move 前/后调用；C++ 已在 worker round 对应边界调用 Debug-only Tracker/Layout CDE 检查。`old_l>0` 和 weighted-loss 不增仍无同形 Debug 断言，后者继续以测试间接覆盖。`debug!` 打印（:86）无对应（观测层）。
 
 ### `SepStats` + `Sum`/`AddAssign`（worker.rs:94-118）
 - C++ 对应：`WorkerRoundResult` 的四个计数字段（Separator.cpp:147-156）+ Run 内逐 worker 累加（Separator.cpp:566-569，S04 条目 5）。
@@ -65,7 +65,7 @@
 | 4 | 每次移动后 layout 视图全量 Restore | C++额外 | C++ layout 是值快照需刷新；Rust 活引用零成本。形态差异，无行为差 | Separator.cpp:268-275 vs worker.rs:60 |
 | 5 | surrogateRejectCount/exactCollisionCount 统计 | C++额外 | 观测计数，进 SeparatorResult/最终 LbfMetrics | worker.rs:94-97 vs SeparatorWorker.h:30-37 + Separator.cpp:244-245 |
 | 6 | FindBestSeparatorMoveWithTrace + SeparatorWorkerTrace 五相 | C++额外 | 测试设施（fixture 生成），对齐 search.rs oracle-trace | SeparatorWorker.cpp:298-308 vs worker.rs（无） |
-| 7 | debug_assert 三连（tracker 一致、old_l>0、wl 不增）与 debug 日志 | C++缺失 | debug 层不变式无 C++ 断言 | worker.rs:69-88 vs SeparatorWorker.cpp（无） |
+| 7 | debug_assert 三连（tracker 一致、old_l>0、wl 不增）与 debug 日志 | 部分对应 | Tracker 一致性已有 Debug-only 对照；old_l>0、weighted-loss 不增和日志仍无同形实现 | worker.rs:83,86-88,122-128 vs CollisionTracker.cpp/Separator.cpp; SeparatorWorker.cpp（无） |
 | 8 | 候选收集/洗牌/重扫/搜索五相/CD 参数/统计口径 | 源码对应，固定路径有 Rust trace | trace 核对指定输入下的阶段/离散事件和容差浮点值；没有任意输入或通用 shuffle 消耗序证明 | worker.rs:36-63 vs Separator.cpp:209-251 + SeparatorWorker.cpp:128-284 |
 | 9 | C++ handle/snapshot 校验和 Result 错误出口 | C++额外防御 | Rust worker 从当前 placed-item key 集合取 handle，不对应这些非法直接调用；不将错误类型宣称为跨语言等价 | worker.rs:36-38 vs SeparatorWorker.cpp:141-151 |
 

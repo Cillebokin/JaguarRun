@@ -30,6 +30,9 @@ public:
     static Result<CollisionTracker> Create(const jaguar::Layout& layout);
 
     Result<void> Rebuild(const jaguar::Layout& layout);
+#ifndef NDEBUG
+    void DebugAssertMatchesLayout(const jaguar::Layout& layout) const;
+#endif
     Result<void> UpdateMovedItem(
         const jaguar::Layout& layout,
         jaguar::PlacedItemHandle previousHandle,

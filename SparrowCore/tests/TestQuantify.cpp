@@ -7,18 +7,22 @@
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/Entities/Container.h"
 #include "JaguarCore/Entities/Layout.h"
+#include "JaguarCore/Collision/CollisionEngine.h"
 #include "JaguarCore/Geometry/ShapeModification.h"
 #include "JaguarCore/IO/Importer.h"
 #include "JaguarCore/Problems/Spp.h"
 
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <ostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -1862,6 +1866,203 @@ bool TestSeparationEvaluatorPreservesTinyCollisionLoss(std::ostream& output)
     return true;
 }
 
+bool TestAlmostBboxContainmentDirectionalDiscoveryMatchesRust(std::ostream& output)
+{
+    const auto outer = jaguar::SimplePolygon::Create({
+        {-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}});
+    const float xExtent = FloatFromBits(0x3f7fffffU);
+    const float yExtent = FloatFromBits(0x3f7ffffeU);
+    const float notchX = xExtent * 0.3F;
+    const float notchY = -yExtent * 0.3F;
+    const auto inner = jaguar::SimplePolygon::Create({
+        {-xExtent, -yExtent},
+        {xExtent, -yExtent},
+        {xExtent, yExtent},
+        {notchX, yExtent},
+        {notchX, notchY},
+        {-notchX, notchY},
+        {-notchX, yExtent},
+        {-xExtent, yExtent},
+    });
+    const auto bounds = jaguar::Rect2d::Create(-4.0, -4.0, 4.0, 4.0);
+    if (!Expect(outer.HasValue() && inner.HasValue() && bounds.HasValue(),
+                output,
+                "directional containment sample geometry creation failed"))
+    {
+        return false;
+    }
+
+    if (!Expect(inner.Value().BoundingBox().AlmostRelationToRustF32(
+                        outer.Value().BoundingBox())
+                        == jaguar::RectRelation::Surrounding
+                    && outer.Value().BoundingBox().AlmostRelationToRustF32(
+                           inner.Value().BoundingBox())
+                           == jaguar::RectRelation::Surrounding,
+                output,
+                "sample bboxes must compare as surrounding in both Rust-f32 directions"))
+    {
+        return false;
+    }
+
+    jaguar::CDEConfig config{};
+    config.quadtreeDepth = 0U;
+    config.cdThreshold = 64U;
+    const auto collectTarget = [&](const jaguar::SimplePolygon& query,
+                                   const jaguar::SimplePolygon& target,
+                                   std::size_t zoneIndex) -> std::optional<bool> {
+        jaguar::CollisionEngine engine(bounds.Value(), config);
+        const jaguar::HazardEntity targetEntity{
+            jaguar::HazardKind::Hole, 0U, 0U, zoneIndex};
+        const auto registered = engine.RegisterHazard({
+            targetEntity,
+            std::make_shared<const jaguar::SimplePolygon>(target),
+            true});
+        if (!registered.HasValue())
+            return std::nullopt;
+        const auto collisions = engine.CollectPolygonCollisions(query);
+        return std::any_of(collisions.begin(), collisions.end(), [&](const auto& entity) {
+            return entity == targetEntity;
+        });
+    };
+
+    const auto outerQueryFindsInner =
+        collectTarget(outer.Value(), inner.Value(), 1U);
+    const auto innerQueryFindsOuter =
+        collectTarget(inner.Value(), outer.Value(), 2U);
+    if (!Expect(outerQueryFindsInner.has_value() && innerQueryFindsOuter.has_value()
+                    && !*outerQueryFindsInner && *innerQueryFindsOuter,
+                output,
+                "CDE must reproduce Rust's one-way POI-containment discovery for the U-shaped pair"))
+    {
+        return false;
+    }
+
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    jaguar::ExternalContainer externalContainer{};
+    externalContainer.id = 8800U;
+    externalContainer.shape = jaguar::ExternalShape::Rectangle(-4.0, -4.0, 8.0, 8.0);
+    const auto container = importer.ImportContainer(externalContainer);
+    if (!Expect(container.HasValue(), output,
+                "directional containment container import failed"))
+    {
+        return false;
+    }
+
+    const auto importItem = [&importer](jaguar::ItemId id,
+                                        jaguar::ItemIndex index,
+                                        const jaguar::SimplePolygon& shape) {
+        jaguar::ExternalItem external{};
+        external.id = id;
+        external.rotation = jaguar::RotationPolicy::Continuous();
+        external.shape = jaguar::ExternalShape::SimplePolygon(shape.Vertices());
+        return importer.ImportItem(external, index);
+    };
+    const auto outerItem = importItem(12001U, 0U, outer.Value());
+    const auto innerItem = importItem(12002U, 1U, inner.Value());
+    if (!Expect(outerItem.HasValue() && innerItem.HasValue(),
+                output,
+                "directional containment items import failed"))
+    {
+        return false;
+    }
+
+    const jaguar::Rect2d& importedInnerBounds =
+        innerItem.Value().CollisionShape().BoundingBox();
+    const float innerCenterX =
+        (static_cast<float>(importedInnerBounds.xMin)
+         + static_cast<float>(importedInnerBounds.xMax))
+        / 2.0F;
+    const float innerCenterY =
+        (static_cast<float>(importedInnerBounds.yMin)
+         + static_cast<float>(importedInnerBounds.yMax))
+        / 2.0F;
+    jaguar::Layout layout(container.Value());
+    const auto outerHandle = layout.PlaceItem(
+        outerItem.Value(), jaguar::Transform2d::Identity());
+    const auto innerHandle = layout.PlaceItem(
+        innerItem.Value(), jaguar::Transform2d::FromRotationTranslation(
+                               0.0,
+                               {-static_cast<double>(innerCenterX),
+                                -static_cast<double>(innerCenterY)}));
+    if (!Expect(outerHandle.HasValue() && innerHandle.HasValue(),
+                output,
+                "directional containment layout placement failed"))
+    {
+        return false;
+    }
+
+    const jaguar::LayoutSnapshot layoutSnapshot = layout.Save();
+    auto layoutEngine = layout.GetContainer().CreateCollisionEngine();
+    if (!Expect(layoutEngine->Restore(layoutSnapshot.cdeSnapshot).HasValue(),
+                output,
+                "directional containment layout CDE snapshot restore failed"))
+    {
+        return false;
+    }
+    const auto collectLayoutTarget = [&layoutEngine](
+                                         const jaguar::SimplePolygon& queryShape,
+                                         jaguar::ItemIndex targetIndex)
+        -> std::optional<bool> {
+        const auto collisions = layoutEngine->CollectPolygonCollisions(
+            queryShape, jaguar::NoFilter{});
+        return std::any_of(collisions.begin(), collisions.end(), [&](const auto& entity) {
+            return entity.kind == jaguar::HazardKind::PlacedItem
+                   && entity.itemIndex == targetIndex;
+        });
+    };
+    const auto layoutOuterToInner = collectLayoutTarget(
+        layoutSnapshot.placements[0].placedItem.CollisionShape(),
+        1U);
+    const auto layoutInnerToOuter = collectLayoutTarget(
+        layoutSnapshot.placements[1].placedItem.CollisionShape(),
+        0U);
+    if (!Expect(layoutOuterToInner.has_value() && layoutInnerToOuter.has_value()
+                    && !*layoutOuterToInner && *layoutInnerToOuter,
+                output,
+                "restored Layout CDE must retain Rust's directional containment result"))
+    {
+        return false;
+    }
+
+    std::ostringstream trackerDiagnostic;
+    std::streambuf* const originalClog = std::clog.rdbuf(trackerDiagnostic.rdbuf());
+    const auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    std::clog.rdbuf(originalClog);
+    if (!Expect(trackerResult.HasValue(), output,
+                "directional containment tracker creation failed"))
+    {
+        return false;
+    }
+#ifndef NDEBUG
+    if (!Expect(trackerDiagnostic.str().find("inconsistent loss")
+                    != std::string::npos,
+                output,
+                "debug tracker consistency check must report the one-way CDE loss"))
+    {
+        return false;
+    }
+    if (!Expect(trackerDiagnostic.str().find(
+                    "item 0 query found 0 hazards, reverse item 1 query found 1 hazards")
+                    != std::string::npos,
+                output,
+                "debug tracker diagnostic must preserve the CDE discovery direction"))
+    {
+        return false;
+    }
+#else
+    if (!Expect(trackerDiagnostic.str().empty(),
+                output,
+                "release tracker creation must not emit debug consistency diagnostics"))
+    {
+        return false;
+    }
+#endif
+    const float pairLoss = trackerResult.Value().PairLoss(0U, 1U);
+    return Expect(FloatBits(pairLoss) == 0x409a27bbU,
+                  output,
+                  "Tracker pair loss must match Rust's later-row overwrite bits");
+}
+
 bool TestRustMultiHazardLossAndEarlyStop(std::ostream& output)
 {
     jaguar::SurrogateConfig surrogateConfig{};
@@ -2457,6 +2658,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestFiniteExteriorCentroidDistanceOverflowMatchesRust(output)
         && TestFiniteExteriorWeightOverflowMatchesRust(output)
         && TestSeparationEvaluatorPreservesTinyCollisionLoss(output)
+        && TestAlmostBboxContainmentDirectionalDiscoveryMatchesRust(output)
         && TestRustMultiHazardLossAndEarlyStop(output)
         && TestSeparationEvaluatorIgnoresItsCurrentHazard(output)
         && TestUnsupportedContainerHazardsMatchRustPanic(output);

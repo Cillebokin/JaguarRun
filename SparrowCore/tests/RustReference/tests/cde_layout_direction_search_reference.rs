@@ -1,13 +1,19 @@
+use jagua_rs::collision_detection::hazards::Hazard;
 use jagua_rs::collision_detection::hazards::HazardEntity;
 use jagua_rs::collision_detection::hazards::collector::BasicHazardCollector;
+use jagua_rs::collision_detection::{CDEConfig, CDEngine};
 use jagua_rs::entities::{Container, Layout, PItemKey};
 use jagua_rs::geometry::DTransformation;
+use jagua_rs::geometry::geo_enums::GeoRelation;
+use jagua_rs::geometry::geo_traits::CollidesWith;
+use jagua_rs::geometry::primitives::{Point, Rect, SPolygon};
 use jagua_rs::io::ext_repr::{
     ExtContainer, ExtItem, ExtOrientation, ExtRotation, ExtSPolygon, ExtShape,
 };
 use jagua_rs::io::import::Importer;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::quantify::tracker::CollisionTracker;
+use std::sync::Arc;
 
 struct ProbeRng(u64);
 
@@ -83,6 +89,169 @@ fn collect_hits(layout: &Layout, query: PItemKey, target: PItemKey) -> bool {
         .cde()
         .collect_poly_collisions(&query_placed.shape, &mut collector);
     collector.iter().any(|(_, entity)| entity == &target_entity)
+}
+
+fn collect_direct_cde_hit(
+    base_cde: &CDEngine,
+    query: &SPolygon,
+    target_shape: Arc<SPolygon>,
+    target_entity: HazardEntity,
+) -> bool {
+    let mut cde = base_cde.clone();
+    cde.register_hazard(Hazard::new(target_entity, target_shape, true));
+    let mut collector = BasicHazardCollector::new();
+    cde.collect_poly_collisions(query, &mut collector);
+    collector.iter().any(|(_, entity)| entity == &target_entity)
+}
+
+fn inset_u_shape_xy(x_extent: f32, y_extent: f32) -> SPolygon {
+    let notch_x = x_extent * 0.3;
+    let notch_y = -y_extent * 0.3;
+    SPolygon::new(vec![
+        Point(-x_extent, -y_extent),
+        Point(x_extent, -y_extent),
+        Point(x_extent, y_extent),
+        Point(notch_x, y_extent),
+        Point(notch_x, notch_y),
+        Point(-notch_x, notch_y),
+        Point(-notch_x, y_extent),
+        Point(-x_extent, y_extent),
+    ])
+    .expect("inset U polygon must be valid")
+}
+
+fn import_polygon_item(
+    importer: &Importer,
+    id: usize,
+    shape: &SPolygon,
+) -> Arc<jagua_rs::entities::Item> {
+    importer
+        .import_item(
+            &ExtItem {
+                id: id as u64,
+                orientation: ExtOrientation {
+                    rotation: ExtRotation::Continuous {},
+                },
+                shape: ExtShape::SimplePolygon(ExtSPolygon(
+                    shape
+                        .vertices
+                        .iter()
+                        .map(|point| (point.0, point.1))
+                        .collect(),
+                )),
+                min_quality: None,
+            },
+            id,
+        )
+        .expect("polygon item must import")
+}
+
+#[test]
+fn near_ulp_inset_u_shape_triggers_directional_cde_containment() {
+    let mut config: CDEConfig = DEFAULT_SPARROW_CONFIG.cde_config;
+    // Keep this probe at one quadtree node so only CDE edge and containment stages participate.
+    config.quadtree_depth = 0;
+    let exterior = Arc::new(SPolygon::from(
+        Rect::try_new(-4.0, -4.0, 4.0, 4.0).expect("valid root bounds"),
+    ));
+    let base_cde = CDEngine::new(
+        exterior.bbox,
+        vec![Hazard::new(HazardEntity::Exterior, exterior, false)],
+        config,
+    );
+    let extent = 1.0_f32;
+    let inset_x = f32::from_bits(extent.to_bits() - 1);
+    let inset_y = f32::from_bits(extent.to_bits() - 2);
+    let outer = SPolygon::from(
+        Rect::try_new(-extent, -extent, extent, extent).expect("valid outer square"),
+    );
+    let inner = inset_u_shape_xy(inset_x, inset_y);
+
+    assert_eq!(
+        inner.bbox.almost_relation_to(outer.bbox),
+        GeoRelation::Surrounding
+    );
+    assert_eq!(
+        outer.bbox.almost_relation_to(inner.bbox),
+        GeoRelation::Surrounding
+    );
+    assert!(outer.collides_with(&inner.poi.center));
+    assert!(!inner.collides_with(&outer.poi.center));
+    assert!(outer.edge_iter().all(|outer_edge| {
+        inner
+            .edge_iter()
+            .all(|inner_edge| !outer_edge.collides_with(&inner_edge))
+    }));
+
+    let outer_query_hits_inner = collect_direct_cde_hit(
+        &base_cde,
+        &outer,
+        Arc::new(inner.clone()),
+        HazardEntity::Hole { idx: 1 },
+    );
+    let inner_query_hits_outer = collect_direct_cde_hit(
+        &base_cde,
+        &inner,
+        Arc::new(outer.clone()),
+        HazardEntity::Hole { idx: 2 },
+    );
+    assert!(!outer_query_hits_inner);
+    assert!(inner_query_hits_outer);
+}
+
+#[test]
+fn near_ulp_inset_u_shape_reaches_sparrow_layout_tracker() {
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let container = build_container(&importer, 4.0);
+    let outer_shape =
+        SPolygon::from(Rect::try_new(-1.0, -1.0, 1.0, 1.0).expect("valid outer square"));
+    let outer_item = import_polygon_item(&importer, 12001, &outer_shape);
+    let x_inset = f32::from_bits(1.0_f32.to_bits() - 1);
+    let y_inset = f32::from_bits(1.0_f32.to_bits() - 2);
+    let inner_shape = inset_u_shape_xy(x_inset, y_inset);
+    let inner_item = import_polygon_item(&importer, 12002, &inner_shape);
+    let inner_bbox = inner_item.shape_cd.bbox;
+    let inner_bbox_center = (
+        (inner_bbox.x_min + inner_bbox.x_max) / 2.0,
+        (inner_bbox.y_min + inner_bbox.y_max) / 2.0,
+    );
+
+    let mut layout = Layout::new(container);
+    let outer_key = layout.place_item(&outer_item, DTransformation::new(0.0, (0.0, 0.0)));
+    let inner_key = layout.place_item(
+        &inner_item,
+        DTransformation::new(0.0, (-inner_bbox_center.0, -inner_bbox_center.1)),
+    );
+    let outer_placed = &layout.placed_items[outer_key].shape;
+    let inner_placed = &layout.placed_items[inner_key].shape;
+
+    assert_eq!(inner_placed.bbox.x_min, -x_inset);
+    assert_eq!(inner_placed.bbox.x_max, x_inset);
+    assert_eq!(inner_placed.bbox.y_min, -y_inset);
+    assert_eq!(inner_placed.bbox.y_max, y_inset);
+    assert_eq!(
+        inner_placed.bbox.almost_relation_to(outer_placed.bbox),
+        GeoRelation::Surrounding
+    );
+    assert_eq!(
+        outer_placed.bbox.almost_relation_to(inner_placed.bbox),
+        GeoRelation::Surrounding
+    );
+    assert!(!collect_hits(&layout, outer_key, inner_key));
+    assert!(collect_hits(&layout, inner_key, outer_key));
+
+    let tracker = CollisionTracker::new(&layout);
+    let pair_loss = tracker.get_pair_loss(outer_key, inner_key);
+    println!(
+        "layout_tracker_pair_loss={pair_loss:?}; bits=0x{:08x}",
+        pair_loss.to_bits()
+    );
+    assert_eq!(pair_loss.to_bits(), 0x409a_27bb);
 }
 
 #[test]

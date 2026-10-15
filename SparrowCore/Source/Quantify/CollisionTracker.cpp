@@ -1,6 +1,13 @@
 #include "SparrowCore/Quantify/CollisionTracker.h"
 
 #include "SparrowCore/Quantify/OverlapProxy.h"
+#ifndef NDEBUG
+#include "JaguarCore/Assertions.h"
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -49,6 +56,62 @@ std::optional<std::size_t> FindCollisionHandle(
     }
     return std::nullopt;
 }
+
+#ifndef NDEBUG
+bool WithinStoredLossTolerance(float calculated, float stored) noexcept
+{
+    return calculated == stored
+        || (std::isfinite(calculated) && std::isfinite(stored)
+            && std::fabs(calculated - stored) <= 0.10F * stored);
+}
+
+std::uint32_t OrderedFloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x80000000U) != 0U ? ~bits : (bits | 0x80000000U);
+}
+
+bool WithinUlps(float first, float second, std::uint32_t maxUlps) noexcept
+{
+    if (first == second)
+    {
+        return true;
+    }
+    if (!std::isfinite(first) || !std::isfinite(second))
+    {
+        return false;
+    }
+    const std::uint32_t firstBits = OrderedFloatBits(first);
+    const std::uint32_t secondBits = OrderedFloatBits(second);
+    const std::uint32_t distance = firstBits > secondBits
+        ? firstBits - secondBits
+        : secondBits - firstBits;
+    return distance <= maxUlps;
+}
+
+bool ContainsPlacedItem(
+    const std::vector<jaguar::HazardEntity>& collisions,
+    const jaguar::LayoutPlacementSnapshot& placement) noexcept
+{
+    return std::any_of(
+        collisions.begin(), collisions.end(), [&placement](const auto& entity) {
+            return entity.kind == jaguar::HazardKind::PlacedItem
+                && entity.placedItemHandle == placement.handle;
+        });
+}
+
+void WarnInconsistentLoss(std::size_t firstItemIndex,
+                          std::size_t secondItemIndex,
+                          std::size_t forwardCollisionCount,
+                          std::size_t reverseCollisionCount)
+{
+    std::clog << "WARN: inconsistent loss; item " << firstItemIndex
+              << " query found " << forwardCollisionCount
+              << " hazards, reverse item " << secondItemIndex << " query found "
+              << reverseCollisionCount << " hazards\n";
+}
+#endif
 }
 
 namespace sparrow
@@ -262,6 +325,9 @@ Result<void> CollisionTracker::UpdateMovedItem(
     // Keeping the other rows untouched preserves the same collision cache and
     // floating-point evaluation order while retaining every GLS weight.
     m_IsSeparated = TotalLoss() == 0.0F;
+#ifndef NDEBUG
+    DebugAssertMatchesLayout(layout);
+#endif
     return Result<void>::FromValue();
 }
 
@@ -359,6 +425,9 @@ Result<void> CollisionTracker::RestoreButKeepWeights(
     {
         m_ContainerEntries[index].weight = containerWeights[index];
     }
+#ifndef NDEBUG
+    DebugAssertMatchesLayout(layout);
+#endif
     return Result<void>::FromValue();
 }
 
@@ -854,6 +923,168 @@ Result<void> CollisionTracker::BuildFromLayout(const jaguar::Layout& layout)
         }
     }
     m_IsSeparated = TotalLoss() == 0.0F;
+#ifndef NDEBUG
+    DebugAssertMatchesLayout(layout);
+#endif
     return Result<void>::FromValue();
 }
+
+#ifndef NDEBUG
+void CollisionTracker::DebugAssertMatchesLayout(
+    const jaguar::Layout& layout) const
+{
+    jaguar::DebugAssertLayout(layout);
+    const jaguar::LayoutSnapshot snapshot = layout.Save();
+    assert(snapshot.placements.size() == m_Handles.size());
+    assert(snapshot.placements.size() == m_PlacedItems.size());
+    assert(m_PairMatrix.Size() == snapshot.placements.size());
+    assert(m_ContainerEntries.size() == snapshot.placements.size());
+
+    auto engine = snapshot.container.CreateCollisionEngine();
+    assert(engine != nullptr);
+    if (engine == nullptr)
+    {
+        return;
+    }
+    const auto restored = engine->Restore(snapshot.cdeSnapshot);
+    assert(restored.HasValue());
+    if (!restored.HasValue())
+    {
+        return;
+    }
+
+    std::vector<bool> matchedTrackerEntries(m_Handles.size(), false);
+    for (const jaguar::LayoutPlacementSnapshot& first : snapshot.placements)
+    {
+        const std::optional<std::size_t> firstTrackerIndex =
+            IndexForHandle(first.handle);
+        assert(firstTrackerIndex.has_value());
+        if (!firstTrackerIndex.has_value())
+        {
+            continue;
+        }
+        assert(!matchedTrackerEntries[*firstTrackerIndex]);
+        matchedTrackerEntries[*firstTrackerIndex] = true;
+        assert(m_PlacedItems[*firstTrackerIndex].GetItemIndex()
+               == first.placedItem.GetItemIndex());
+        assert(m_PlacedItems[*firstTrackerIndex].Transform().rotationRad
+               == first.placedItem.Transform().rotationRad);
+        assert(m_PlacedItems[*firstTrackerIndex].Transform().translation
+               == first.placedItem.Transform().translation);
+        assert(m_PairMatrix.At(*firstTrackerIndex, *firstTrackerIndex).loss
+               == 0.0F);
+
+        jaguar::HazardFilter firstFilter;
+        firstFilter.irrelevant = [&first](const jaguar::HazardEntity& entity) {
+            return entity.kind == jaguar::HazardKind::PlacedItem
+                && entity.placedItemHandle == first.handle;
+        };
+        const std::vector<jaguar::HazardEntity> firstCollisions =
+            engine->CollectPolygonCollisions(
+                first.placedItem.CollisionShape(), firstFilter);
+
+        for (const jaguar::LayoutPlacementSnapshot& second : snapshot.placements)
+        {
+            if (second.handle == first.handle)
+            {
+                continue;
+            }
+            const std::optional<std::size_t> secondTrackerIndex =
+                IndexForHandle(second.handle);
+            assert(secondTrackerIndex.has_value());
+            if (!secondTrackerIndex.has_value())
+            {
+                continue;
+            }
+
+            const float storedLoss = m_PairMatrix.At(
+                *firstTrackerIndex, *secondTrackerIndex).loss;
+            if (ContainsPlacedItem(firstCollisions, second))
+            {
+                const float calculatedLoss = CalculatePolygonCollisionLoss(
+                    first.placedItem.CollisionShape(),
+                    second.placedItem.CollisionShape());
+                const float reverseCalculatedLoss = CalculatePolygonCollisionLoss(
+                    second.placedItem.CollisionShape(),
+                    first.placedItem.CollisionShape());
+                if (!WithinStoredLossTolerance(calculatedLoss, storedLoss)
+                    && !WithinStoredLossTolerance(reverseCalculatedLoss, storedLoss))
+                {
+                    jaguar::HazardFilter secondFilter;
+                    secondFilter.irrelevant = [&second](
+                                                  const jaguar::HazardEntity& entity) {
+                        return entity.kind == jaguar::HazardKind::PlacedItem
+                            && entity.placedItemHandle == second.handle;
+                    };
+                    const std::vector<jaguar::HazardEntity> reverseCollisions =
+                        engine->CollectPolygonCollisions(
+                            second.placedItem.CollisionShape(), secondFilter);
+                    if (ContainsPlacedItem(reverseCollisions, first))
+                    {
+                        assert(false && "tracker error");
+                    }
+                    else if (storedLoss == 0.0F)
+                    {
+                        std::clog << "WARN: non-symmetrical collision; item "
+                                  << first.placedItem.GetItemIndex()
+                                  << " query found item "
+                                  << second.placedItem.GetItemIndex()
+                                  << ", reverse query did not\n";
+                    }
+                    else
+                    {
+                        assert(false && "tracker error");
+                    }
+                }
+            }
+            else if (storedLoss != 0.0F)
+            {
+                jaguar::HazardFilter secondFilter;
+                secondFilter.irrelevant = [&second](
+                                              const jaguar::HazardEntity& entity) {
+                    return entity.kind == jaguar::HazardKind::PlacedItem
+                        && entity.placedItemHandle == second.handle;
+                };
+                const std::vector<jaguar::HazardEntity> reverseCollisions =
+                    engine->CollectPolygonCollisions(
+                        second.placedItem.CollisionShape(), secondFilter);
+                if (!ContainsPlacedItem(reverseCollisions, first))
+                {
+                    assert(false && "tracker error");
+                }
+                else
+                {
+                    WarnInconsistentLoss(
+                        first.placedItem.GetItemIndex(),
+                        second.placedItem.GetItemIndex(),
+                        firstCollisions.size(),
+                        reverseCollisions.size());
+                }
+            }
+        }
+
+        const bool collidesWithExterior = std::any_of(
+            firstCollisions.begin(), firstCollisions.end(), [](const auto& entity) {
+                return entity.kind == jaguar::HazardKind::Exterior;
+            });
+        const float storedContainerLoss =
+            m_ContainerEntries[*firstTrackerIndex].loss;
+        if (collidesWithExterior)
+        {
+            const float calculatedContainerLoss = CalculateContainerPenalty(
+                first.placedItem.CollisionShape(),
+                snapshot.container.CollisionShape().BoundingBox());
+            assert(WithinUlps(
+                storedContainerLoss, calculatedContainerLoss, 5U));
+        }
+        else
+        {
+            assert(storedContainerLoss == 0.0F);
+        }
+    }
+    assert(std::all_of(
+        matchedTrackerEntries.begin(), matchedTrackerEntries.end(),
+        [](bool matched) { return matched; }));
+}
+#endif
 }

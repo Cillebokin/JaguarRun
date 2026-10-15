@@ -26,6 +26,38 @@ fn finite_large_square() -> SPolygon {
 }
 
 #[test]
+fn positive_shoelace_area_with_zero_bbox_product_fails_before_loss_helper() {
+    let points = [
+        (0x0000_03ca, 0x3d7f_ffff),
+        (0x0000_0aad, 0x3d7f_ffff),
+        (0x0000_0d11, 0x3d7f_ffff),
+        (0x0000_09d3, 0x3d80_0000),
+        (0x0000_0f67, 0x3d80_0000),
+        (0x0000_0528, 0x3d80_0000),
+        (0x0000_00a8, 0x3d80_0000),
+        (0x0000_0011, 0x3d80_0000),
+    ]
+    .map(|(x, y)| Point(f32::from_bits(x), f32::from_bits(y)));
+
+    assert_eq!(SPolygon::calculate_area(&points).to_bits(), 0x0000_0001);
+    let bbox = SPolygon::generate_bounding_box(&points);
+    assert!(bbox.width() > 0.0);
+    assert!(bbox.height() > 0.0);
+    assert_eq!(bbox.area().to_bits(), 0x0000_0000);
+
+    let construction = catch_unwind(AssertUnwindSafe(|| SPolygon::new(points.to_vec())));
+    let panic = construction.expect_err(
+        "POI construction must reject this zero-clearance geometry before it can reach loss",
+    );
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(message.contains("invalid rectangle"), "{message}");
+}
+
+#[test]
 fn finite_candidate_translation_can_overflow_bbox_area_in_container_loss() {
     let shape = finite_large_square();
     assert_eq!(shape.area.to_bits(), 0x7ed8_aac7);

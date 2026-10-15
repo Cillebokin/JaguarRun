@@ -651,6 +651,74 @@ bool TestSubnormalLossThroughSeparationEvaluator(std::ostream& output)
 #endif
 }
 
+bool TestPositiveShoelaceZeroBboxCandidateIsRejectedBeforeLoss(
+    std::ostream& output)
+{
+    const std::vector<jaguar::Point2d> points{
+        {static_cast<double>(FloatFromBits(0x000003caU)),
+         static_cast<double>(FloatFromBits(0x3d7fffffU))},
+        {static_cast<double>(FloatFromBits(0x00000aadU)),
+         static_cast<double>(FloatFromBits(0x3d7fffffU))},
+        {static_cast<double>(FloatFromBits(0x00000d11U)),
+         static_cast<double>(FloatFromBits(0x3d7fffffU))},
+        {static_cast<double>(FloatFromBits(0x000009d3U)),
+         static_cast<double>(FloatFromBits(0x3d800000U))},
+        {static_cast<double>(FloatFromBits(0x00000f67U)),
+         static_cast<double>(FloatFromBits(0x3d800000U))},
+        {static_cast<double>(FloatFromBits(0x00000528U)),
+         static_cast<double>(FloatFromBits(0x3d800000U))},
+        {static_cast<double>(FloatFromBits(0x000000a8U)),
+         static_cast<double>(FloatFromBits(0x3d800000U))},
+        {static_cast<double>(FloatFromBits(0x00000011U)),
+         static_cast<double>(FloatFromBits(0x3d800000U))},
+    };
+
+    float xMin = std::numeric_limits<float>::infinity();
+    float yMin = std::numeric_limits<float>::infinity();
+    float xMax = -std::numeric_limits<float>::infinity();
+    float yMax = -std::numeric_limits<float>::infinity();
+    for (const jaguar::Point2d& point : points)
+    {
+        const float x = static_cast<float>(point.x);
+        const float y = static_cast<float>(point.y);
+        xMin = std::min(xMin, x);
+        yMin = std::min(yMin, y);
+        xMax = std::max(xMax, x);
+        yMax = std::max(yMax, y);
+    }
+    const float width = xMax - xMin;
+    const float height = yMax - yMin;
+    float twiceArea = 0.0F;
+    for (std::size_t i = 0; i < points.size(); ++i)
+    {
+        const std::size_t j = (i + 1U) % points.size();
+        const float xI = static_cast<float>(points[i].x);
+        const float yI = static_cast<float>(points[i].y);
+        const float xJ = static_cast<float>(points[j].x);
+        const float yJ = static_cast<float>(points[j].y);
+        twiceArea += (yI + yJ) * (xI - xJ);
+    }
+    const float area = 0.5F * twiceArea;
+    if (!Expect(width > 0.0F && height > 0.0F && width * height == 0.0F,
+                output,
+                "fixture must retain positive f32 bbox axes with zero area product"))
+    {
+        return false;
+    }
+    if (!Expect(FloatBits(area) == 0x00000001U,
+                output,
+                "fixture shoelace area must match Rust's positive minimum subnormal"))
+    {
+        return false;
+    }
+
+    const auto candidate = jaguar::SimplePolygon::Create(points);
+    return Expect(!candidate.HasValue()
+                      && candidate.GetError().code == jaguar::ErrorCode::InvalidPolygon,
+                  output,
+                  "C++ POI construction must reject the zero-clearance candidate before loss");
+}
+
 bool TestSubnormalContainerLossThroughEvaluator(std::ostream& output)
 {
     constexpr double side = 1.0e-20;
@@ -3066,6 +3134,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestExtremeEpsilonOverlapProxyBoundary(output)
         && TestSubnormalPolygonLossBranch(output)
         && TestFiniteTransformOverflowingContainerBboxAreaMatchesRust(output)
+        && TestPositiveShoelaceZeroBboxCandidateIsRejectedBeforeLoss(output)
         && TestSubnormalContainerLossThroughEvaluator(output)
         && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)

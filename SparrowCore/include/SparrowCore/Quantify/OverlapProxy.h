@@ -14,14 +14,14 @@ SPARROWCORE_API float CalculateOverlapProxy(
     const jaguar::Transform2d& firstTransform,
     const jaguar::Surrogate& second,
     const jaguar::Transform2d& secondTransform,
-    float epsilon) noexcept;
+    float epsilon);
 
 // Quantifies an already colliding pair using Sparrow's polygon loss formula.
 // The low-level overload above intentionally remains available for callers
 // that need the raw pole proxy.
 SPARROWCORE_API float CalculatePolygonCollisionLoss(
     const jaguar::SimplePolygon& first,
-    const jaguar::SimplePolygon& second) noexcept;
+    const jaguar::SimplePolygon& second);
 
 SPARROWCORE_API float CalculateContainerPenalty(
     const jaguar::SimplePolygon& shape,

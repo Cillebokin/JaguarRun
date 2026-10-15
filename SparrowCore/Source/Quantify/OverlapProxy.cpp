@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 
 namespace
@@ -25,21 +24,8 @@ float CirclePairContribution(const jaguar::Circle2d& first,
                              const jaguar::Transform2d& secondTransform,
                              float epsilon) noexcept
 {
-    if (!std::isfinite(first.radius) || !std::isfinite(second.radius)
-        || first.radius < 0.0 || second.radius < 0.0
-        || !first.center.IsFinite() || !second.center.IsFinite()
-        || !firstTransform.IsFinite() || !secondTransform.IsFinite()
-        || !std::isfinite(epsilon) || epsilon <= 0.0F)
-    {
-        return 0.0F;
-    }
-
     const jaguar::Point2d firstCenter = firstTransform.ApplyRustF32(first.center);
     const jaguar::Point2d secondCenter = secondTransform.ApplyRustF32(second.center);
-    if (!firstCenter.IsFinite() || !secondCenter.IsFinite())
-    {
-        return 0.0F;
-    }
 
     const float dx = static_cast<float>(firstCenter.x) -
                      static_cast<float>(secondCenter.x);
@@ -50,21 +36,11 @@ float CirclePairContribution(const jaguar::Circle2d& first,
     const float secondRadius = static_cast<float>(second.radius);
     const float penetration = firstRadius + secondRadius - distance;
     const float minimumRadius = std::min(firstRadius, secondRadius);
-    if (!std::isfinite(distance) || !std::isfinite(penetration)
-        || !std::isfinite(minimumRadius) || minimumRadius <= 0.0F)
-    {
-        return 0.0F;
-    }
 
     const float decayedPenalty = penetration >= epsilon
         ? penetration
         : (epsilon * epsilon / (-penetration + 2.0F * epsilon));
-    const float result = decayedPenalty * minimumRadius;
-    if (!std::isfinite(result) || result <= 0.0F)
-    {
-        return 0.0F;
-    }
-    return result;
+    return decayedPenalty * minimumRadius;
 }
 
 float ShapePenalty(const jaguar::SimplePolygon& first,
@@ -78,14 +54,7 @@ float ShapePenalty(const jaguar::SimplePolygon& first,
     }
     const float firstArea = static_cast<float>(firstSurrogate->ConvexHullArea());
     const float secondArea = static_cast<float>(secondSurrogate->ConvexHullArea());
-    if (!std::isfinite(firstArea) || !std::isfinite(secondArea)
-        || firstArea <= 0.0F || secondArea <= 0.0F)
-    {
-        return 0.0F;
-    }
-    const float result = std::sqrt(std::sqrt(firstArea)
-                                   * std::sqrt(secondArea));
-    return std::isfinite(result) && result > 0.0F ? result : 0.0F;
+    return std::sqrt(std::sqrt(firstArea) * std::sqrt(secondArea));
 }
 
 float RectCentroidDistance(const jaguar::Rect2d& first,
@@ -111,7 +80,7 @@ float CalculateOverlapProxy(const jaguar::Surrogate& first,
                             const jaguar::Transform2d& firstTransform,
                             const jaguar::Surrogate& second,
                             const jaguar::Transform2d& secondTransform,
-                            float epsilon) noexcept
+                            float epsilon)
 {
     float total = 0.0F;
     for (const jaguar::Circle2d& firstPole : first.Poles())
@@ -124,20 +93,18 @@ float CalculateOverlapProxy(const jaguar::Surrogate& first,
                 firstTransform,
                 secondTransform,
                 epsilon);
-            if (!std::isfinite(total))
-            {
-                return 0.0F;
-            }
         }
     }
     total *= rustPi;
-    if (!std::isfinite(total))
-        return 0.0F;
-    return std::max(total, 0.0F);
+#ifndef NDEBUG
+    if (!std::isnormal(total))
+        throw std::domain_error("assertion failed: total_overlap.is_normal()");
+#endif
+    return total;
 }
 
 float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
-                                    const jaguar::SimplePolygon& second) noexcept
+                                    const jaguar::SimplePolygon& second)
 {
     const jaguar::Surrogate* firstSurrogate = first.GetSurrogate();
     const jaguar::Surrogate* secondSurrogate = second.GetSurrogate();
@@ -149,18 +116,10 @@ float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
     const float firstDiameter = static_cast<float>(first.Diameter());
     const float secondDiameter = static_cast<float>(second.Diameter());
     const float diameter = std::max(firstDiameter, secondDiameter);
-    if (!std::isfinite(diameter) || diameter <= 0.0F)
-    {
-        return 0.0F;
-    }
 
     constexpr float epsilonDiameterRatio = 0.01F;
     const float epsilon = static_cast<float>(diameter)
         * epsilonDiameterRatio;
-    if (!std::isfinite(epsilon) || epsilon <= 0.0F)
-    {
-        return 0.0F;
-    }
 
     const float rawProxy = CalculateOverlapProxy(
         *firstSurrogate,
@@ -169,18 +128,13 @@ float CalculatePolygonCollisionLoss(const jaguar::SimplePolygon& first,
         jaguar::Transform2d::Identity(),
         epsilon);
     const float overlapProxy = rawProxy + epsilon * epsilon;
-    const float shapePenalty = ShapePenalty(first, second);
-    if (!std::isfinite(overlapProxy) || overlapProxy <= 0.0F
-        || shapePenalty <= 0.0F)
-    {
-        return 0.0F;
-    }
+#ifndef NDEBUG
+    if (!std::isnormal(overlapProxy))
+        throw std::domain_error("assertion failed: overlap_proxy.is_normal()");
+#endif
 
+    const float shapePenalty = ShapePenalty(first, second);
     const float result = std::sqrt(overlapProxy) * shapePenalty;
-    if (!std::isfinite(result) || result <= 0.0F)
-    {
-        return 0.0F;
-    }
     return result;
 }
 
@@ -230,34 +184,12 @@ float CalculateContainerPenalty(const jaguar::SimplePolygon& shape,
             + RectCentroidDistance(shapeBounds, containerBounds);
     }
 
-    const float shapePenalty = ShapePenalty(shape, shape);
-    if (std::isinf(overlap) && overlap > 0.0F
-        && std::isfinite(shapePenalty) && shapePenalty > 0.0F)
-    {
 #ifndef NDEBUG
+    if (!std::isnormal(overlap))
         throw std::domain_error("assertion failed: overlap.is_normal()");
-#else
-        // Rust Release preserves positive infinity when overlap overflows.
-        return std::numeric_limits<float>::infinity();
 #endif
-    }
-    if (!std::isfinite(overlap) || overlap <= 0.0F
-        || !std::isfinite(shapePenalty) || shapePenalty <= 0.0F)
-    {
-        return 0.0F;
-    }
 
-    const float result = 2.0F * std::sqrt(overlap) * shapePenalty;
-    if (std::isinf(result) && result > 0.0F)
-    {
-        // Rust asserts that overlap is normal, but does not assert the final
-        // loss. Keep a later-stage positive-infinity result in both profiles.
-        return result;
-    }
-    if (!std::isfinite(result) || result <= 0.0F)
-    {
-        return 0.0F;
-    }
-    return result;
+    const float shapePenalty = ShapePenalty(shape, shape);
+    return 2.0F * std::sqrt(overlap) * shapePenalty;
 }
 }

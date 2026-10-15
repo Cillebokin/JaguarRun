@@ -334,6 +334,330 @@ bool TestOverlapProxy(std::ostream& output)
                   "container loss must match Sparrow's bounding-box formula");
 }
 
+bool TestExtremeEpsilonOverlapProxyBoundary(std::ostream& output)
+{
+    const jaguar::Item item = MakeItem(90U, 2.0, 2.0);
+    const jaguar::Surrogate* surrogate = item.CollisionShape().GetSurrogate();
+    if (!Expect(surrogate != nullptr,
+                output,
+                "extreme-epsilon proxy item must have a surrogate"))
+    {
+        return false;
+    }
+    const float epsilon = std::numeric_limits<float>::max();
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(sparrow::CalculateOverlapProxy(
+            *surrogate,
+            jaguar::Transform2d::Identity(),
+            *surrogate,
+            jaguar::Transform2d::Identity(),
+            epsilon));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("total_overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug raw proxy must surface Rust's NaN assertion");
+#else
+    const float raw = sparrow::CalculateOverlapProxy(
+        *surrogate,
+        jaguar::Transform2d::Identity(),
+        *surrogate,
+        jaguar::Transform2d::Identity(),
+        epsilon);
+    return Expect(std::isnan(raw),
+                  output,
+                  "Release raw proxy must preserve Rust's NaN arithmetic");
+#endif
+}
+
+bool TestSubnormalPolygonLossBranch(std::ostream& output)
+{
+    constexpr double half = 5.0e-21;
+    const auto polygonResult = jaguar::SimplePolygon::Create({
+        {-half, -half}, {half, -half}, {half, half}, {-half, half}});
+    if (!Expect(polygonResult.HasValue(),
+                output,
+                "subnormal-area polygon must construct for the loss probe"))
+    {
+        return false;
+    }
+
+    jaguar::SimplePolygon polygon = polygonResult.Value();
+    jaguar::SurrogateConfig config{};
+    config.poleLimits = {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+    if (!Expect(polygon.GenerateSurrogate(config).HasValue(),
+                output,
+                "subnormal-area surrogate must construct for the loss probe"))
+    {
+        return false;
+    }
+
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(sparrow::CalculatePolygonCollisionLoss(polygon, polygon));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("total_overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug pair helper must surface Rust's subnormal proxy assertion");
+#else
+    const float diameter = static_cast<float>(polygon.Diameter());
+    const float epsilon = diameter * 0.01F;
+    const float rawProxy = sparrow::CalculateOverlapProxy(
+        *polygon.GetSurrogate(),
+        jaguar::Transform2d::Identity(),
+        *polygon.GetSurrogate(),
+        jaguar::Transform2d::Identity(),
+        epsilon);
+    const float loss = sparrow::CalculatePolygonCollisionLoss(polygon, polygon);
+    output << "subnormal_overlap_proxy bits=0x" << std::hex << FloatBits(rawProxy)
+           << " loss bits=0x" << FloatBits(loss) << std::dec << '\n';
+    return Expect(FloatBits(rawProxy) == 0x0001c3bdU
+                      && FloatBits(loss) == 0x000162e2U,
+                  output,
+                  "subnormal pair loss must match Rust Release raw bits");
+#endif
+}
+
+bool TestSubnormalLossThroughSeparationEvaluator(std::ostream& output)
+{
+    constexpr double side = 1.0e-20;
+    constexpr double fixedHeight = 2.0e-19;
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.poleLimits = {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+
+    const auto polygon0 = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {side, 0.0}, {side, side}, {0.0, side}});
+    const auto polygon1 = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {side, 0.0}, {side, side}, {0.0, side}});
+    if (!Expect(polygon0.HasValue() && polygon1.HasValue(),
+                output,
+                "tiny finite item polygons must construct"))
+    {
+        return false;
+    }
+    const auto item0 = jaguar::Item::Create(
+        0U,
+        1U,
+        {polygon0.Value(),
+         jaguar::Transform2d::Identity(),
+         jaguar::ShapeModifyMode::Inflate,
+         {}},
+        surrogateConfig);
+    const auto item1 = jaguar::Item::Create(
+        1U,
+        2U,
+        {polygon1.Value(),
+         jaguar::Transform2d::Identity(),
+         jaguar::ShapeModifyMode::Inflate,
+         {}},
+        surrogateConfig);
+    if (!Expect(item0.HasValue() && item1.HasValue(),
+                output,
+                "tiny finite items and their surrogates must construct"))
+    {
+        return false;
+    }
+
+    jaguar::CDEConfig cdeConfig{};
+    cdeConfig.itemSurrogateConfig = surrogateConfig;
+    const auto strip = jaguar::Strip::Create(
+        fixedHeight, cdeConfig, {}, fixedHeight);
+    if (!Expect(strip.HasValue(), output, "tiny strip must construct"))
+    {
+        return false;
+    }
+    const auto instance = jaguar::SPInstance::Create(
+        {item0.Value(), item1.Value()}, {1U, 1U}, strip.Value());
+    if (!Expect(instance.HasValue(), output, "tiny SPP instance must construct"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output, "tiny SPP problem must construct"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto first = problem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {0.5e-19, 0.5e-19})});
+    const auto second = problem.PlaceItem({
+        1U,
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {1.5e-19, 1.5e-19})});
+    if (!Expect(first.HasValue() && second.HasValue(),
+                output,
+                "tiny separated initial placements must succeed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                output,
+                "tiny layout restore must succeed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(),
+                output,
+                "non-overlapping tiny items must create a tracker"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    sparrow::SeparationEvaluator evaluator(
+        layout, problem.Instance().GetItem(0U), first.Value(), tracker);
+    const jaguar::Transform2d candidateTransform =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {1.5e-19, 1.5e-19});
+
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(evaluator.Evaluate(candidateTransform, std::nullopt));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("total_overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug evaluator must surface Rust's subnormal proxy assertion");
+#else
+    const sparrow::SampleEval evaluation =
+        evaluator.Evaluate(candidateTransform, std::nullopt);
+    output << "actual_evaluator_subnormal_loss bits=0x" << std::hex
+           << FloatBits(evaluation.loss) << std::dec << '\n';
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                      && FloatBits(evaluation.loss) == 0x000162e2U,
+                  output,
+                  "Release evaluator must match Rust's subnormal collision loss");
+#endif
+}
+
+bool TestSubnormalContainerLossThroughEvaluator(std::ostream& output)
+{
+    constexpr double side = 1.0e-20;
+    constexpr double containerSide = 2.0e-19;
+    const auto polygon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {side, 0.0}, {side, side}, {0.0, side}});
+    if (!Expect(polygon.HasValue(), output, "tiny container-probe item must construct"))
+    {
+        return false;
+    }
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.poleLimits = {{{2U, 0.0}, {2U, 0.8}, {2U, 0.9}}};
+    const auto item = jaguar::Item::Create(
+        0U,
+        3U,
+        {polygon.Value(),
+         jaguar::Transform2d::Identity(),
+         jaguar::ShapeModifyMode::Inflate,
+         {}},
+        surrogateConfig);
+    if (!Expect(item.HasValue(), output, "tiny container-probe item must have a surrogate"))
+    {
+        return false;
+    }
+    jaguar::CDEConfig cdeConfig{};
+    cdeConfig.itemSurrogateConfig = surrogateConfig;
+    const auto strip = jaguar::Strip::Create(
+        containerSide, cdeConfig, {}, containerSide);
+    if (!Expect(strip.HasValue(), output, "tiny container-probe strip must construct"))
+    {
+        return false;
+    }
+    const auto instance = jaguar::SPInstance::Create(
+        {item.Value()}, {1U}, strip.Value());
+    if (!Expect(instance.HasValue(), output, "tiny container-probe instance must construct"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output, "tiny container-probe problem must construct"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto handle = problem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {1.0e-19, 1.0e-19})});
+    if (!Expect(handle.HasValue(), output, "tiny interior placement must succeed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                output,
+                "tiny container-probe layout restore must succeed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(),
+                output,
+                "tiny interior placement must create a tracker"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    sparrow::SeparationEvaluator evaluator(
+        layout, problem.Instance().GetItem(0U), handle.Value(), tracker);
+    const jaguar::Transform2d outsideTransform =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {-2.0e-21, -2.0e-21});
+
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(evaluator.Evaluate(outsideTransform, std::nullopt));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug evaluator must surface Rust's subnormal container assertion");
+#else
+    const sparrow::SampleEval evaluation =
+        evaluator.Evaluate(outsideTransform, std::nullopt);
+    output << "actual_evaluator_subnormal_container_loss bits=0x" << std::hex
+           << FloatBits(evaluation.loss) << std::dec << '\n';
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                      && FloatBits(evaluation.loss) == 0x00014e8eU,
+                  output,
+                  "Release evaluator must match Rust's subnormal container loss");
+#endif
+}
+
 bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
 {
     const auto instanceResult = MakeInstance();
@@ -2645,6 +2969,10 @@ bool RunQuantifyTests(std::ostream& output)
         && TestPairMatrixPreservesNonFiniteLossArithmetic(output)
         && TestPairMatrixOverflowMatchesRustProfile(output)
         && TestOverlapProxy(output)
+        && TestExtremeEpsilonOverlapProxyBoundary(output)
+        && TestSubnormalPolygonLossBranch(output)
+        && TestSubnormalContainerLossThroughEvaluator(output)
+        && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)

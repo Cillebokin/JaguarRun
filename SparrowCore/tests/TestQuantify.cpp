@@ -719,6 +719,68 @@ bool TestPositiveShoelaceZeroBboxCandidateIsRejectedBeforeLoss(
                   "C++ POI construction must reject the zero-clearance candidate before loss");
 }
 
+bool TestContainerCentroidMidpointOverflowMatchesRust(std::ostream& output)
+{
+    const float x0 = FloatFromBits(0x7f000000U);
+    const float x1 = FloatFromBits(0x7f000001U);
+    const float x2 = FloatFromBits(0x7f000002U);
+    const float x3 = FloatFromBits(0x7f000003U);
+
+    jaguar::SimplePolygon shape = MakeItem(91U, 2.0, 2.0).CollisionShape();
+    // This direct low-level fixture isolates bbox arithmetic; the geometry and bbox
+    // intentionally do not describe the same polygon.
+    jaguar::Rect2d& shapeBounds =
+        const_cast<jaguar::Rect2d&>(shape.BoundingBox());
+    shapeBounds = jaguar::Rect2d{
+        static_cast<double>(x0), 0.0, static_cast<double>(x1), 1.0};
+    const auto containerBounds = jaguar::Rect2d::Create(
+        static_cast<double>(x2), 0.0, static_cast<double>(x3), 1.0);
+    if (!Expect(containerBounds.HasValue(),
+                output,
+                "extreme finite container bbox must construct"))
+    {
+        return false;
+    }
+
+    const jaguar::Point2d shapeCentroid = shapeBounds.CentroidRustF32();
+    const jaguar::Point2d containerCentroid =
+        containerBounds.Value().CentroidRustF32();
+    if (!Expect(FloatBits(static_cast<float>(shapeCentroid.x)) == 0x7f000000U
+                    && FloatBits(static_cast<float>(containerCentroid.x))
+                        == 0x7f000002U,
+                output,
+                "Rect2d Rust-f32 centroid must match the Rust midpoint tie cases"))
+    {
+        return false;
+    }
+
+#ifndef NDEBUG
+    bool observedRustDebugBoundary = false;
+    try
+    {
+        static_cast<void>(sparrow::CalculateContainerPenalty(
+            shape, containerBounds.Value()));
+    }
+    catch (const std::domain_error& error)
+    {
+        observedRustDebugBoundary =
+            std::string(error.what()).find("overlap.is_normal()")
+            != std::string::npos;
+    }
+    return Expect(observedRustDebugBoundary,
+                  output,
+                  "Debug container penalty must retain Rust's non-normal assertion boundary");
+#else
+    const float loss = sparrow::CalculateContainerPenalty(
+        shape, containerBounds.Value());
+    output << "container_midpoint_overflow_loss bits=0x" << std::hex
+           << FloatBits(loss) << std::dec << '\n';
+    return Expect(std::isinf(loss) && FloatBits(loss) == 0x7f800000U,
+                  output,
+                  "Release container loss must match Rust's positive-infinity midpoint path");
+#endif
+}
+
 bool TestSubnormalContainerLossThroughEvaluator(std::ostream& output)
 {
     constexpr double side = 1.0e-20;
@@ -3135,6 +3197,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestSubnormalPolygonLossBranch(output)
         && TestFiniteTransformOverflowingContainerBboxAreaMatchesRust(output)
         && TestPositiveShoelaceZeroBboxCandidateIsRejectedBeforeLoss(output)
+        && TestContainerCentroidMidpointOverflowMatchesRust(output)
         && TestSubnormalContainerLossThroughEvaluator(output)
         && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)

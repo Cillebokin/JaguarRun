@@ -60,14 +60,12 @@ float ShapePenalty(const jaguar::SimplePolygon& first,
 float RectCentroidDistance(const jaguar::Rect2d& first,
                            const jaguar::Rect2d& second) noexcept
 {
-    const float firstX = (static_cast<float>(first.xMin)
-                          + static_cast<float>(first.xMax)) * 0.5F;
-    const float firstY = (static_cast<float>(first.yMin)
-                          + static_cast<float>(first.yMax)) * 0.5F;
-    const float secondX = (static_cast<float>(second.xMin)
-                           + static_cast<float>(second.xMax)) * 0.5F;
-    const float secondY = (static_cast<float>(second.yMin)
-                           + static_cast<float>(second.yMax)) * 0.5F;
+    const jaguar::Point2d firstCentroid = first.CentroidRustF32();
+    const jaguar::Point2d secondCentroid = second.CentroidRustF32();
+    const float firstX = static_cast<float>(firstCentroid.x);
+    const float firstY = static_cast<float>(firstCentroid.y);
+    const float secondX = static_cast<float>(secondCentroid.x);
+    const float secondY = static_cast<float>(secondCentroid.y);
     const float dx = firstX - secondX;
     const float dy = firstY - secondY;
     return std::sqrt(dx * dx + dy * dy);

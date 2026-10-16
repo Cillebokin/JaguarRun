@@ -51,7 +51,7 @@ emcmake cmake -S SparrowCore/Tools/SparrowWasm -B build-wasm \
 cmake --build build-wasm
 ```
 
-The return code is `0` for success, `1` for malformed input, `2` for optimization/serialization failure and `3` when the output buffer is too small.
+The return code is `0` for success, `1` only when the input is null or empty, `2` for any failure after input is accepted (JSON import/parse failure, optimization failure, layout restore, SVG export or serialization failure) and `3` when the output buffer is null or too small. On a non-zero return code other than `3`, the output buffer contains `{"error":"<message>"}`.
 
 ## Browser demo
 

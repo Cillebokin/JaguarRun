@@ -715,6 +715,60 @@ fn run_b1_geometry_oracle() {
         Edge::try_new(Point(1.0, 1.0), Point(1.0, 1.0)).is_ok(),
         Edge::try_new(Point(1.0, 0.0), Point(1.0 + f32::EPSILON * 0.5, 0.0)).is_ok()
     );
+    let zero_length_edge = Edge {
+        start: Point(1.0, 2.0),
+        end: Point(1.0, 2.0),
+    };
+    let zero_length_closest = zero_length_edge.closest_point_on_edge(&Point(2.0, 3.0));
+    let zero_length_bbox = zero_length_edge.bbox();
+    println!(
+        "geometry.edge_zero_length_operations={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        zero_length_closest.0,
+        zero_length_closest.1,
+        zero_length_edge.length(),
+        zero_length_edge.centroid().0,
+        zero_length_edge.centroid().1,
+        zero_length_bbox.x_min,
+        zero_length_bbox.y_min,
+        zero_length_bbox.x_max,
+        zero_length_bbox.y_max,
+        zero_length_edge.sq_distance_to(&Point(2.0, 3.0))
+    );
+
+    let smallest_normal = f32::MIN_POSITIVE;
+    let underflow_length_edge =
+        Edge::try_new(Point(0.0, 0.0), Point(smallest_normal, 0.0)).unwrap();
+    let underflow_front = underflow_length_edge.extend_at_front(1.0);
+    let underflow_back = underflow_length_edge.extend_at_back(1.0);
+    println!(
+        "geometry.edge_underflow_length_contract={},{},{},{},{},{}",
+        true,
+        underflow_length_edge.length() == 0.0,
+        underflow_front.start.0.is_infinite() && underflow_front.start.0.is_sign_negative(),
+        underflow_front.start.1.is_nan(),
+        underflow_back.end.0.is_infinite() && underflow_back.end.0.is_sign_positive(),
+        underflow_back.end.1.is_nan()
+    );
+
+    let nan_edge = Edge::try_new(Point(f32::NAN, 0.0), Point(1.0, 1.0)).unwrap();
+    let infinite_edge = Edge::try_new(Point(f32::INFINITY, 0.0), Point(1.0, 1.0)).unwrap();
+    let nan_edge_bbox = nan_edge.bbox();
+    let infinite_edge_bbox = infinite_edge.bbox();
+    println!(
+        "geometry.edge_nonfinite_bbox_contract={},{},{},{},{},{},{},{}",
+        nan_edge.start.0.is_nan(),
+        infinite_edge.start.0.is_infinite(),
+        !nan_edge_bbox.x_min.is_nan(),
+        !nan_edge_bbox.y_min.is_nan(),
+        !nan_edge_bbox.x_max.is_nan(),
+        !nan_edge_bbox.y_max.is_nan(),
+        nan_edge_bbox.x_min == nan_edge_bbox.x_max,
+        infinite_edge_bbox.x_max.is_infinite()
+    );
+    println!(
+        "geometry.edge_nan_bbox_values={:.9},{:.9},{:.9},{:.9}",
+        nan_edge_bbox.x_min, nan_edge_bbox.y_min, nan_edge_bbox.x_max, nan_edge_bbox.y_max
+    );
     let proper_edge_a = Edge::try_new(Point(0.0, 0.0), Point(10.0, 10.0)).unwrap();
     let proper_edge_b = Edge::try_new(Point(0.0, 10.0), Point(10.0, 0.0)).unwrap();
     let endpoint_edge_a = Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap();
@@ -863,6 +917,41 @@ fn run_b1_geometry_oracle() {
         Rect::try_new(0.0, 1.0, 1.0, 1.0).is_ok(),
         Rect::try_new(0.0, 0.0, f32::NAN, 1.0).is_ok(),
         Rect::try_new(0.0, 0.0, f32::INFINITY, 1.0).is_ok()
+    );
+    let boundary_rect = Rect::try_new(0.0, 0.0, 2.0, 1.0).unwrap();
+    let edge_touch_rect = Rect::try_new(2.0, 0.0, 3.0, 1.0).unwrap();
+    let corner_touch_rect = Rect::try_new(2.0, 1.0, 3.0, 2.0).unwrap();
+    let overlap_boundary_rect = Rect::try_new(1.0, 0.5, 3.0, 2.0).unwrap();
+    let disjoint_boundary_rect = Rect::try_new(3.0, 0.0, 4.0, 1.0).unwrap();
+    println!(
+        "geometry.rect_boundary_intersections={},{},{},{}",
+        Rect::intersection(boundary_rect, overlap_boundary_rect).is_some(),
+        Rect::intersection(boundary_rect, edge_touch_rect).is_some(),
+        Rect::intersection(boundary_rect, corner_touch_rect).is_some(),
+        Rect::intersection(boundary_rect, disjoint_boundary_rect).is_some()
+    );
+    println!(
+        "geometry.rect_boundary_resizes={},{},{},{}",
+        boundary_rect.resize_by(-1.0, 0.0).is_none(),
+        boundary_rect.resize_by(0.0, -0.5).is_none(),
+        boundary_rect.resize_by(-1.0, -0.5).is_none(),
+        boundary_rect.resize_by(0.0, 0.0) == Some(boundary_rect)
+    );
+    println!(
+        "geometry.rect_zero_scale_rejected={}",
+        std::panic::catch_unwind(|| boundary_rect.scale(0.0)).is_err()
+    );
+    let one_ulp_rect = Rect::try_new(1.0, 0.0, f32::from_bits(0x3f80_0001), 1.0).unwrap();
+    let zero_width_rect = Rect {
+        x_min: 1.0,
+        y_min: 0.0,
+        x_max: 1.0,
+        y_max: 1.0,
+    };
+    println!(
+        "geometry.rect_quadrant_panic_contract={},{}",
+        std::panic::catch_unwind(|| one_ulp_rect.quadrants()).is_err(),
+        std::panic::catch_unwind(|| zero_width_rect.quadrants()).is_err()
     );
 
     let rectangle = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
@@ -1013,6 +1102,87 @@ fn run_b1_geometry_oracle() {
         polygon_from_target.poi.radius
     );
 
+    let surrogate_config = SPSurrogateConfig {
+        n_pole_limits: [(1, 0.0), (0, 0.0), (0, 0.0)],
+        ff_pole_area_ratio: 1.0,
+        n_ff_piers: 1,
+    };
+    let mut surrogate_reference = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    surrogate_reference
+        .generate_surrogate(surrogate_config)
+        .unwrap();
+    let mut surrogate_target = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    surrogate_target
+        .generate_surrogate(surrogate_config)
+        .unwrap();
+    let surrogate_transform = DTransformation::new(0.37, (3.0, -2.0)).compose();
+    surrogate_target.transform_from(&surrogate_reference, &surrogate_transform);
+    let transformed_surrogate = surrogate_target.surrogate();
+    let mut transformed_surrogate_values = vec![surrogate_target.n_vertices() as f32];
+    for vertex in &surrogate_target.vertices {
+        transformed_surrogate_values.extend([vertex.0, vertex.1]);
+    }
+    transformed_surrogate_values.extend([
+        surrogate_target.bbox.x_min,
+        surrogate_target.bbox.y_min,
+        surrogate_target.bbox.x_max,
+        surrogate_target.bbox.y_max,
+        surrogate_target.centroid().0,
+        surrogate_target.centroid().1,
+        surrogate_target.area,
+        surrogate_target.diameter,
+        surrogate_target.poi.center.0,
+        surrogate_target.poi.center.1,
+        surrogate_target.poi.radius,
+        transformed_surrogate.poles.len() as f32,
+        transformed_surrogate.ff_poles().len() as f32,
+        transformed_surrogate.piers.len() as f32,
+        transformed_surrogate.convex_hull_area,
+        transformed_surrogate.convex_hull_indices.len() as f32,
+    ]);
+    for index in &transformed_surrogate.convex_hull_indices {
+        transformed_surrogate_values.push(*index as f32);
+    }
+    for pole in &transformed_surrogate.poles {
+        transformed_surrogate_values.extend([pole.center.0, pole.center.1, pole.radius]);
+    }
+    for pier in &transformed_surrogate.piers {
+        transformed_surrogate_values.extend([pier.start.0, pier.start.1, pier.end.0, pier.end.1]);
+    }
+    let surrogate_fixture_key = if cfg!(debug_assertions) {
+        "geometry.transform_from_surrogate_debug"
+    } else {
+        "geometry.transform_from_surrogate_release"
+    };
+    println!(
+        "{}={}",
+        surrogate_fixture_key,
+        transformed_surrogate_values
+            .iter()
+            .map(|value| format!("{value:.9}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let mut no_surrogate_target = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    no_surrogate_target.transform_from(&surrogate_reference, &surrogate_transform);
+    let mut surrogate_target_without_reference =
+        polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    surrogate_target_without_reference
+        .generate_surrogate(surrogate_config)
+        .unwrap();
+    let no_surrogate_reference = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    let missing_reference_surrogate_panics =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            surrogate_target_without_reference
+                .transform_from(&no_surrogate_reference, &surrogate_transform);
+        }))
+        .is_err();
+    println!(
+        "geometry.transform_from_surrogate_state={},{}",
+        no_surrogate_target.surrogate.is_none(),
+        missing_reference_surrogate_panics
+    );
+
     let dispatch_circle = Circle::try_new(Point(0.0, 0.0), 1.0).unwrap();
     let dispatch_rect = Rect::try_new(0.0, 0.0, 2.0, 2.0).unwrap();
     let dispatch_touching_rect = Rect::try_new(2.0, 0.0, 4.0, 2.0).unwrap();
@@ -1069,6 +1239,63 @@ fn run_b1_geometry_oracle() {
         helper_poi.center.0,
         helper_poi.center.1,
         helper_poi.radius
+    );
+
+    let empty_helper_points: Vec<Point> = vec![];
+    let singleton_helper_points = vec![Point(1.0, 2.0)];
+    let two_helper_points = vec![Point(0.0, 0.0), Point(2.0, 2.0)];
+    let collinear_helper_points = vec![Point(0.0, 0.0), Point(1.0, 1.0), Point(2.0, 2.0)];
+    let two_helper_diameter = SPolygon::calculate_diameter(two_helper_points.clone());
+    let collinear_helper_diameter = SPolygon::calculate_diameter(collinear_helper_points.clone());
+    let empty_diameter_panics =
+        std::panic::catch_unwind(|| SPolygon::calculate_diameter(empty_helper_points.clone()))
+            .is_err();
+    let empty_bbox_panics =
+        std::panic::catch_unwind(|| SPolygon::generate_bounding_box(&empty_helper_points)).is_err();
+    let empty_poi_panics =
+        std::panic::catch_unwind(|| SPolygon::calculate_poi(&empty_helper_points, 0.0)).is_err();
+    let singleton_diameter_panics =
+        std::panic::catch_unwind(|| SPolygon::calculate_diameter(singleton_helper_points.clone()))
+            .is_err();
+    let singleton_bbox_panics =
+        std::panic::catch_unwind(|| SPolygon::generate_bounding_box(&singleton_helper_points))
+            .is_err();
+    let singleton_poi_panics =
+        std::panic::catch_unwind(|| SPolygon::calculate_poi(&singleton_helper_points, 0.0))
+            .is_err();
+    let two_point_poi = std::panic::catch_unwind(|| {
+        SPolygon::calculate_poi(&two_helper_points, two_helper_diameter)
+    });
+    let (two_point_poi_panics, two_point_poi_is_error) = match two_point_poi {
+        Ok(result) => (false, result.is_err()),
+        Err(_) => (true, false),
+    };
+    let collinear_poi = std::panic::catch_unwind(|| {
+        SPolygon::calculate_poi(&collinear_helper_points, collinear_helper_diameter)
+    });
+    let (collinear_poi_panics, collinear_poi_is_error) = match collinear_poi {
+        Ok(result) => (false, result.is_err()),
+        Err(_) => (true, false),
+    };
+    println!(
+        "geometry.simple_polygon_helper_failures={},{},{},{},{},{},{},{},{},{}",
+        empty_diameter_panics,
+        empty_bbox_panics,
+        empty_poi_panics,
+        singleton_diameter_panics,
+        singleton_bbox_panics,
+        singleton_poi_panics,
+        two_point_poi_is_error,
+        two_point_poi_panics,
+        collinear_poi_is_error,
+        collinear_poi_panics
+    );
+    println!(
+        "geometry.simple_polygon_helper_rejections={},{},{},{}",
+        SPolygon::new(empty_helper_points).is_err(),
+        SPolygon::new(singleton_helper_points).is_err(),
+        SPolygon::new(two_helper_points).is_err(),
+        SPolygon::new(collinear_helper_points).is_err()
     );
 
     let original = OriginalShape {

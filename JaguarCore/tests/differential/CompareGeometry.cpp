@@ -10,7 +10,9 @@
 #include "JaguarCore/Geometry/SimplePolygon.h"
 #include "JaguarCore/Geometry/ShapeModification.h"
 #include "JaguarCore/Geometry/Transformation.h"
+#include "JaguarCore/FailFast/Surrogate.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cassert>
 #include <cmath>
@@ -172,8 +174,20 @@ void expectRustNumbers(const ReferenceMap& reference,
     assert(expected.size() == actual.size());
     for (std::size_t index = 0; index < expected.size(); ++index)
     {
-        assert(jaguar::detail::AlmostEqualRustF32(
-            static_cast<float>(actual[index]), static_cast<float>(expected[index])));
+        const float actualValue = static_cast<float>(actual[index]);
+        const float expectedValue = static_cast<float>(expected[index]);
+        const bool matches =
+            jaguar::detail::AlmostEqualRustF32(actualValue, expectedValue);
+        if (!matches)
+        {
+            std::fprintf(stderr,
+                         "B1 reference %s[%zu]: Rust %.9g, C++ %.9g\n",
+                         key,
+                         index,
+                         expectedValue,
+                         actualValue);
+        }
+        assert(matches);
     }
 }
 
@@ -437,6 +451,47 @@ void runB1PrimitiveReferenceTests()
             {1.0, 0.0}, {1.0 + std::numeric_limits<float>::epsilon() * 0.5, 0.0})
             .HasValue()});
 
+    const jaguar::Edge2d zeroLengthEdge{{1.0, 2.0}, {1.0, 2.0}};
+    const auto zeroLengthClosest = zeroLengthEdge.ClosestPointRustF32({2.0, 3.0});
+    const auto zeroLengthCenter = zeroLengthEdge.CentroidRustF32();
+    const auto zeroLengthBounds = zeroLengthEdge.BoundingBox();
+    expectRustNumbers(reference, "geometry.edge_zero_length_operations", {
+        zeroLengthClosest.x, zeroLengthClosest.y,
+        zeroLengthEdge.LengthRustF32(), zeroLengthCenter.x, zeroLengthCenter.y,
+        zeroLengthBounds.xMin, zeroLengthBounds.yMin,
+        zeroLengthBounds.xMax, zeroLengthBounds.yMax,
+        zeroLengthEdge.SquaredDistanceToRustF32({2.0, 3.0})});
+
+    const float smallestNormal = std::numeric_limits<float>::min();
+    const auto underflowLengthEdge = jaguar::Edge2d::Create(
+        {0.0, 0.0}, {static_cast<double>(smallestNormal), 0.0});
+    assert(underflowLengthEdge.HasValue());
+    const auto underflowFront = underflowLengthEdge.Value().ExtendedAtFrontRustF32(1.0);
+    const auto underflowBack = underflowLengthEdge.Value().ExtendedAtBackRustF32(1.0);
+    expectRustBooleans(reference, "geometry.edge_underflow_length_contract", {
+        underflowLengthEdge.HasValue(),
+        underflowLengthEdge.Value().LengthRustF32() == 0.0,
+        std::isinf(underflowFront.start.x) && std::signbit(underflowFront.start.x),
+        std::isnan(underflowFront.start.y),
+        std::isinf(underflowBack.end.x) && !std::signbit(underflowBack.end.x),
+        std::isnan(underflowBack.end.y)});
+
+    const float quietNan = std::numeric_limits<float>::quiet_NaN();
+    const auto nanEdge = jaguar::Edge2d::Create({quietNan, 0.0}, {1.0, 1.0});
+    const auto infiniteEdge = jaguar::Edge2d::Create(
+        {std::numeric_limits<float>::infinity(), 0.0}, {1.0, 1.0});
+    assert(nanEdge.HasValue() && infiniteEdge.HasValue());
+    const auto nanEdgeBounds = nanEdge.Value().BoundingBox();
+    expectRustBooleans(reference, "geometry.edge_nonfinite_bbox_contract", {
+        nanEdge.HasValue(), infiniteEdge.HasValue(),
+        !std::isnan(nanEdgeBounds.xMin), !std::isnan(nanEdgeBounds.yMin),
+        !std::isnan(nanEdgeBounds.xMax), !std::isnan(nanEdgeBounds.yMax),
+        nanEdgeBounds.xMin == nanEdgeBounds.xMax,
+        std::isinf(infiniteEdge.Value().BoundingBox().xMax)});
+    expectRustNumbers(reference, "geometry.edge_nan_bbox_values", {
+        nanEdgeBounds.xMin, nanEdgeBounds.yMin,
+        nanEdgeBounds.xMax, nanEdgeBounds.yMax});
+
     const auto crossingA = jaguar::Edge2d::Create({0.0, 0.0}, {10.0, 10.0});
     const auto crossingB = jaguar::Edge2d::Create({0.0, 10.0}, {10.0, 0.0});
     const auto endpointA = jaguar::Edge2d::Create({0.0, 0.0}, {2.0, 0.0});
@@ -623,6 +678,56 @@ void runB1PrimitiveReferenceTests()
         jaguar::Rect2d::Create(0.0, 0.0,
             std::numeric_limits<double>::infinity(), 1.0).HasValue()});
 
+    const auto boundaryRect = jaguar::Rect2d::Create(0.0, 0.0, 2.0, 1.0);
+    const auto edgeTouchRect = jaguar::Rect2d::Create(2.0, 0.0, 3.0, 1.0);
+    const auto cornerTouchRect = jaguar::Rect2d::Create(2.0, 1.0, 3.0, 2.0);
+    const auto overlapBoundaryRect = jaguar::Rect2d::Create(1.0, 0.5, 3.0, 2.0);
+    assert(boundaryRect.HasValue() && edgeTouchRect.HasValue() &&
+           cornerTouchRect.HasValue() && overlapBoundaryRect.HasValue());
+    expectRustBooleans(reference, "geometry.rect_boundary_intersections", {
+        jaguar::Rect2d::IntersectionRustF32(
+            boundaryRect.Value(), overlapBoundaryRect.Value()).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            boundaryRect.Value(), edgeTouchRect.Value()).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            boundaryRect.Value(), cornerTouchRect.Value()).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            boundaryRect.Value(), disjointBounds).has_value()});
+    const auto collapseWidth = boundaryRect.Value().ResizeByRustF32(-1.0, 0.0);
+    const auto collapseHeight = boundaryRect.Value().ResizeByRustF32(0.0, -0.5);
+    const auto collapseBoth = boundaryRect.Value().ResizeByRustF32(-1.0, -0.5);
+    const auto noResize = boundaryRect.Value().ResizeByRustF32(0.0, 0.0);
+    expectRustBooleans(reference, "geometry.rect_boundary_resizes", {
+        !collapseWidth.has_value(), !collapseHeight.has_value(),
+        !collapseBoth.has_value(), noResize.has_value() &&
+            noResize->xMin == boundaryRect.Value().xMin &&
+            noResize->yMin == boundaryRect.Value().yMin &&
+            noResize->xMax == boundaryRect.Value().xMax &&
+            noResize->yMax == boundaryRect.Value().yMax});
+    const auto zeroScale = boundaryRect.Value().ScaledRustF32(0.0);
+    expectRustBooleans(reference, "geometry.rect_zero_scale_rejected", {
+        !zeroScale.HasValue()});
+
+    const float nextAfterOne = std::nextafter(1.0F, 2.0F);
+    const auto oneUlpRect = jaguar::Rect2d::Create(
+        1.0, 0.0, static_cast<double>(nextAfterOne), 1.0);
+    assert(oneUlpRect.HasValue());
+    const auto oneUlpQuadrants = oneUlpRect.Value().QuadrantsRustF32();
+    const bool oneUlpHasCollapsedQuadrant = std::any_of(
+        oneUlpQuadrants.begin(), oneUlpQuadrants.end(), [](const jaguar::Rect2d& quadrant) {
+            return quadrant.WidthRustF32() == 0.0 || quadrant.HeightRustF32() == 0.0;
+        });
+    assert(oneUlpHasCollapsedQuadrant);
+    const jaguar::Rect2d zeroWidthRect{1.0, 0.0, 1.0, 1.0};
+    const auto zeroWidthQuadrants = zeroWidthRect.QuadrantsRustF32();
+    assert(std::all_of(zeroWidthQuadrants.begin(), zeroWidthQuadrants.end(),
+                       [](const jaguar::Rect2d& quadrant) {
+                           return quadrant.WidthRustF32() == 0.0;
+                       }));
+    const auto& rustQuadrantPanics =
+        booleanValues(referenceValue(reference, "geometry.rect_quadrant_panic_contract"));
+    assert((rustQuadrantPanics == std::vector<bool>{true, true}));
+
     const jaguar::Point2d pointA{1.25, -2.5};
     const jaguar::Point2d pointB{4.5, 2.5};
     expectRustNumbers(reference, "point.distance", {
@@ -803,6 +908,66 @@ void runB1PrimitiveReferenceTests()
         transformedFromPoi.radius});
     expectRustNumbers(reference, "geometry.transform_from", transformFromValues);
 
+    jaguar::SurrogateConfig transformSurrogateConfig;
+    transformSurrogateConfig.poleLimits = {{{1U, 0.0}, {0U, 0.0}, {0U, 0.0}}};
+    transformSurrogateConfig.failFastPoleAreaRatio = 1.0;
+    transformSurrogateConfig.failFastPiers = 1U;
+    auto surrogateSource = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {0.0, 2.0}});
+    assert(surrogateSource.HasValue());
+    const auto generatedSurrogate =
+        surrogateSource.Value().GenerateSurrogate(transformSurrogateConfig);
+    assert(generatedSurrogate.HasValue());
+    const auto transformedSurrogatePolygon =
+        surrogateSource.Value().TransformedRustF32(
+            jaguar::Transform2d::FromRotationTranslation(0.37, {3.0, -2.0}));
+    assert(transformedSurrogatePolygon.HasValue());
+    const jaguar::Surrogate* transformedSurrogate =
+        transformedSurrogatePolygon.Value().GetSurrogate();
+    assert(transformedSurrogate != nullptr);
+    std::vector<double> transformedSurrogateValues = {
+        static_cast<double>(transformedSurrogatePolygon.Value().VertexCount())};
+    for (const auto& point : transformedSurrogatePolygon.Value().Vertices())
+        transformedSurrogateValues.insert(
+            transformedSurrogateValues.end(), {point.x, point.y});
+    const auto& transformedSurrogateBounds =
+        transformedSurrogatePolygon.Value().BoundingBox();
+    const auto transformedSurrogateCentroid =
+        transformedSurrogatePolygon.Value().Centroid();
+    const auto& transformedSurrogatePoi =
+        transformedSurrogatePolygon.Value().PointOfInaccessibility();
+    transformedSurrogateValues.insert(transformedSurrogateValues.end(), {
+        transformedSurrogateBounds.xMin, transformedSurrogateBounds.yMin,
+        transformedSurrogateBounds.xMax, transformedSurrogateBounds.yMax,
+        transformedSurrogateCentroid.x, transformedSurrogateCentroid.y,
+        transformedSurrogatePolygon.Value().Area(),
+        transformedSurrogatePolygon.Value().Diameter(),
+        transformedSurrogatePoi.center.x, transformedSurrogatePoi.center.y,
+        transformedSurrogatePoi.radius,
+        static_cast<double>(transformedSurrogate->Poles().size()),
+        static_cast<double>(transformedSurrogate->FailFastPoleCount()),
+        static_cast<double>(transformedSurrogate->Piers().size()),
+        transformedSurrogate->ConvexHullArea(),
+        static_cast<double>(transformedSurrogate->ConvexHullIndices().size())});
+    for (const std::size_t index : transformedSurrogate->ConvexHullIndices())
+        transformedSurrogateValues.push_back(static_cast<double>(index));
+    for (const auto& pole : transformedSurrogate->Poles())
+        transformedSurrogateValues.insert(transformedSurrogateValues.end(), {
+            pole.center.x, pole.center.y, pole.radius});
+    for (const auto& pier : transformedSurrogate->Piers())
+        transformedSurrogateValues.insert(transformedSurrogateValues.end(), {
+            pier.start.x, pier.start.y, pier.end.x, pier.end.y});
+#ifdef JAGUARCORE_TEST_RELEASE
+    expectRustNumbers(reference, "geometry.transform_from_surrogate_release",
+                      transformedSurrogateValues);
+#else
+    expectRustNumbers(reference, "geometry.transform_from_surrogate_debug",
+                      transformedSurrogateValues);
+#endif
+    const auto& rustSurrogateState = booleanValues(
+        referenceValue(reference, "geometry.transform_from_surrogate_state"));
+    assert((rustSurrogateState == std::vector<bool>{true, true}));
+
     const auto dispatchCircle = jaguar::Circle2d::Create({0.0, 0.0}, 1.0);
     const auto dispatchRect = jaguar::Rect2d::Create(0.0, 0.0, 2.0, 2.0);
     const auto dispatchTouchingRect = jaguar::Rect2d::Create(2.0, 0.0, 4.0, 2.0);
@@ -855,6 +1020,19 @@ void runB1PrimitiveReferenceTests()
         referencePolygon.Value().PointOfInaccessibility().center.x,
         referencePolygon.Value().PointOfInaccessibility().center.y,
         referencePolygon.Value().PointOfInaccessibility().radius});
+
+    const auto emptyPolygon = jaguar::SimplePolygon::Create({});
+    const auto singletonPolygon = jaguar::SimplePolygon::Create({{1.0, 2.0}});
+    const auto twoPointPolygon = jaguar::SimplePolygon::Create({{0.0, 0.0}, {2.0, 2.0}});
+    const auto diagonalCollinearPolygon = jaguar::SimplePolygon::Create(
+        {{0.0, 0.0}, {1.0, 1.0}, {2.0, 2.0}});
+    expectRustBooleans(reference, "geometry.simple_polygon_helper_rejections", {
+        !emptyPolygon.HasValue(), !singletonPolygon.HasValue(),
+        !twoPointPolygon.HasValue(), !diagonalCollinearPolygon.HasValue()});
+    const auto& rustHelperFailures = booleanValues(
+        referenceValue(reference, "geometry.simple_polygon_helper_failures"));
+    assert((rustHelperFailures == std::vector<bool>{
+        true, true, true, true, true, true, true, false, true, false}));
 
     const auto tiedXHull = jaguar::ConvexHull({
         {0.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, {1.0, 1.0}});

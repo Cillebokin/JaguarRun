@@ -10,7 +10,7 @@ The files under `../Fixtures/RustReference/` use the jagua-rs external JSON sche
 
 ## Current checks
 
-- `CompareGeometry.cpp`: rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, plus PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering.
+- `CompareGeometry.cpp`: pinned Rust geometry reference fixture for B1 primitives, transforms, convex hull and `OriginalShape`, plus rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering.
 - `CompareProblem.cpp`: SPP demand/width/density, BPP demand/stock/cost/density, and MSPP demand/max-width/total-width/density invariants, including Layout snapshot restore.
 - `CompareMatrix.cpp`: shared edge intersection and containment tables. The matrix explicitly preserves jagua-rs's non-collision rule for collinear segments and collision rule for non-collinear endpoint/T-junction contact.
 - `CompareTrajectory.cpp`: the same xorshift64* seed and 256-step operation grammar run in Rust and C++, including placement/removal/restore counts, active count, checksum, and final PRNG state.
@@ -28,6 +28,8 @@ The expected scalar values are derived from the corresponding jagua-rs import ru
 5. Record float type, tolerance, item ordering, random seed, and whether a result came from an optimizer.
 
 The current fixed collision matrix also records the boundary convention: CDE treats touching/tangent geometry as collision. A Surrogate negative case therefore uses a separate engine without an Exterior hazard, so it isolates fail-fast filtering from container-boundary semantics.
+
+The B1 geometry fixture uses the locked Rust 1.98.1 toolchain and jagua-rs revision. Existing circle/edge/rect/point/polygon values come from the default oracle; extended B1 values come from `RustOracle --geometry-primitives-parity-only`. Scalar results use JaguarCore's `AlmostEqualRustF32` comparison; booleans, position classifications, and ordered vertices are exact. The extended values were checked against both Rust Debug and Release output on 2026-10-16.
 
 `CompareBoundary.cpp` additionally locks the primitive convention that non-collinear
 near-contact uses the configured tolerance while collinear overlap remains outside the

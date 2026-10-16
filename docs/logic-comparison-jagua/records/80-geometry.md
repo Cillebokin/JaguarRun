@@ -22,7 +22,7 @@
 | Rust 声明/函数/行 | 逻辑、分支与失败出口 | JaguarCore 对应与差异 |
 |---|---|---|
 | `DTransformation/new`、访问器与 `compose` (11–53) | 保存弧度与 x/y 平移，三个值用 `NotNan<f32>`；`new` 遇 NaN 时 `expect` panic，但不拒绝 infinity；可转换为矩阵 `Transformation` | C++ `Transform2d`（`Geometry/Transformation.h`）直接保存分解式 rotation/translation，double 存储；通过 `ApplyRustF32`、`InverseRustF32`、`FollowedByRustF32`显式走 f32 算术 |
-| `From<Transformation>`、`Display`、`normalize_rotation` (55–85) | 从矩阵分解；文本输出角度/位移；rotation 以 `% 2π` 归一化，负余数加 `2π`，NaN/infinity 不在此函数拒绝 | `Importer::ImportRotation` 与 C++ `RotationRange` 负责外部角度策略；当前几何 API 未见独立同名归一化函数，角度归一化与输出需要单独对拍 |
+| `From<Transformation>`、`Display`、`normalize_rotation` (55–85) | 从矩阵分解；文本输出角度/位移；rotation 以 `% 2π` 归一化，负余数加 `2π`，NaN/infinity 不在此函数拒绝 | `Transform2d` 的旋转/平移字段承接分解数据；`NormalizeRotationRustF32` 对应公开角度 helper，B1 首轮已比较有限角、NaN/infinity 与 signed zero。Rust `Display` 暂无同构格式化 API |
 
 ### `jagua-rs/src/geometry/transformation.rs`
 
@@ -120,11 +120,15 @@
 ## 结论边界与后续验收
 
 - 15 个 geometry 实现文件均已登记；`geometry/mod.rs`、`geometry/primitives/mod.rs` 与 `geometry/fail_fast/mod.rs` 的导出边界见 `00-module-exports.md`。
-- B1/B3/B9 仍需运行对拍的重点：边/点接触与共线交叠、NaN/inf/退化原语、矩形象限顺序、polygon 构造顺序、shape offset 多轮廓与 fallback、缺失 surrogate、POI/pier profile 差异、transform composition 与 signed-zero 哈希。
-- 本账本只证明静态记录覆盖；没有运行 Rust/C++ 测试、构建、数值 fixture 或真实实例对拍。
+- B1 首轮运行对拍（2026-10-16）：`JaguarCore/Tests/Fixtures/RustReference/geometry_primitives.txt` 使用 pinned `jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`、Rust 1.98.1 生成；原有 circle/edge/rect/point/polygon 输出来自默认 oracle，新扩展用例来自 `--geometry-primitives-parity-only`。Debug 与 Release oracle 的扩展输出一致。
+- 本轮 fixture 与 `CompareGeometry.cpp::runB1PrimitiveReferenceTests` 覆盖圆构造/度量/包含/相交/距离/分离/包围圆/变换；边构造/最近点/距离/延伸/缩放/反向/交点/相交/变换；点距离；矩形构造/关系/几乎关系/象限/角点/边/组合/距离/分离；多边形有限输入构造、方向归一、派生指标、POI、包含、距离/分离与变换；凸包顺序/单点；`OriginalShape` 原始指标和默认配置下的预变换转换。有限退化用例覆盖零半径、零长边、f32 收敛为重复端点、矩形零宽/零高、多边形点数不足/重复点/共线/自交/小面积。
+- C++ 数值结果通过 `AlmostEqualRustF32` 按 D3 规则比较；布尔值与 `GeoPosition`、顶点顺序精确比较。Rust oracle 的 Debug/Release 命令和 JaguarCore 两个 profile 的完整测试均以退出码 0 结束。
+- `DTransformation` 不需要新增同名结构：它保存的旋转和平移可由 `Transform2d::rotationRad/translation` 表达，行为落在 `ApplyRustF32`、`FollowedByRustF32`、`InverseRustF32`；Rust 公开的 `normalize_rotation` 则新增直接对应 `NormalizeRotationRustF32(float)`，按 f32 remainder 及负角修正规则实现，并覆盖 NaN、正负无穷和负零。
+- B1 仍为进行中：当前是按操作组的确定性 fixture，不是 9 个 Rust 文件每个公开函数的完整用例矩阵；矩阵形式/分解边界、未覆盖的点接触与比较分支仍需补齐。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rust `Edge::try_new` 接受非有限端点而 C++ `Edge2d::Create` 拒绝，先记录为非有限输入域差异，不计入本轮有限输入通过结论。
+- 本轮验证命令：Rust `rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --geometry-primitives-parity-only` 及带 `--release` 的同命令；JaguarCore Debug/Release `JaguarCoreTests.exe` 全套各运行一次。
 
 ## 证据位置
 
 - pinned Rust：`geometry/{convex_hull,d_transformation,geo_enums,geo_traits,original_shape,shape_modification,transformation}.rs`、`geometry/fail_fast/{piers,pole,sp_surrogate}.rs`、`geometry/primitives/{circle,edge,point,rect,simple_polygon}.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Geometry/*`、`JaguarCore/Source/Geometry/{ConvexHull,OriginalShape,Primitives,ShapeModification,Transformation}/*`、`JaguarCore/Source/FailFast/Surrogate.cpp`。
-- 本轮仅更新静态记录与索引，没有执行构建或测试。
+- 运行对拍：`JaguarCore/Tests/Differential/CompareGeometry.cpp`、`JaguarCore/Tests/Fixtures/RustReference/geometry_primitives.txt`、`JaguarCore/tools/RustOracle/src/main.rs`。

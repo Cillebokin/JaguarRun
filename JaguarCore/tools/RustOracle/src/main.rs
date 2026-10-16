@@ -560,6 +560,287 @@ fn run_offset_boundary_oracle() {
     }
 }
 
+fn run_b1_geometry_oracle() {
+    let angles = [-7.0_f32, -1.0, 7.0, 1_000_000.0];
+    println!(
+        "geometry.normalize_rotation={:.9},{:.9},{:.9},{:.9}",
+        jagua_rs::geometry::normalize_rotation(angles[0]),
+        jagua_rs::geometry::normalize_rotation(angles[1]),
+        jagua_rs::geometry::normalize_rotation(angles[2]),
+        jagua_rs::geometry::normalize_rotation(angles[3])
+    );
+    let normalized_nan = jagua_rs::geometry::normalize_rotation(f32::NAN);
+    let normalized_infinity = jagua_rs::geometry::normalize_rotation(f32::INFINITY);
+    println!(
+        "geometry.normalize_rotation_nonfinite=nan:{},infinity:{},negative_infinity:{}",
+        normalized_nan.is_nan(),
+        normalized_infinity.is_nan(),
+        jagua_rs::geometry::normalize_rotation(f32::NEG_INFINITY).is_nan()
+    );
+    println!(
+        "geometry.normalize_rotation_negative_zero={}",
+        jagua_rs::geometry::normalize_rotation(-0.0_f32).is_sign_negative()
+    );
+
+    let transform = DTransformation::new(0.37, (1.25, -0.75));
+    let decomposed = DTransformation::from(transform.compose());
+    let (decomposed_x, decomposed_y) = decomposed.translation();
+    println!(
+        "geometry.dtransformation={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        DTransformation::empty().rotation(),
+        DTransformation::empty().translation().0,
+        DTransformation::empty().translation().1,
+        transform.rotation(),
+        transform.translation().0,
+        transform.translation().1,
+        decomposed.rotation(),
+        decomposed_x,
+        decomposed_y
+    );
+    let applied = Point(2.0, -3.0).transform_clone(&transform.compose());
+    println!(
+        "geometry.transformation_apply={:.9},{:.9}",
+        applied.0,
+        applied.1
+    );
+    let rotate_then_translate = jagua_rs::geometry::Transformation::empty()
+        .rotate_translate(0.5, (3.0, -2.0))
+        .decompose();
+    let translate_then_rotate = jagua_rs::geometry::Transformation::empty()
+        .translate_rotate((3.0, -2.0), 0.5)
+        .decompose();
+    println!(
+        "geometry.transformation_order={:.9},{:.9},{:.9};{:.9},{:.9},{:.9}",
+        rotate_then_translate.rotation(),
+        rotate_then_translate.translation().0,
+        rotate_then_translate.translation().1,
+        translate_then_rotate.rotation(),
+        translate_then_rotate.translation().0,
+        translate_then_rotate.translation().1
+    );
+
+    let circle = Circle::try_new(Point(2.0, 3.0), 5.0).unwrap();
+    let circle_bbox = circle.bbox();
+    println!(
+        "geometry.circle_basics={:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        circle.area(),
+        circle_bbox.x_min,
+        circle_bbox.y_min,
+        circle_bbox.x_max,
+        circle_bbox.y_max,
+        circle.diameter()
+    );
+    println!("geometry.circle_contains={}", circle.collides_with(&Point(2.0, 3.0)));
+    println!(
+        "geometry.circle_construction=zero_radius:{},negative_radius:{},nonfinite_center:{},nonfinite_radius:{}",
+        Circle::try_new(Point(0.0, 0.0), 0.0).is_ok(),
+        Circle::try_new(Point(0.0, 0.0), -1.0).is_ok(),
+        Circle::try_new(Point(f32::INFINITY, 0.0), 1.0).is_ok(),
+        Circle::try_new(Point(0.0, 0.0), f32::INFINITY).is_ok()
+    );
+
+    let edge = Edge::try_new(Point(0.0, 0.0), Point(3.0, 4.0)).unwrap();
+    let closest = edge.closest_point_on_edge(&Point(1.0, 2.0));
+    println!(
+        "geometry.edge_closest={:.9},{:.9},{:.9},{:.9}",
+        closest.0,
+        closest.1,
+        edge.distance_to(&Point(1.0, 2.0)),
+        edge.sq_distance_to(&Point(1.0, 2.0))
+    );
+    println!(
+        "geometry.edge_construction=valid:{},zero_length:{},f32_collapsed:{}",
+        Edge::try_new(Point(0.0, 0.0), Point(1.0, 0.0)).is_ok(),
+        Edge::try_new(Point(1.0, 1.0), Point(1.0, 1.0)).is_ok(),
+        Edge::try_new(
+            Point(1.0, 0.0),
+            Point(1.0 + f32::EPSILON * 0.5, 0.0)
+        )
+        .is_ok()
+    );
+    let proper_edge_a = Edge::try_new(Point(0.0, 0.0), Point(10.0, 10.0)).unwrap();
+    let proper_edge_b = Edge::try_new(Point(0.0, 10.0), Point(10.0, 0.0)).unwrap();
+    let endpoint_edge_a = Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap();
+    let endpoint_edge_b = Edge::try_new(Point(2.0, 0.0), Point(2.0, 1.0)).unwrap();
+    let collinear_edge = Edge::try_new(Point(1.0, 0.0), Point(3.0, 0.0)).unwrap();
+    println!(
+        "geometry.edge_intersects=proper:{},endpoint:{},collinear:{}",
+        proper_edge_a.collides_with(&proper_edge_b),
+        endpoint_edge_a.collides_with(&endpoint_edge_b),
+        endpoint_edge_a.collides_with(&collinear_edge)
+    );
+
+    let rect = Rect::try_new(0.0, 0.0, 4.0, 2.0).unwrap();
+    let quadrants = rect.quadrants();
+    println!(
+        "geometry.rect_basics={:.9},{:.9};{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9};{:.9},{:.9}",
+        rect.centroid().0,
+        rect.centroid().1,
+        quadrants[0].x_min,
+        quadrants[0].y_min,
+        quadrants[0].x_max,
+        quadrants[0].y_max,
+        quadrants[1].x_min,
+        quadrants[1].y_min,
+        quadrants[1].x_max,
+        quadrants[1].y_max,
+        quadrants[2].x_min,
+        quadrants[2].y_min,
+        quadrants[2].x_max,
+        quadrants[2].y_max,
+        quadrants[3].x_min,
+        quadrants[3].y_min,
+        quadrants[3].x_max,
+        quadrants[3].y_max,
+        rect.width(),
+        rect.height()
+    );
+    let enclosed_rect = Rect::try_new(1.0, 0.5, 3.0, 1.5).unwrap();
+    let overlap_rect = Rect::try_new(3.0, 1.0, 5.0, 4.0).unwrap();
+    let disjoint_rect = Rect::try_new(5.0, 0.0, 6.0, 1.0).unwrap();
+    println!(
+        "geometry.rect_relations=surrounding:{},enclosed:{},intersecting:{},disjoint:{}",
+        matches!(
+            rect.relation_to(enclosed_rect),
+            jagua_rs::geometry::geo_enums::GeoRelation::Surrounding
+        ),
+        matches!(
+            enclosed_rect.relation_to(rect),
+            jagua_rs::geometry::geo_enums::GeoRelation::Enclosed
+        ),
+        matches!(
+            rect.relation_to(overlap_rect),
+            jagua_rs::geometry::geo_enums::GeoRelation::Intersecting
+        ),
+        matches!(
+            rect.relation_to(disjoint_rect),
+            jagua_rs::geometry::geo_enums::GeoRelation::Disjoint
+        )
+    );
+    let through_rect = Edge::try_new(Point(-1.0, 1.0), Point(5.0, 1.0)).unwrap();
+    let outside_rect = Edge::try_new(Point(-1.0, 3.0), Point(5.0, 3.0)).unwrap();
+    println!(
+        "geometry.rect_edge_intersects=through:{},outside:{}",
+        rect.collides_with(&through_rect),
+        rect.collides_with(&outside_rect)
+    );
+    println!(
+        "geometry.rect_construction=valid:{},zero_width:{},zero_height:{},nan_max:{},infinite_max:{}",
+        Rect::try_new(0.0, 0.0, 1.0, 1.0).is_ok(),
+        Rect::try_new(1.0, 0.0, 1.0, 1.0).is_ok(),
+        Rect::try_new(0.0, 1.0, 1.0, 1.0).is_ok(),
+        Rect::try_new(0.0, 0.0, f32::NAN, 1.0).is_ok(),
+        Rect::try_new(0.0, 0.0, f32::INFINITY, 1.0).is_ok()
+    );
+
+    let rectangle = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    let edges = rectangle
+        .edge_iter()
+        .map(|edge| {
+            format!(
+                "{:.9},{:.9}>{:.9},{:.9}",
+                edge.start.0, edge.start.1, edge.end.0, edge.end.1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    println!(
+        "geometry.simple_polygon_basics=vertices:{},area:{:.9},diameter:{:.9},bbox:{:.9},{:.9},{:.9},{:.9},centroid:{:.9},{:.9},poi:{:.9},{:.9},{:.9},edges:{}",
+        rectangle.n_vertices(),
+        rectangle.area,
+        rectangle.diameter,
+        rectangle.bbox.x_min,
+        rectangle.bbox.y_min,
+        rectangle.bbox.x_max,
+        rectangle.bbox.y_max,
+        rectangle.centroid().0,
+        rectangle.centroid().1,
+        rectangle.poi.center.0,
+        rectangle.poi.center.1,
+        rectangle.poi.radius,
+        edges
+    );
+    println!(
+        "geometry.simple_polygon_contains=inside:{},boundary:{},outside:{}",
+        rectangle.collides_with(&Point(1.0, 1.0)),
+        rectangle.collides_with(&Point(0.0, 1.0)),
+        rectangle.collides_with(&Point(-1.0, 1.0))
+    );
+    let clockwise = polygon(&[(0.0, 0.0), (0.0, 2.0), (4.0, 2.0), (4.0, 0.0)]);
+    println!(
+        "geometry.simple_polygon_clockwise_vertices={}",
+        clockwise
+            .vertices
+            .iter()
+            .map(|point| format!("{:.0},{:.0}", point.0, point.1))
+            .collect::<Vec<_>>()
+            .join(";")
+    );
+    let constructor_result = |points: &[(f32, f32)]| {
+        SPolygon::new(points.iter().copied().map(Point::from).collect()).is_ok()
+    };
+    println!(
+        "geometry.simple_polygon_construction=valid:{},too_few:{},duplicate:{},collinear:{},bowtie:{},tiny:{}",
+        constructor_result(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]),
+        constructor_result(&[(0.0, 0.0), (1.0, 0.0)]),
+        constructor_result(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (2.0, 2.0), (0.0, 2.0)]),
+        constructor_result(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]),
+        constructor_result(&[(0.0, 0.0), (2.0, 2.0), (0.0, 2.0), (2.0, 0.0)]),
+        constructor_result(&[(0.0, 0.0), (0.0, 1.0e-5), (1.0e-5, 1.0e-5), (1.0e-5, 0.0)])
+    );
+
+    let polygon_transform = DTransformation::new(0.37, (10.0, -2.0)).compose();
+    let transformed = rectangle.transform_clone(&polygon_transform);
+    let transformed_vertices = transformed
+        .vertices
+        .iter()
+        .map(|point| format!("{:.9},{:.9}", point.0, point.1))
+        .collect::<Vec<_>>()
+        .join(";");
+    println!(
+        "geometry.simple_polygon_transform=vertices:{};bbox:{:.9},{:.9},{:.9},{:.9};centroid:{:.9},{:.9};area:{:.9};diameter:{:.9}",
+        transformed_vertices,
+        transformed.bbox.x_min,
+        transformed.bbox.y_min,
+        transformed.bbox.x_max,
+        transformed.bbox.y_max,
+        transformed.centroid().0,
+        transformed.centroid().1,
+        transformed.area,
+        transformed.diameter
+    );
+
+    let original = OriginalShape {
+        shape: rectangle,
+        pre_transform: DTransformation::new(0.5, (10.0, 20.0)),
+        modify_mode: ShapeModifyMode::Inflate,
+        modify_config: ShapeModifyConfig::default(),
+    };
+    let internal = original.convert_to_internal().unwrap();
+    println!(
+        "geometry.original_shape=raw:{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9};internal:{},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        original.area(),
+        original.diameter(),
+        original.bbox().x_min,
+        original.bbox().y_min,
+        original.bbox().x_max,
+        original.bbox().y_max,
+        original.centroid().0,
+        original.centroid().1,
+        internal.n_vertices(),
+        internal.vertices[0].0,
+        internal.vertices[0].1,
+        internal.bbox.x_min,
+        internal.bbox.y_min,
+        internal.bbox.x_max,
+        internal.bbox.y_max,
+        internal.centroid().0,
+        internal.centroid().1,
+        internal.area,
+        internal.diameter
+    );
+}
+
 fn main() {
     if std::env::args().any(|arg| arg == "--restore-boundary-parity-only") {
         run_restore_boundary_parity_oracle();
@@ -585,6 +866,12 @@ fn main() {
         run_collision_parity_oracle();
         return;
     }
+    if std::env::args().any(|arg| arg == "--geometry-primitives-parity-only") {
+        run_b1_geometry_oracle();
+        return;
+    }
+
+    run_b1_geometry_oracle();
 
     let tied_x_hull = convex_hull_from_points(vec![
         Point(0.0, 1.0),

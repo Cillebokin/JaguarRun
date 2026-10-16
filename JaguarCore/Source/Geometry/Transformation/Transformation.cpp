@@ -12,6 +12,14 @@ float rustF32(double value) noexcept
 }
 }
 
+JAGUARCORE_API float NormalizeRotationRustF32(float rotationRad) noexcept
+{
+    constexpr float pi = 3.14159265358979323846F;
+    const float period = 2.0F * pi;
+    const float normalized = std::fmod(rotationRad, period);
+    return normalized < 0.0F ? normalized + period : normalized;
+}
+
 JAGUARCORE_API Point2d Transform2d::Apply(const Point2d& point) const noexcept
 {
     const double sinValue = std::sin(rotationRad);

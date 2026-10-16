@@ -19,7 +19,7 @@
 | [50-bpp.md](records/50-bpp.md) | `probs/bpp/{entities,io}` 实现 | B7、B8、B13、B14 | 7 个文件已静态映射；实例、快照与 IO 对拍仍待 B7/B8/B14 |
 | [60-spp.md](records/60-spp.md) | `probs/spp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；状态与 IO 运行对拍仍待 B6/B7/B8/B14 |
 | [70-mspp.md](records/70-mspp.md) | `probs/mspp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；问题状态与 IO 运行对拍仍待 B6/B7/B8/B14 |
-| [80-geometry.md](records/80-geometry.md) | `geometry/{primitives,fail_fast}` 与几何 helper | B1、B3、B9、B13 | 15 个实现文件已静态映射；数值、退化输入和 fail-fast profile 对拍仍待 B1/B3/B9 |
+| [80-geometry.md](records/80-geometry.md) | `geometry/{primitives,fail_fast}` 与几何 helper | B1、B3、B9、B13 | 15 个实现文件已静态映射；B1 首轮确定性几何夹具已在 Debug/Release 通过，逐函数余项与 fail-fast profile 对拍仍待 B1/B3/B9 |
 | [SOURCE-INVENTORY.md](records/SOURCE-INVENTORY.md) | `jagua-rs/src/**/*.rs` | B13 | 85 个 pinned 源文件均有记录：24 个模块边界记录，61 个实现/测试文件静态映射 |
 
 ## 证据规则

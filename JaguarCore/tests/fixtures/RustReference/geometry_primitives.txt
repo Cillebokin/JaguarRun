@@ -1,0 +1,46 @@
+# jagua-rs revision f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# rustc 1.98.1; debug profile
+# existing comparison keys: rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml
+# extended B1 keys: rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --geometry-primitives-parity-only
+geometry.convex_hull_tied_x=0,1;0,0;1,0;1,1
+geometry.convex_hull_singleton_count=0
+geometry.transform_followed_by=0.250000000,-2.110505104,8.135797501
+geometry.transform_inverse=3.052349091,0.547462106,-7.733891487
+circle.collision=circles:true,circles_separated:false,edge:true,edge_separated:false,rect:true,rect_separated:false
+circle.distance=diameter:2.000000000,point_inside:0.000000000,point_outside:2.000000000,point_outside_sq:4.000000000,circle_outside:1.000000000,circle_outside_sq:1.000000000,edge_inside:0.000000000,edge_inside_sq:0.000000000
+circle.separation=point_inside:Interior:0.750000000,point_outside:Exterior:2.000000000,circle_outside:Exterior:1.000000000,edge_inside:Interior:0.750000000
+circle.squared_separation=point_inside:Interior:0.562500000,point_outside:Exterior:4.000000000,circle_outside:Exterior:1.000000000,edge_inside:Interior:0.562500000
+circle.bounding_circle=2.500000000,0.000000000,3.500000000,diameter:7.000000000
+circle.transform=10.000000000,21.000000000,radius:1.000000000
+edge.operations=minmax:0.0,0.0,3.0,4.0;length:5.0;centroid:1.5,2.0;front:-1.2,-1.6;back:4.2,5.6;scaled:-1.5,-2.0,4.5,6.0;reversed:3.0,4.0,0.0,0.0
+edge.intersection=proper:5.0,5.0;endpoint:2.0,0.0;collinear:false
+edge.transform=10.0,20.0,6.0,23.0
+rect.operations=diagonal:-2.0,-1.0,4.0,5.0;square:0.0,-1.0,4.0,3.0;resize:0.5,0.5,3.5,1.5;scale:-1.0,-0.5,5.0,2.5;measure:4.0,2.0,8.0,4.472136021
+rect.combination=intersection:3.0,1.0,4.0,2.0;bounding:0.0,0.0,5.0,4.0;corners:4.0,2.0;0.0,2.0;0.0,0.0;4.0,0.0
+rect.edges=4.0,2.0>0.0,2.0;0.0,2.0>0.0,0.0;0.0,0.0>4.0,0.0;4.0,0.0>4.0,2.0
+rect.distance=inside:0.0,outside:3.605551243,outside_sq:13.0;separation:inside:Interior:1.0,outside:Exterior:3.605551243;squared:inside:Interior:1.0,outside:Exterior:13.0;invalid_resize:true
+point.distance=normal:5.963430405,normal_sq:35.562500000,f32_rounded:0.0
+polygon.distance=inside:0.0,inside_sq:0.0,outside:3.605551243,outside_sq:13.0;separation:inside:Interior:1.0,outside:Exterior:3.605551243;squared:inside:Interior:1.0,outside:Exterior:13.0
+rect.almost_relation_cases=surrounding:true,enclosed:true,intersecting:true,disjoint:true
+geometry.normalize_rotation=5.566370964,5.283185482,0.716814518,5.897793770
+geometry.normalize_rotation_nonfinite=nan:true,infinity:true,negative_infinity:true
+geometry.normalize_rotation_negative_zero=true
+geometry.dtransformation=0.000000000,0.000000000,0.000000000,0.370000005,1.250000000,-0.750000000,0.370000035,1.250000000,-0.750000000
+geometry.transformation_apply=4.199501038,-2.823751211
+geometry.transformation_order=0.500000000,3.000000000,-2.000000000;0.500000000,3.591598749,-0.316888452
+geometry.circle_basics=78.539817810,-3.000000000,-2.000000000,7.000000000,8.000000000,10.000000000
+geometry.circle_contains=true
+geometry.circle_construction=zero_radius:true,negative_radius:false,nonfinite_center:false,nonfinite_radius:false
+geometry.edge_closest=1.319999933,1.759999990,0.399999946,0.159999967
+geometry.edge_construction=valid:true,zero_length:false,f32_collapsed:false
+geometry.edge_intersects=proper:true,endpoint:true,collinear:false
+geometry.rect_basics=2.000000000,1.000000000;2.000000000,1.000000000,4.000000000,2.000000000,0.000000000,1.000000000,2.000000000,2.000000000,0.000000000,0.000000000,2.000000000,1.000000000,2.000000000,0.000000000,4.000000000,1.000000000;4.000000000,2.000000000
+geometry.rect_relations=surrounding:true,enclosed:true,intersecting:true,disjoint:true
+geometry.rect_edge_intersects=through:true,outside:false
+geometry.rect_construction=valid:true,zero_width:false,zero_height:false,nan_max:false,infinite_max:true
+geometry.simple_polygon_basics=vertices:4,area:8.000000000,diameter:4.472136021,bbox:0.000000000,0.000000000,4.000000000,2.000000000,centroid:2.000000000,1.000000000,poi:2.000000000,1.000000000,1.000000000,edges:0.000000000,0.000000000>4.000000000,0.000000000;4.000000000,0.000000000>4.000000000,2.000000000;4.000000000,2.000000000>0.000000000,2.000000000;0.000000000,2.000000000>0.000000000,0.000000000
+geometry.simple_polygon_contains=inside:true,boundary:false,outside:false
+geometry.simple_polygon_clockwise_vertices=4,0;4,2;0,2;0,0
+geometry.simple_polygon_construction=valid:true,too_few:false,duplicate:false,collinear:false,bowtie:false,tiny:true
+geometry.simple_polygon_transform=vertices:10.000000000,-2.000000000;13.729309082,-0.553538203;13.006078720,1.311116457;9.276768684,-0.135345340;bbox:9.276768684,-2.000000000,13.729309082,1.311116457;centroid:11.503039360,-0.344441801;area:8.000000000;diameter:4.472136021
+geometry.original_shape=raw:8.000000000,4.472136021,0.000000000,0.000000000,4.000000000,2.000000000,2.000000000,1.000000000;internal:4,10.000000000,20.000000000,9.041149139,20.000000000,13.510330200,23.672866821,11.275738716,21.836431503,8.000000000,4.472136021

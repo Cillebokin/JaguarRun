@@ -7,6 +7,9 @@
 
 namespace jaguar
 {
+// Normalize an angle with jagua-rs's f32 remainder and correction rules.
+JAGUARCORE_API float NormalizeRotationRustF32(float rotationRad) noexcept;
+
 // 二维旋转和平移变换
 struct Transform2d
 {

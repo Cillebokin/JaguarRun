@@ -32,7 +32,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 查询入口 `Query`（611-650）支持矩形、线段三种形态，并在节点的活动边数超过 `m_CdThreshold` 时退化为直接对边列表逐一检测，而不是继续下降到子节点。这个阈值（`CDEConfig::cdThreshold` 默认 32，见 `CollisionEngine.h` 35-36）是一个性能折中：边数很少时直接检测比递归更便宜。`PresenceAt`（663-689）计算某句柄在给定节点矩形上的覆盖状态，`VirtualRootFor`（701-721）则为查询矩形选择最小的覆盖节点作为虚拟根，从而缩小遍历范围。
 
-有一处确定的缺陷需要单独说明。仅使用包围盒注册的 `RegisterHazard` 重载（`Quadtree.cpp` 579-598）会把障碍物标记为 Partial 且不附带形状。然而 `RegisterIntoNode`（515-526 行）和懒扩展逻辑（492-500 行）会跳过 `shape` 为空的障碍物，因此这类障碍物对于需要下降到子节点的查询是不可见的。该重载的头文件注释也写明"没有多边形几何时统一标记为部分覆盖"，但下游逻辑并未兑现这一语义。如果上层使用包围盒注册路径，就可能出现漏检，这是本模块最需要修复或加注释说明的地方。
+静态实现显示，仅使用包围盒注册的 RegisterHazard 重载（Quadtree.cpp 579-598）创建 Partial hazard，以一条对角 Edge 近似包围盒且不保存完整形状。RegisterIntoNode 只有在存在完整形状时才会把 hazard constrict 到子节点，因此该重载不会把条目分发到子节点。具体查询是否因此漏检或误报仍需直接调用的最小用例验证；仓库内未发现此重载的调用者（B5），Rust 也没有对应路径。当前应将其记录为未使用扩展路径的潜在风险，而不是已复现缺陷；未来接入前需明确契约并补查询用例。
 
 ## 五、SoA 布局与 AVX2 的选择
 
@@ -58,7 +58,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 piers 的生成分为两步。`generateCandidatePiers`（186-241）沿若干射线发射候选弦，射线数量在 `#ifdef NDEBUG` 下为 200 个角度乘以 90 个采样，调试版本则为 10 乘以 4。`generatePiers`（440-490）随后用贪心策略，每次挑选使 `pierLoss` 最小的候选，直到满足数量或覆盖条件。`generateUnrepresentedGrid`（329-373）在调试与发布间同样存在 100 与 10 的采样差异（`Surrogate.cpp` 333-337）。Rust 版的 `piers.rs` 第 16-20 行使用 `cfg!(debug_assertions)` 实现同样的分支，因此这一差异是忠实移植的结果，而不是 C++ 独有的缺陷。但它意味着调试版与发布版生成的代理在数值上不同，对比测试时必须统一构建配置。
 
-代理的变换有两条路径。`Transformed`（674-723 附近）使用双精度，而 `TransformedRustF32` 使用 `*RustF32` 系列辅助函数模拟 f32 运算，以便与 Rust 的结果逐位对齐。这种双轨设计是为了跨语言验证，正常运行时应当明确选择其中一条，否则两侧结果可能在边界情况下出现分歧。
+代理变换有两条路径。Transformed（674–723 行附近）使用双精度，TransformedRustF32 使用 RustF32 辅助函数模拟 f32 中间运算，目标是让特定路径更接近 Rust 数值行为。它不能单独证明整条碰撞流程逐位相同；只有逐字段、逐用例的 raw-bit 测试通过时，才可对相应字段作有限的逐位声明。
 
 ## 八、形状修改
 
@@ -84,6 +84,6 @@ Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `
 
 ## 十一、主要陷阱与建议
 
-综合上述分析，阅读和使用这一子系统时需要注意以下几点。第一，包围盒注册路径会在四叉树下降时漏掉障碍物，若业务依赖该路径，应优先修复 `RegisterIntoNode` 与懒扩展对空形状的处理。第二，线性去重、线性 `Contains`（`Collector.cpp` 7-11）与 `SetRegistered` 的线性扫描在障碍物数量大时会成为瓶颈，可以改为哈希索引。第三，`GetThreadPool` 忽略后续的 `workerCount` 参数，调用方应当意识到线程数只在首次调用时确定。第四，线程池工作线程缺乏异常保护。第五，AVX2 的运行时检测仅在 MSVC 下启用，而编译期开关需要在 qmake 中显式配置。第六，形状修改的多处容差与回退策略会静默改变结果，建议为回退路径增加计数或日志。第七，`ShapeModifyConfig` 未被使用，`OffsetShape` 只返回首条轮廓，这些接口语义需要在文档或代码中明确。第八，源码中若干 include 路径使用 `JaguarCore/Collision/...` 的大写形式，而实际目录为小写的 `include/JaguarCore/collision`，这在大小写敏感的文件系统上会导致编译失败，应统一路径大小写。第九，`Quadtree.cpp` 529 行存在 `}void` 的格式错误，虽不影响编译，但容易掩盖函数边界。
+综合上述分析，当前仍需按证据核查以下事项：RegisterHazard(bounds) 在 C++ 中没有调用者，属于未使用路径；若保留，应记录其限制，若未来接入再验证覆盖充分性。线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
 
-在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要分歧集中在 C++ 对 `constrict` 的宽容处理、包围盒注册的缺陷、以及形状修改部分的回退与容差策略。阅读时可以把这些差异作为重点核对项。
+在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括 C++ 对 constrict 的宽容处理，以及形状修改部分的回退与容差策略。包围盒注册是无调用者的扩展路径，当前仅记为潜在风险，不作为已观察到的 parity 差异。阅读时需同时标明 Rust 参考的源码基线。

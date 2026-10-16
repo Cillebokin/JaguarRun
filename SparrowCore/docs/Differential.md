@@ -208,12 +208,40 @@ checksum, validity flags, and collision counters; elapsed time is informational 
 From the repository root in a PowerShell session with Rust installed, run the direct oracle:
 
 ```powershell
-cargo test --locked --manifest-path SparrowCore/Tests/RustReference/Cargo.toml
-cargo run --locked --release --manifest-path SparrowCore/Tests/RustReference/Cargo.toml -- SparrowCore/Tests/Fixtures/RustSppSingleItem.json SparrowCore/Tests/Fixtures/SparrowLbfRustReference.tsv SparrowCore/Tests/Fixtures/LbfSeed42Reference.tsv SparrowCore/Tests/Fixtures/SamplingCoordinateDescentRustReference.tsv SparrowCore/Tests/Fixtures/SparrowUniformIndexRustReference.tsv SparrowCore/Tests/Fixtures/LbfSearchRustTrace.tsv SparrowCore/Tests/Fixtures/SeparatorRustTrace.json SparrowCore/Tests/Fixtures/SeparatorSearchRustTrace.tsv SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.tsv SparrowCore/Tests/Fixtures/SeparatorMultiWorkerRoundRustTrace.tsv SparrowCore/Tests/Fixtures/SeparatorThreeWorkerSeed43RoundRustTrace.tsv SparrowCore/Tests/Fixtures/ExplorationRustTrace.tsv SparrowCore/Tests/Fixtures/ExplorationPool.json SparrowCore/Tests/Fixtures/ExplorationPoolRustTrace.tsv SparrowCore/Tests/Fixtures/ExplorationContained.json SparrowCore/Tests/Fixtures/ExplorationContainedRustTrace.tsv
+rustup run 1.98.1 cargo test --locked --manifest-path SparrowCore/Tests/RustReference/Cargo.toml --target x86_64-pc-windows-msvc
+rustup run 1.98.1 cargo test --locked --release --manifest-path SparrowCore/Tests/RustReference/Cargo.toml --target x86_64-pc-windows-msvc
 ```
 
-The CLI writes the Rust-derived LBF, RNG, sampler/CDE, bounded-integer, direct LBF search,
-single-move and one-/two-/three-worker-round separator, and all three Exploration phase fixtures.
+The fixture generator has multiple binaries in this Cargo package, so select
+`sparrow-rust-reference` explicitly. This command writes and overwrites the listed fixture files;
+for review, direct every output argument to a temporary directory first, compare the generated
+files, then replace only reviewed fixtures:
+
+```powershell
+rustup run 1.98.1 cargo run --locked --release --manifest-path SparrowCore/Tests/RustReference/Cargo.toml --bin sparrow-rust-reference -- `
+  SparrowCore/Tests/Fixtures/RustSppSingleItem.json `
+  SparrowCore/Tests/Fixtures/SparrowLbfRustReference.tsv `
+  SparrowCore/Tests/Fixtures/LbfSeed42Reference.tsv `
+  SparrowCore/Tests/Fixtures/SamplingCoordinateDescentRustReference.tsv `
+  SparrowCore/Tests/Fixtures/SparrowUniformIndexRustReference.tsv `
+  SparrowCore/Tests/Fixtures/LbfSearchRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/SeparatorRustTrace.json `
+  SparrowCore/Tests/Fixtures/SeparatorSearchRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json `
+  SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/SeparatorMultiWorkerRoundRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/SeparatorThreeWorkerSeed43RoundRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/ExplorationRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/ExplorationPool.json `
+  SparrowCore/Tests/Fixtures/ExplorationPoolRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/ExplorationContained.json `
+  SparrowCore/Tests/Fixtures/ExplorationContainedRustTrace.tsv `
+  SparrowCore/Tests/Fixtures/UniformSamplerNarrowIntervalRust.tsv
+```
+
+The CLI writes the Rust-derived LBF, RNG, sampler/CDE, bounded-integer, narrow-interval sampler,
+direct LBF search, single-move and one-/two-/three-worker-round separator, and all three
+Exploration phase fixtures.
 It does not emit `OptimizeCompressRustReference.tsv` or `CompressionWorkerMoveRustReference.tsv`;
 the Rust integration tests consume those checked-in references directly. Keep the input, seed,
 sample configuration, Cargo lockfile, matched CDE settings, and tolerances together when changing

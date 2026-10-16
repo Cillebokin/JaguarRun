@@ -55,10 +55,10 @@ The oracle is not a claim that Sparrow or any optimizer must produce identical p
 Run the Rust oracle in both profiles from the repository root:
 
 ```powershell
-cargo +1.98.1 run --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
-cargo +1.98.1 run --release --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
-cargo +1.98.1 run --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
-cargo +1.98.1 run --release --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+rustup run 1.98.1 cargo run --release --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+rustup run 1.98.1 cargo run --release --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
 ```
 
 The model probe covers `total_item_qty()` overflow plus over-demand placement in SPP/BPP/MSPP, recording remaining demand, placed count, and BPP stock. The restore probe records the saved strip fields alongside the layout container width, making intentionally inconsistent snapshots visible. Its current Rust output documents unresolved JaguarCore acceptance/state differences; passing JaguarCore's ordinary Debug/Release suite alone does not close those differences.

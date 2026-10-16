@@ -1,0 +1,93 @@
+# pinned Rust 源文件清单
+
+基线：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。该表从 Cargo.lock 对应的 Cargo git checkout 生成；只做文件覆盖跟踪，不代表逐函数审核完成。
+
+| Rust 源文件 | 模块组 | 记录状态 |
+|---|---|---|
+| `jagua-rs/src/collision_detection/cd_engine.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/hazards/collector.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/hazards/filter.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/hazards/hazard.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/hazards/mod.rs` | `collision_detection` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/collision_detection/mod.rs` | `collision_detection` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/collision_detection/quadtree/assertions.rs` | `collision_detection` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/collision_detection/quadtree/mod.rs` | `collision_detection` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/collision_detection/quadtree/qt_hazard_vec.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/quadtree/qt_hazard.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/quadtree/qt_node.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/quadtree/qt_partial_hazard.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/quadtree/qt_traits.rs` | `collision_detection` | 静态逻辑记录见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/collision_detection/quadtree/tests.rs` | `collision_detection` | 测试静态映射见 [30-collision-detection.md](30-collision-detection.md) |
+| `jagua-rs/src/entities/container.rs` | `entities` | 静态逻辑记录见 [20-entities.md](20-entities.md) |
+| `jagua-rs/src/entities/item.rs` | `entities` | 静态逻辑记录见 [20-entities.md](20-entities.md) |
+| `jagua-rs/src/entities/layout.rs` | `entities` | 静态逻辑记录见 [20-entities.md](20-entities.md) |
+| `jagua-rs/src/entities/mod.rs` | `entities` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/entities/placed_item.rs` | `entities` | 静态逻辑记录见 [20-entities.md](20-entities.md) |
+| `jagua-rs/src/geometry/convex_hull.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/d_transformation.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/fail_fast/mod.rs` | `geometry` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/geometry/fail_fast/piers.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/fail_fast/pole.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/fail_fast/sp_surrogate.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/geo_enums.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/geo_traits.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/mod.rs` | `geometry` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/geometry/original_shape.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/primitives/circle.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/primitives/edge.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/primitives/mod.rs` | `geometry` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/geometry/primitives/point.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/primitives/rect.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/primitives/simple_polygon.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/shape_modification.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/geometry/transformation.rs` | `geometry` | 静态逻辑记录见 [80-geometry.md](80-geometry.md) |
+| `jagua-rs/src/io/export.rs` | `io` | 静态逻辑记录见 [40-io.md](40-io.md) |
+| `jagua-rs/src/io/ext_repr.rs` | `io` | 静态逻辑记录见 [40-io.md](40-io.md) |
+| `jagua-rs/src/io/import.rs` | `io` | 静态逻辑记录见 [40-io.md](40-io.md) |
+| `jagua-rs/src/io/mod.rs` | `io` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/io/svg/layout_to_svg.rs` | `io` | 静态逻辑记录见 [40-io.md](40-io.md) |
+| `jagua-rs/src/io/svg/mod.rs` | `io` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/io/svg/svg_util.rs` | `io` | 静态逻辑记录见 [40-io.md](40-io.md) |
+| `jagua-rs/src/lib.rs` | `crate root` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/bpp/entities/bin.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/entities/instance.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/entities/mod.rs` | `probs/bpp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/bpp/entities/problem.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/entities/solution.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/io/export.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/io/ext_repr.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/io/import.rs` | `probs/bpp` | 静态逻辑记录见 [50-bpp.md](50-bpp.md) |
+| `jagua-rs/src/probs/bpp/io/mod.rs` | `probs/bpp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/bpp/mod.rs` | `probs/bpp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/bpp/util/assertions.rs` | `probs/bpp` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/probs/bpp/util/mod.rs` | `probs/bpp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/mod.rs` | `probs` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/mspp/entities/instance.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/entities/mod.rs` | `probs/mspp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/mspp/entities/problem.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/entities/solution.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/entities/strip.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/io/export.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/io/ext_repr.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/io/import.rs` | `probs/mspp` | 静态逻辑记录见 [70-mspp.md](70-mspp.md) |
+| `jagua-rs/src/probs/mspp/io/mod.rs` | `probs/mspp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/mspp/mod.rs` | `probs/mspp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/mspp/util/assertions.rs` | `probs/mspp` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/probs/mspp/util/mod.rs` | `probs/mspp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/spp/entities/instance.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/entities/mod.rs` | `probs/spp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/spp/entities/problem.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/entities/solution.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/entities/strip.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/io/export.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/io/ext_repr.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/io/import.rs` | `probs/spp` | 静态逻辑记录见 [60-spp.md](60-spp.md) |
+| `jagua-rs/src/probs/spp/io/mod.rs` | `probs/spp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/spp/mod.rs` | `probs/spp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/probs/spp/util/assertions.rs` | `probs/spp` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/probs/spp/util/mod.rs` | `probs/spp` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+| `jagua-rs/src/util/assertions.rs` | `util` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/util/fpa.rs` | `util` | 静态逻辑记录见 [10-utilities-and-assertions.md](10-utilities-and-assertions.md) |
+| `jagua-rs/src/util/mod.rs` | `util` | 模块/导出边界已记于 [00-module-exports.md](00-module-exports.md) |
+
+**盘点结果**：85 个 pinned Rust 源文件均已登记：24 个 crate/module 文件记录模块/导出边界，其余 61 个实现/测试文件已有函数、重要分支、失败出口、C++ 落点与静态差异记录，包括 15 个 geometry 文件（见 [80-geometry.md](80-geometry.md)）。静态记录不代表运行等价。

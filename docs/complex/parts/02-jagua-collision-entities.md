@@ -1,6 +1,6 @@
 # jagua-rs 碰撞检测与实体部分代码逻辑说明
 
-**范围与约定。** 本文覆盖 `jagua-rs/src/collision_detection/**` 与 `jagua-rs/src/entities/**`，并在必要处引用调用方（`lbf/src/opt/search.rs` 等）说明调用链。文中路径均相对仓库根 `CodeResource/jagua-rs`，例如 `jagua-rs/src/collision_detection/cd_engine.rs:161-198` 表示该文件第 161 至 198 行。结论全部来自源码阅读。当前环境没有 cargo，因此没有编译或运行测试，第九节中标注的疑点需要用单元测试验证。
+**范围与约定。** 本文覆盖 jagua-rs/src/collision_detection/** 与 jagua-rs/src/entities/**，并在必要处引用调用方（lbf/src/opt/search.rs 等）说明调用链。文中路径均相对仓库根 CodeResource/jagua-rs。需注意：该本地镜像曾被记录为与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在差异；涉及 Rust 行为的结论和 fixture 应注明实际基线，并在 E4 完成后复核。本篇静态分析未在本次修订中重跑测试。
 
 ## 一、数据结构总览与所有权
 
@@ -64,9 +64,9 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 ## 九、疑点、隐含假设与风险
 
-最重要的一点是 `detect_poly_collision` 中可能触发 panic 的路径。第一阶段（`cd_engine.rs:167-171`）通过 `collides` 检测边，而 `collides` 经由 `strongest(filter)`（`qt_hazard_vec.rs:61-64`）会忽略被 filter 认定为无关的 hazard。但第二阶段（第 174-179 行）遍历虚拟根的全部 hazard 时，对 `Entire` 分支直接 `unreachable!`，且此处并不检查 filter。因此，若某个被忽略的 hazard 在虚拟根上为 `Entire`（例如被忽略的质量区完整覆盖了包含候选形状 bbox 的节点），而形状又不与任何相关 hazard 相交，就会 panic。注释“Entire hazards 必然被边检测捕获”只对相关 hazard 成立。在 LBF 的实际路径中，filter 来自 `min_quality`（`lbf_spp.rs:53-57`），大面积质量区的 `Entire` 覆盖是常见情形，因此这一风险不是纸上推演。修复方向是让 `Entire` 分支先判断 `filter.is_irrelevant`，忽略时跳过。建议用单元测试验证：构造一个带大面积质量区的容器，用忽略该质量区的 `HazKeyFilter` 去检测一个完全落在区域内部的小形状。`jagua-rs/src/collision_detection/quadtree/tests.rs` 中目前没有覆盖这一情形，`lbf/tests/differential_matrix.rs:101` 使用 `from_keys([exterior_key])` 忽略外部 hazard，也可能需要检查是否覆盖了外部 hazard 为 `Entire` 的情形。`Layout::is_feasible` 使用自身的 `HazKey` 作为 filter，自身 hazard 不可能在虚拟根上为 `Entire`（自身边位于虚拟根内，因此为 `Partial`），所以该路径不受影响。
+detect_poly_collision 的源码分支存在需要验证的风险：第一阶段通过 collides 检测边，并经 strongest(filter) 忽略被 filter 排除的 hazard；第二阶段遍历虚拟根 hazard 时，Rust 对 Entire 分支执行 unreachable!，未见该分支再次检查 filter。这确认了 Rust 在该分支上的实现行为，但尚未证明合法输入能够让一个被忽略的 hazard 以 Entire 到达此处。min_quality 与 lbf_spp.rs:53-57 提供了候选调用路径，不足以证明“常见”或“可复现”。需用 pinned revision 构造最小合法输入，记录是否 panic；若不可达，应将其登记为不可达分支而不是运行缺陷。C++ 在对应分支返回 true，仍需比较该语义差异是否可观察。
 
-第二个疑点在 `from_irrelevant_qzones`（`filter.rs:113-135`）。其文档写的是“deems all inferior quality zones above or at a certain quality as irrelevant”，即质量大于等于 `required_quality` 的区域被忽略，而第 125 行的实际条件是 `quality < required_quality`，两者方向相反。容器文档（`container.rs:86`）写明“Higher qualities are superior”，物件的 `min_quality`（`item.rs:52`）是“应当产出的最低质量”。按这一语义，低于最低要求的质量区应当是障碍，而代码却把它们设为无关，即允许放置。这一点需要结合业务定义与测试确认，若语义确为代码所写，则文档是错误的，若语义为文档所写，则代码方向错误，且会导致 LBF 把低质量区当作可放置区域。
+第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
 
 第三个疑点在 `detect_containment_collision` 的 `Enclosed` 分支（`cd_engine.rs:248`、`254-255`）。对 `Exterior` hazard，若容器 bbox 被形状 bbox 包围，则代码测试容器的 `poi` 是否在形状内，结果为真时视为不碰撞。但此时容器轮廓整体位于形状内部，形状显然超出了容器，应当碰撞。由于引擎 bbox 是容器的外接正方形，`Enclosed` 只可能发生在形状 bbox 在容器长边方向与容器完全重合、并在短边方向伸入正方形 padding 的边界情形中。这种情形不常见，但语义上与 `Surrounding` 分支不对称，应当补充测试。
 

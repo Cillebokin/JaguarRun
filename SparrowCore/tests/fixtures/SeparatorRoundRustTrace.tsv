@@ -1,4 +1,4 @@
-# generator=Sparrow Rust Separator::separate with one worker
+# generator=Sparrow Rust Separator::separate with 1 workers
 # input=SeparatorRoundRustTrace.json seed=42 width=9 strike_limit=1 iter_no_imprv_limit=1 n_workers=1 n_container_samples=1 n_focussed_samples=0 n_coord_descents=1
 # progress ordinal iteration width density min_loss
 # report kind placed_count

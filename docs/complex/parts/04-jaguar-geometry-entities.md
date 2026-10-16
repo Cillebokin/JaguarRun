@@ -4,7 +4,7 @@
 
 ## 一、数值策略：模拟 Rust f32 的基础设施
 
-整个几何层的核心设计是“双轨并存”。每个几何函数通常有两个版本，一个是以 `double` 计算的普通版本（如 `Edge2d::ClosestPoint`，`Edge.cpp:232`），另一个是带 `RustF32` 后缀、以 `static_cast<float>` 逐步模拟 Rust `f32` 运算的版本（如 `Edge2d::ClosestPointRustF32`，`Edge.cpp:246`）。业务路径（碰撞检测、放置）应当统一使用 `RustF32` 版本，以保证与 jagua-rs 的结果逐位对齐；`double` 版本主要供工具函数和测试使用。阅读代码时务必注意这一点，否则很容易在同一条调用链中混用两套精度。
+整个几何层并存 double 实现与 RustF32 实现。后者逐步模拟 Rust f32 运算，用于提高指定数值路径的行为对应度；这不意味着业务链路在所有函数、平台和输入上逐位相同。实际等价范围应以字段容差、FloatBits 用例和差分记录为准。阅读代码时需确认调用链选用了哪种精度，避免无意混用。
 
 `include/JaguarCore/geometry/RustF32.h` 提供了四类工具。第一是 `MinRustF32`/`MaxRustF32`，直接包装 `std::fmin`/`std::fmax`，与 Rust `f32::min`/`max` 的 NaN 处理一致。第二是 `MidpointRustF32`（第 15-24 行），对两端同号且绝对值超过 `max/2` 的情况改用 `first*0.5 + second*0.5`，以避免溢出，这是对 Rust 实现的精确复刻。第三是 `AlmostEqualRustF32`（第 32-50 行），判定顺序为：完全相等；绝对差不超过 `FLT_EPSILON`；有限性检查；最后是按有序位模式计算的 ULP 差不超过 4。注意前两步是绝对容差，对绝对值很小的坐标会把不同数值判为相等，这一点在做微小量比较时需要留意。`LessRustF32`、`GreaterRustF32`、`LessEqualRustF32`（第 56-65 行）分别基于它定义，因此与 Rust 中 `FPA` 包装类型的 `PartialEq`/`PartialOrd` 语义一致（Rust 侧 `util/fpa.rs` 使用 `float_cmp::approx_eq!`）。
 
@@ -88,7 +88,7 @@ Debug 与 Release 的行为差异需要特别说明。`assert` 在失败时直�
 
 第四，错误被静默吞掉的位置。`Restore` 在 Release 下对碰撞引擎不一致不报错，且句柄可能保持旧值。`Container::CreateCollisionEngine` 返回空指针时丢失错误详情。`Item::Create` 对 `minQuality` 与 `Discrete` 空角度集合不做校验。
 
-第五，跨平台问题。多处 `#include` 的大小写与磁盘文件名不一致，例如 `JaguarCore/Geometry/Edge.h` 对应 `include/JaguarCore/geometry/edge.h`，`JaguarCore/Assertions.h` 对应 `assertions.h`，`JaguarCore/Result.h` 对应 `result.h`，`JaguarCore/Entities/...` 对应 `entities/...`。在 Windows 上大小写不敏感可以编译通过，但在 Linux 或 macOS 上会直接失败。若团队计划跨平台，应统一为一种大小写约定。
+第五，大小写目录副本。源码引用如 JaguarCore/Geometry/Edge.h 与 JaguarCore/Assertions.h 使用大写路径；当前仓库存在 Include/ 与 include/ 两套目录，且相应头文件在两套副本中均可找到。因此不能仅凭大小写差异断言 Linux 或 macOS 构建失败。应比较副本、检查工程设置的 include root，并明确权威目录；当前已确认的维护风险是副本漂移。
 
 第六，性能热点。`PlacedItem` 深拷贝、`MakeHazard` 每次复制多边形、`ClearanceRustF32` 每次分配边向量、`Transformed`（double）重新执行完整校验、`DebugAssertLayout` 在 Debug 下的全量校验，这几处是最可能的性能瓶颈。
 

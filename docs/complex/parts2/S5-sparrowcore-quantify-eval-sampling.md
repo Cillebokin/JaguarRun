@@ -34,7 +34,7 @@ Rust 侧 `eval/sep_evaluator.rs` 使用共享 `collector`，损失由 `collision
 
 样本比较 `IsBetterSample`（`SampleEval.h` 80–87 行）的等级为 CLEAR 低于 COLLISION 低于 INVALID，损失用 `RustApproxEqualF32` 比较，NaN 直接抛出。该函数的语义是 `|diff| ≤ FLT_EPSILON` 或 4 ULP 以内，对应 Rust `jagua-rs` `util/fpa.rs` 的 `float_cmp::approx_eq!`，所用 `float_cmp` 的具体版本仍待确认。
 
-`UniformRectSampler`（`Source/Sampling/UniformRectSampler.cpp`，172 行）在 `Create`（95–199 行）中为每个旋转计算可行范围，即容器减去旋转后包围盒，再与采样包围盒求交。`Sample`（201–210 行）依次抽取旋转索引、x、y，与 Rust `uniform_sampler.rs` 的 `sample`（79–89 行）顺序一致。`SampleAxis`（69–77 行）使用 `minValue + (maxValue-minValue)*Uniform01F32()`，缺少 rand 在上端点的舍入重试，注释却声称与 rand 0.10 对齐，这一点需要修正注释或补齐逻辑。连续旋转角 `TWO_PI*i/16` 与 Rust `i*(2π/16)` 经 float32 模拟核对，i=0 至 15 逐位一致。它被 `Optimizer/LbfSearch.cpp:148` 与 `SeparatorWorker.cpp:180、184` 调用。
+UniformRectSampler（Source/Sampling/UniformRectSampler.cpp，172 行）在 Create（95–199 行）中为每个旋转计算可行范围，即容器减去旋转后包围盒，再与采样包围盒求交。Sample（201–210 行）依次抽取旋转索引、x、y，与 Rust uniform_sampler.rs 的 sample（79–89 行）顺序一致。SampleAxis（69–77 行）使用 minValue + (maxValue-minValue)*Uniform01F32()，缺少 rand 上端点舍入重试，注释却声称与 rand 0.10 对齐，需要修正注释或补齐逻辑。连续旋转角的 i=0..15 样本逐位相同，证据来自 UniformSamplerContinuousGridRust.tsv 与 SparrowCore/Tests/TestSampling.cpp 的 TestUniformSamplerContinuousGridRustReference：该测试按 raw bits 比较采样角和 RotationDistribution 输出，并要求 fixture 有 16 行。10 月 16 日用户记录的 Windows MSVC 2019 x64 / Qt 5.12.10 Debug 与 Release 全套运行均通过（见移植工作项清单第十四节）。此结论限于该 fixture 的 16 个角与该平台运行记录，不代表跨平台或整条采样路径。调用点为 Optimizer/LbfSearch.cpp:148 与 SeparatorWorker.cpp:180、184。
 
 `LocalSearchSampler`（`Source/Sampling/LocalSearchSampler.cpp`，206 行）的 `Sample`（152–169 行）使用 `Normal01F32`，`DecayStddev`（194–205 行）按 `init*(limit/init)^progress` 衰减。Rust `sample/` 中没有对应实现，只被 `tests/TestSampling.cpp` 使用。`RotationDistribution`（97 行）的 `FromItem`（60–105 行）构造 16 个连续角或离散列表，`Sample`（107–128 行）只消耗一次 `UniformIndex`，同样只被 LocalSearchSampler 与测试使用。
 
@@ -52,7 +52,7 @@ RNG 消耗顺序决定复现性：每次 `UniformRectSampler::Sample` 依次消�
 
 ## 六、浮点精度策略
 
-Quantify 与 Eval 全程使用 float32，`CalculatePolygonCollisionLoss` 与 Rust 的 f32 路径一致。为与 `TransformedRustF32`、`ApplyRustF32`、`CentroidRustF32` 逐位对齐，C++ 显式模拟了 f32 中间舍入，其类型转换细节尚未完全验证。构建必须关闭 FMA 收缩（GCC/Clang 用 `-ffp-contract=off`，MSVC 用 `/fp:precise`），否则 `minValue + (maxValue-minValue)*u` 与重叠公式可能被融合，产生超过 1 ULP 的偏差。`DebugAssertMatchesLayout`（933–1088 行）中的 `WithinUlps(...,5)` 与 10% pair 容差只用于 Debug 一致性检查。
+Quantify 与 Eval 的主要数值路径使用 float32。C++ 显式模拟若干 f32 中间舍入，以贴近 Rust 运算顺序；类型转换细节仍未完全验证，不能概括为全路径逐位一致。构建应关闭 FMA 收缩（GCC/Clang 用 -ffp-contract=off，MSVC 用 /fp:precise），否则 minValue + (maxValue-minValue)*u 与重叠公式可能被融合并改变结果。DebugAssertMatchesLayout（933–1088 行）中的 WithinUlps(...,5) 与 10% pair 容差只用于 Debug 一致性检查。
 
 ## 七、差异与待办
 

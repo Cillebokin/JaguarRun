@@ -4,7 +4,7 @@
 
 ## 一、版本前提
 
-阅读前需要先确认一个版本问题。`Cargo.toml:18` 把 jagua-rs 指向 git 分支 `jg-explicit-rotations-v0.9`，而 `README.md:106-107` 写的是 `jg-container-identity` 分支。本地副本位于 `CodeResource/jagua-rs/jagua-rs`，`Cargo.toml` 版本号为 0.9.0，git HEAD 是 `develop` 分支的 `65dffaaf`。两者大概率不是同一个提交：`src/optimizer/mod.rs:47-48` 对 `SPProblem::new(instance)` 调用了 `.expect(...)`，而本地副本 `src/probs/spp/entities/problem.rs:20` 中该函数直接返回 `Self`。因此下文对 jagua-rs 接口含义的描述都以本地副本核对，但"sparrow 实际链接的版本"需要以 `Cargo.lock` 为准。仓库中目前没有 `Cargo.lock`，团队在复现时应先固定依赖版本。
+阅读前需要先区分源码镜像与 oracle 锁定基线。CodeResource/sparrow/Cargo.toml:18 把 jagua-rs 指向 git 分支 jg-explicit-rotations-v0.9，而同目录 README.md:106-107 写的是 jg-container-identity。本地 jagua-rs 镜像的 Cargo.toml 版本为 0.9.0、HEAD 为 develop 的 65dffaaf；源码接口也与 Sparrow 的调用不同（src/optimizer/mod.rs:47-48 调用 .expect(...)，本地 src/probs/spp/entities/problem.rs:20 直接返回 Self）。因此本文的源码说明基于本地镜像，RustReference 实际依赖基线以其 Cargo.lock 为准。CodeResource/sparrow crate 根目录没有 Cargo.lock；SparrowCore 与 JaguarCore 的 oracle 目录各自有锁文件，当前配置锁定 jagua-rs revision f5e2b5f。本地镜像与 pinned revision 的差异仍按 D5/E4 复核。
 
 ## 二、整体流程概览
 

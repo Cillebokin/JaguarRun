@@ -26,19 +26,19 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 
 ## 六、已核实与待核实的问题
 
-本次分析分为两类。第一类是本人已在源码中直接核对、确认存在的问题。第二类是子代理基于阅读推断、尚未用测试验证的问题。两类在修复优先级上应区别对待。
+本文区分源码可直接确认的实现事实、由实现推导的风险和待运行验证的行为。文中 Rust 路径主要指向 CodeResource/jagua-rs 本地镜像；此前记录该镜像与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在文件差异。oracle 配置已统一不代表旧分析和 fixture 已自动按该 revision 更新；凡依赖 Rust 行为的结论，应注明参考 revision，并在 E4 完成后复核。
 
-已核实的问题有四条。其一，`CodeResource/jagua-rs/jagua-rs/src/collision_detection/cd_engine.rs:174-179` 在虚拟根的第二阶段遍历 hazard 时，`Entire` 分支直接 `unreachable!`，且没有先检查 `filter.is_irrelevant`。当 filter 忽略了一个完整覆盖虚拟根的 hazard（例如由 `min_quality` 生成的低质量区，LBF 在 `lbf_spp.rs:53-57` 中正是这样使用的），而候选形状又完全位于其内部时，第一阶段的边检测会因为被忽略而不报碰撞，第二阶段随即命中 `unreachable!` 而 panic。这一路径是真实存在的，建议为其编写单元测试并修复，修复方式是在 `Entire` 分支先判断 filter。同一逻辑在 C++ 的 `Quadtree.cpp` 中被写得更宽容，但 C++ 是否存在同样的覆盖问题也需要单独确认。
+在 CodeResource/jagua-rs 本地镜像中已确认一处分支实现差异：cd_engine.rs 174–179 行 Rust 对虚拟根第二阶段的 Entire 分支执行 unreachable!，而 JaguarCore 对应分支返回 true。该差异尚未对照 oracle 锁定的 f5e2b5f revision，也不能证明合法输入会到达此分支。原先“大面积低质量区是常见触发路径”的表述证据不足，应保留为待复现假设。后续用 pinned revision 构造最小合法用例，验证 filter 忽略的 Entire hazard 能否触发；运行结果决定是否按运行缺陷处理。
 
-其二，`Rust filter.rs` 中 `from_irrelevant_qzones` 的实现条件是 `quality < required_quality`，即把低于要求的质量区设为无关，从而允许物品压在这些区域上。而其文档注释写的是“质量高于或等于要求的区域被忽略”，`container.rs:86` 的注释又说明“质量越高越好”。代码与文档方向相反，如果业务语义是“物品不得压在低于 `min_quality` 的区域上”，那么当前代码就是反的，会导致结果非法。这一点需要结合业务定义确认，然后用小算例验证。
+其二，Rust filter.rs 中 from_irrelevant_qzones 的条件为 quality < required_quality，而其注释写成忽略质量高于或等于阈值的区域，源码和注释方向相反。container.rs 与 item.rs 的注释提供了业务语义线索，但尚不足以单独决定实现哪一侧有误。须先确认业务契约，再用最小实例验证放置接受/拒绝结果。
 
-其三，`JaguarCore/Source/IO/SvgExport.cpp:146` 的 `flipTranslation = viewY + viewHeight`，而第 156-157 行使用 `translate(0 F) scale(1 -1)`。翻转后 y 坐标变为 `F − y`，视口的范围会平移 `viewY`，因此 `viewY ≠ 0` 时图形会出现垂直偏移。正确的平移量应为 `2·viewY + viewHeight`。该结论由公式推导得出，但未用渲染结果验证，建议用 `viewY ≠ 0` 的用例回归。
+其三，SvgExport.cpp 第 146 行的 flipTranslation 为 viewY + viewHeight，第 156–157 行变换为 translate(0 F) scale(1 -1)。按坐标变换公式，viewY 不为 0 时现有平移量可能产生视口垂直偏移；推导得到的候选平移量为 2·viewY + viewHeight，但尚未通过 SVG 渲染结果确认。应以非零 viewY 的输入运行渲染回归后再定性。
 
-其四，C++ 的 `#include` 大量使用 `JaguarCore/Collision/...`、`JaguarCore/Geometry/...` 这类首字母大写的路径，而磁盘上的目录是小写的 `collision/`、`geometry/`。在 Windows 的大小写不敏感文件系统上可以编译，但在 Linux、macOS 或大小写敏感的 CI 环境中会直接失败。这会阻碍任何跨平台计划，建议统一大小写。
+其四是大小写目录副本。C++ include 引用使用大写路径，当前仓库同时存在 Include/include 与 Tests/Differential/differential 副本，且 .pro 所引用的大写路径存在；因此不能仅凭大小写差异断言 Linux、macOS 或大小写敏感 CI 必然构建失败。应比较副本内容、核对 qmake/CMake 的 include root，并明确单一权威目录；副本漂移才是已确认的维护风险。
 
-待核实的问题较多，以下按我认为的重要性简要列出，每一条都需要用测试确认。窄凹陷闭合 `close_narrow_concavities`（`shape_modification.rs:446-449`）对 Inflate 与 Deflate 都要求子多边形面积为负，注释与模式语义是否一致需要核实；同一函数中 `shape.vertices[i..j]` 与删除的 `i..=j` 之间可能存在 off-by-one。`Edge::collides_with` 对平行或共线线段返回“不相交”，因此折返式的自相交无法被 `find_self_intersection` 检出。`piers.rs:57` 的 `forfeit_distance` 使用包围盒面积而非长度，量纲错误，并且 piers 的参数随 `debug_assertions` 变化，调试与发布结果不可直接比较。`Circle::bounding_circle` 在同心较大圆的输入下会产生 NaN。BPP 中未能放置的物品会被静默丢弃，没有任何日志或错误。`Layout` 的 C++ 版本在 Release 下对碰撞引擎不一致的情况静默忽略，而 `Layout` 对空 `m_Cde` 缺乏防护。`MSPProblem::RemoveLayout` 的修改不是原子的。`Density()` 在无布局时产生 NaN。`QuadTree::RegisterHazard(handle, bounds)`（`Quadtree.cpp:579-598`）以对角线 `Edge` 作为包围盒的代理，这与“仅包围盒、无几何”的语义并不等价，覆盖是否充分需要核实，子代理报告中“该路径被跳过”的说法与代码不符，应以本段为准。
+待核实的问题较多，以下条目仍需按目标 revision 与最小用例验证。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一问题；平行/共线边与自相交检测的关系；piers.rs:57 的 forfeit_distance 量纲；debug_assertions 对 piers 参数的影响；同心圆 bounding_circle 的 NaN 边界；BPP 未放置物品的处理；Layout 与 MSPProblem 的失败原子性；无布局 Density 的 NaN；JSON、SVG、MSPP 边界。bounds-only RegisterHazard 以对角 Edge 近似包围盒且不向子节点分发，但全仓库无调用者，直接查询影响未验证，应记录为未使用扩展路径风险。除明确标注为源码事实的项目外，这些均不应仅凭静态阅读写成已复现缺陷。
 
-最后，本文全部结论基于阅读源码得出，当前环境中没有 cargo，也没有 MSVC 构建环境，因此没有编译或运行任何测试。若要把上述判断转化为确定的结论，建议先修复已核实的第一条，并为其添加回归测试，然后逐条用最小算例确认第二类问题。
+本文结论按静态源码事实、由源码推导的风险和待复现行为区分。本次文档修订没有运行构建或测试；当前工作区可找到 cargo/rustc，项目 oracle 配置为 Rust 1.98.1，但是否能成功运行、下载依赖或生成 fixture 尚未在此验证。10 月 16 日 SparrowCore 测试与 SparrowCli 的 MSVC 执行记录见移植工作项清单第十四节，由用户提供；这些记录不覆盖 JaguarCore 的 MSVC 验证，本次也未独立复跑。优先为 Entire/filter 路径和质量区语义补最小输入，再按固定 revision 复验其他疑点。
 
 
 ---
@@ -147,7 +147,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 # 附录 B：jagua-rs 碰撞检测与实体
 
 
-**范围与约定。** 本文覆盖 `jagua-rs/src/collision_detection/**` 与 `jagua-rs/src/entities/**`，并在必要处引用调用方（`lbf/src/opt/search.rs` 等）说明调用链。文中路径均相对仓库根 `CodeResource/jagua-rs`，例如 `jagua-rs/src/collision_detection/cd_engine.rs:161-198` 表示该文件第 161 至 198 行。结论全部来自源码阅读。当前环境没有 cargo，因此没有编译或运行测试，第九节中标注的疑点需要用单元测试验证。
+范围与约定：本文覆盖 jagua-rs/src/collision_detection/**、jagua-rs/src/entities/** 及必要的 lbf 调用链。文中路径相对 CodeResource/jagua-rs 本地镜像。此前记录该镜像与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在文件差异，因此涉及 Rust 行为的结论应注明目标基线，并在 E4 fixture 复核完成后重新核验。本次文档修订没有运行构建或测试；本地可找到 cargo/rustc，但工具可用不代表测试或 fixture 已通过。
 
 ## 一、数据结构总览与所有权
 
@@ -211,9 +211,9 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 ## 九、疑点、隐含假设与风险
 
-最重要的一点是 `detect_poly_collision` 中可能触发 panic 的路径。第一阶段（`cd_engine.rs:167-171`）通过 `collides` 检测边，而 `collides` 经由 `strongest(filter)`（`qt_hazard_vec.rs:61-64`）会忽略被 filter 认定为无关的 hazard。但第二阶段（第 174-179 行）遍历虚拟根的全部 hazard 时，对 `Entire` 分支直接 `unreachable!`，且此处并不检查 filter。因此，若某个被忽略的 hazard 在虚拟根上为 `Entire`（例如被忽略的质量区完整覆盖了包含候选形状 bbox 的节点），而形状又不与任何相关 hazard 相交，就会 panic。注释“Entire hazards 必然被边检测捕获”只对相关 hazard 成立。在 LBF 的实际路径中，filter 来自 `min_quality`（`lbf_spp.rs:53-57`），大面积质量区的 `Entire` 覆盖是常见情形，因此这一风险不是纸上推演。修复方向是让 `Entire` 分支先判断 `filter.is_irrelevant`，忽略时跳过。建议用单元测试验证：构造一个带大面积质量区的容器，用忽略该质量区的 `HazKeyFilter` 去检测一个完全落在区域内部的小形状。`jagua-rs/src/collision_detection/quadtree/tests.rs` 中目前没有覆盖这一情形，`lbf/tests/differential_matrix.rs:101` 使用 `from_keys([exterior_key])` 忽略外部 hazard，也可能需要检查是否覆盖了外部 hazard 为 `Entire` 的情形。`Layout::is_feasible` 使用自身的 `HazKey` 作为 filter，自身 hazard 不可能在虚拟根上为 `Entire`（自身边位于虚拟根内，因此为 `Partial`），所以该路径不受影响。
+detect_poly_collision 的源码分支存在需要验证的风险：第一阶段通过 collides 检测边，并经 strongest(filter) 忽略被 filter 排除的 hazard；第二阶段遍历虚拟根 hazard 时，Rust 对 Entire 分支执行 unreachable!，未见该分支再次检查 filter。这确认了 Rust 在该分支上的实现行为，但尚未证明合法输入能够让一个被忽略的 hazard 以 Entire 到达此处。min_quality 与 lbf_spp.rs:53-57 提供了候选调用路径，不足以证明“常见”或“可复现”。需用 pinned revision 构造最小合法输入，记录是否 panic；若不可达，应将其登记为不可达分支而不是运行缺陷。C++ 在对应分支返回 true，仍需比较该语义差异是否可观察。
 
-第二个疑点在 `from_irrelevant_qzones`（`filter.rs:113-135`）。其文档写的是“deems all inferior quality zones above or at a certain quality as irrelevant”，即质量大于等于 `required_quality` 的区域被忽略，而第 125 行的实际条件是 `quality < required_quality`，两者方向相反。容器文档（`container.rs:86`）写明“Higher qualities are superior”，物件的 `min_quality`（`item.rs:52`）是“应当产出的最低质量”。按这一语义，低于最低要求的质量区应当是障碍，而代码却把它们设为无关，即允许放置。这一点需要结合业务定义与测试确认，若语义确为代码所写，则文档是错误的，若语义为文档所写，则代码方向错误，且会导致 LBF 把低质量区当作可放置区域。
+第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
 
 第三个疑点在 `detect_containment_collision` 的 `Enclosed` 分支（`cd_engine.rs:248`、`254-255`）。对 `Exterior` hazard，若容器 bbox 被形状 bbox 包围，则代码测试容器的 `poi` 是否在形状内，结果为真时视为不碰撞。但此时容器轮廓整体位于形状内部，形状显然超出了容器，应当碰撞。由于引擎 bbox 是容器的外接正方形，`Enclosed` 只可能发生在形状 bbox 在容器长边方向与容器完全重合、并在短边方向伸入正方形 padding 的边界情形中。这种情形不常见，但语义上与 `Surrounding` 分支不对称，应当补充测试。
 
@@ -400,7 +400,7 @@ Debug 与 Release 的行为差异需要特别说明。`assert` 在失败时直�
 
 第四，错误被静默吞掉的位置。`Restore` 在 Release 下对碰撞引擎不一致不报错，且句柄可能保持旧值。`Container::CreateCollisionEngine` 返回空指针时丢失错误详情。`Item::Create` 对 `minQuality` 与 `Discrete` 空角度集合不做校验。
 
-第五，跨平台问题。多处 `#include` 的大小写与磁盘文件名不一致，例如 `JaguarCore/Geometry/Edge.h` 对应 `include/JaguarCore/geometry/edge.h`，`JaguarCore/Assertions.h` 对应 `assertions.h`，`JaguarCore/Result.h` 对应 `result.h`，`JaguarCore/Entities/...` 对应 `entities/...`。在 Windows 上大小写不敏感可以编译通过，但在 Linux 或 macOS 上会直接失败。若团队计划跨平台，应统一为一种大小写约定。
+第五，大小写目录副本。源码引用如 JaguarCore/Geometry/Edge.h 与 JaguarCore/Assertions.h 使用大写路径；当前仓库存在 Include/ 与 include/ 两套目录，且相应头文件在两套副本中均可找到。因此不能仅凭大小写差异断言 Linux 或 macOS 构建失败。应比较副本、检查工程设置的 include root，并明确权威目录；当前已确认的维护风险是副本漂移。
 
 第六，性能热点。`PlacedItem` 深拷贝、`MakeHazard` 每次复制多边形、`ClearanceRustF32` 每次分配边向量、`Transformed`（double）重新执行完整校验、`DebugAssertLayout` 在 Debug 下的全量校验，这几处是最可能的性能瓶颈。
 
@@ -443,7 +443,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 查询入口 `Query`（611-650）支持矩形、线段三种形态，并在节点的活动边数超过 `m_CdThreshold` 时退化为直接对边列表逐一检测，而不是继续下降到子节点。这个阈值（`CDEConfig::cdThreshold` 默认 32，见 `CollisionEngine.h` 35-36）是一个性能折中：边数很少时直接检测比递归更便宜。`PresenceAt`（663-689）计算某句柄在给定节点矩形上的覆盖状态，`VirtualRootFor`（701-721）则为查询矩形选择最小的覆盖节点作为虚拟根，从而缩小遍历范围。
 
-有一处确定的缺陷需要单独说明。仅使用包围盒注册的 `RegisterHazard` 重载（`Quadtree.cpp` 579-598）会把障碍物标记为 Partial 且不附带形状。然而 `RegisterIntoNode`（515-526 行）和懒扩展逻辑（492-500 行）会跳过 `shape` 为空的障碍物，因此这类障碍物对于需要下降到子节点的查询是不可见的。该重载的头文件注释也写明"没有多边形几何时统一标记为部分覆盖"，但下游逻辑并未兑现这一语义。如果上层使用包围盒注册路径，就可能出现漏检，这是本模块最需要修复或加注释说明的地方。
+bounds-only RegisterHazard 重载（Quadtree.cpp 579-598）创建 Partial hazard，以一条对角 Edge 近似包围盒，且不保存完整形状。RegisterIntoNode 只有在存在完整形状时才会把 hazard constrict 到子节点，因此该重载留下的条目不会分发到子节点。具体查询是否因此漏检或误报仍需直接调用的最小用例验证；全仓库未发现此重载调用者（B5），当前应记录为未使用扩展路径的潜在风险，而不是已复现缺陷。
 
 ## 五、SoA 布局与 AVX2 的选择
 
@@ -495,9 +495,9 @@ Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `
 
 ## 十一、主要陷阱与建议
 
-综合上述分析，阅读和使用这一子系统时需要注意以下几点。第一，包围盒注册路径会在四叉树下降时漏掉障碍物，若业务依赖该路径，应优先修复 `RegisterIntoNode` 与懒扩展对空形状的处理。第二，线性去重、线性 `Contains`（`Collector.cpp` 7-11）与 `SetRegistered` 的线性扫描在障碍物数量大时会成为瓶颈，可以改为哈希索引。第三，`GetThreadPool` 忽略后续的 `workerCount` 参数，调用方应当意识到线程数只在首次调用时确定。第四，线程池工作线程缺乏异常保护。第五，AVX2 的运行时检测仅在 MSVC 下启用，而编译期开关需要在 qmake 中显式配置。第六，形状修改的多处容差与回退策略会静默改变结果，建议为回退路径增加计数或日志。第七，`ShapeModifyConfig` 未被使用，`OffsetShape` 只返回首条轮廓，这些接口语义需要在文档或代码中明确。第八，源码中若干 include 路径使用 `JaguarCore/Collision/...` 的大写形式，而实际目录为小写的 `include/JaguarCore/collision`，这在大小写敏感的文件系统上会导致编译失败，应统一路径大小写。第九，`Quadtree.cpp` 529 行存在 `}void` 的格式错误，虽不影响编译，但容易掩盖函数边界。
+综合上述分析，当前仍需按证据核查以下事项：RegisterHazard(bounds) 在 C++ 中没有调用者，属于未使用路径；若保留，应记录其限制，若未来接入再验证覆盖充分性。线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
 
-在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要分歧集中在 C++ 对 `constrict` 的宽容处理、包围盒注册的缺陷、以及形状修改部分的回退与容差策略。阅读时可以把这些差异作为重点核对项。
+在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括本地镜像与 pinned revision 的 constrict 分支语义，以及形状修改部分的回退与容差策略。bounds-only RegisterHazard 是无调用者的扩展路径，查询影响尚未验证，不作为当前已观察到的 parity 差异。阅读时需标明 Rust 参考源码基线。
 
 # 附录 F：JaguarCore 问题模型、IO 与公开 API
 
@@ -552,7 +552,7 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 `ExportLayoutSvg`（`Source/IO/SvgExport.cpp`，410 行；接口在 `include/JaguarCore/io/SvgExport.h` 第 67–69 行，返回 `Result<std::string>`）的流水线大致为：计算视口（第 114–145 行），构造 flip 平移（第 146 行），生成场景组（第 156–157 行），绘制容器、布局与碰撞高亮，最后输出坐标轴（第 396–397 行）。
 
-第 146 行的 `flipTranslation` 计算为 `viewY + viewHeight`，而第 156–157 行的变换写为 `translate(0 F) scale(1 -1)`。当 `viewY` 不为 0 时，这一组合并不能正确镜像到视口内，场景会发生垂直偏移。这是一个明确的缺陷，应当在修复后用 `viewY ≠ 0` 的用例回归。每个布局的 `id` 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 `CollisionEngine` 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
+第 146 行的 flipTranslation 计算为 viewY + viewHeight，而第 156–157 行的变换写为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认。应以 viewY 不为 0 的输入运行 SVG 渲染回归后再判定。每个布局的 id 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 CollisionEngine 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
 
 错误路径方面，`compatibility.md` 第 120 行声称 SVG 导出只返回 `SerializationFailure`，但代码还会返回 `CollisionEngineFailure` 与 `SnapshotMismatch`，文档与实现不一致。
 
@@ -564,16 +564,16 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 `Result<T>` 定义于 `include/JaguarCore/result.h`（约 90 行）。`ErrorCode` 共 14 个取值（第 10–26 行），`Error` 结构（第 29–33 行），`Result<T>` 基于 `std::variant` 实现（第 41–57 行），在成功状态下调用 `GetError` 会抛出 `bad_variant_access`。`Result<void>` 见第 87–88 行。`Source/Support/Result.cpp` 只有一行 include。与 Rust 的 panic 与 anyhow 不同，C++ 的失败路径以值返回为主，但部分内部断言仍然依赖异常。
 
-`export.h`（11 行）在 Windows 下根据 `JAGUARCORE_BUILD` 决定使用 `dllexport` 还是 `dllimport`，在 Linux 下展开为空。头文件中的 include 路径使用大写目录名，例如 `JaguarCore/Problems/Spp.h`、`JaguarCore/IO/Importer.h`、`JaguarCore/Assertions.h`、`JaguarCore/Export.h`、`JaguarCore/Version.h`，而磁盘上的文件名为小写。这种大小写不一致只能在大小写不敏感的 NTFS 上编译，迁移到 Linux 或 CI 时会直接失败，是需要优先修复的构建陷阱。
+export.h 在 Windows 下根据 JAGUARCORE_BUILD 选择 dllexport 或 dllimport，在 Linux 下展开为空。头文件引用使用大写目录名，而仓库中 Include/ 与 include/ 两套目录都存在，且对应头文件在两套路径下均可找到。当前不能据此断言 Linux 构建失败；应比较两套副本，确认权威目录以及 qmake/CMake 的 include root 是否一致。大小写副本漂移仍是维护风险。
 
 ## 七、差分测试与 Rust Oracle 机制
 
-差分测试位于 `tests/differential/`，包括 `CompareBoundary`、`CompareGeometry`（333 行）、`CompareMatrix`、`CompareOptimizer`、`CompareProblem`（179 行）与 `CompareTrajectory`（155 行）。这些测试并不调用 Rust oracle，而是直接比较 C++ 结果与代码中写死的字面量，以及 `tests/fixtures/RustReference` 下的快照文件。容差方面，`CompareGeometry` 面积使用 1e-3 与 1e-9 两档，`CompareOptimizer` 的密度容差为 5e-3。`CompareProblem.cpp` 第 17–31 行硬编码了 Windows 反斜杠路径，在 Linux 上无法找到 fixtures。差分测试只在 `tests/JaguarCoreTests.pro` 的第 52–57 行注册，并使用大写的 `Differential/` 路径，与磁盘目录大小写不一致。`tests/differential/README.md`（60 行）描述的运行方式与实际代码行为存在出入。
+差分测试位于 JaguarCore/Tests/Differential，JaguarCore/Tests/differential 两个大小写不同的目录都存在，JaguarCoreTests.pro 当前引用大写 Differential/ 路径。因此“区分大小写系统必然找不到该目录”的结论不成立；需要检查两份目录的内容是否一致，并明确权威副本。测试本身比较 C++ 结果与字面量及快照，不会在每次运行时调用 Rust oracle。CompareGeometry 面积使用 1e-3 与 1e-9 两档，CompareOptimizer 的密度容差为 5e-3。CompareProblem.cpp 的 Windows 反斜杠路径仍是独立的跨平台风险；tests/differential/README.md 的运行说明也需与实际工程核对。
 
 `tools/RustOracle/src/main.rs`（2666 行）是一个依赖 `../../../CodeResource/jagua-rs/jagua-rs`（启用 spp、bpp、mspp 特性）的 Rust 二进制。`main()` 位于约第 557 行，根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt`（53 行）是陈旧且不完整的输出，不能作为当前基准。`tools/rust_oracle/` 目录仅包含 `target/`，属于构建残留。因此，当前的差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行 oracle 并更新 fixtures。
 
 ## 八、Rust 差异、可疑点与陷阱汇总
 
-第一，发布版本中的需求下溢：SPP、BPP、MSPP 的 `PlaceItem` 在 NDEBUG 下都不检查需求，Rust 在 release 下虽然也会回绕，但 C++ 没有等价的错误返回路径，调用方无法感知。第二，多处 RemoveItem 与 RemoveLayout 为非原子操作，SPP 与 MSPP 的 `RemoveItem`、MSPP 的 `RemoveLayout` 在失败时可能留下部分修改，BPP 的 `RemoveLayout` 是唯一先校验再修改的实现。第三，Restore 的键保留策略与 Rust 的 SlotMap 不同，Rust 会生成新键，C++ 尽量保留。第四，SPP 与 MSPP 的 `Restore` 对快照中的 Strip 缺少校验，恶意或损坏的快照可以写入非法宽度。第五，BP 与 MSP 解决方案导入两侧均未实现。第六，无布局时的 `Density` 返回 NaN，且 BP 与 MSP 的密度定义与 SPP 不一致。第七，JSON 解析的 float 截断与缺少版本字段，导致协议演进缺乏闸门。第八，SVG 在 `viewY ≠ 0` 时有垂直偏移缺陷。第九，错误码契约与文档不一致，`compatibility.md` 第 120 行需要更新。第十，Importer 中的零需求过滤发生在 ID 唯一性检查之后，旋转单角度被折叠为 `None`，孔洞归属依赖输入顺序，这些都是隐式假设。第十一，MSPP 的 `Create` 与 `SetWidth` 对宽度边界的检查不一致，且 `SetWidth` 的错误信息误导。第十二，头文件大小写与差分测试路径大小写不一致。
+第一，发布版本中的需求下溢：SPP、BPP、MSPP 的 PlaceItem 在 NDEBUG 下都不检查需求，Rust 在 release 下虽然也会回绕，但 C++ 没有等价的错误返回路径，调用方无法感知。第二，多处 RemoveItem 与 RemoveLayout 为非原子操作，SPP 与 MSPP 的 RemoveItem、MSPP 的 RemoveLayout 在失败时可能留下部分修改，BPP 的 RemoveLayout 是唯一先校验再修改的实现。第三，Restore 的键保留策略与 Rust 的 SlotMap 不同，Rust 会生成新键，C++ 尽量保留。第四，SPP 与 MSPP 的 Restore 对快照中的 Strip 缺少校验，恶意或损坏的快照可以写入非法宽度。第五，BP 与 MSP 解决方案导入两侧均未实现。第六，无布局时的 Density 返回 NaN，且 BP 与 MSP 的密度定义与 SPP 不一致。第七，JSON 解析的 float 截断与缺少版本字段，导致协议演进缺乏闸门。第八，SVG 在 viewY 不为 0 时可能产生垂直偏移（公式推导，待渲染回归）。第九，错误码契约与文档不一致，compatibility.md 第 120 行需要更新。第十，Importer 中的零需求过滤发生在 ID 唯一性检查之后，旋转单角度被折叠为 None，孔洞归属依赖输入顺序，这些都是隐式假设。第十一，MSPP 的 Create 与 SetWidth 对宽度边界的检查不一致，且 SetWidth 的错误信息误导。第十二，头文件大小写与差分测试路径大小写不一致。
 
-以上缺陷中，发布版的需求下溢、非原子修改与 SVG 偏移缺陷最值得优先处理。修复时应同步更新 `docs/` 中的过时路径（如 NestLab、rust_reference、JaguarCore/Tests），这些路径已经无法对应当前目录结构。
+本文列出的下溢、非原子修改、SVG 偏移、导入契约与错误码事项来自源码检查，须按各项的证据等级处理；公式推导或源码分支差异不等于已经复现的运行缺陷。后续应为高风险项补最小输入和对应测试，并确认记录所引用的 Rust revision、C++ 路径与当前仓库布局一致。

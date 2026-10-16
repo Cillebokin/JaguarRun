@@ -50,7 +50,7 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 `ExportLayoutSvg`（`Source/IO/SvgExport.cpp`，410 行；接口在 `include/JaguarCore/io/SvgExport.h` 第 67–69 行，返回 `Result<std::string>`）的流水线大致为：计算视口（第 114–145 行），构造 flip 平移（第 146 行），生成场景组（第 156–157 行），绘制容器、布局与碰撞高亮，最后输出坐标轴（第 396–397 行）。
 
-第 146 行的 `flipTranslation` 计算为 `viewY + viewHeight`，而第 156–157 行的变换写为 `translate(0 F) scale(1 -1)`。当 `viewY` 不为 0 时，这一组合并不能正确镜像到视口内，场景会发生垂直偏移。这是一个明确的缺陷，应当在修复后用 `viewY ≠ 0` 的用例回归。每个布局的 `id` 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 `CollisionEngine` 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
+第 146 行的 flipTranslation 计算为 viewY + viewHeight，而第 156–157 行的变换写为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认。应以 viewY 不为 0 的输入运行 SVG 渲染回归后再判定。每个布局的 id 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 CollisionEngine 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
 
 错误路径方面，`compatibility.md` 第 120 行声称 SVG 导出只返回 `SerializationFailure`，但代码还会返回 `CollisionEngineFailure` 与 `SnapshotMismatch`，文档与实现不一致。
 
@@ -62,16 +62,16 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 `Result<T>` 定义于 `include/JaguarCore/result.h`（约 90 行）。`ErrorCode` 共 14 个取值（第 10–26 行），`Error` 结构（第 29–33 行），`Result<T>` 基于 `std::variant` 实现（第 41–57 行），在成功状态下调用 `GetError` 会抛出 `bad_variant_access`。`Result<void>` 见第 87–88 行。`Source/Support/Result.cpp` 只有一行 include。与 Rust 的 panic 与 anyhow 不同，C++ 的失败路径以值返回为主，但部分内部断言仍然依赖异常。
 
-`export.h`（11 行）在 Windows 下根据 `JAGUARCORE_BUILD` 决定使用 `dllexport` 还是 `dllimport`，在 Linux 下展开为空。头文件中的 include 路径使用大写目录名，例如 `JaguarCore/Problems/Spp.h`、`JaguarCore/IO/Importer.h`、`JaguarCore/Assertions.h`、`JaguarCore/Export.h`、`JaguarCore/Version.h`，而磁盘上的文件名为小写。这种大小写不一致只能在大小写不敏感的 NTFS 上编译，迁移到 Linux 或 CI 时会直接失败，是需要优先修复的构建陷阱。
+export.h 在 Windows 下根据 JAGUARCORE_BUILD 选择 dllexport 或 dllimport，在 Linux 下展开为空。头文件引用使用大写目录名，而仓库中 Include/ 与 include/ 两套目录都存在，且对应头文件在两套路径下均可找到。当前不能据此断言 Linux 构建失败；应比较两套副本，确认权威目录以及 qmake/CMake 的 include root 是否一致。大小写副本漂移仍是维护风险。
 
 ## 七、差分测试与 Rust Oracle 机制
 
-差分测试位于 `tests/differential/`，包括 `CompareBoundary`、`CompareGeometry`（333 行）、`CompareMatrix`、`CompareOptimizer`、`CompareProblem`（179 行）与 `CompareTrajectory`（155 行）。这些测试并不调用 Rust oracle，而是直接比较 C++ 结果与代码中写死的字面量，以及 `tests/fixtures/RustReference` 下的快照文件。容差方面，`CompareGeometry` 面积使用 1e-3 与 1e-9 两档，`CompareOptimizer` 的密度容差为 5e-3。`CompareProblem.cpp` 第 17–31 行硬编码了 Windows 反斜杠路径，在 Linux 上无法找到 fixtures。差分测试只在 `tests/JaguarCoreTests.pro` 的第 52–57 行注册，并使用大写的 `Differential/` 路径，与磁盘目录大小写不一致。`tests/differential/README.md`（60 行）描述的运行方式与实际代码行为存在出入。
+差分测试位于 JaguarCore/Tests/Differential 与 JaguarCore/Tests/differential 两个大小写不同的目录中；JaguarCoreTests.pro 当前引用大写 Differential/ 路径，且该目录存在。目录大小写本身不足以证明 Linux 构建失败，需核对两份副本内容并指定权威目录。测试比较 C++ 结果与字面量及 tests/fixtures/RustReference 下的快照，不会在每次运行时调用 Rust oracle。CompareGeometry 面积使用 1e-3 与 1e-9 两档，CompareOptimizer 密度容差为 5e-3。CompareProblem.cpp 第 17–31 行的 Windows 反斜杠路径仍可能阻碍 Linux 读取 fixtures；tests/differential/README.md 的运行说明需与工程当前状态复核。
 
 `tools/RustOracle/src/main.rs`（2666 行）是一个依赖 `../../../CodeResource/jagua-rs/jagua-rs`（启用 spp、bpp、mspp 特性）的 Rust 二进制。`main()` 位于约第 557 行，根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt`（53 行）是陈旧且不完整的输出，不能作为当前基准。`tools/rust_oracle/` 目录仅包含 `target/`，属于构建残留。因此，当前的差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行 oracle 并更新 fixtures。
 
 ## 八、Rust 差异、可疑点与陷阱汇总
 
-第一，发布版本中的需求下溢：SPP、BPP、MSPP 的 `PlaceItem` 在 NDEBUG 下都不检查需求，Rust 在 release 下虽然也会回绕，但 C++ 没有等价的错误返回路径，调用方无法感知。第二，多处 RemoveItem 与 RemoveLayout 为非原子操作，SPP 与 MSPP 的 `RemoveItem`、MSPP 的 `RemoveLayout` 在失败时可能留下部分修改，BPP 的 `RemoveLayout` 是唯一先校验再修改的实现。第三，Restore 的键保留策略与 Rust 的 SlotMap 不同，Rust 会生成新键，C++ 尽量保留。第四，SPP 与 MSPP 的 `Restore` 对快照中的 Strip 缺少校验，恶意或损坏的快照可以写入非法宽度。第五，BP 与 MSP 解决方案导入两侧均未实现。第六，无布局时的 `Density` 返回 NaN，且 BP 与 MSP 的密度定义与 SPP 不一致。第七，JSON 解析的 float 截断与缺少版本字段，导致协议演进缺乏闸门。第八，SVG 在 `viewY ≠ 0` 时有垂直偏移缺陷。第九，错误码契约与文档不一致，`compatibility.md` 第 120 行需要更新。第十，Importer 中的零需求过滤发生在 ID 唯一性检查之后，旋转单角度被折叠为 `None`，孔洞归属依赖输入顺序，这些都是隐式假设。第十一，MSPP 的 `Create` 与 `SetWidth` 对宽度边界的检查不一致，且 `SetWidth` 的错误信息误导。第十二，头文件大小写与差分测试路径大小写不一致。
+以下是当前源码审阅中记录的主要风险，除已有运行证据者外仍应作为待复现项：发布版需求下溢；SPP/MSPP 的非原子移除；Restore 对 Strip 校验不足；BP/MSP 解决方案导入缺失；无布局 Density 的 NaN；JSON float 截断和版本字段缺失；SVG viewY 非零时可能出现的垂直偏移（公式推导，待渲染回归）；导入器隐含约束；MSPP Create/SetWidth 边界不一致；错误码契约。质量区语义、错误码和 SVG 行为需结合产品契约及最小回归用例确认；大小写问题按重复目录副本漂移追踪。
 
-以上缺陷中，发布版的需求下溢、非原子修改与 SVG 偏移缺陷最值得优先处理。修复时应同步更新 `docs/` 中的过时路径（如 NestLab、rust_reference、JaguarCore/Tests），这些路径已经无法对应当前目录结构。
+以上条目来自源码检查，需依证据等级和复现情况安排优先级。公式推导或实现差异应先补最小输入与回归测试，再定性为运行缺陷。跨平台方面，Include/include 与 Tests/Differential/differential 两套目录同时存在；先核对内容和工程引用，避免把目录大小写差异直接写成确定的构建失败。文中引用的兼容性文档、测试目录和源码路径也应按当前仓库布局逐条复核。

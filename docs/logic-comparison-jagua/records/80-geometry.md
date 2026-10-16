@@ -124,8 +124,10 @@
 - 本轮 fixture 与 `CompareGeometry.cpp::runB1PrimitiveReferenceTests` 覆盖圆构造/度量/包含/相交/距离/分离/包围圆/变换；边构造/最近点/距离/延伸/缩放/反向/交点/相交/变换；点距离；矩形构造/关系/几乎关系/象限/角点/边/组合/距离/分离；多边形有限输入构造、方向归一、派生指标、POI、包含、距离/分离与变换；凸包顺序/单点；`OriginalShape` 原始指标和默认配置下的预变换转换。有限退化用例覆盖零半径、零长边、f32 收敛为重复端点、矩形零宽/零高、多边形点数不足/重复点/共线/自交/小面积。
 - C++ 数值结果通过 `AlmostEqualRustF32` 按 D3 规则比较；布尔值与 `GeoPosition`、顶点顺序精确比较。Rust oracle 的 Debug/Release 命令和 JaguarCore 两个 profile 的完整测试均以退出码 0 结束。
 - `DTransformation` 不需要新增同名结构：它保存的旋转和平移可由 `Transform2d::rotationRad/translation` 表达，行为落在 `ApplyRustF32`、`FollowedByRustF32`、`InverseRustF32`；Rust 公开的 `normalize_rotation` 则新增直接对应 `NormalizeRotationRustF32(float)`，按 f32 remainder 及负角修正规则实现，并覆盖 NaN、正负无穷和负零。
-- B1 仍为进行中：当前是按操作组的确定性 fixture，不是 9 个 Rust 文件每个公开函数的完整用例矩阵；矩阵形式/分解边界、未覆盖的点接触与比较分支仍需补齐。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rust `Edge::try_new` 接受非有限端点而 C++ `Edge2d::Create` 拒绝，先记录为非有限输入域差异，不计入本轮有限输入通过结论。
-- 本轮验证命令：Rust `rustup run 1.98.1 cargo run --locked --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --geometry-primitives-parity-only` 及带 `--release` 的同命令；JaguarCore Debug/Release `JaguarCoreTests.exe` 全套各运行一次。
+- B1 第二轮运行对拍（2026-10-16）：新增 `geometry.transformation_matrix_probes`，按 `empty/from_translation/from_rotation/rotate/translate/rotate_translate/translate_rotate/transform/transform_from_decomposed/inverse` 路径，对原点与两个单位基向量逐项比较；同时比较每条路径的分解字段与 `is_empty` 边界。C++ 没有原始 3×3 matrix accessor 或同名 `is_empty` 方法；矩阵作用映射到 `Transform2d::ApplyRustF32`，空变换判定映射到精确零旋转/零平移字段。Rust matrix 与 C++ 表示差异保留在 API 映射记录。
+- 第二轮还补了 `Edge::collides_at` 的 7 组用例：线段内部相交、端点接触、T 形接触、共线重叠、共线端点接触、平行分离及交点落在线段范围外；对应交点与存在性均和 `IntersectionPointRustF32` 比较。矩形 relation/`almost_relation_to` 的阈值矩阵覆盖距 `1.0f` 下方 1、2、3、4、8、16 ULP；严格 relation 均为 `Intersecting`，almost relation 在 1–4 ULP 归为 `Surrounding`，8/16 ULP 归为 `Intersecting`。
+- B1 仍为进行中：当前仍是按操作组的确定性 fixture，并非 9 个 Rust 文件每个公开函数的完整用例矩阵；剩余项继续按 B0 API 映射逐项核对。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rust `Edge::try_new` 接受非有限端点而 C++ `Edge2d::Create` 拒绝，仍记录为输入域差异，不计入本轮有限输入通过结论。
+- 本轮验证：Rust 1.98.1 Debug/Release geometry-only oracle 新增 6 个键逐值一致；fixture 共 48 个键与默认 oracle/geometry-only oracle 的相应输出逐值一致；JaguarCore Debug/Release 全套 `JaguarCoreTests.exe` 均以退出码 0 结束。
 
 ## 证据位置
 

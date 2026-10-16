@@ -600,8 +600,7 @@ fn run_b1_geometry_oracle() {
     let applied = Point(2.0, -3.0).transform_clone(&transform.compose());
     println!(
         "geometry.transformation_apply={:.9},{:.9}",
-        applied.0,
-        applied.1
+        applied.0, applied.1
     );
     let rotate_then_translate = jagua_rs::geometry::Transformation::empty()
         .rotate_translate(0.5, (3.0, -2.0))
@@ -618,6 +617,64 @@ fn run_b1_geometry_oracle() {
         translate_then_rotate.translation().0,
         translate_then_rotate.translation().1
     );
+    let transform_base = jagua_rs::geometry::Transformation::from_translation((1.25, -2.5));
+    let transform_other =
+        jagua_rs::geometry::Transformation::from_rotation(-0.3).translate((0.25, 1.5));
+    let decomposed_operation = DTransformation::new(-0.4, (0.5, 2.25));
+    let transformation_paths = vec![
+        jagua_rs::geometry::Transformation::empty(),
+        jagua_rs::geometry::Transformation::from_translation((3.0, -4.0)),
+        jagua_rs::geometry::Transformation::from_rotation(0.375),
+        transform_base.clone().rotate(0.2),
+        transform_base.clone().translate((3.0, -1.0)),
+        transform_base.clone().rotate_translate(0.5, (2.0, -1.0)),
+        transform_base.clone().translate_rotate((2.0, -1.0), 0.5),
+        transform_base.clone().transform(&transform_other),
+        transform_base
+            .clone()
+            .transform_from_decomposed(&decomposed_operation),
+        transform_base.clone().inverse(),
+    ];
+    let transformation_probes = [Point(0.0, 0.0), Point(1.0, 0.0), Point(0.0, 1.0)];
+    let mut matrix_probe_values = Vec::new();
+    let mut decomposed_values = Vec::new();
+    for path in &transformation_paths {
+        for probe in &transformation_probes {
+            let transformed = probe.transform_clone(path);
+            matrix_probe_values.push(format!("{:.9},{:.9}", transformed.0, transformed.1));
+        }
+        let decomposed = path.decompose();
+        let (translation_x, translation_y) = decomposed.translation();
+        decomposed_values.push(format!(
+            "{:.9},{:.9},{:.9}",
+            decomposed.rotation(),
+            translation_x,
+            translation_y
+        ));
+    }
+    println!(
+        "geometry.transformation_matrix_probes={}",
+        matrix_probe_values.join(";")
+    );
+    println!(
+        "geometry.transformation_decompositions={}",
+        decomposed_values.join(";")
+    );
+    let empty_transform_cases = [
+        jagua_rs::geometry::Transformation::empty(),
+        jagua_rs::geometry::Transformation::from_translation((0.0, 0.0)),
+        jagua_rs::geometry::Transformation::from_rotation(0.375),
+        jagua_rs::geometry::Transformation::from_rotation(std::f32::consts::TAU),
+        jagua_rs::geometry::Transformation::from_translation((-0.0, 0.0)),
+    ];
+    println!(
+        "geometry.transformation_is_empty={}",
+        empty_transform_cases
+            .iter()
+            .map(|transform| transform.is_empty().to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 
     let circle = Circle::try_new(Point(2.0, 3.0), 5.0).unwrap();
     let circle_bbox = circle.bbox();
@@ -630,7 +687,10 @@ fn run_b1_geometry_oracle() {
         circle_bbox.y_max,
         circle.diameter()
     );
-    println!("geometry.circle_contains={}", circle.collides_with(&Point(2.0, 3.0)));
+    println!(
+        "geometry.circle_contains={}",
+        circle.collides_with(&Point(2.0, 3.0))
+    );
     println!(
         "geometry.circle_construction=zero_radius:{},negative_radius:{},nonfinite_center:{},nonfinite_radius:{}",
         Circle::try_new(Point(0.0, 0.0), 0.0).is_ok(),
@@ -652,11 +712,7 @@ fn run_b1_geometry_oracle() {
         "geometry.edge_construction=valid:{},zero_length:{},f32_collapsed:{}",
         Edge::try_new(Point(0.0, 0.0), Point(1.0, 0.0)).is_ok(),
         Edge::try_new(Point(1.0, 1.0), Point(1.0, 1.0)).is_ok(),
-        Edge::try_new(
-            Point(1.0, 0.0),
-            Point(1.0 + f32::EPSILON * 0.5, 0.0)
-        )
-        .is_ok()
+        Edge::try_new(Point(1.0, 0.0), Point(1.0 + f32::EPSILON * 0.5, 0.0)).is_ok()
     );
     let proper_edge_a = Edge::try_new(Point(0.0, 0.0), Point(10.0, 10.0)).unwrap();
     let proper_edge_b = Edge::try_new(Point(0.0, 10.0), Point(10.0, 0.0)).unwrap();
@@ -668,6 +724,54 @@ fn run_b1_geometry_oracle() {
         proper_edge_a.collides_with(&proper_edge_b),
         endpoint_edge_a.collides_with(&endpoint_edge_b),
         endpoint_edge_a.collides_with(&collinear_edge)
+    );
+    let edge_contact_cases = vec![
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(4.0, 0.0)).unwrap(),
+            Edge::try_new(Point(2.0, -1.0), Point(2.0, 1.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap(),
+            Edge::try_new(Point(2.0, 0.0), Point(2.0, 1.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(4.0, 0.0)).unwrap(),
+            Edge::try_new(Point(2.0, 0.0), Point(2.0, 2.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap(),
+            Edge::try_new(Point(1.0, 0.0), Point(3.0, 0.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(2.0, 0.0)).unwrap(),
+            Edge::try_new(Point(2.0, 0.0), Point(4.0, 0.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(4.0, 0.0)).unwrap(),
+            Edge::try_new(Point(0.0, 1.0), Point(4.0, 1.0)).unwrap(),
+        ),
+        (
+            Edge::try_new(Point(0.0, 0.0), Point(2.0, 2.0)).unwrap(),
+            Edge::try_new(Point(0.0, 1.0), Point(1.0, 1.5)).unwrap(),
+        ),
+    ];
+    let mut edge_contact_results = Vec::new();
+    let mut edge_contact_points = Vec::new();
+    for (edge_a, edge_b) in edge_contact_cases {
+        if let Some(Point(x, y)) = edge_a.collides_at(&edge_b) {
+            edge_contact_results.push("true");
+            edge_contact_points.push(format!("{x:.9},{y:.9}"));
+        } else {
+            edge_contact_results.push("false");
+        }
+    }
+    println!(
+        "geometry.edge_collides_at={}",
+        edge_contact_results.join(",")
+    );
+    println!(
+        "geometry.edge_collides_at_points={}",
+        edge_contact_points.join(";")
     );
 
     let rect = Rect::try_new(0.0, 0.0, 4.0, 2.0).unwrap();
@@ -716,6 +820,33 @@ fn run_b1_geometry_oracle() {
             rect.relation_to(disjoint_rect),
             jagua_rs::geometry::geo_enums::GeoRelation::Disjoint
         )
+    );
+    let threshold_rect = Rect::try_new(1.0, 1.0, 3.0, 3.0).unwrap();
+    let mut rect_relation_ulp_results = Vec::new();
+    for ulp_distance in [1_u32, 2, 3, 4, 8, 16] {
+        let x_min = f32::from_bits(1.0_f32.to_bits() - ulp_distance);
+        let near_boundary_rect = Rect::try_new(x_min, 1.5, 3.0, 2.5).unwrap();
+        let strict_relation = threshold_rect.relation_to(near_boundary_rect);
+        let almost_relation = threshold_rect.almost_relation_to(near_boundary_rect);
+        rect_relation_ulp_results.push(format!(
+            "{},{},{}",
+            matches!(
+                strict_relation,
+                jagua_rs::geometry::geo_enums::GeoRelation::Intersecting
+            ),
+            matches!(
+                almost_relation,
+                jagua_rs::geometry::geo_enums::GeoRelation::Surrounding
+            ),
+            matches!(
+                almost_relation,
+                jagua_rs::geometry::geo_enums::GeoRelation::Intersecting
+            )
+        ));
+    }
+    println!(
+        "geometry.rect_relation_ulp_boundary={}",
+        rect_relation_ulp_results.join(";")
     );
     let through_rect = Edge::try_new(Point(-1.0, 1.0), Point(5.0, 1.0)).unwrap();
     let outside_rect = Edge::try_new(Point(-1.0, 3.0), Point(5.0, 3.0)).unwrap();

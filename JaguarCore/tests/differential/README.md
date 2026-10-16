@@ -31,6 +31,8 @@ The current fixed collision matrix also records the boundary convention: CDE tre
 
 The B1 geometry fixture uses the locked Rust 1.98.1 toolchain and jagua-rs revision. Existing circle/edge/rect/point/polygon values come from the default oracle; extended B1 values come from `RustOracle --geometry-primitives-parity-only`. Scalar results use JaguarCore's `AlmostEqualRustF32` comparison; booleans, position classifications, and ordered vertices are exact. The extended values were checked against both Rust Debug and Release output on 2026-10-16.
 
+The B1 second round compares Rust transformation matrix behavior through transformed origin/unit-axis probes and decomposed fields, plus exact `is_empty` cases. Edge intersection fixtures cover crossing, endpoint and T-junction contact, collinear overlap/touch, separated parallel edges, and an out-of-segment line intersection. Rectangle relation fixtures sample 1, 2, 3, 4, 8, and 16 ULP below `1.0f` to lock the `almost_relation_to` transition.
+
 `CompareBoundary.cpp` additionally locks the primitive convention that non-collinear
 near-contact uses the configured tolerance while collinear overlap remains outside the
 Rust `Edge::collides_with` predicate. The randomized problem-state test runs 1000 steps

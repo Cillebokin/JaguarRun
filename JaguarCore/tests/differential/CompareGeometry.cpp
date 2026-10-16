@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -242,6 +243,78 @@ void runB1PrimitiveReferenceTests()
         translateThenRotate.translation.x,
         translateThenRotate.translation.y});
 
+    const jaguar::Transform2d transformBase =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.25, -2.5});
+    const jaguar::Transform2d transformRotation =
+        jaguar::Transform2d::FromRotationTranslation(0.375, {0.0, 0.0});
+    const jaguar::Transform2d transformTranslation =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {3.0, -4.0});
+    const auto rotatePath = transformBase.FollowedByRustF32(
+        jaguar::Transform2d::FromRotationTranslation(0.2, {0.0, 0.0}));
+    const auto translatePath = transformBase.FollowedByRustF32(
+        jaguar::Transform2d::FromRotationTranslation(0.0, {3.0, -1.0}));
+    const auto rotateTranslatePath = transformBase.FollowedByRustF32(
+        jaguar::Transform2d::FromRotationTranslation(0.5, {2.0, -1.0}));
+    const auto translateRotatePath = transformBase.FollowedByRustF32(
+        jaguar::Transform2d::FromRotationTranslation(0.0, {2.0, -1.0})
+            .FollowedByRustF32(
+                jaguar::Transform2d::FromRotationTranslation(0.5, {0.0, 0.0})));
+    const auto transformOther =
+        jaguar::Transform2d::FromRotationTranslation(-0.3, {0.25, 1.5});
+    const auto transformedPath = transformBase.FollowedByRustF32(transformOther);
+    const jaguar::Transform2d decomposedOperation =
+        jaguar::Transform2d::FromRotationTranslation(-0.4, {0.5, 2.25});
+    const auto decomposedPath = transformBase.FollowedByRustF32(decomposedOperation);
+    const std::vector<jaguar::Transform2d> transformationPaths = {
+        jaguar::Transform2d::Identity(),
+        transformTranslation,
+        transformRotation,
+        rotatePath,
+        translatePath,
+        rotateTranslatePath,
+        translateRotatePath,
+        transformedPath,
+        decomposedPath,
+        transformBase.InverseRustF32()};
+    std::vector<double> transformationMatrixProbes;
+    std::vector<double> transformationDecompositions;
+    for (const auto& path : transformationPaths)
+    {
+        for (const jaguar::Point2d& probe : {
+                 jaguar::Point2d{0.0, 0.0},
+                 jaguar::Point2d{1.0, 0.0},
+                 jaguar::Point2d{0.0, 1.0}})
+        {
+            const auto point = path.ApplyRustF32(probe);
+            transformationMatrixProbes.insert(
+                transformationMatrixProbes.end(), {point.x, point.y});
+        }
+        transformationDecompositions.insert(
+            transformationDecompositions.end(),
+            {path.rotationRad, path.translation.x, path.translation.y});
+    }
+    expectRustNumbers(reference, "geometry.transformation_matrix_probes",
+                      transformationMatrixProbes);
+    expectRustNumbers(reference, "geometry.transformation_decompositions",
+                      transformationDecompositions);
+    const std::vector<jaguar::Transform2d> emptyTransformCases = {
+        jaguar::Transform2d::Identity(),
+        jaguar::Transform2d::FromRotationTranslation(0.0, {0.0, 0.0}),
+        jaguar::Transform2d::FromRotationTranslation(0.375, {0.0, 0.0}),
+        jaguar::Transform2d::FromRotationTranslation(2.0 * std::acos(-1.0),
+                                                     {0.0, 0.0}),
+        jaguar::Transform2d::FromRotationTranslation(0.0, {-0.0, 0.0})};
+    std::vector<bool> mapsToEmptyTransform;
+    for (const auto& transformCase : emptyTransformCases)
+    {
+        mapsToEmptyTransform.push_back(
+            transformCase.rotationRad == 0.0 &&
+            transformCase.translation.x == 0.0 &&
+            transformCase.translation.y == 0.0);
+    }
+    expectRustBooleans(reference, "geometry.transformation_is_empty",
+                       mapsToEmptyTransform);
+
     const auto metricCircle = jaguar::Circle2d::Create({2.0, 3.0}, 5.0);
     assert(metricCircle.HasValue());
     const auto metricCircleBounds = metricCircle.Value().BoundingBoxRustF32();
@@ -385,6 +458,32 @@ void runB1PrimitiveReferenceTests()
         endpointA.Value().IntersectsRustF32(collinear.Value())});
     expectRustBooleans(reference, "edge.intersection", {
         endpointA.Value().IntersectionPointRustF32(collinear.Value()).has_value()});
+    const std::vector<std::pair<jaguar::Edge2d, jaguar::Edge2d>> edgeContactCases = {
+        {jaguar::Edge2d{{0.0, 0.0}, {4.0, 0.0}},
+         jaguar::Edge2d{{2.0, -1.0}, {2.0, 1.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {2.0, 0.0}},
+         jaguar::Edge2d{{2.0, 0.0}, {2.0, 1.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {4.0, 0.0}},
+         jaguar::Edge2d{{2.0, 0.0}, {2.0, 2.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {2.0, 0.0}},
+         jaguar::Edge2d{{1.0, 0.0}, {3.0, 0.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {2.0, 0.0}},
+         jaguar::Edge2d{{2.0, 0.0}, {4.0, 0.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {4.0, 0.0}},
+         jaguar::Edge2d{{0.0, 1.0}, {4.0, 1.0}}},
+        {jaguar::Edge2d{{0.0, 0.0}, {1.0, 1.0}},
+         jaguar::Edge2d{{2.0, 0.0}, {2.0, 2.0}}}};
+    std::vector<bool> edgeContactResults;
+    std::vector<double> edgeContactPoints;
+    for (const auto& edgeCase : edgeContactCases)
+    {
+        const auto point = edgeCase.first.IntersectionPointRustF32(edgeCase.second);
+        edgeContactResults.push_back(point.has_value());
+        if (point)
+            edgeContactPoints.insert(edgeContactPoints.end(), {point->x, point->y});
+    }
+    expectRustBooleans(reference, "geometry.edge_collides_at", edgeContactResults);
+    expectRustNumbers(reference, "geometry.edge_collides_at_points", edgeContactPoints);
     jaguar::Edge2d transformedEdge = edge.Value();
     transformedEdge.TransformRustF32(jaguar::Transform2d::FromRotationTranslation(
         0.5 * std::acos(-1.0), {10.0, 20.0}));
@@ -461,6 +560,29 @@ void runB1PrimitiveReferenceTests()
         hazardBounds.AlmostRelationToRustF32(enclosedBounds) == jaguar::RectRelation::Enclosed,
         hazardBounds.AlmostRelationToRustF32(intersectingBounds) == jaguar::RectRelation::Intersecting,
         hazardBounds.AlmostRelationToRustF32(disjointBounds) == jaguar::RectRelation::Disjoint});
+    const jaguar::Rect2d thresholdRect{1.0, 1.0, 3.0, 3.0};
+    float ulpBelowOne = 1.0F;
+    std::vector<float> ulpBoundaries;
+    for (unsigned int ulp = 1; ulp <= 16; ++ulp)
+    {
+        ulpBelowOne = std::nextafter(ulpBelowOne, 0.0F);
+        if (ulp == 1 || ulp == 2 || ulp == 3 || ulp == 4 || ulp == 8 || ulp == 16)
+            ulpBoundaries.push_back(ulpBelowOne);
+    }
+    std::vector<bool> rectangleRelationUlpCases;
+    for (const float boundaryXMin : ulpBoundaries)
+    {
+        const jaguar::Rect2d nearBoundaryRect{
+            static_cast<double>(boundaryXMin), 1.5, 3.0, 2.5};
+        const auto strictRelation = thresholdRect.RelationToRustF32(nearBoundaryRect);
+        const auto almostRelation =
+            thresholdRect.AlmostRelationToRustF32(nearBoundaryRect);
+        rectangleRelationUlpCases.push_back(strictRelation == jaguar::RectRelation::Intersecting);
+        rectangleRelationUlpCases.push_back(almostRelation == jaguar::RectRelation::Surrounding);
+        rectangleRelationUlpCases.push_back(almostRelation == jaguar::RectRelation::Intersecting);
+    }
+    expectRustBooleans(reference, "geometry.rect_relation_ulp_boundary",
+                       rectangleRelationUlpCases);
     const auto quadrants = utilityRect.Value().QuadrantsRustF32();
     const auto utilityCentroid = utilityRect.Value().CentroidRustF32();
     std::vector<double> rectBasics = {utilityCentroid.x, utilityCentroid.y};

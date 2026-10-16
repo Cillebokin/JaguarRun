@@ -18,6 +18,8 @@ SparrowCli --input instance.json --output solution.json --svg layout.svg \
   --seed 42 --samples 1000 --time-ms 2000 --early-termination
 ```
 
+CLI exit codes: `0` success; `2` usage error; `3` input file unreadable; `4` instance import failed; `5` optimization failed; `6` solution conversion failed; `7` solution serialization failed; `8` output write failed; `9` layout restore, SVG export or SVG write failed; `10` an unexpected exception escaped the library layer (reported on stderr).
+
 On `SIGINT`/Ctrl-C, SparrowCli requests a cooperative stop for the active phase. The optimizer
 finishes through its normal phase handoff and final-result path; a later phase clears that
 phase-scoped interrupt, matching Sparrow's `CtrlCTerminator` behavior. Native C++ hosts can pass
@@ -51,11 +53,12 @@ emcmake cmake -S SparrowCore/Tools/SparrowWasm -B build-wasm \
 cmake --build build-wasm
 ```
 
-The return code is `0` for success, `1` only when the input is null or empty, `2` for any failure after input is accepted (JSON import/parse failure, optimization failure, layout restore, SVG export or serialization failure) and `3` when the output buffer is null or too small. On a non-zero return code other than `3`, the output buffer contains `{"error":"<message>"}`.
+The return code is `0` for success, `1` only when the input is null or empty, `2` for any failure after input is accepted (JSON import/parse failure, optimization failure, layout restore, SVG export or serialization failure) and `3` when the output buffer is null or too small. Any C++ exception raised inside the optimizer is caught at the C ABI boundary and reported as code `2` with the payload `{"error":"internal error"}`. On a non-zero return code other than `3`, the output buffer contains `{"error":"<message>"}`.
 
 ## Browser demo
 
 Serve `SparrowCore/Demo` from a local HTTP server and load the Emscripten-generated bridge as
-`window.SparrowWasm.optimizeJson` and `window.SparrowWasm.optimizeSvg`. The JSON result is
-shown as text and the SVG result is shown as the layout preview. `Demo/Index.html` intentionally
+`window.SparrowWasm.optimizeJson` and `window.SparrowWasm.optimizeSvg`. Run optimizes once and shows the JSON
+result; the bridge must return the JSON text on success, or a `{"error":"..."}` payload on failure. The
+`Export SVG preview` button is a separate request that re-runs the optimization to produce the SVG preview. `Demo/Index.html` intentionally
 has no network dependency and can be hosted as static files.

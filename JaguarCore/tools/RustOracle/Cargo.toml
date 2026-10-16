@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-jagua-rs = { path = "../../../CodeResource/jagua-rs/jagua-rs", features = ["spp", "bpp", "mspp"] }
+jagua-rs = { git = "https://github.com/JeroenGar/jagua-rs", rev = "f5e2b5ffd14931f17a20ce283a2122e877953ceb", features = ["spp", "bpp", "mspp"] }
 geo-buffer = "0.2"
 geo-types = "0.7"
 serde_json = "1.0"

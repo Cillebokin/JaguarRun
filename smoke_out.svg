@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="-0.20004036426544192 -0.20044400691986086 4.4008880138397215 4.4008877754211424">
+  <title>SparrowCore Layout</title>
+  <g id="scene" transform="translate(0 4.2004437685012812) scale(1 -1)">
+    <path class="container-original" data-container-id="0" d="M 0 0 L 4.0008072853088379 0 L 4.0008072853088379 4 L 0 4 Z" fill="#CC824A" fill-opacity="0.25" stroke="#CC824A" stroke-width="0.020004036426544188" fill-rule="evenodd"/>
+    <path class="container-collision" data-container-id="0" d="M 0 0 L 4.0008072853088379 0 L 4.0008072853088379 4 L 0 4 Z" fill="none" stroke="#0080FF" stroke-width="0.020004036426544188" stroke-dasharray="0.060012109279632561 0.040008072853088376"/>
+    <g id="item_0_201" data-item-id="201" data-rotation-degrees="0" data-translation-x="0.00024592876434326172" data-translation-y="0.0015276670455932617">
+      <title>item id: 201, transform: translate(0.00024592876434326172 0.0015276670455932617) rotate(0)</title>
+      <g class="item-placement" transform="translate(0.00024592876434326172 0.0015276670455932617) rotate(0)">
+        <path class="item-original" d="M 0 0 L 2 0 L 2 2 L 0 2 Z" fill="#FFC879" fill-opacity="0.7" stroke="#FFC879" stroke-width="0.020004036426544188"/>
+      </g>
+      <path class="item-collision" d="M 0.00024592876434326172 0.0015276670455932617 L 2.0002459287643433 0.0015276670455932617 L 2.0002459287643433 2.0015276670455933 L 0.00024592876434326172 2.0015276670455933 Z" fill="none" stroke="#0080FF" stroke-width="0.020004036426544188" stroke-dasharray="0.040008072853088376 0.020004036426544188"/>
+      <g class="surrogate" data-item-id="201">
+        <circle class="surrogate-pole" cx="1.0002459287643433" cy="1.0015276670455933" r="1" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="1.8283709287643433" cy="1.8296526670455933" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="0.17212092876434326" cy="1.8296526670455933" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="0.17212092876434326" cy="0.17340266704559326" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="1.8283709287643433" cy="0.17340266704559326" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="1.5861834287643433" cy="1.9155901670455933" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="1.9143084287643433" cy="1.5874651670455933" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="0.41430842876434326" cy="1.9155901670455933" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="0.086183428764343262" cy="1.5874651670455933" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+      </g>
+    </g>
+    <g id="item_1_201" data-item-id="201" data-rotation-degrees="0" data-translation-x="2.0007672309875488" data-translation-y="0.00085663795471191406">
+      <title>item id: 201, transform: translate(2.0007672309875488 0.00085663795471191406) rotate(0)</title>
+      <g class="item-placement" transform="translate(2.0007672309875488 0.00085663795471191406) rotate(0)">
+        <path class="item-original" d="M 0 0 L 2 0 L 2 2 L 0 2 Z" fill="#FFC879" fill-opacity="0.7" stroke="#FFC879" stroke-width="0.020004036426544188"/>
+      </g>
+      <path class="item-collision" d="M 2.0007672309875488 0.00085663795471191406 L 4.0007672309875488 0.00085663795471191406 L 4.0007672309875488 2.0008566379547119 L 2.0007672309875488 2.0008566379547119 Z" fill="none" stroke="#0080FF" stroke-width="0.020004036426544188" stroke-dasharray="0.040008072853088376 0.020004036426544188"/>
+      <g class="surrogate" data-item-id="201">
+        <circle class="surrogate-pole" cx="3.0007672309875488" cy="1.0008566379547119" r="1" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="3.8288922309875488" cy="1.8289816379547119" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="2.1726422309875488" cy="1.8289816379547119" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="2.1726422309875488" cy="0.17273163795471191" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="3.8288922309875488" cy="0.17273163795471191" r="0.17114555835723877" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="3.5867047309875488" cy="1.9149191379547119" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="3.9148297309875488" cy="1.5867941379547119" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="2.4148297309875488" cy="1.9149191379547119" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+        <circle class="surrogate-pole" cx="2.0867047309875488" cy="1.5867941379547119" r="0.085740804672241211" fill="none" stroke="#00AA55" stroke-width="0.020004036426544188"/>
+      </g>
+    </g>
+    <g id="quality_zones">
+    </g>
+    <g id="collision_lines">
+    </g>
+    <g id="collision-debug" data-layout-feasible="true" data-enabled="true"/>
+  </g>
+  <g id="axes" transform="translate(0 4.2004437685012812) scale(1 -1)" stroke="#555555" stroke-width="0.01500302731990814" fill="none">
+    <path d="M -0.20004036426544192 0 L 4.2008476495742793 0"/>
+    <path d="M 0 -0.20044400691986086 L 0 4.2004437685012812"/>
+  </g>
+</svg>

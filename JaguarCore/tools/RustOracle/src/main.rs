@@ -238,7 +238,8 @@ fn run_model_boundary_parity_oracle() {
     let mut spp = SPProblem::new(SPInstance::new(
         vec![(square_item(0, 1.0), 0)],
         SPStrip::new(10.0, cde_config, shape_config, 10.0).unwrap(),
-    ));
+    ))
+    .unwrap();
     let spp_result = catch_unwind(AssertUnwindSafe(|| {
         spp.place_item(SPPlacement {
             item_idx: 0,
@@ -288,7 +289,9 @@ fn run_model_boundary_parity_oracle() {
         vec![(square_item(0, 1.0), 0)],
         Strip::new(10.0, 10.0, cde_config, shape_config, 10.0).unwrap(),
     ));
-    let layout = mspp.add_layout_from_strip(mspp.instance.base_strip);
+    let layout = mspp
+        .add_layout_from_strip(mspp.instance.base_strip)
+        .unwrap();
     let mspp_result = catch_unwind(AssertUnwindSafe(|| {
         mspp.place_item(MSPPlacement {
             lk: layout,
@@ -318,7 +321,8 @@ fn run_restore_boundary_parity_oracle() {
     let mut spp = SPProblem::new(SPInstance::new(
         vec![(square_item(0, 1.0), 1)],
         SPStrip::new(10.0, cde_config, shape_config, 10.0).unwrap(),
-    ));
+    ))
+    .unwrap();
     spp.place_item(SPPlacement {
         item_idx: 0,
         d_transf: DTransformation::new(0.0, (1.0, 1.0)),
@@ -358,7 +362,9 @@ fn run_restore_boundary_parity_oracle() {
         vec![(square_item(0, 1.0), 1)],
         Strip::new(10.0, 10.0, cde_config, shape_config, 10.0).unwrap(),
     ));
-    let layout = mspp.add_layout_from_strip(mspp.instance.base_strip);
+    let layout = mspp
+        .add_layout_from_strip(mspp.instance.base_strip)
+        .unwrap();
     mspp.place_item(MSPPlacement {
         lk: layout,
         item_idx: 0,
@@ -1997,7 +2003,8 @@ fn main() {
             (square_item(2, 1.0), 1),
         ],
         spp_restore_strip,
-    ));
+    ))
+    .unwrap();
     let spp_item_a = spp_restore.place_item(SPPlacement {
         item_idx: 0,
         d_transf: DTransformation::new(0.0, (1.0, 1.0)),
@@ -2056,7 +2063,7 @@ fn main() {
         vec![(square_item(0, 1.0), 2)],
         stale_msp_strip,
     ));
-    let old_msp_key = stale_msp.add_layout_from_strip(stale_msp_strip);
+    let old_msp_key = stale_msp.add_layout_from_strip(stale_msp_strip).unwrap();
     println!("mspp.first_layout_key={old_msp_key:?}");
     stale_msp.place_item(MSPPlacement {
         lk: old_msp_key,
@@ -2065,7 +2072,7 @@ fn main() {
     });
     let old_msp_solution = stale_msp.save();
     stale_msp.remove_layout(old_msp_key);
-    let replacement_msp_key = stale_msp.add_layout_from_strip(stale_msp_strip);
+    let replacement_msp_key = stale_msp.add_layout_from_strip(stale_msp_strip).unwrap();
     stale_msp.place_item(MSPPlacement {
         lk: replacement_msp_key,
         item_idx: 0,
@@ -2084,12 +2091,16 @@ fn main() {
         vec![(square_item(0, 1.0), 1)],
         restore_order_base,
     ));
-    let restore_order_first = restore_order_msp.add_layout_from_strip(
-        Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 4.0).unwrap(),
-    );
-    let restore_order_second = restore_order_msp.add_layout_from_strip(
-        Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 6.0).unwrap(),
-    );
+    let restore_order_first = restore_order_msp
+        .add_layout_from_strip(
+            Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 4.0).unwrap(),
+        )
+        .unwrap();
+    let restore_order_second = restore_order_msp
+        .add_layout_from_strip(
+            Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 6.0).unwrap(),
+        )
+        .unwrap();
     let restore_order_solution = restore_order_msp.save();
     restore_order_msp.remove_layout(restore_order_first);
     restore_order_msp.remove_layout(restore_order_second);
@@ -2210,16 +2221,18 @@ fn main() {
         strip_width_base,
     ));
     for width in [16_777_216.0, 1.0, 1.0] {
-        strip_width_problem.add_layout_from_strip(
-            Strip::new(
-                16_777_216.0,
-                1.0,
-                cde_config,
-                ShapeModifyConfig::default(),
-                width,
+        strip_width_problem
+            .add_layout_from_strip(
+                Strip::new(
+                    16_777_216.0,
+                    1.0,
+                    cde_config,
+                    ShapeModifyConfig::default(),
+                    width,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        );
+            .unwrap();
     }
     println!(
         "mspp.total_strip_width={:.0}",
@@ -2235,47 +2248,55 @@ fn main() {
     .unwrap();
     let mut churn_problem =
         MSPProblem::new(MSPInstance::new(vec![(square_item(0, 1.0), 1)], churn_base));
-    let removed_key = churn_problem.add_layout_from_strip(
-        Strip::new(
-            16_777_216.0,
-            1.0,
-            cde_config,
-            ShapeModifyConfig::default(),
-            1.0,
+    let removed_key = churn_problem
+        .add_layout_from_strip(
+            Strip::new(
+                16_777_216.0,
+                1.0,
+                cde_config,
+                ShapeModifyConfig::default(),
+                1.0,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    );
-    churn_problem.add_layout_from_strip(
-        Strip::new(
-            16_777_216.0,
-            1.0,
-            cde_config,
-            ShapeModifyConfig::default(),
-            1.0,
+        .unwrap();
+    churn_problem
+        .add_layout_from_strip(
+            Strip::new(
+                16_777_216.0,
+                1.0,
+                cde_config,
+                ShapeModifyConfig::default(),
+                1.0,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    );
-    churn_problem.add_layout_from_strip(
-        Strip::new(
-            16_777_216.0,
-            1.0,
-            cde_config,
-            ShapeModifyConfig::default(),
-            16_777_216.0,
+        .unwrap();
+    churn_problem
+        .add_layout_from_strip(
+            Strip::new(
+                16_777_216.0,
+                1.0,
+                cde_config,
+                ShapeModifyConfig::default(),
+                16_777_216.0,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    );
+        .unwrap();
     churn_problem.remove_layout(removed_key);
-    let reused_churn_key = churn_problem.add_layout_from_strip(
-        Strip::new(
-            16_777_216.0,
-            1.0,
-            cde_config,
-            ShapeModifyConfig::default(),
-            1.0,
+    let reused_churn_key = churn_problem
+        .add_layout_from_strip(
+            Strip::new(
+                16_777_216.0,
+                1.0,
+                cde_config,
+                ShapeModifyConfig::default(),
+                1.0,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    );
+        .unwrap();
     println!(
         "mspp.reused_slot_total_strip_width={:.0}",
         churn_problem.total_strip_width()
@@ -2302,15 +2323,21 @@ fn main() {
         vec![(square_item(0, 1.0), 1)],
         over_max_base,
     ));
-    let over_max_key = over_max_problem.add_layout_from_strip(
-        Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 11.0).unwrap(),
-    );
-    over_max_problem.add_layout_from_strip(
-        Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 9.0).unwrap(),
-    );
-    over_max_problem.add_layout_from_strip(
-        Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 10.0).unwrap(),
-    );
+    let over_max_key = over_max_problem
+        .add_layout_from_strip(
+            Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 11.0).unwrap(),
+        )
+        .unwrap();
+    over_max_problem
+        .add_layout_from_strip(
+            Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 9.0).unwrap(),
+        )
+        .unwrap();
+    over_max_problem
+        .add_layout_from_strip(
+            Strip::new(10.0, 5.0, cde_config, ShapeModifyConfig::default(), 10.0).unwrap(),
+        )
+        .unwrap();
     println!(
         "mspp.extendable_strips_count={}",
         over_max_problem.extendable_strips().count()

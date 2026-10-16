@@ -22,14 +22,12 @@ const REFERENCE: &str = include_str!("../../Fixtures/OptimizeColdStartDefaultRus
 #[derive(Clone)]
 struct PhaseTerminator {
     stop: Arc<AtomicBool>,
-    timeout: Option<Instant>,
 }
 
 impl PhaseTerminator {
     fn new() -> Self {
         Self {
             stop: Arc::new(AtomicBool::new(false)),
-            timeout: None,
         }
     }
 }
@@ -37,17 +35,30 @@ impl PhaseTerminator {
 impl Terminator for PhaseTerminator {
     fn kill(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
-            || self.timeout.is_some_and(|timeout| Instant::now() > timeout)
     }
 
-    fn new_timeout(&mut self, timeout: Duration) {
+    fn new_timeout(&mut self, _timeout: Duration) {
         self.stop.store(false, Ordering::SeqCst);
-        self.timeout = Some(Instant::now() + timeout);
     }
 
     fn timeout_at(&self) -> Option<Instant> {
-        self.timeout
+        None
     }
+}
+
+#[test]
+fn phase_terminator_ignores_wall_clock_deadlines() {
+    let mut terminator = PhaseTerminator::new();
+    terminator.new_timeout(Duration::ZERO);
+
+    assert!(
+        terminator.timeout_at().is_none(),
+        "the reference trace must not inherit a wall-clock phase deadline"
+    );
+    assert!(
+        !terminator.kill(),
+        "an elapsed timeout must not stop the reference phase"
+    );
 }
 
 #[derive(Default)]

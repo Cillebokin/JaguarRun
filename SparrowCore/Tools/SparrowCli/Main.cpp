@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <string>
@@ -59,7 +60,7 @@ bool ReadFile(const std::string& path, std::string& content)
 }
 }
 
-int main(int argc, char** argv)
+int RunCli(int argc, char** argv)
 {
     std::string inputPath;
     std::string outputPath;
@@ -258,4 +259,25 @@ int main(int argc, char** argv)
               << ", width=" << optimized.Value().metrics.stripWidth
               << ", density=" << optimized.Value().metrics.density << '\n';
     return 0;
+}
+
+// Exit code 10 is reserved for exceptions that escape the library layer. They
+// are reported on stderr instead of terminating the process, so the exit code
+// is always defined. Codes 2-9 keep their documented meanings.
+int main(int argc, char** argv)
+{
+    try
+    {
+        return RunCli(argc, argv);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "internal error: " << error.what() << '\n';
+        return 10;
+    }
+    catch (...)
+    {
+        std::cerr << "internal error: unknown exception\n";
+        return 10;
+    }
 }

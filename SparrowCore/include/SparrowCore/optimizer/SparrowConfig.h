@@ -61,6 +61,10 @@ struct CompressionConfig
     double shrinkMax = 0.0005;
     double failureDecay = 0.9;
     std::chrono::nanoseconds timeLimit{std::chrono::seconds{60}};
+    // Test-only override of the compression phase deadline. timeLimit keeps
+    // driving the time-based shrink ratio and config reporting; when set, this
+    // value bounds the phase wall-clock budget instead. Unset in production.
+    std::optional<std::chrono::nanoseconds> phaseDeadlineOverride = std::nullopt;
 
     Result<void> Validate() const;
 };

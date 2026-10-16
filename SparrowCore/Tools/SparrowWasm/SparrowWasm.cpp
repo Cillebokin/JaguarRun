@@ -7,6 +7,7 @@
 #include "JaguarCore/IO/SvgExport.h"
 
 #include <cstring>
+#include <exception>
 #include <string>
 #include <utility>
 
@@ -98,7 +99,7 @@ jaguar::Result<OptimizedInput> OptimizeInput(
 }
 }
 
-extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeJson(
+static int SparrowOptimizeJsonUnguarded(
     const char* inputJson,
     std::size_t inputSize,
     char* outputJson,
@@ -128,7 +129,7 @@ extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeJson(
     return CopyOutput(json.Value(), outputJson, outputCapacity);
 }
 
-extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeSvg(
+static int SparrowOptimizeSvgUnguarded(
     const char* inputJson,
     std::size_t inputSize,
     char* outputSvg,
@@ -159,4 +160,49 @@ extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeSvg(
         return CopyError("SVG export failed", outputSvg, outputCapacity, 2);
     }
     return CopyOutput(svg.Value(), outputSvg, outputCapacity);
+}
+
+// The C ABI must never let a C++ exception cross the boundary. Any exception
+// raised by the optimizer, importer or exporter is reported as code 2 with a
+// fixed message, so the JSON payload stays valid regardless of e.what().
+extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeJson(
+    const char* inputJson,
+    std::size_t inputSize,
+    char* outputJson,
+    std::size_t outputCapacity)
+{
+    try
+    {
+        return SparrowOptimizeJsonUnguarded(
+            inputJson, inputSize, outputJson, outputCapacity);
+    }
+    catch (const std::exception&)
+    {
+        return CopyError("internal error", outputJson, outputCapacity, 2);
+    }
+    catch (...)
+    {
+        return CopyError("internal error", outputJson, outputCapacity, 2);
+    }
+}
+
+extern "C" SPARROW_WASM_KEEPALIVE int SparrowOptimizeSvg(
+    const char* inputJson,
+    std::size_t inputSize,
+    char* outputSvg,
+    std::size_t outputCapacity)
+{
+    try
+    {
+        return SparrowOptimizeSvgUnguarded(
+            inputJson, inputSize, outputSvg, outputCapacity);
+    }
+    catch (const std::exception&)
+    {
+        return CopyError("internal error", outputSvg, outputCapacity, 2);
+    }
+    catch (...)
+    {
+        return CopyError("internal error", outputSvg, outputCapacity, 2);
+    }
 }

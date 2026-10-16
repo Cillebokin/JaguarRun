@@ -2,6 +2,10 @@
 
 This directory contains the first deterministic differential baseline for JaguarCore.
 
+The RustOracle baseline uses Rust 1.98.1 and jagua-rs revision
+`f5e2b5ffd14931f17a20ce283a2122e877953ceb`; invoke it with the pinned toolchain
+and lockfile so it does not follow a different default rustup channel.
+
 The files under `../Fixtures/RustReference/` use the jagua-rs external JSON schema. They intentionally contain small, deterministic cases so a failure identifies a geometry/import/state semantic mismatch rather than an optimizer ordering difference.
 
 ## Current checks
@@ -51,10 +55,10 @@ The oracle is not a claim that Sparrow or any optimizer must produce identical p
 Run the Rust oracle in both profiles from the repository root:
 
 ```powershell
-cargo run --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
-cargo run --offline --release --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
-cargo run --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
-cargo run --offline --release --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+cargo +1.98.1 run --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+cargo +1.98.1 run --release --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --model-boundary-parity-only
+cargo +1.98.1 run --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
+cargo +1.98.1 run --release --locked --offline --manifest-path JaguarCore/tools/RustOracle/Cargo.toml -- --restore-boundary-parity-only
 ```
 
 The model probe covers `total_item_qty()` overflow plus over-demand placement in SPP/BPP/MSPP, recording remaining demand, placed count, and BPP stock. The restore probe records the saved strip fields alongside the layout container width, making intentionally inconsistent snapshots visible. Its current Rust output documents unresolved JaguarCore acceptance/state differences; passing JaguarCore's ordinary Debug/Release suite alone does not close those differences.

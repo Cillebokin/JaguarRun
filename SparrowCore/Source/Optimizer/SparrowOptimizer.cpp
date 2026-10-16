@@ -179,7 +179,8 @@ Result<SparrowOptimizationResult> OptimizeWithTerminator(
     if (listener != nullptr)
         listener->OnPhase(
             OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION);
-    terminator.StartPhase(config.compression.timeLimit);
+    terminator.StartPhase(config.compression.phaseDeadlineOverride.value_or(
+        config.compression.timeLimit));
     const auto compressed = Compress(
         instance,
         explored.Value().separatorState,

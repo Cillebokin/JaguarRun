@@ -1,0 +1,31 @@
+{
+  "density": 0.49989911913871765,
+  "layout": {
+    "container_id": 0,
+    "density": 0.49989911913871765,
+    "placed_items": [
+      {
+        "item_id": 201,
+        "transformation": {
+          "rotation": 0,
+          "translation": [
+            0.00024592876434326172,
+            0.0015276670455932617
+          ]
+        }
+      },
+      {
+        "item_id": 201,
+        "transformation": {
+          "rotation": 0,
+          "translation": [
+            2.0007672309875488,
+            0.00085663795471191406
+          ]
+        }
+      }
+    ]
+  },
+  "run_time_sec": 0,
+  "strip_width": 4.0008072853088379
+}

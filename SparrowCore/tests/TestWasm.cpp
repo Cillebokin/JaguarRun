@@ -81,6 +81,31 @@ bool RunWasmTests(std::ostream& output)
         return false;
     }
 
+    std::vector<char> malformed(128U);
+    const std::string badJson = "{not json";
+    const int malformedResult = SparrowOptimizeJson(
+        badJson.data(), badJson.size(), malformed.data(), malformed.size());
+    if (!Expect(malformedResult == 2
+                    && std::string(malformed.data()).find("\"error\"")
+                        != std::string::npos,
+                output,
+                "JSON C ABI must report import failure as code 2 with an error payload"))
+    {
+        return false;
+    }
+
+    std::vector<char> svgMalformed(128U);
+    const int svgMalformedResult = SparrowOptimizeSvg(
+        badJson.data(), badJson.size(), svgMalformed.data(), svgMalformed.size());
+    if (!Expect(svgMalformedResult == 2
+                    && std::string(svgMalformed.data()).find("\"error\"")
+                        != std::string::npos,
+                output,
+                "SVG C ABI must report import failure as code 2 with an error payload"))
+    {
+        return false;
+    }
+
     std::vector<char> tiny(1U);
     const int capacityResult = SparrowOptimizeJson(
         input.data(), input.size(), tiny.data(), tiny.size());

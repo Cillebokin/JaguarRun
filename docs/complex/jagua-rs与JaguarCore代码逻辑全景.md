@@ -316,7 +316,7 @@ lbf 只使用 `Layout::cde()`、`Layout::place_item`、`Layout::save`、`CDEngin
 
 ## 一、数值策略：模拟 Rust f32 的基础设施
 
-整个几何层的核心设计是“双轨并存”。每个几何函数通常有两个版本，一个是以 `double` 计算的普通版本（如 `Edge2d::ClosestPoint`，`Edge.cpp:232`），另一个是带 `RustF32` 后缀、以 `static_cast<float>` 逐步模拟 Rust `f32` 运算的版本（如 `Edge2d::ClosestPointRustF32`，`Edge.cpp:246`）。业务路径（碰撞检测、放置）应当统一使用 `RustF32` 版本，以保证与 jagua-rs 的结果逐位对齐；`double` 版本主要供工具函数和测试使用。阅读代码时务必注意这一点，否则很容易在同一条调用链中混用两套精度。
+整个几何层的核心设计是“双轨并存”。每个几何函数通常有两个版本，一个是以 `double` 计算的普通版本（如 `Edge2d::ClosestPoint`，`Edge.cpp:232`），另一个是带 `RustF32` 后缀、以 `static_cast<float>` 逐步模拟 Rust `f32` 运算的版本（如 `Edge2d::ClosestPointRustF32`，`Edge.cpp:246`）。业务路径（碰撞检测、放置）应当统一使用 `RustF32` 版本，以尽量复现 jagua-rs 的 f32 舍入顺序；`double` 版本主要供工具函数和测试使用。逐函数的对应关系与验证依据见 `SparrowCore/docs/Differential.md`。阅读代码时务必注意这一点，否则很容易在同一条调用链中混用两套精度。
 
 `include/JaguarCore/geometry/RustF32.h` 提供了四类工具。第一是 `MinRustF32`/`MaxRustF32`，直接包装 `std::fmin`/`std::fmax`，与 Rust `f32::min`/`max` 的 NaN 处理一致。第二是 `MidpointRustF32`（第 15-24 行），对两端同号且绝对值超过 `max/2` 的情况改用 `first*0.5 + second*0.5`，以避免溢出，这是对 Rust 实现的精确复刻。第三是 `AlmostEqualRustF32`（第 32-50 行），判定顺序为：完全相等；绝对差不超过 `FLT_EPSILON`；有限性检查；最后是按有序位模式计算的 ULP 差不超过 4。注意前两步是绝对容差，对绝对值很小的坐标会把不同数值判为相等，这一点在做微小量比较时需要留意。`LessRustF32`、`GreaterRustF32`、`LessEqualRustF32`（第 56-65 行）分别基于它定义，因此与 Rust 中 `FPA` 包装类型的 `PartialEq`/`PartialOrd` 语义一致（Rust 侧 `util/fpa.rs` 使用 `float_cmp::approx_eq!`）。
 
@@ -469,7 +469,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 piers 的生成分为两步。`generateCandidatePiers`（186-241）沿若干射线发射候选弦，射线数量在 `#ifdef NDEBUG` 下为 200 个角度乘以 90 个采样，调试版本则为 10 乘以 4。`generatePiers`（440-490）随后用贪心策略，每次挑选使 `pierLoss` 最小的候选，直到满足数量或覆盖条件。`generateUnrepresentedGrid`（329-373）在调试与发布间同样存在 100 与 10 的采样差异（`Surrogate.cpp` 333-337）。Rust 版的 `piers.rs` 第 16-20 行使用 `cfg!(debug_assertions)` 实现同样的分支，因此这一差异是忠实移植的结果，而不是 C++ 独有的缺陷。但它意味着调试版与发布版生成的代理在数值上不同，对比测试时必须统一构建配置。
 
-代理的变换有两条路径。`Transformed`（674-723 附近）使用双精度，而 `TransformedRustF32` 使用 `*RustF32` 系列辅助函数模拟 f32 运算，以便与 Rust 的结果逐位对齐。这种双轨设计是为了跨语言验证，正常运行时应当明确选择其中一条，否则两侧结果可能在边界情况下出现分歧。
+代理的变换有两条路径。`Transformed`（674-723 附近）使用双精度，而 `TransformedRustF32` 使用 `*RustF32` 系列辅助函数模拟 f32 运算，以便复现 Rust 的 f32 舍入顺序并供跨语言对拍。这种双轨设计是为了跨语言验证，正常运行时应当明确选择其中一条，否则两侧结果可能在边界情况下出现分歧。
 
 ## 八、形状修改
 

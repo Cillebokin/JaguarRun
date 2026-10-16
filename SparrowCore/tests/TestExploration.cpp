@@ -1294,6 +1294,11 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
         return false;
     }
 
+    // Wall-clock phase deadlines made per-event comparison machine-dependent
+    // (Debug stopped compression at 616 of 647 separation iterations). Lift only
+    // the compression deadline for this test; the 60 s time limit used for the
+    // shrink ratio and config reporting is unchanged.
+    config.compression.phaseDeadlineOverride = std::chrono::minutes{10};
     sparrow::OptimizationTerminator terminator(config.terminator);
     terminator.Start();
     DefaultColdStartReferenceListener listener(terminator);

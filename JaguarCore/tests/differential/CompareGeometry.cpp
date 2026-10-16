@@ -751,6 +751,111 @@ void runB1PrimitiveReferenceTests()
     expectRustNumbers(reference, "geometry.transform_inverse", {
         inverse.rotationRad, inverse.translation.x, inverse.translation.y});
 
+    const jaguar::Point2d accessorPoint{1.25, -2.5};
+    const auto accessorEdge = jaguar::Edge2d::Create({0.0, 0.0}, {3.0, 4.0});
+    assert(accessorEdge.HasValue());
+    const auto accessorBox = accessorEdge.Value().BoundingBox();
+    const auto accessorSides = utilityRect.Value().SidesRustF32();
+    std::vector<double> independentAccessors = {
+        accessorPoint.x, accessorPoint.y,
+        accessorBox.xMin, accessorBox.yMin, accessorBox.xMax, accessorBox.yMax};
+    for (const auto& side : accessorSides)
+    {
+        independentAccessors.insert(independentAccessors.end(), {
+            side.start.x, side.start.y, side.end.x, side.end.y});
+    }
+    expectRustNumbers(reference, "geometry.independent_accessors",
+                      independentAccessors);
+
+    const jaguar::Transform2d transformFrom =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {3.0, -2.0});
+    const jaguar::Point2d transformFromPoint{2.0, -3.0};
+    const auto transformedFromPoint = transformFrom.ApplyRustF32(transformFromPoint);
+    const auto transformFromCircle = jaguar::Circle2d::Create({1.0, 2.0}, 1.5);
+    const auto transformFromEdge = jaguar::Edge2d::Create({-1.0, 0.0}, {2.0, 1.0});
+    assert(transformFromCircle.HasValue() && transformFromEdge.HasValue());
+    auto transformedFromCircle = transformFromCircle.Value();
+    transformedFromCircle.TransformRustF32(transformFrom);
+    auto transformedFromEdge = transformFromEdge.Value();
+    transformedFromEdge.TransformRustF32(transformFrom);
+    const auto transformedFromPolygon = referencePolygon.Value().TransformedRustF32(
+        transformFrom);
+    assert(transformedFromPolygon.HasValue());
+    std::vector<double> transformFromValues = {
+        transformedFromPoint.x, transformedFromPoint.y,
+        transformedFromCircle.center.x, transformedFromCircle.center.y,
+        transformedFromCircle.radius,
+        transformedFromEdge.start.x, transformedFromEdge.start.y,
+        transformedFromEdge.end.x, transformedFromEdge.end.y};
+    for (const auto& point : transformedFromPolygon.Value().Vertices())
+        transformFromValues.insert(transformFromValues.end(), {point.x, point.y});
+    const auto& transformedFromBox = transformedFromPolygon.Value().BoundingBox();
+    const auto transformedFromCentroid = transformedFromPolygon.Value().Centroid();
+    const auto& transformedFromPoi =
+        transformedFromPolygon.Value().PointOfInaccessibility();
+    transformFromValues.insert(transformFromValues.end(), {
+        transformedFromBox.xMin, transformedFromBox.yMin,
+        transformedFromBox.xMax, transformedFromBox.yMax,
+        transformedFromCentroid.x, transformedFromCentroid.y,
+        transformedFromPolygon.Value().Area(),
+        transformedFromPolygon.Value().Diameter(),
+        transformedFromPoi.center.x, transformedFromPoi.center.y,
+        transformedFromPoi.radius});
+    expectRustNumbers(reference, "geometry.transform_from", transformFromValues);
+
+    const auto dispatchCircle = jaguar::Circle2d::Create({0.0, 0.0}, 1.0);
+    const auto dispatchRect = jaguar::Rect2d::Create(0.0, 0.0, 2.0, 2.0);
+    const auto dispatchTouchingRect = jaguar::Rect2d::Create(2.0, 0.0, 4.0, 2.0);
+    const auto dispatchSeparatedRect = jaguar::Rect2d::Create(2.01, 0.0, 4.0, 2.0);
+    const float dispatchEpsilon = std::numeric_limits<float>::epsilon();
+    const auto dispatchNearRect = jaguar::Rect2d::Create(
+        -1.0, 0.0, -dispatchEpsilon * 0.25, 2.0);
+    const auto dispatchFarRect = jaguar::Rect2d::Create(
+        -1.0, 0.0, -dispatchEpsilon * 2.0, 2.0);
+    const auto dispatchCrossingEdge = jaguar::Edge2d::Create({-1.0, 1.0}, {3.0, 1.0});
+    assert(dispatchCircle.HasValue() && dispatchRect.HasValue() &&
+           dispatchTouchingRect.HasValue() && dispatchSeparatedRect.HasValue() &&
+           dispatchNearRect.HasValue() && dispatchFarRect.HasValue() &&
+           dispatchCrossingEdge.HasValue());
+    const jaguar::Point2d circleInsidePoint{0.25, 0.0};
+    const jaguar::Point2d circleOutsidePoint{3.0, 0.0};
+    const jaguar::Point2d rectInsidePoint{1.0, 1.0};
+    const jaguar::Point2d rectOutsidePoint{3.0, 1.0};
+    const jaguar::Point2d nearRectPoint{-dispatchEpsilon * 0.25, 1.0};
+    const jaguar::Point2d farRectPoint{-dispatchEpsilon * 2.0, 1.0};
+    expectRustBooleans(reference, "geometry.trait_dispatch", {
+        dispatchCircle.Value().ContainsRustF32(circleInsidePoint),
+        dispatchCircle.Value().ContainsRustF32(circleOutsidePoint),
+        dispatchRect.Value().ContainsRustF32(rectInsidePoint),
+        dispatchRect.Value().ContainsRustF32(rectOutsidePoint),
+        referencePolygon.Value().ContainsRustF32(rectInsidePoint),
+        referencePolygon.Value().ContainsRustF32({5.0, 1.0}),
+        dispatchRect.Value().ContainsRustF32(rectInsidePoint),
+        dispatchRect.Value().ContainsRustF32(rectOutsidePoint),
+        dispatchRect.Value().RelationToRustF32(dispatchTouchingRect.Value()) !=
+            jaguar::RectRelation::Disjoint,
+        dispatchRect.Value().RelationToRustF32(dispatchSeparatedRect.Value()) !=
+            jaguar::RectRelation::Disjoint,
+        dispatchRect.Value().AlmostRelationToRustF32(dispatchNearRect.Value()) !=
+            jaguar::RectRelation::Disjoint,
+        dispatchRect.Value().AlmostRelationToRustF32(dispatchFarRect.Value()) !=
+            jaguar::RectRelation::Disjoint,
+        dispatchRect.Value().AlmostContainsRustF32(nearRectPoint),
+        dispatchRect.Value().AlmostContainsRustF32(farRectPoint),
+        dispatchCrossingEdge.Value().IntersectsRustF32(dispatchRect.Value()),
+        dispatchCrossingEdge.Value().IntersectsRustF32(dispatchRect.Value())});
+
+    expectRustNumbers(reference, "geometry.simple_polygon_helpers", {
+        referencePolygon.Value().Diameter(),
+        referencePolygon.Value().BoundingBox().xMin,
+        referencePolygon.Value().BoundingBox().yMin,
+        referencePolygon.Value().BoundingBox().xMax,
+        referencePolygon.Value().BoundingBox().yMax,
+        referencePolygon.Value().Area(),
+        referencePolygon.Value().PointOfInaccessibility().center.x,
+        referencePolygon.Value().PointOfInaccessibility().center.y,
+        referencePolygon.Value().PointOfInaccessibility().radius});
+
     const auto tiedXHull = jaguar::ConvexHull({
         {0.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, {1.0, 1.0}});
     std::vector<double> hullCoordinates;

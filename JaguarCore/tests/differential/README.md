@@ -33,6 +33,8 @@ The B1 geometry fixture uses the locked Rust 1.98.1 toolchain and jagua-rs revis
 
 The B1 second round compares Rust transformation matrix behavior through transformed origin/unit-axis probes and decomposed fields, plus exact `is_empty` cases. Edge intersection fixtures cover crossing, endpoint and T-junction contact, collinear overlap/touch, separated parallel edges, and an out-of-segment line intersection. Rectangle relation fixtures sample 1, 2, 3, 4, 8, and 16 ULP below `1.0f` to lock the `almost_relation_to` transition.
 
+The B1 fourth round expands `geometry_primitives.txt` to 52 keys. It compares the independent `Point::x/y`, `Edge::bbox`, and `Rect::sides` accessors; all four `TransformableFrom` implementations; Point-left collision blanket dispatch, rectangle collision/near-collision trait booleans, and Edge/Rect dispatch in both directions; plus direct Rust calls to the four `SPolygon` derived-value helpers. C++ compares those helper values with fields produced by `SimplePolygon::Create`, since there is no matching public C++ helper API. Rust 1.98.1 Debug/Release oracle output matches the fixture; JaguarCore Debug/Release full test runners pass with the assertions enabled.
+
 `CompareBoundary.cpp` additionally locks the primitive convention that non-collinear
 near-contact uses the configured tolerance while collinear overlap remains outside the
 Rust `Edge::collides_with` predicate. The randomized problem-state test runs 1000 steps

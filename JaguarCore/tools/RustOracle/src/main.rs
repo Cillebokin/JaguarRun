@@ -10,6 +10,7 @@ use jagua_rs::geometry::fail_fast::SPSurrogateConfig;
 use jagua_rs::geometry::geo_enums::RotationRange;
 use jagua_rs::geometry::geo_traits::{
     AlmostCollidesWith, CollidesWith, DistanceTo, SeparationDistance, Transformable,
+    TransformableFrom,
 };
 use jagua_rs::geometry::primitives::{Circle, Edge, Point, Rect, SPolygon};
 use jagua_rs::geometry::shape_modification::{
@@ -939,6 +940,135 @@ fn run_b1_geometry_oracle() {
         transformed.centroid().1,
         transformed.area,
         transformed.diameter
+    );
+
+    let accessor_point = Point(1.25, -2.5);
+    let accessor_edge = Edge::try_new(Point(0.0, 0.0), Point(3.0, 4.0)).unwrap();
+    let accessor_bbox = accessor_edge.bbox();
+    let accessor_rect = Rect::try_new(0.0, 0.0, 4.0, 2.0).unwrap();
+    let accessor_sides = accessor_rect.sides();
+    let accessor_sides_text = accessor_sides
+        .iter()
+        .map(|side| {
+            format!(
+                "{:.9},{:.9},{:.9},{:.9}",
+                side.start.0, side.start.1, side.end.0, side.end.1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    println!(
+        "geometry.independent_accessors=point:{:.9},{:.9};bbox:{:.9},{:.9},{:.9},{:.9};sides:{}",
+        accessor_point.x(),
+        accessor_point.y(),
+        accessor_bbox.x_min,
+        accessor_bbox.y_min,
+        accessor_bbox.x_max,
+        accessor_bbox.y_max,
+        accessor_sides_text
+    );
+
+    let transform_from = jagua_rs::geometry::Transformation::from_translation((3.0, -2.0));
+    let transform_from_point = Point(2.0, -3.0);
+    let mut point_from_target = Point(99.0, 98.0);
+    point_from_target.transform_from(&transform_from_point, &transform_from);
+    let transform_from_circle = Circle::try_new(Point(1.0, 2.0), 1.5).unwrap();
+    let mut circle_from_target = Circle::try_new(Point(99.0, 98.0), 1.5).unwrap();
+    circle_from_target.transform_from(&transform_from_circle, &transform_from);
+    let transform_from_edge = Edge::try_new(Point(-1.0, 0.0), Point(2.0, 1.0)).unwrap();
+    let mut edge_from_target = Edge::try_new(Point(10.0, 10.0), Point(11.0, 12.0)).unwrap();
+    edge_from_target.transform_from(&transform_from_edge, &transform_from);
+    let transform_from_source_polygon = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    let mut polygon_from_target =
+        polygon(&[(10.0, 10.0), (14.0, 10.0), (14.0, 12.0), (10.0, 12.0)]);
+    polygon_from_target.transform_from(&transform_from_source_polygon, &transform_from);
+    let polygon_from_vertices = polygon_from_target
+        .vertices
+        .iter()
+        .map(|point| format!("{:.9},{:.9}", point.0, point.1))
+        .collect::<Vec<_>>()
+        .join(";");
+    println!(
+        "geometry.transform_from=point:{:.9},{:.9};circle:{:.9},{:.9},{:.9};edge:{:.9},{:.9},{:.9},{:.9};polygon_vertices:{};bbox:{:.9},{:.9},{:.9},{:.9};centroid:{:.9},{:.9};area:{:.9};diameter:{:.9};poi:{:.9},{:.9},{:.9}",
+        point_from_target.0,
+        point_from_target.1,
+        circle_from_target.center.0,
+        circle_from_target.center.1,
+        circle_from_target.radius,
+        edge_from_target.start.0,
+        edge_from_target.start.1,
+        edge_from_target.end.0,
+        edge_from_target.end.1,
+        polygon_from_vertices,
+        polygon_from_target.bbox.x_min,
+        polygon_from_target.bbox.y_min,
+        polygon_from_target.bbox.x_max,
+        polygon_from_target.bbox.y_max,
+        polygon_from_target.centroid().0,
+        polygon_from_target.centroid().1,
+        polygon_from_target.area,
+        polygon_from_target.diameter,
+        polygon_from_target.poi.center.0,
+        polygon_from_target.poi.center.1,
+        polygon_from_target.poi.radius
+    );
+
+    let dispatch_circle = Circle::try_new(Point(0.0, 0.0), 1.0).unwrap();
+    let dispatch_rect = Rect::try_new(0.0, 0.0, 2.0, 2.0).unwrap();
+    let dispatch_touching_rect = Rect::try_new(2.0, 0.0, 4.0, 2.0).unwrap();
+    let dispatch_separated_rect = Rect::try_new(2.01, 0.0, 4.0, 2.0).unwrap();
+    let dispatch_epsilon = f32::EPSILON;
+    let dispatch_near_rect = Rect::try_new(-1.0, 0.0, -dispatch_epsilon * 0.25, 2.0).unwrap();
+    let dispatch_far_rect = Rect::try_new(-1.0, 0.0, -dispatch_epsilon * 2.0, 2.0).unwrap();
+    let dispatch_polygon = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);
+    let dispatch_crossing_edge = Edge::try_new(Point(-1.0, 1.0), Point(3.0, 1.0)).unwrap();
+    let circle_inside_point = Point(0.25, 0.0);
+    let circle_outside_point = Point(3.0, 0.0);
+    let rect_inside_point = Point(1.0, 1.0);
+    let rect_outside_point = Point(3.0, 1.0);
+    let near_rect_point = Point(-dispatch_epsilon * 0.25, 1.0);
+    let far_rect_point = Point(-dispatch_epsilon * 2.0, 1.0);
+    println!(
+        "geometry.trait_dispatch=point_circle_inside:{},point_circle_outside:{},point_rect_inside:{},point_rect_outside:{},point_polygon_inside:{},point_polygon_outside:{},rect_point_inside:{},rect_point_outside:{},rect_rect_touching:{},rect_rect_separated:{},almost_rect_near:{},almost_rect_far:{},almost_point_near:{},almost_point_far:{},edge_rect:{},rect_edge:{}",
+        circle_inside_point.collides_with(&dispatch_circle),
+        circle_outside_point.collides_with(&dispatch_circle),
+        rect_inside_point.collides_with(&dispatch_rect),
+        rect_outside_point.collides_with(&dispatch_rect),
+        rect_inside_point.collides_with(&dispatch_polygon),
+        Point(5.0, 1.0).collides_with(&dispatch_polygon),
+        dispatch_rect.collides_with(&rect_inside_point),
+        dispatch_rect.collides_with(&rect_outside_point),
+        dispatch_rect.collides_with(&dispatch_touching_rect),
+        dispatch_rect.collides_with(&dispatch_separated_rect),
+        dispatch_rect.almost_collides_with(&dispatch_near_rect),
+        dispatch_rect.almost_collides_with(&dispatch_far_rect),
+        dispatch_rect.almost_collides_with(&near_rect_point),
+        dispatch_rect.almost_collides_with(&far_rect_point),
+        dispatch_crossing_edge.collides_with(&dispatch_rect),
+        dispatch_rect.collides_with(&dispatch_crossing_edge)
+    );
+
+    let helper_points = vec![
+        Point(0.0, 0.0),
+        Point(4.0, 0.0),
+        Point(4.0, 2.0),
+        Point(0.0, 2.0),
+    ];
+    let helper_diameter = SPolygon::calculate_diameter(helper_points.clone());
+    let helper_bbox = SPolygon::generate_bounding_box(&helper_points);
+    let helper_area = SPolygon::calculate_area(&helper_points);
+    let helper_poi = SPolygon::calculate_poi(&helper_points, helper_diameter).unwrap();
+    println!(
+        "geometry.simple_polygon_helpers=diameter:{:.9};bbox:{:.9},{:.9},{:.9},{:.9};area:{:.9};poi:{:.9},{:.9},{:.9}",
+        helper_diameter,
+        helper_bbox.x_min,
+        helper_bbox.y_min,
+        helper_bbox.x_max,
+        helper_bbox.y_max,
+        helper_area,
+        helper_poi.center.0,
+        helper_poi.center.1,
+        helper_poi.radius
     );
 
     let original = OriginalShape {

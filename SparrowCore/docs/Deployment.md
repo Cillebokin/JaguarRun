@@ -5,9 +5,9 @@
 Build JaguarCore first, then SparrowCore, then the optional tools. The project is tested with Qt 5.12.10 and MSVC 2019 x64.
 
 ```powershell
-qmake SparrowCore/SparrowCore.pro CONFIG+=release SPARROWCORE_BUILD_DIR=D:/build/SparrowCore
+qmake SparrowCore/SparrowCore.pro CONFIG+=release SPARROWCORE_BUILD_DIR=<sparrow-build-dir>
 nmake /nologo
-qmake SparrowCore/Tools/SparrowCli/SparrowCli.pro CONFIG+=release SPARROWCORE_BUILD_DIR=D:/build/SparrowCore JAGUARCORE_BUILD_DIR=D:/build/JaguarCore
+qmake SparrowCore/Tools/SparrowCli/SparrowCli.pro CONFIG+=release SPARROWCORE_BUILD_DIR=<sparrow-build-dir> JAGUARCORE_BUILD_DIR=<jaguar-build-dir>
 nmake /nologo
 ```
 

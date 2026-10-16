@@ -4,12 +4,11 @@
 
 本文是 SparrowCore LBF 纯 C++ 移植的来源登记表。它记录参考实现、目标文件、保留的行为、不保证逐点相同的部分，以及许可证边界。本文不授权将 Rust 源码逐行复制到 C++；实现必须重新编写，并通过行为/不变量/指标差分验证。
 
-参考目录：
+参考目录（本仓库内的 Rust 参考源码以 `SparrowCore/tests/RustReference` 的 Cargo 依赖与 `CodeResource/jagua-rs` 本地镜像为准，二者的差异见移植工作项清单 E4）：
 
 ```text
-D:\MyFiles\Gits_Xj\NestLab\NestLab\jagua-rs\lbf
-D:\MyFiles\Gits_Xj\NestLab\NestLab\sparrow
-D:\MyFiles\Gits_Xj\NestLab\NestLab\JaguarCore
+CodeResource/jagua-rs/jagua-rs/src/...   （jagua-rs 本地镜像，非编译输入）
+sparrow Rust 工作源码（路径由负责人在本地指定，不写入仓库）
 ```
 
 ## 2. 许可证和来源
@@ -53,7 +52,7 @@ SparrowCore 核心仍以 static library 作为 C++ 集成产物；CLI、WASM C A
 | `src/sample/coord_descent.rs` | `Source/Sampling/CoordinateDescent.cpp` | horizontal/vertical/diagonal/wiggle candidate 与 step update |
 | `src/sample/uniform_sampler.rs` | `Source/Sampling/UniformRectSampler.cpp` | item bbox 合法化采样 |
 | `src/Eval/sample_eval.rs` | `Source/Optimizer/SampleEval.cpp` | Invalid/Collision/Clear 三态排序 |
-| `src/Eval/lbf_evaluator.rs` | `Source/Eval/SparrowLbfEvaluator.cpp` | `10*(POI.x+bbox.x)+POI.y+bbox.y` |
+| `src/Eval/lbf_evaluator.rs` | `Source/Eval/LbfEvaluator.cpp`（`Evaluate` 中的 POI 公式，约第 91–102 行） | `10*(POI.x+bbox.x)+POI.y+bbox.y` |
 | `src/consts.rs` | `Include/SparrowCore/LbfConfig.h` | sample/step constants |
 | `src/quantify/overlap_proxy.rs` | `Source/Quantify/OverlapProxy.cpp` | pole-circle overlap proxy and container penalty |
 | `src/quantify/pair_matrix.rs` | `Source/Quantify/PairMatrix.cpp` | symmetric triangular pair storage |

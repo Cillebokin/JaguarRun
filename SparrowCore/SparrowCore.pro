@@ -33,7 +33,6 @@ HEADERS += \
     $$PWD/Include/SparrowCore/Optimizer/Separator.h \
     $$PWD/Include/SparrowCore/Optimizer/SparrowOptimizer.h \
     $$PWD/Include/SparrowCore/Eval/LbfEvaluator.h \
-    $$PWD/Include/SparrowCore/Eval/SparrowLbfEvaluator.h \
     $$PWD/Include/SparrowCore/Eval/SeparationEvaluator.h \
     $$PWD/Include/SparrowCore/Sampling/LocalSearchSampler.h \
     $$PWD/Include/SparrowCore/Sampling/CoordinateDescent.h \
@@ -65,7 +64,6 @@ SOURCES += \
     $$PWD/Source/Optimizer/SparrowOptimizer.cpp \
     $$PWD/Source/Sampling/BestSamples.cpp \
     $$PWD/Source/Eval/LbfEvaluator.cpp \
-    $$PWD/Source/Eval/SparrowLbfEvaluator.cpp \
     $$PWD/Source/Eval/SeparationEvaluator.cpp \
     $$PWD/Source/Optimizer/SparrowLbfBuilder.cpp \
     $$PWD/Source/Quantify/OverlapProxy.cpp \

@@ -233,6 +233,15 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - TDD 红测分别因新增 fixture 键缺失、象限 panic 项数不足而失败；补入 Rust reference 后通过。Rust 1.98.1 Debug/Release 的三项相关 fixture 值逐字匹配；Rust `cargo fmt --check` 通过。基于当前 workspace 源码在 MSVC 2019 x64 下重建 JaguarCore Debug/Release，并由临时定向 runner 只调用 `runGeometryDifferentialTests()`，两种 profile 均退出码 0。完整 `JaguarCoreTests.exe` 未运行。
 - 第七轮补齐了 `sides()`、退化 `bounding_rect()` 和 scale 错误码证据，但 B1 仍为“部分”：Rect 象限的退化返回与 Rust panic 不同，SPolygon 原始点 helper 缺 C++ 公共映射。若要将 B1 标为完成，需先确定是否允许调整冻结 API/声明可接受域；不以当前通过的定向测试推断全量等价。
 
+## B1 第八轮：剩余差异的裁决与范围收口（2026-10-17）
+
+本轮按已批准的 JaguarCore API 稳定边界保留现有 C++ 公共接口，不新增只用于镜像 Rust helper 的公开方法，也不改变 `Rect2d::QuadrantsRustF32()` 的返回类型、`noexcept` 属性或现有调用点。
+
+- `Rect::quadrants()`：Rust 只有在 f32 中点严格落在两个坐标轴的开区间内时，才能成功构造四个子矩形；中点舍入到边界或输入本身退化时，`from_diagonal_corners(...).unwrap()` 会 panic。C++ `QuadrantsRustF32()` 对相同固定输入返回四个元素，其中可含零宽/零高矩形。决定保留 C++ 现有扩展行为；跨语言等价范围限定为 Rust 能正常返回的输入，折叠/退化输入作为已确认范围差异。第七轮四个用例（1 ULP 宽、高及零宽、高）已在 Rust Debug/Release 与 C++ 当前源码的定向 comparator 中锁定；本轮未重跑。
+- `SPolygon` 的 `calculate_diameter`、`generate_bounding_box`、`calculate_area`、`calculate_poi`：Rust 将它们作为接受任意原始点列的公开关联函数；C++ 产品 API 只通过校验后的 `SimplePolygon::Create()` 生成并读取派生缓存。有效多边形缓存已有对拍；任意退化点列的 helper 数值/失败出口没有 C++ 同形公开入口。决定保留冻结的 C++ API，将这些 Rust helper 登记为 API 映射差异，不宣称逐函数或原始点列行为等价。
+- 本轮完成的是差异裁决和状态记录，不是差异消除。B1 仍标为“部分”；若要改成完整等价，需由后续负责人明确扩大公共 API/认证范围并另行执行接口变更与运行对拍。
+- 本轮没有修改生产代码、测试或 fixture，也没有运行构建/测试；运行证据沿用第七轮已记录的 Rust 1.98.1 与 MSVC 2019 x64 Debug/Release 定向验证，不外推为全套测试通过。
+
 ## 结论边界与后续验收
 
 - 15 个 geometry 实现文件均已登记；`geometry/mod.rs`、`geometry/primitives/mod.rs` 与 `geometry/fail_fast/mod.rs` 的导出边界见 `00-module-exports.md`。
@@ -242,7 +251,7 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - `DTransformation` 不需要新增同名结构：它保存的旋转和平移可由 `Transform2d::rotationRad/translation` 表达，行为落在 `ApplyRustF32`、`FollowedByRustF32`、`InverseRustF32`；Rust 公开的 `normalize_rotation` 则新增直接对应 `NormalizeRotationRustF32(float)`，按 f32 remainder 及负角修正规则实现，并覆盖 NaN、正负无穷和负零。
 - B1 第二轮运行对拍（2026-10-16）：新增 `geometry.transformation_matrix_probes`，按 `empty/from_translation/from_rotation/rotate/translate/rotate_translate/translate_rotate/transform/transform_from_decomposed/inverse` 路径，对原点与两个单位基向量逐项比较；同时比较每条路径的分解字段与 `is_empty` 边界。C++ 没有原始 3×3 matrix accessor 或同名 `is_empty` 方法；矩阵作用映射到 `Transform2d::ApplyRustF32`，空变换判定映射到精确零旋转/零平移字段。Rust matrix 与 C++ 表示差异保留在 API 映射记录。
 - 第二轮还补了 `Edge::collides_at` 的 7 组用例：线段内部相交、端点接触、T 形接触、共线重叠、共线端点接触、平行分离及交点落在线段范围外；对应交点与存在性均和 `IntersectionPointRustF32` 比较。矩形 relation/`almost_relation_to` 的阈值矩阵覆盖距 `1.0f` 下方 1、2、3、4、8、16 ULP；严格 relation 均为 `Intersecting`，almost relation 在 1–4 ULP 归为 `Surrounding`，8/16 ULP 归为 `Intersecting`。
-- 当前 B1 仍为进行中：78 个显式公开函数和 33 个 trait 实现块已有静态覆盖矩阵；第四至第七轮扩展了对拍，剩余差异见“B1 第七轮”。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rect 无效缩放的拒绝集合已对齐，panic→`InvalidInput` 属于失败通道映射；Rect 象限退化结果与 Rust panic 不同，SPolygon 原始点 helper 没有 C++ 公共映射，均继续登记为差异。
+- 当前 B1 仍为“部分”：78 个显式公开函数和 33 个 trait 实现块已有静态覆盖矩阵；第四至第七轮扩展了对拍，第八轮已裁决并登记两项剩余差异。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rect 无效缩放的拒绝集合已对齐，panic→`InvalidInput` 属于失败通道映射；退化象限的 panic/返回差异与 SPolygon 原始点 helper 的 API 映射差异仍是明确范围残差，不计为行为等价。
 - 第三轮之前的既有验证：Rust 1.98.1 Debug/Release geometry-only oracle 新增 6 个键逐值一致；当时 fixture 共 48 个键，默认 oracle 与 geometry-only oracle 的对应输出逐值一致；JaguarCore Debug/Release 全套 `JaguarCoreTests.exe` 均以退出码 0 结束。第四轮更新后的 52 键和双 profile 验证见本记录“B1 第四轮”。
 
 ## B3 第一轮：固定代理生成与 fail-fast 碰撞对拍

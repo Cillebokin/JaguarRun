@@ -70,7 +70,7 @@ jagua-rs 规则拒绝，不把未支持的多环 offset 误称为已完成。
 
 质量区过滤保留 jagua-rs 当前实现的实际条件：`HazKeyFilter::from_irrelevant_qzones(required_quality)` 忽略
 `quality < required_quality` 的 `InferiorQualityZone`，而质量 0 的 Hole 不在该过滤条件内，始终作为碰撞 Hazard。
-这条规则优先于对字段名 `min_quality` 的直觉解释，C++ Layout 和差分测试均按源码行为执行。
+按 D5 锁定的 jagua-rs `f5e2b5f`，这条规则是本项目的行为兼容目标；它与 `min_quality` 的意图语义及维护版 `QualityZoneFilter` 相反，差异登记为 R8。C++ Layout 和差分测试均按 pinned 源码行为执行。
 
 正常 `Layout` 用法把 PlacedItem 注册为动态 Hazard，把 Exterior、Hole 和
 `InferiorQualityZone` 作为静态 Hazard；但公开的 CDE 快照恢复入口不会在输入层限制

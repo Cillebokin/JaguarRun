@@ -30,7 +30,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 
 B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小合法输入确认：虚拟根中的 Hole/`Entire` 若未被过滤，两侧边查询均早退返回 true；若 `HazKeyFilter` 忽略该 Hole，Rust 先在边查询中跳过它，再在 containment pass 的无条件 `unreachable!()` panic，C++ 仅处理 `Partial` 并返回 false。C++ 的 `NodeCollidesWithEdge` `Entire → true` 对应的是 Rust 第一阶段，不是出问题的 containment 分支。该输入证明路径可达，但不证明实际排样中常见。因 filter 的契约是忽略指定 hazard，保留 C++ false 处理，不传播 Rust panic，并将其登记为 pinned Rust 的已知兼容性差异；见 B4a 执行记录。
 
-其二，Rust filter.rs 中 from_irrelevant_qzones 的条件为 quality < required_quality，而其注释写成忽略质量高于或等于阈值的区域，源码和注释方向相反。container.rs 与 item.rs 的注释提供了业务语义线索，但尚不足以单独决定实现哪一侧有误。须先确认业务契约，再用最小实例验证放置接受/拒绝结果。
+其二，pinned `f5e2b5f` 中 `from_irrelevant_qzones` 把 `quality < required_quality` 标为无关，虽与函数 API 注释、`container.rs`/`item.rs` 契约及 SVG 的阈值方向相反。项目按 D5 保留锁定谓词；SparrowCore callback 与现有阈值断言一致。维护版语义差异登记为 R8，见 B4b 碰撞记录。
 
 其三，SvgExport.cpp 第 146 行的 flipTranslation 为 viewY + viewHeight，第 156–157 行变换为 translate(0 F) scale(1 -1)。按坐标变换公式，viewY 不为 0 时现有平移量可能产生视口垂直偏移；推导得到的候选平移量为 2·viewY + viewHeight，但尚未通过 SVG 渲染结果确认。应以非零 viewY 的输入运行渲染回归后再定性。
 
@@ -38,7 +38,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 待核实的问题较多，以下条目仍需按目标 revision 与最小用例验证。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一问题；平行/共线边与自相交检测的关系；piers.rs:57 的 forfeit_distance 量纲；debug_assertions 对 piers 参数的影响；同心圆 bounding_circle 的 NaN 边界；BPP 未放置物品的处理；Layout 与 MSPProblem 的失败原子性；无布局 Density 的 NaN；JSON、SVG、MSPP 边界。bounds-only RegisterHazard 以对角 Edge 近似包围盒且不向子节点分发，但全仓库无调用者，直接查询影响未验证，应记录为未使用扩展路径风险。除明确标注为源码事实的项目外，这些均不应仅凭静态阅读写成已复现缺陷。
 
-本文结论按静态源码事实、源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；10 月 17 日已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过；完整 `JaguarCoreTests.exe` 未运行。10 月 16 日 SparrowCore 与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 全量验证。下一步先处理 B4b 的质量比较方向，再按固定 revision 复验其他疑点。
+本文结论按静态源码事实、源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；10 月 17 日已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a，并完成 B4b 质量方向静态核对。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过；完整 `JaguarCoreTests.exe` 未运行。B4b 已按 D5 保持 pinned `f5e2b5f` 的实际过滤谓词，SparrowCore callback 与现有阈值断言一致；维护版 `quality >= min_quality` 方向作为 R8 语义残差记录，不改变锁定基线行为。10 月 16 日 SparrowCore 与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 全量验证。
 
 
 ---
@@ -213,7 +213,7 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 `detect_poly_collision` 的风险已在 B4a 通过 pinned revision 的运行用例确认可达：过滤掉 virtual-root 中的 Hole/`Entire` 后，Rust 的 containment pass 仍遍历该条目并执行 `unreachable!()`，C++ 返回 false。该结果表明此 Rust 路径的可观察性已经确认；`min_quality` 与 `lbf_spp.rs:53–57` 仍只是候选业务调用路径，不能据此说该失败在排样中常见。处置见 B4a 记录。
 
-第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
+第二个已核对项是 `from_irrelevant_qzones`（pinned `filter.rs:20,31–35`）。实现把 `quality < required_quality` 的 key 标记为无关，但函数 API 注释、`container.rs:86` 的质量递增定义、`item.rs:23–24` 的最低质量要求和 SVG 对 `quality >= min_quality` 的处理指向达标区可用。维护版 `QualityZoneFilter` 也按 `quality >= min_quality` 忽略。项目按 D5 保留 pinned `f5e2b5f` 的实际谓词；SparrowCore 四处 callback 和现有阈值断言与其一致。该固定基线决定不代表谓词符合意图语义，维护版方向差异登记为 R8，见碰撞记录。
 
 第三个疑点在 `detect_containment_collision` 的 `Enclosed` 分支（`cd_engine.rs:248`、`254-255`）。对 `Exterior` hazard，若容器 bbox 被形状 bbox 包围，则代码测试容器的 `poi` 是否在形状内，结果为真时视为不碰撞。但此时容器轮廓整体位于形状内部，形状显然超出了容器，应当碰撞。由于引擎 bbox 是容器的外接正方形，`Enclosed` 只可能发生在形状 bbox 在容器长边方向与容器完全重合、并在短边方向伸入正方形 padding 的边界情形中。这种情形不常见，但语义上与 `Surrounding` 分支不对称，应当补充测试。
 
@@ -280,7 +280,7 @@ lbf 只使用 `Layout::cde()`、`Layout::place_item`、`Layout::save`、`CDEngin
 
 ## 六、疑点、隐含假设与风险
 
-第一，质量过滤器的方向很可能是反的。`HazKeyFilter::from_irrelevant_qzones`（`jagua-rs/src/collision_detection/hazards/filter.rs`，实现约在第 31 行）把 `quality < required_quality` 的质量区域标为"无关"，即忽略其碰撞。但同函数文档（第 20 行）写的是"质量大于等于要求的区域被忽略"；`container.rs:86` 说明"质量越高越好"；`ext_repr.rs:13-14` 说明 `min_quality` 是最低要求；`layout_to_svg.rs` 约 405-416 行中跳过条件是 `quality >= required`。三处都与代码相反。若判断正确，带 `min_quality` 的物件会被允许压在低质量区域上，结果非法。`assets/baldacci1.json` 含 `min_quality: 1`，建议用小算例核实。
+第一，质量过滤器的阈值方向已按 B4b 处理。锁定 `f5e2b5f` 的 `from_irrelevant_qzones` 把 `quality < required_quality` 的区域标为无关，与 API 注释、`container.rs`/`item.rs` 契约、SVG 条件和维护版 `QualityZoneFilter` 的方向相反。按 D5，本项目保留 pinned 实际谓词以维持锁定基线行为；该选择不代表符合 `min_quality` 意图，差异留在 R8。
 
 第二，`strip_width_is_in_check` 是启发式：宽度不小于物件直径和的两倍时 panic，且不考虑条带高度。若某物件直径超过条带高度，它永远放不下，宽度会按 10% 步长增长直至 panic，而不是返回错误。
 

@@ -66,7 +66,7 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 `detect_poly_collision` 的风险已在 B4a 通过 pinned revision 的运行用例确认可达：过滤掉 virtual-root 中的 Hole/`Entire` 后，Rust 的 containment pass 仍遍历该条目并执行 `unreachable!()`，C++ 返回 false。该结果表明此 Rust 路径的可观察性已经确认；`min_quality` 与 `lbf_spp.rs:53–57` 仍只是候选业务调用路径，不能据此说该失败在排样中常见。处置见 B4a 记录。
 
-第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
+第二个已核对项是 `from_irrelevant_qzones`（pinned `filter.rs:20,31–35`）。锁定实现把 `quality < required_quality` 的区域标为无关，与 API 注释、`container.rs:86` 的质量递增定义、`item.rs:23–24` 的最低要求和 SVG 对 `quality >= min_quality` 的处理相反；维护版 `QualityZoneFilter` 也按 `quality >= min_quality` 忽略达标区。项目按 D5 保留锁定 `f5e2b5f` 的实际谓词，SparrowCore 四处 callback 和现有测试断言与 pinned 行为一致。B4b 已按固定基线收口；意图语义差异登记为 R8，详见碰撞记录。
 
 第三个疑点在 `detect_containment_collision` 的 `Enclosed` 分支（`cd_engine.rs:248`、`254-255`）。对 `Exterior` hazard，若容器 bbox 被形状 bbox 包围，则代码测试容器的 `poi` 是否在形状内，结果为真时视为不碰撞。但此时容器轮廓整体位于形状内部，形状显然超出了容器，应当碰撞。由于引擎 bbox 是容器的外接正方形，`Enclosed` 只可能发生在形状 bbox 在容器长边方向与容器完全重合、并在短边方向伸入正方形 padding 的边界情形中。这种情形不常见，但语义上与 `Surrounding` 分支不对称，应当补充测试。
 

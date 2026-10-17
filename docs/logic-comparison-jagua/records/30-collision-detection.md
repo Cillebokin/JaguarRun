@@ -48,9 +48,19 @@
 |---|---|---|
 | `HazardFilter` (7–9) | 仅按 `HazKey` 决定相关性 | C++ `HazardFilter`（`HazardFilter.h:10–28`）支持 entity predicate 和 `(handle, entity)` predicate 两种 callback；过滤表达能力/调用线程安全约束不同 |
 | `HazKeyFilter::from_keys` (13–18) | 将输入 iterator 收集到 SecondaryMap，key 在 map 内则 irrelevant | C++ 可由 `irrelevantHandle` callback 实现相同集合过滤，但无同名具体类型 |
-| `from_irrelevant_qzones` (20–42) | 遍历 hazard map，仅把 `InferiorQualityZone { quality }` 且 `quality < required_quality` 的 key 收入过滤器；Hole、Exterior、quality 达标区不忽略 | C++ 质量区过滤通常通过 `HazardFilter::irrelevant` callback 表达；没有相同 helper |
+| `from_irrelevant_qzones` (20–42) | 实际只把 `quality < required_quality` 的 key 收入过滤器；Hole、Exterior、quality 达标区不忽略。函数 API 注释与 pinned 实现相反；按 D5 保持 pinned `f5e2b5f` 的实际行为，见 B4b | JaguarCore `HazardFilter` 是通用 callback，无质量方向 helper；SparrowCore 的 4 个 minQuality callback 均使用 `<`，与 pinned Rust 行为一致，但违背维护版上游定义 |
 | `HazardFilter for HazKey/NoFilter` (45–65) | HazKey 仅忽略自身 key；NoFilter 全部返回 false | C++ `NoFilter` 设置恒 false callback（`HazardFilter.h:31–38`）；忽略自身可用 handle callback |
 | collector blanket impl (68–77) | 任意 `HazardCollector` 自动作为过滤器，已收集 key 返回 irrelevant | C++ collector 与 filter 是两种独立参数；引擎调用 collector 时还会自行按 collector 是否已含 handle 去重 |
+
+### B4b：`InferiorQualityZone` 的最低质量阈值方向（2026-10-17）
+
+按 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`，`filter.rs:20` 的 API 注释说 `quality >= required_quality` 的质量区无关；但 `filter.rs:31–35` 实际把 `quality < required_quality` 的 key 放入无关集合，函数内部注释也与该实现一致。`container.rs:86` 说明质量编号越大质量越好、0 表示洞；`item.rs:23–24` 将 `min_quality` 定义为物品所需最低质量，未指定时要求 full quality；SVG 输出在 `quality >= min_quality` 时跳过该质量区覆盖（`layout_to_svg.rs:411–415`）。这些契约共同指向：达到阈值的质量区可用、应从碰撞过滤中忽略；低于阈值的质量区与洞继续阻挡。
+
+维护版 upstream `main` 已将该逻辑明确实现为 `QualityZoneFilter`：文档说明忽略达到物品最低质量的区域、低于阈值与洞继续阻挡，代码条件为 `quality >= min_quality`（[filter.rs，2026-10-17 检视](https://github.com/JeroenGar/jagua-rs/blob/main/jagua-rs/src/collision_detection/hazards/filter.rs#L400-L425)）。据此，意图方向已确认；这并不改变当前项目锁定的 `f5e2b5f` 行为。
+
+当前项目的 SPP、BPP 两侧实现都使用反向条件：pinned Rust 的 `from_irrelevant_qzones` 与 SparrowCore 的 `SppLbfOptimizer.cpp:104–106`、`BppLbfOptimizer.cpp:99–101,138–140`、`SparrowLbfBuilder.cpp:73–75` 都忽略 `quality < min_quality`。`TestBppLbf.cpp:408,435` 与 `TestSampling.cpp:2677,2687` 也明确断言低于阈值可忽略、等于阈值仍碰撞；这些测试证明当前 C++ optimizer callback 与 pinned Rust 的行为相同，不证明该方向符合 `min_quality` 的语义意图。JaguarCore 碰撞引擎自身只提供通用过滤 callback，没有另一个质量比较实现。
+
+**处置**：按 D5 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`，B4b 选择保留 pinned Rust 的实际谓词，以该基线进行行为对齐。SparrowCore 四处 callback 和现有阈值断言都使用同一 `<` 规则；本次收口只确定基线处置并同步文档，没有改动生产代码或测试，也未运行这些既有测试。维护版按 `quality >= min_quality` 忽略达标区的契约仍与 pinned 行为相反，作为 R8 的已知语义残差保留；这项决定表示兼容锁定基线，不表示 pinned 谓词符合 `min_quality` 的语义意图。D5 基线不变时，B4b 按静态源码核对完成；若将来升级基线，再重开此差异并同步 Rust oracle、C++ callback 与边界测试。B4 整体仍部分。
 
 ## `jagua-rs/src/collision_detection/hazards/collector.rs`
 
@@ -128,3 +138,4 @@
 - pinned Rust：`collision_detection/cd_engine.rs:18–417`、`hazards/{hazard,filter,collector}.rs`、`quadtree/{qt_hazard_vec,qt_hazard,qt_partial_hazard,qt_node,qt_traits,tests}.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Collision/{CollisionEngine,Hazard,HazardFilter,HazardCollector,Quadtree}.h`；`JaguarCore/Source/Collision/CollisionEngine.cpp`、`Quadtree/Quadtree.cpp`、`Hazards/Collector.cpp`。
 - 相关现存测试：`JaguarCore/Tests/TestCollision.cpp`；这里只登记静态对应位置，本轮未执行。
+

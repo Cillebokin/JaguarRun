@@ -30,7 +30,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 
 B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小合法输入确认：虚拟根中的 Hole/`Entire` 若未被过滤，两侧边查询均早退返回 true；若 `HazKeyFilter` 忽略该 Hole，Rust 先在边查询中跳过它，再在 containment pass 的无条件 `unreachable!()` panic，C++ 仅处理 `Partial` 并返回 false。C++ 的 `NodeCollidesWithEdge` `Entire → true` 对应的是 Rust 第一阶段，不是出问题的 containment 分支。该输入证明路径可达，但不证明实际排样中常见。因 filter 的契约是忽略指定 hazard，保留 C++ false 处理，不传播 Rust panic，并将其登记为 pinned Rust 的已知兼容性差异；见 B4a 执行记录。
 
-其二，`Rust filter.rs` 中 `from_irrelevant_qzones` 的实现条件是 `quality < required_quality`，即把低于要求的质量区设为无关，从而允许物品压在这些区域上。而其文档注释写的是“质量高于或等于要求的区域被忽略”，`container.rs:86` 的注释又说明“质量越高越好”。代码与文档方向相反，如果业务语义是“物品不得压在低于 `min_quality` 的区域上”，那么当前代码就是反的，会导致结果非法。这一点需要结合业务定义确认，然后用小算例验证。
+其二，`Rust filter.rs` 锁定版的 `from_irrelevant_qzones` 实际把 `quality < required_quality` 的区域设为无关，这与 API 注释、`container.rs:86` 的质量递增定义、`item.rs:23–24` 的最低质量要求及 SVG 对 `quality >= min_quality` 的处理相反。维护版上游也按 `quality >= min_quality` 忽略达标区。项目按 D5 保留锁定 `f5e2b5f` 的实际谓词；SparrowCore callback 与现有测试断言和 pinned 行为一致。B4b 已按固定基线收口，意图语义差异留在 R8，见碰撞记录。
 
 其三，JaguarCore/Source/IO/SvgExport.cpp:146 的 flipTranslation = viewY + viewHeight，而第 156–157 行变换为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认，需以非零 viewY 的 SVG 渲染用例回归。
 
@@ -38,5 +38,5 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 待核实的问题较多，以下按重要性简要列出，每一条都需要用测试确认。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一需要核实；Edge::collides_with 对平行或共线线段的行为需用自相交反例确认；piers.rs:57 的 forfeit_distance 量纲和 debug_assertions 对参数的影响需核对；Circle::bounding_circle 的 NaN 边界、BPP 未放置物品处理、Layout Release 失败语义、MSPProblem::RemoveLayout 原子性、Density 空布局、MSPP 边界与导入器隐含约束均需按目标 revision 和最小用例复验。QuadTree::RegisterHazard(handle, bounds) 以对角 Edge 近似包围盒，且不向子节点分发；直接查询影响尚未验证，全仓库未发现调用者。它属于未使用扩展路径风险，不能写成已复现缺陷。
 
-本文结论按静态源码事实、由源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；后续已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2 和 B4a。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过，详见移植工作项清单第十四节；完整 `JaguarCoreTests.exe` 仍未运行。10 月 16 日 SparrowCore 测试与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 的全量 MSVC 验证。下一步是确认质量区比较语义，并继续覆盖其余 B4 行为。
+本文结论按静态源码事实、由源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；后续已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a，并静态核对 B4b。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过，详见移植工作项清单第十四节；完整 `JaguarCoreTests.exe` 仍未运行。B4b 已按 D5 保持锁定 `f5e2b5f` 的实际谓词，SparrowCore callback 与阈值断言一致；维护版方向差异作为 R8 语义残差保留，不再是基线决策待办。10 月 16 日 SparrowCore 测试与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 的全量 MSVC 验证。
 

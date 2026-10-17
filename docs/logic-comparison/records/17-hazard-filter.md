@@ -1,7 +1,7 @@
 # 17. hazard-filter 逐文件逻辑比对
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/collision_detection/hazards/filter.rs`（77 行）
 **C++**: `JaguarCore/Include/JaguarCore/Collision/HazardFilter.h`（39 行）
-**判定**: 基本等价（过滤语义一致；trait 体系改 struct+std::function；`from_irrelevant_qzones` 无独立构造器对应）
+**判定**: 核心过滤 callback 结构基本对应；`from_irrelevant_qzones` 在 JaguarCore 无独立构造器。项目按 D5 以 pinned `f5e2b5f` 为行为目标，维护版语义差异见 B4b/R8
 
 ## 函数逐条比对
 
@@ -38,7 +38,7 @@
   hazard_entity: HazardEntity::InferiorQualityZone { quality, .. }
       if quality < required_quality => Some((hkey, ())),  // 只把 quality 低于 required 的低质区标记为 irrelevant
   ```
-  即：`quality < required_quality` 的 InferiorQualityZone 被忽略（视为可放），`quality >= required_quality` 的仍为障碍。这是"物品允许放置在质量低于需求的区域"语义（quality 数值越大质量越差时忽略较差区）。C++ 全仓搜索 `Irrelevant` 仅两处实现（HazardFilter.h 本身、Layout.cpp:214 的自身句柄过滤），质量区过滤无任何构造点；Container.cpp 只负责把 InferiorQualityZone 注册为 hazard（Container.cpp:93）。**C++ 目前没有任何调用方需要该过滤器，故缺失不造成现有流程行为分叉，但公共能力缺口存在**。
+  即：pinned `f5e2b5f` 把 `quality < required_quality` 的 InferiorQualityZone 标为 irrelevant（过滤掉、视为不参与碰撞），`quality >= required_quality` 的仍为障碍。该谓词与 `container.rs:86` 的“质量编号越大质量越好”、`min_quality` 最低要求及维护版 `QualityZoneFilter` 相反；按 D5，本项目保留锁定谓词做行为对齐，并将意图语义差异登记为 B4b/R8。JaguarCore 引擎本身只有通用过滤 callback，没有专用质量比较器；SparrowCore optimizer 的四处 callback 则都复现 pinned 的 `<` 谓词。
 
 ### `impl HazardFilter for HazKey`（filter.rs:51-56）
 - C++ 对应：`Layout::IsFeasible` 中手工构造（Layout.cpp:211-216）
@@ -68,7 +68,7 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | trait 静态分发 vs struct+std::function 运行时分发 | 结果等价/实现不同 | C++ 有间接调用开销；`irrelevantHandle`/`irrelevant` 双通道为 Rust 无的细分 | filter.rs:7-9 vs HazardFilter.h:12-27 |
-| 2 | `from_irrelevant_qzones`（quality < required 低质区忽略） | C++ 缺失 | 公共 API 缺口；当前无 C++ 调用方需要，行为不分叉 | filter.rs:20-43 vs 全仓无对应 |
+| 2 | `from_irrelevant_qzones`（pinned `quality < required` 区域被过滤） | JaguarCore 无专用质量比较器；SparrowCore callback 有对应谓词 | 按 D5 保留 pinned 行为；与维护版意图契约相反的差异登记为 B4b/R8 | filter.rs:20-43；SparrowCore callbacks 与 B4b 记录 |
 | 3 | `HazKeyFilter::from_keys` 集合式过滤器 | C++ 缺失（可用 lambda 复现） | 便捷性缺口 | filter.rs:11-18 |
 | 4 | `impl HazardFilter for HazKey` | 一致（Layout.cpp 内联复现） | — | filter.rs:51-56 vs Layout.cpp:211-216 |
 | 5 | `NoFilter` | 一致 | — | filter.rs:58-66 vs HazardFilter.h:31-38 |

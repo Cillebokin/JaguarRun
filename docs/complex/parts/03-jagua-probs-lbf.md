@@ -42,7 +42,7 @@ lbf 只使用 `Layout::cde()`、`Layout::place_item`、`Layout::save`、`CDEngin
 
 ## 六、疑点、隐含假设与风险
 
-第一，质量过滤器的方向很可能是反的。`HazKeyFilter::from_irrelevant_qzones`（`jagua-rs/src/collision_detection/hazards/filter.rs`，实现约在第 31 行）把 `quality < required_quality` 的质量区域标为"无关"，即忽略其碰撞。但同函数文档（第 20 行）写的是"质量大于等于要求的区域被忽略"；`container.rs:86` 说明"质量越高越好"；`ext_repr.rs:13-14` 说明 `min_quality` 是最低要求；`layout_to_svg.rs` 约 405-416 行中跳过条件是 `quality >= required`。三处都与代码相反。若判断正确，带 `min_quality` 的物件会被允许压在低质量区域上，结果非法。`assets/baldacci1.json` 含 `min_quality: 1`，建议用小算例核实。
+第一，质量过滤器的阈值方向已按 B4b 处理。锁定 `f5e2b5f` 的 `from_irrelevant_qzones` 把 `quality < required_quality` 的区域标为无关，与 API 注释、`container.rs`/`item.rs` 契约、SVG 条件和维护版 `QualityZoneFilter` 的方向相反。按 D5，本项目保留 pinned 实际谓词以维持锁定基线行为；该选择不代表符合 `min_quality` 意图，差异留在 R8。
 
 第二，`strip_width_is_in_check` 是启发式：宽度不小于物件直径和的两倍时 panic，且不考虑条带高度。若某物件直径超过条带高度，它永远放不下，宽度会按 10% 步长增长直至 panic，而不是返回错误。
 

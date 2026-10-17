@@ -42,6 +42,15 @@ fn polygon(points: &[(f32, f32)]) -> SPolygon {
     SPolygon::new(points.iter().copied().map(Point::from).collect()).unwrap()
 }
 
+fn rectangle(x_min: f32, y_min: f32, x_max: f32, y_max: f32) -> SPolygon {
+    polygon(&[
+        (x_min, y_min),
+        (x_max, y_min),
+        (x_max, y_max),
+        (x_min, y_max),
+    ])
+}
+
 fn square_item(index: usize, side: f32) -> Arc<Item> {
     let original_shape = OriginalShape {
         shape: polygon(&[(0.0, 0.0), (side, 0.0), (side, side), (0.0, side)]),
@@ -114,6 +123,303 @@ fn print_buffer_components(name: &str, points: &[(f32, f32)], distance: f64) {
             y_max
         );
     }
+}
+
+fn b11_cde_config() -> CDEConfig {
+    CDEConfig {
+        quadtree_depth: 4,
+        cd_threshold: 8,
+        item_surrogate_config: SPSurrogateConfig::none(),
+    }
+}
+
+fn run_boundary_b11_oracle() {
+    let root_bounds = Rect::try_new(0.0, 0.0, 10.0, 10.0).unwrap();
+    let root_shape = Arc::new(SPolygon::from(&root_bounds));
+    let root_engine = CDEngine::new(
+        root_bounds,
+        vec![Hazard::new(HazardEntity::Exterior, root_shape, false)],
+        b11_cde_config(),
+    );
+    let exterior_key = root_engine
+        .hazards_map
+        .iter()
+        .find(|(_, hazard)| matches!(hazard.entity, HazardEntity::Exterior))
+        .map(|(key, _)| key)
+        .unwrap();
+    let ignore_exterior = HazKeyFilter::from_keys([exterior_key]);
+    let partially_out_of_bounds = polygon(&[(-1.0, 1.0), (1.0, 1.0), (1.0, 2.0), (-1.0, 2.0)]);
+    println!(
+        "boundary.root_out_of_bounds_ignores_exterior={}",
+        root_engine.detect_poly_collision(&partially_out_of_bounds, &ignore_exterior)
+    );
+
+    let edge = |start: (f32, f32), end: (f32, f32)| {
+        Edge::try_new(Point::from(start), Point::from(end)).unwrap()
+    };
+    println!(
+        "boundary.edge.proper={}",
+        edge((0.0, 0.0), (4.0, 4.0)).collides_with(&edge((0.0, 4.0), (4.0, 0.0)))
+    );
+    println!(
+        "boundary.edge.tangent={}",
+        edge((0.0, 0.0), (4.0, 0.0)).collides_with(&edge((2.0, 0.0), (2.0, 3.0)))
+    );
+    println!(
+        "boundary.edge.endpoint={}",
+        edge((0.0, 0.0), (4.0, 0.0)).collides_with(&edge((4.0, 0.0), (4.0, 4.0)))
+    );
+    println!(
+        "boundary.edge.collinear_overlap={}",
+        edge((0.0, 0.0), (4.0, 0.0)).collides_with(&edge((2.0, 0.0), (6.0, 0.0)))
+    );
+    let gap = edge((0.0, 0.0), (4.0, 0.0));
+    println!(
+        "boundary.edge.small_gap={}",
+        gap.collides_with(&edge((4.0 + 5.0e-10, 0.0), (8.0, 1.0)))
+    );
+    println!(
+        "boundary.edge.large_gap={}",
+        gap.collides_with(&edge((4.0 + 5.0e-7, 0.0), (8.0, 1.0)))
+    );
+
+    let bounds = Rect::try_new(0.0, 0.0, 20.0, 20.0).unwrap();
+    let exterior = Arc::new(SPolygon::from(&bounds));
+    let hazard = Arc::new(polygon(&[(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0)]));
+    let engine = CDEngine::new(
+        bounds,
+        vec![
+            Hazard::new(HazardEntity::Exterior, exterior, false),
+            Hazard::new(HazardEntity::Hole { idx: 0 }, hazard, false),
+        ],
+        b11_cde_config(),
+    );
+    let rectangle = |x_min: f32, y_min: f32, x_max: f32, y_max: f32| {
+        polygon(&[
+            (x_min, y_min),
+            (x_max, y_min),
+            (x_max, y_max),
+            (x_min, y_max),
+        ])
+    };
+    println!(
+        "boundary.polygon.corner_touch={}",
+        engine.detect_poly_collision(&rectangle(6.0, 6.0, 8.0, 8.0), &NoFilter)
+    );
+    println!(
+        "boundary.polygon.small_gap={}",
+        engine.detect_poly_collision(
+            &rectangle(6.0 + 5.0e-10, 6.0, 8.0 + 5.0e-10, 8.0),
+            &NoFilter
+        )
+    );
+    println!(
+        "boundary.polygon.large_gap={}",
+        engine.detect_poly_collision(&rectangle(6.0 + 5.0e-7, 6.0, 8.0 + 5.0e-7, 8.0), &NoFilter)
+    );
+    println!(
+        "boundary.polygon.interior={}",
+        engine.detect_poly_collision(
+            &rectangle(4.0 + 5.0e-10, 4.0 + 5.0e-10, 6.0 - 5.0e-10, 6.0 - 5.0e-10),
+            &NoFilter
+        )
+    );
+}
+
+fn run_matrix_b11_oracle() {
+    let edge_reference = include_str!("../../../Tests/Fixtures/RustReference/edge_matrix.tsv");
+    for line in edge_reference
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        assert_eq!(fields.len(), 10);
+        let edge = |offset: usize| {
+            Edge::try_new(
+                Point(
+                    fields[offset].parse().unwrap(),
+                    fields[offset + 1].parse().unwrap(),
+                ),
+                Point(
+                    fields[offset + 2].parse().unwrap(),
+                    fields[offset + 3].parse().unwrap(),
+                ),
+            )
+            .unwrap()
+        };
+        println!("edge.{}={}", fields[0], edge(1).collides_with(&edge(5)));
+    }
+
+    let containment_reference =
+        include_str!("../../../Tests/Fixtures/RustReference/containment_matrix.tsv");
+    let bounds = Rect::try_new(0.0, 0.0, 10.0, 10.0).unwrap();
+    let bounds_shape = Arc::new(SPolygon::from(&bounds));
+    let hazard_shape = Arc::new(polygon(&[(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)]));
+    for line in containment_reference
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        assert_eq!(fields.len(), 11);
+        let query = rectangle(
+            fields[1].parse().unwrap(),
+            fields[2].parse().unwrap(),
+            fields[3].parse().unwrap(),
+            fields[4].parse().unwrap(),
+        );
+        let (hazards, hole_case) = if fields[9] == "hole" {
+            (
+                vec![
+                    Hazard::new(HazardEntity::Exterior, bounds_shape.clone(), false),
+                    Hazard::new(HazardEntity::Hole { idx: 0 }, hazard_shape.clone(), false),
+                ],
+                true,
+            )
+        } else {
+            (
+                vec![Hazard::new(
+                    HazardEntity::Exterior,
+                    hazard_shape.clone(),
+                    false,
+                )],
+                false,
+            )
+        };
+        let engine = CDEngine::new(bounds, hazards, b11_cde_config());
+        let actual = if hole_case {
+            let exterior_key = engine
+                .hazards_map
+                .iter()
+                .find(|(_, hazard)| matches!(hazard.entity, HazardEntity::Exterior))
+                .map(|(key, _)| key)
+                .unwrap();
+            let ignore_exterior = HazKeyFilter::from_keys([exterior_key]);
+            engine.detect_poly_collision(&query, &ignore_exterior)
+        } else {
+            engine.detect_poly_collision(&query, &NoFilter)
+        };
+        println!("containment.{}={actual}", fields[0]);
+    }
+}
+
+fn run_trajectory_b11_oracle() {
+    struct XorShift64Star {
+        state: u64,
+    }
+    impl XorShift64Star {
+        fn next(&mut self) -> u64 {
+            self.state ^= self.state >> 12;
+            self.state ^= self.state << 25;
+            self.state ^= self.state >> 27;
+            self.state = self.state.wrapping_mul(2_685_821_657_736_338_717);
+            self.state
+        }
+    }
+    fn mix(checksum: &mut u64, value: u64) {
+        *checksum ^= value;
+        *checksum = checksum.wrapping_mul(1_099_511_628_211);
+    }
+
+    let config = CDEConfig {
+        quadtree_depth: 4,
+        cd_threshold: 32,
+        item_surrogate_config: SPSurrogateConfig {
+            n_pole_limits: [(1, 0.0), (0, 0.0), (0, 0.0)],
+            ff_pole_area_ratio: 0.0,
+            n_ff_piers: 0,
+        },
+    };
+    let importer = Importer::new(config, None, None);
+    let item: ExtItem = serde_json::from_value(serde_json::json!({
+        "id": 8801,
+        "orientation": {"rotation": {"mode": "discrete", "angles": [0, 90, 180, 270]}},
+        "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 2, "height": 2}}
+    }))
+    .unwrap();
+    let item = importer.import_item(&item, 0).unwrap();
+    let container: ExtContainer = serde_json::from_value(serde_json::json!({
+        "id": 8800,
+        "shape": {"type": "rectangle", "data": {"x_min": 0, "y_min": 0, "width": 52, "height": 26}}
+    }))
+    .unwrap();
+    let mut layout = Layout::new(importer.import_container(&container).unwrap());
+    let mut rng = XorShift64Star {
+        state: 0x4A47524312345678,
+    };
+    let mut active = Vec::new();
+    let mut checksum = 1_469_598_103_934_665_603u64;
+    let (mut placements, mut removals, mut restores) = (0usize, 0usize, 0usize);
+    for step in 0..256usize {
+        let decision = rng.next();
+        if active.is_empty() || decision % 3 == 0 {
+            let serial = placements;
+            let column = serial % 16;
+            let row = (serial / 16) % 8;
+            let rotation = (rng.next() % 4) as usize;
+            let key = layout.place_item(
+                &item,
+                DTransformation::new(
+                    rotation as f32 * std::f32::consts::FRAC_PI_2,
+                    (1.0 + (column * 2) as f32, 1.0 + (row * 2) as f32),
+                ),
+            );
+            active.push((key, serial, column, row, rotation));
+            placements += 1;
+            for value in [
+                0,
+                step as u64,
+                serial as u64,
+                column as u64,
+                row as u64,
+                rotation as u64,
+                active.len() as u64,
+            ] {
+                mix(&mut checksum, value);
+            }
+        } else if decision % 3 == 1 {
+            let selected = (rng.next() % active.len() as u64) as usize;
+            let removed_serial = active[selected].1;
+            let (key, _, _, _, _) = active.remove(selected);
+            layout.remove_item(key);
+            removals += 1;
+            for value in [
+                1,
+                step as u64,
+                selected as u64,
+                removed_serial as u64,
+                active.len() as u64,
+            ] {
+                mix(&mut checksum, value);
+            }
+        } else {
+            let snapshot = layout.save();
+            layout.restore(&snapshot).unwrap();
+            restores += 1;
+            for value in [2, step as u64, active.len() as u64] {
+                mix(&mut checksum, value);
+            }
+        }
+        assert_eq!(layout.placed_items.len(), active.len());
+    }
+    for value in [255, 256, active.len() as u64] {
+        mix(&mut checksum, value);
+    }
+    for (_, serial, column, row, rotation) in &active {
+        for value in [
+            *serial as u64,
+            *column as u64,
+            *row as u64,
+            *rotation as u64,
+        ] {
+            mix(&mut checksum, value);
+        }
+    }
+    println!("placements={placements}");
+    println!("removals={removals}");
+    println!("restores={restores}");
+    println!("active={}", active.len());
+    println!("checksum={checksum:016x}");
+    println!("rng_state={:016x}", rng.state);
 }
 
 fn run_b4a_entire_branch_oracle() {
@@ -2372,6 +2678,18 @@ fn run_problem_types_b7_parity_oracle() {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--boundary-b11-parity-only") {
+        run_boundary_b11_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--matrix-b11-parity-only") {
+        run_matrix_b11_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--trajectory-b11-parity-only") {
+        run_trajectory_b11_oracle();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--problem-types-b7-parity-only") {
         run_problem_types_b7_parity_oracle();
         return;

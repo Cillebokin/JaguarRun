@@ -8,26 +8,40 @@ and lockfile so it does not follow a different default rustup channel.
 
 The files under `../Fixtures/RustReference/` use the jagua-rs external JSON schema. They intentionally contain small, deterministic cases so a failure identifies a geometry/import/state semantic mismatch rather than an optimizer ordering difference.
 
-## Current checks
+## B11 comparator coverage matrix
 
-- `CompareGeometry.cpp`: pinned Rust geometry reference fixture for B1 primitives, transforms, convex hull and `OriginalShape`, plus rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering. B2 additionally compares the narrow-concavity half-open area threshold, wrapped slice and Deflate sign behavior against `shape_modification_b2.txt`. B4a records a filtered `Entire` hazard that panics in pinned Rust after edge checks while the C++ query returns no collision, as required by the filter.
-- `CompareSurrogate.cpp`: B3 pinned Rust references for all poles/piers and fail-fast pole prefixes on U/L/C shapes, threshold and ratio boundary transitions, ratio rejection, pole/pier generation errors, plus surrogate collision detection and collection outcomes.
-- `CompareProblem.cpp`: pinned Rust B7 fixture for SPP instance/change-width/place/save/remove/restore; BPP Closed new-bin and Open reuse flows with stock/cost/density/save/remove/restore; and MSPP add-strip/place/change-width/FitStrip/save/remove/restore. Floating-point fields use `AlmostEqualRustF32`; the fixed valid-flow matrix is not an exhaustive error-contract proof.
-- `CompareLayoutLifecycle.cpp`: pinned Layout lifecycle fixture covering shared versus independently rebuilt container identity, save/restore key and placement state, container swap, mismatch failure atomicity, and `Items()` de-duplication order.
-- `CompareMatrix.cpp`: shared edge intersection and containment tables. The matrix explicitly preserves jagua-rs's non-collision rule for collinear segments and collision rule for non-collinear endpoint/T-junction contact.
-- `CompareTrajectory.cpp`: the same xorshift64* seed and 256-step operation grammar run in Rust and C++, including placement/removal/restore counts, active count, checksum, and final PRNG state.
-- `CompareOptimizer.cpp`: consumes a Rust LBF solution fixture generated with seed `42`; JaguarCore validates external placements, feasibility, item count, density, and strip width. It does not claim to reproduce LBF/Sparrow's search path.
-- `TestSoa.cpp`: B10 compares the SoA `Scalar`, `Auto`, and `Avx2` modes exactly for boundary and full edge-intersection booleans. It checks raw-bit preservation for copied vertex, edge, and bounding-box doubles, and covers polygon edge counts 3 through 11 so every AVX2 tail length is exercised. See the [B10 record](../../../docs/logic-comparison-jagua/records/30-collision-detection.md).
-- `RustOracle --model-boundary-parity-only` and `--restore-boundary-parity-only`: probe Debug/Release demand underflow and snapshot restore state directly against jagua-rs. These probes report partial state after caught Rust panics; compare them with JaguarCore's `Result` outcome and state, rather than treating `panic` and `Infeasible` as interchangeable by default.
-- `RustOracle --shape-modification-b2-parity-only`: pinned Debug/Release references for B2's half-open narrow-concavity slices and the documented Deflate positive-area rule versus the implemented nonnegative-area rejection.
-- `RustOracle --collision-entire-b4a-parity-only`: pinned Debug/Release probe for an `Entire` Hole in the polygon query's virtual root; an unfiltered query returns collision, while filtering that hazard reaches the post-edge Rust `unreachable!()` arm.
-- `RustOracle --layout-lifecycle-parity-only`: pinned Debug/Release reference for Layout snapshot round trips, cloned versus independently created Container identity, swap behavior, mismatch atomicity, and item listing order.
+`JaguarCore/Tests/JaguarCoreTests.pro` compiles the eight `Compare*.cpp` files below, and `TestSupport.cpp::main` calls their eight differential entry points. `TestSoa.cpp` is a separate B10 comparator and is not part of the B11 `Compare*.cpp` count.
+
+RustOracle references use Rust 1.98.1 and jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`, as recorded by [E4](../../../docs/complex/E4-oracle-fixture-baseline-2026-10-16.md). The LBF tests under `CodeResource/jagua-rs/lbf/tests` build against the sibling `jagua-rs` local path dependency and do not inherit RustOracle's git revision pin.
+
+### D5 source identity audit (2026-10-17)
+
+A line-ending-normalized source comparison against the Cargo checkout for `f5e2b5ffd14931f17a20ce283a2122e877953ceb` shows that `CodeResource/jagua-rs` is a downstream fork, not a source-identical mirror. Of 85 files under `jagua-rs/src`, 7 differ: `geometry/primitives/simple_polygon.rs`, `geometry/shape_modification.rs`, `probs/mspp/entities/{problem,strip}.rs`, `probs/spp/entities/{problem,strip}.rs`, and `probs/spp/io/import.rs`. The offset implementation uses `geo-buffer` locally instead of pinned `geo::Buffer`; the SPP/MSPP strip and problem APIs also replace fallible results with infallible conversions/assertions, and the SPP import width formula differs. Of 18 files under `lbf/src`, `main.rs`, `opt/lbf_spp.rs`, and `util/wasm_demo.rs` differ. Both package manifests differ. Under `lbf/tests`, the local tree has 6 files versus 3 pinned files; `container_identity.rs` and `tests.rs` differ, and `differential_matrix.rs`, `differential_trajectory.rs`, and `optimizer_fixture.rs` exist only locally.
+
+The pinned edge predicate and collision-engine source files used by the B11 matrix are identical in both trees. Still, results from the local LBF tests are treated as local-fork regression evidence only. B11's Rust reference output is now produced by RustOracle's direct D5 git dependency, and the optimizer fixture is generated by the LBF crate in that exact Cargo checkout.
+
+| C++ comparator | Rust reference and entry point | Fixture or comparison rule | Evidence and limit |
+| --- | --- | --- | --- |
+| `CompareBoundary.cpp` | RustOracle `--boundary-b11-parity-only`; pinned `edge.rs` and `cd_engine.rs` | `boundary_b11.txt` contains 11 exact Boolean outputs for root-bounds filtering, edge crossing/touch/overlap/tolerance, and polygon collision boundaries. | Rust Debug/Release output matches the 11-key fixture; targeted MSVC 2019 x64 Debug/Release runner compares C++ results to it. |
+| `CompareGeometry.cpp` | RustOracle default geometry output and `--geometry-primitives-parity-only`, `--shape-modification-b2-parity-only`, `--collision-entire-b4a-parity-only`; Rust geometry primitives, transformations, shape modification, and collision detection | `geometry_primitives.txt`, `shape_modification_b2.txt`, `collision_entire_b4a.txt`; floats use the recorded RustF32/explicit tolerance rules, while booleans, classifications, and ordered vertices are exact. | B1 remains partial because degenerate quadrant outputs differ; B2 and B4a are closed only for their fixed matrices. Generic collision and quality-zone assertions in this file are not backed by the B4a fixture; the separate `--collision-parity-only` output has no active fixture consumer. |
+| `CompareLayoutLifecycle.cpp` | RustOracle `--layout-lifecycle-parity-only`; pinned `jagua-rs/src/entities/layout.rs` and container/CDE snapshot behavior. `lbf/tests/container_identity.rs` is a related local-fork Rust test. | `layout_lifecycle.txt` has 18 expected values for container identity, restore, swap, mismatch atomicity, and item ordering. | Rust Debug/Release output matches the fixture; targeted MSVC 2019 x64 Debug/Release evidence is recorded under B6. The full C++ test executable was not run for that matrix. |
+| `CompareMatrix.cpp` | RustOracle `--matrix-b11-parity-only`; pinned edge predicates and CDE containment | The pinned oracle reads the same nine-row `edge_matrix.tsv` and nine-row `containment_matrix.tsv` inputs as C++; `matrix_b11.txt` stores its 18 Boolean outputs. C++ checks both the TSV expectation and the pinned Rust result. | Rust Debug/Release output matches the fixture; targeted C++ MSVC 2019 x64 Debug/Release passes. The local LBF test is ancillary fork coverage, not the pinned reference. |
+| `CompareOptimizer.cpp` | LBF CLI in the exact D5 Cargo checkout; fixed seed `42` | Reads `optimizer_spp_instance.json`, `optimizer_lbf_config.json`, and `LbfSpp/sol_optimizer_spp_instance.json`. C++ validates imported placements, feasibility, item count, density, and strip width; it does not compare optimizer search order or exact placement coordinates. | `GeneratePinnedLbfFixture.ps1` uses Rust 1.98.1, jagua-rs revision `f5e2b5f`, and the recorded `LbfFixture.Cargo.lock`. Pinned Debug and Release outputs are structurally identical to each other and to the committed fixture: three placements, width `4.398323`, density `0.53050524`. Targeted C++ Debug/Release passes. |
+| `CompareProblem.cpp` | RustOracle `--problem-types-b7-parity-only`; pinned SPP/BPP/MSPP problem models and instance import | `problem_types_b7.txt` plus `spp_instance.json`, `bpp_instance.json`, and `mspp_instance.json`; numeric values use `AlmostEqualRustF32`, textual/state values are exact. | Rust Debug/Release each emit 21 matching fixture lines; targeted C++ MSVC 2019 x64 Debug/Release passes are recorded. This is the fixed valid-flow matrix; the listed error contracts and solution I/O remain outside it. |
+| `CompareSurrogate.cpp` | RustOracle `--fail-fast-parity-only`; `jagua-rs/src/geometry/fail_fast/{pole,piers,sp_surrogate}.rs` | `surrogate_b3_debug.txt` and `surrogate_b3_release.txt` record poles/piers, fail-fast prefixes, threshold and ratio transitions, generation failures, and surrogate collision results. | Rust stdout matches the 72-key profile fixtures; targeted C++ MSVC 2019 x64 Debug/Release runners pass with assertions active. The 1000-pole safety guard is not exercised; B3 is closed only for this fixed matrix. |
+| `CompareTrajectory.cpp` | RustOracle `--trajectory-b11-parity-only`; pinned layout, transformation, and import paths | `trajectory_b11.txt` contains six exact values: placement/removal/restore counts, final active count, checksum, and PRNG state. C++ consumes these values instead of embedding the Rust expectations. | Rust Debug/Release output matches the fixture; targeted C++ MSVC 2019 x64 Debug/Release passes. The local LBF trajectory test remains supplementary fork coverage. |
+
+The fixed-fixture rows above are not whole-library equivalence claims. A fixture contributes coverage only when an active comparator or Rust test reads it; the legacy `surrogate_l_c_*` and `surrogate_u_shape_*` files are not consumed by the active C++ comparator, as also noted in E4/E7.
+
+The RustOracle modes `--model-boundary-parity-only`, `--restore-boundary-parity-only`, `--offset-boundary-parity-only`, `--import-boundary-parity-only`, `--zero-separation-parity-only`, and `--collision-parity-only` still have no matching active `Compare*.cpp` fixture reader. They remain standalone Rust probes and must not be counted as C++/Rust differential coverage. Caught Rust panics and their partial state must be compared with JaguarCore's `Result` outcome and state; `panic` and `Infeasible` are not interchangeable by default.
+
+B10 remains separate: `TestSoa.cpp` compares SoA `Scalar`, `Auto`, and `Avx2` Boolean results exactly, and checks raw-bit preservation of copied vertex, edge, and bounding-box doubles. See the [B10 collision record](../../../docs/logic-comparison-jagua/records/30-collision-detection.md).
 
 The expected scalar values are derived from the corresponding jagua-rs import rules (`f32` geometry, centering transform, normalized rotation list, and total-area/fixed-height width). They are intentionally compared with explicit tolerances instead of comparing textual JSON; rotation values use a wider tolerance because JaguarCore stores `double` while jagua-rs stores `f32`.
 
 ## Expanding the oracle
 
-1. Run the Rust workspace tests with the pinned toolchain.
+1. Run RustOracle with the D5 toolchain and revision. Treat tests under `CodeResource/jagua-rs` as local-fork evidence unless a source comparison establishes identity with the pinned revision; the RustOracle lockfile does not pin that workspace path dependency.
 2. Add a fixed Rust reference fixture or generated output under `rust_reference/`.
 3. Add one C++ comparison with literals derived independently from the Rust run.
 4. Compare feasibility, quantity conservation, stock, density, and hazard kinds before comparing coordinates.
@@ -58,17 +72,30 @@ per SPP/BPP/MSPP model and compares each state with a separately restored proble
 
 ## Rust LBF fixture
 
-The optimizer fixture was generated with:
+The optimizer fixture can be regenerated from the exact D5 checkout with:
 
 ```powershell
-cargo +1.90.0 run --offline --manifest-path jagua-rs/lbf/Cargo.toml -- `
-  --input-file JaguarCore/Tests/Fixtures/RustReference/optimizer_spp_instance.json `
-  --solution-folder JaguarCore/Tests/Fixtures/RustReference/LbfSpp `
-  --config-file JaguarCore/Tests/Fixtures/RustReference/optimizer_lbf_config.json `
-  --prob-var spp --log-level info
+& .\JaguarCore\Tools\RustOracle\GeneratePinnedLbfFixture.ps1
 ```
 
-The recorded Rust result is approximately `strip_width = 4.398323`, `density = 0.53050524`, with three placed items. These values are acceptance bounds for the external result, not a promise that another optimizer or floating-point implementation will produce identical coordinates.
+The script locates the exact revision in Cargo's git checkout, installs the recorded LBF dependency lock if needed, refuses a conflicting cached lock, and runs the CLI with Rust 1.98.1. The pinned Cargo checkout did not contain a `Cargo.lock`; the supplementary 151-package lock is recorded at `JaguarCore/Tools/RustOracle/LbfFixture.Cargo.lock` (SHA-256 `218794721CEF3727816EF84F04E8152176C0F17E092C7025CF8E40A45C670AED`). The committed JSON fixture was regenerated from pinned Debug output and compared against pinned Release output. The three placements, width, density, and complete parsed JSON values match exactly. These values are acceptance bounds for the external result, not a promise that another optimizer or floating-point implementation will produce identical coordinates.
+
+### B11 pinned differential outputs (2026-10-17)
+
+Generate and verify the Rust outputs with the D5 toolchain:
+
+```powershell
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --boundary-b11-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --boundary-b11-parity-only
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --matrix-b11-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --matrix-b11-parity-only
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --trajectory-b11-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --trajectory-b11-parity-only
+```
+
+Debug and Release stdout match the fixtures and each other. The stdout / fixture SHA-256 pairs are `boundary_b11.txt`: `B66B3FBA2B9686935EA6F79C3F7EEFAC1D3EA772ECA37748D09213070172C14E` / `CEC6936A6D0D8BE9FC408B6B961FD33C5148D672D64F8E23D6589DB98BD045F9`; `matrix_b11.txt`: `F3C92CF73C1050143E8154BFD3CEFA676FBFB8525AD15C4C5C162FF9B9110252` / `D2A2E7D11F0C31890D3BE3A27AB7560793A8C6BBBB1A21220F290B12160F9B32`; `trajectory_b11.txt`: `0DE71DD5188D07AADDAC345CDBF1A7A8DF978EFDD7E03254FB5464CA3A206ACD` / `BE34C9208D63DC8ECA1DFBE662F08AE43A2BBB383078E4235E9C6BC94E8B874D`.
+
+The changed B11 comparators were compiled against the existing MSVC 2019 x64 JaguarCore Debug and Release builds and run through a targeted harness. Both profiles passed boundary, matrix, trajectory, and optimizer checks; the Release harness enabled assertions with `/UNDEBUG` and `TestReleaseAsserts.h`. The full `JaguarCoreTests.exe` suite was not run.
 
 The oracle is not a claim that Sparrow or any optimizer must produce identical placements. It checks the shared geometry and problem-model contract.
 

@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -45,10 +46,39 @@ bool expected(const std::string& value)
 {
     return value == "1";
 }
+
+std::map<std::string, std::string> loadRustResults()
+{
+    const std::string content = loadFile("matrix_b11.txt");
+    assert(!content.empty());
+    std::map<std::string, std::string> result;
+    std::istringstream input(content);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line.front() == '#')
+            continue;
+        const std::size_t separator = line.find('=');
+        assert(separator != std::string::npos);
+        result.emplace(line.substr(0, separator), line.substr(separator + 1));
+    }
+    return result;
+}
+
+bool rustExpected(const std::map<std::string, std::string>& results,
+                  const std::string& key)
+{
+    const auto found = results.find(key);
+    assert(found != results.end());
+    assert(found->second == "true" || found->second == "false");
+    return found->second == "true";
+}
 }
 
 void runEdgeMatrixDifferentialTests()
 {
+    const auto rustResults = loadRustResults();
+    assert(rustResults.size() == 18);
     const std::string content = loadFile("edge_matrix.tsv");
     assert(!content.empty());
     std::istringstream input(content);
@@ -67,7 +97,9 @@ void runEdgeMatrixDifferentialTests()
             {number(values[5]), number(values[6])},
             {number(values[7]), number(values[8])});
         assert(first.HasValue() && second.HasValue());
-        assert(first.Value().Intersects(second.Value()) == expected(values[9]));
+        const bool actual = first.Value().Intersects(second.Value());
+        assert(actual == expected(values[9]));
+        assert(actual == rustExpected(rustResults, "edge." + values[0]));
         ++cases;
     }
     assert(cases == 9);
@@ -75,6 +107,8 @@ void runEdgeMatrixDifferentialTests()
 
 void runContainmentMatrixDifferentialTests()
 {
+    const auto rustResults = loadRustResults();
+    assert(rustResults.size() == 18);
     const auto bounds = jaguar::Rect2d::Create(0.0, 0.0, 10.0, 10.0);
     assert(bounds.HasValue());
     jaguar::CDEConfig config{};
@@ -110,6 +144,7 @@ void runContainmentMatrixDifferentialTests()
         assert(handle.HasValue());
         const bool actual = engine.DetectPolygonCollision(query.Value(), jaguar::NoFilter{});
         assert(actual == expected(values[10]));
+        assert(actual == rustExpected(rustResults, "containment." + values[0]));
         assert(engine.DeregisterHazard(handle.Value()).HasValue());
         ++cases;
     }

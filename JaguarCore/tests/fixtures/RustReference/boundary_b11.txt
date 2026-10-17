@@ -1,0 +1,12 @@
+# Rust 1.98.1; jagua-rs f5e2b5ffd14931f17a20ce283a2122e877953ceb; --boundary-b11-parity-only
+boundary.root_out_of_bounds_ignores_exterior=true
+boundary.edge.proper=true
+boundary.edge.tangent=true
+boundary.edge.endpoint=true
+boundary.edge.collinear_overlap=false
+boundary.edge.small_gap=true
+boundary.edge.large_gap=false
+boundary.polygon.corner_touch=true
+boundary.polygon.small_gap=true
+boundary.polygon.large_gap=false
+boundary.polygon.interior=true

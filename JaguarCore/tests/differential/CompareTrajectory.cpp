@@ -8,10 +8,50 @@
 #include <fstream>
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
+#include <map>
+#include <sstream>
 #include <string>
 
 namespace
 {
+std::map<std::string, std::string> loadReference()
+{
+    for (const std::string& path : {
+             std::string("..\\JaguarCore\\Tests\\Fixtures\\RustReference\\trajectory_b11.txt"),
+             std::string("JaguarCore\\Tests\\Fixtures\\RustReference\\trajectory_b11.txt"),
+             std::string("..\\JaguarRun\\JaguarCore\\Tests\\Fixtures\\RustReference\\trajectory_b11.txt")})
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            continue;
+        const std::string content{std::istreambuf_iterator<char>(input),
+                                  std::istreambuf_iterator<char>()};
+        std::map<std::string, std::string> result;
+        std::istringstream lines(content);
+        std::string line;
+        while (std::getline(lines, line))
+        {
+            if (line.empty() || line.front() == '#')
+                continue;
+            const std::size_t separator = line.find('=');
+            assert(separator != std::string::npos);
+            result.emplace(line.substr(0, separator), line.substr(separator + 1));
+        }
+        return result;
+    }
+    return {};
+}
+
+std::uint64_t expectedInteger(const std::map<std::string, std::string>& reference,
+                              const char* key,
+                              int base = 10)
+{
+    const auto found = reference.find(key);
+    assert(found != reference.end());
+    return std::stoull(found->second, nullptr, base);
+}
+
 struct XorShift64Star
 {
     std::uint64_t state;
@@ -73,6 +113,9 @@ jaguar::Container makeTrajectoryContainer()
 
 void runTrajectoryDifferentialTests()
 {
+    const auto reference = loadReference();
+    assert(reference.size() == 6);
+
     XorShift64Star rng{0x4A47524312345678ULL};
     jaguar::Layout layout(makeTrajectoryContainer());
     const jaguar::Item item = makeTrajectoryItem();
@@ -146,10 +189,10 @@ void runTrajectoryDifferentialTests()
         mix(checksum, placement.rotation);
     }
 
-    assert(placements == 91);
-    assert(removals == 80);
-    assert(restores == 85);
-    assert(active.size() == 11);
-    assert(checksum == 0x4bfd29cfe028430bULL);
-    assert(rng.state == 0xe607235f6e91befaULL);
+    assert(placements == expectedInteger(reference, "placements"));
+    assert(removals == expectedInteger(reference, "removals"));
+    assert(restores == expectedInteger(reference, "restores"));
+    assert(active.size() == expectedInteger(reference, "active"));
+    assert(checksum == expectedInteger(reference, "checksum", 16));
+    assert(rng.state == expectedInteger(reference, "rng_state", 16));
 }

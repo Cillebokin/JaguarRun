@@ -1,0 +1,7 @@
+# Rust 1.98.1; jagua-rs f5e2b5ffd14931f17a20ce283a2122e877953ceb; --trajectory-b11-parity-only
+placements=91
+removals=80
+restores=85
+active=11
+checksum=4bfd29cfe028430b
+rng_state=e607235f6e91befa

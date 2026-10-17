@@ -1,0 +1,19 @@
+# Rust 1.98.1; jagua-rs f5e2b5ffd14931f17a20ce283a2122e877953ceb; --matrix-b11-parity-only
+edge.proper_cross=true
+edge.endpoint_touch=true
+edge.t_junction=true
+edge.disjoint=false
+edge.collinear_overlap=false
+edge.collinear_touch=false
+edge.parallel=false
+edge.small_gap=true
+edge.large_gap=false
+containment.hole_inside=true
+containment.hole_enclosing=true
+containment.hole_crossing=true
+containment.hole_corner_touch=true
+containment.hole_disjoint=false
+containment.exterior_inside=false
+containment.exterior_crossing=true
+containment.exterior_outside=true
+containment.exterior_enclosing=true

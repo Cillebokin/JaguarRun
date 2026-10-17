@@ -174,3 +174,9 @@ C++ 原先在 future.get() 抛出时丢弃 worker lambda 的局部 RNG。现在 
 顶层 Optimize 夹具验证只发 Exploration phase、初始 ExploreFeasible report 和 iteration 0 progress，异常后不发 SeparationResult，也不进入 Compression/Final。warm-start 构造 child-stream 差异由同时布置两组候选 QZone 隔离，不把本用例扩展为 S08 RNG 派生顺序证明。
 
 边界：只认证列出的 QZone 几何、seed、两 worker 和所测 callback prefix；不覆盖任意 worker 数、其他 hazard/错误源、所有 listener 类型、线程创建失败或 C++ 内部 Result-only 防御出口。
+
+### S12 清单收口（2026-10-17）
+
+工作项清单此前仍将“有限候选导致的 Exterior 质心距离平方溢出的其余路径”和“与 GLS 权重更新的组合用例”列为待补。现有定向 reference 已分别覆盖有限候选触发的质心距离平方溢出，以及 128 次真实 `update_weights()` 后有限 Exterior raw loss 与 `+Inf` 权重相乘；两者均比较 Rust/C++ Debug 与 Release 的分类、状态不变和有限候选恢复。容器损失最终乘法溢出、OverlapProxy 非有限/退化路径、Hole/QZone 分派与固定双 worker 传播也已有对应记录和 Rust/C++ 证据。
+
+因此 S12 按默认标量 feature 和本文列出的固定 reference 范围标记完成。malformed surrogate/矩形表示、未列出的几何/pole/公式组合不从现有 fixture 外推；opt-in SIMD 的差异由 S19 单独跟踪。缺失 surrogate 的高层调用失败边界见 S17。

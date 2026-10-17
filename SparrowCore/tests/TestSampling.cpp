@@ -1332,7 +1332,6 @@ bool SameTraceSample(const jaguar::Transform2d& actualTransform,
                      const sparrow::SampleEval& expectedEvaluation) noexcept
 {
     constexpr float TRANSFORM_TOLERANCE = 2.0e-5F;
-    constexpr float LOSS_TOLERANCE = 2.0e-3F;
     return actualEvaluation.kind == expectedEvaluation.kind
         && std::abs(static_cast<float>(actualTransform.rotationRad)
                     - static_cast<float>(expectedTransform.rotationRad))
@@ -1344,8 +1343,7 @@ bool SameTraceSample(const jaguar::Transform2d& actualTransform,
                     - static_cast<float>(expectedTransform.translation.y))
                <= TRANSFORM_TOLERANCE
         && (actualEvaluation.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID
-            || std::abs(actualEvaluation.loss - expectedEvaluation.loss)
-                   <= LOSS_TOLERANCE);
+            || FloatBits(actualEvaluation.loss) == FloatBits(expectedEvaluation.loss));
 }
 
 bool TestUniformSamplerUpperBoundaryRustReference(std::ostream& output)

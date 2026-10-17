@@ -16,7 +16,7 @@ expectations, matching their former infallible behavior for validated instances.
 | f32 sampler upper-endpoint rounding | `Tests/Fixtures/UniformSamplerUpperBoundaryRust.tsv`, `Tests/RustReference/tests/uniform_sampler_boundary_reference.rs`, `TestSampling.cpp::TestUniformSamplerUpperBoundaryRustReference` | Seed 10, one rotation entry, and the narrow X interval `[0x3f800000,0x3f800002]`; Rust and C++ sample X raw bits must both equal the upper endpoint `0x3f800002`. This guards rand 0.10.3 `sample_single` multiply-add rounding without post-clamping |
 | Continuous sampler rotation grid | `Tests/Fixtures/UniformSamplerContinuousGridRust.tsv`, `Tests/RustReference/tests/continuous_sampler_reference.rs`, `TestSampling.cpp::TestUniformSamplerContinuousGridRustReference` | Sixteen fixed seeds select all 16 Rust Continuous rotation entries; raw f32 angle bits are checked in Rust and in both C++ `UniformRectSampler` and `RotationDistribution` paths |
 | Singleton sampler axis and RNG stream | `Tests/Fixtures/UniformSamplerSingletonAxisRust.tsv`, `Tests/RustReference/tests/uniform_sampler_singleton_reference.rs`, `TestSampling.cpp::TestUniformSamplerSingletonAxisRustReference` | Same imported one-item JSON, `seed=42`, and a container width equal to item width make X feasible only at 1.0. Eight consecutive samples compare X and Y raw bits, checking that the singleton X axis consumes no random draw and leaves subsequent samples aligned |
-| Direct LBF search | `Tests/Fixtures/LbfSearchRustTrace.tsv` | Actual Rust `search_placement` with `LBFEvaluator`: candidate evaluations, report acceptance, ordered retained-sample snapshots, and final refined result; compared against `SearchLbf` |
+| Direct LBF search | `Tests/Fixtures/LbfSearchRustTrace.tsv`, `TestSampling.cpp::TestRustLbfSearchTrace` | Actual Rust `search_placement` with `LBFEvaluator`: 104 candidate evaluations (75 Clear, 29 Invalid), report acceptance, ordered retained-sample snapshots, and final refined result; event/classification/counts compare exactly, transforms use 2e-5 tolerance, and all Clear losses compare by raw f32 bits in Debug/Release |
 | Direct separator move search | `Tests/Fixtures/SeparatorRustTrace.json`, `Tests/Fixtures/SeparatorSearchRustTrace.tsv` | Actual Rust `search_placement` with `SeparationEvaluator` and `ref_pk=Some(...)`: starting placement, focused/container sampling, pre/final refinement, evaluation/report events, retained snapshots, and returned result; compared against `FindBestSeparatorMove` |
 | Direct LBF construction | `Tests/Fixtures/RustSppSingleItem.json`, `SparrowLbfRustReference.tsv` | Rust `LBFBuilder` and C++ constructor on the same one-item SPP input and sample configuration |
 | Legacy Jagua LBF metrics | `Tests/Fixtures/LbfMetricsReference.tsv` | Schema, provenance, and stored values from `jagua-rs/lbf`; not a Sparrow parity fixture |
@@ -111,8 +111,9 @@ real container-wide LBF placement search (`seed=42`, width 10, 16 container samp
 samples, no reference placement), plus a real separator single-move search (`seed=42`, width 8,
 two overlapping 2-by-2 items, 8 focused samples, 16 container samples, 2 retained samples,
 Rust-default CDE/surrogate settings matched in C++). For direct search, evaluation/report event order, phase,
-evaluation kind, acceptance, retained candidate order, and evaluation count must match; transforms
-use absolute tolerance `2e-5` and finite losses `2e-3`. The separator trace covers the focused
+evaluation kind, acceptance, retained candidate order, and evaluation count must match. The LBF trace
+uses transform tolerance `2e-5` and compares Clear losses by raw f32 bits; the separator trace uses
+transform tolerance `2e-5` and finite-loss tolerance `2e-3`. The separator trace covers the focused
 reference-placement branch and final refined return semantics for one item move. The Exploration
 trace checks two feasible paths: two shrink attempts from width 6.0 with step 0.1, and a width-4.0
 case whose 0.6 shrink would cross the minimum-width bound. A third case shrinks from width 6.0 to

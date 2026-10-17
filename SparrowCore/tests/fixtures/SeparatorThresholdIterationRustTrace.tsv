@@ -1,0 +1,22 @@
+# generator=Sparrow Rust 1.98.1; single-worker control-boundary trace
+# input=SeparatorRoundRustTrace.json; seed=0; width=9; strike_limit=2; iter_no_imprv_limit=2
+# progress ordinal iteration min_loss_f32_bits
+progress 0 0 4343bf37
+progress 1 1 41951466
+progress 2 2 40b938bc
+progress 3 3 40b40968
+progress 4 4 40b40968
+progress 5 5 40ab983a
+progress 6 6 40ab983a
+progress 7 7 40ab983a
+progress 8 8 40aa79ca
+progress 9 9 40a6fdc5
+progress 10 10 40a6fdc5
+progress 11 11 40a528d8
+progress 12 12 40a528d8
+progress 13 13 40a528d8
+progress 14 14 40a528d8
+progress 15 15 40a528d8
+progress 16 16 40a528d8
+reports 7
+result 0 5510 111 16 9 40a528d8 41a15e78

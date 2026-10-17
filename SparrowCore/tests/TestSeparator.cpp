@@ -886,6 +886,377 @@ bool TestRustSeparatorRound(std::size_t workerCount,
     return true;
 }
 
+bool ReadSeparatorControlBoundaryTrace(
+    std::vector<std::pair<std::size_t, float>>& progress,
+    std::size_t& reportCount,
+    bool& success,
+    std::size_t& evaluationCount,
+    std::size_t& moveCount,
+    std::size_t& iterations,
+    std::size_t& placementCount,
+    float& totalLoss,
+    float& totalWeightedLoss,
+    std::ostream& output)
+{
+    std::ifstream traceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SeparatorThresholdIterationRustTrace.tsv",
+             "../SparrowCore/Tests/Fixtures/SeparatorThresholdIterationRustTrace.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SeparatorThresholdIterationRustTrace.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SeparatorThresholdIterationRustTrace.tsv"})
+    {
+        traceFile.open(path);
+        if (traceFile.is_open())
+            break;
+        traceFile.clear();
+    }
+    if (!Expect(traceFile.is_open(), output,
+                "Rust separator control-boundary fixture must be readable"))
+    {
+        return false;
+    }
+
+    bool hasReports = false;
+    bool hasResult = false;
+    std::string line;
+    while (std::getline(traceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+            continue;
+        std::istringstream row(line);
+        std::string record;
+        if (!(row >> record))
+            continue;
+        if (record == "progress")
+        {
+            std::size_t ordinal = 0U;
+            std::size_t iteration = 0U;
+            std::uint32_t lossBits = 0U;
+            if (!(row >> ordinal >> iteration >> std::hex >> lossBits)
+                || ordinal != progress.size())
+            {
+                return Expect(false, output,
+                              "malformed Rust control-boundary progress row");
+            }
+            progress.emplace_back(iteration, FloatFromBits(lossBits));
+        }
+        else if (record == "reports")
+        {
+            std::string unexpected;
+            if (hasReports || !(row >> reportCount) || (row >> unexpected))
+            {
+                return Expect(false, output,
+                              "malformed Rust control-boundary report row");
+            }
+            hasReports = true;
+        }
+        else if (record == "result")
+        {
+            unsigned successValue = 0U;
+            std::uint32_t lossBits = 0U;
+            std::uint32_t weightedLossBits = 0U;
+            std::string unexpected;
+            if (hasResult
+                || !(row >> successValue >> evaluationCount >> moveCount
+                         >> iterations >> placementCount >> std::hex
+                         >> lossBits >> weightedLossBits)
+                || successValue > 1U || (row >> unexpected))
+            {
+                return Expect(false, output,
+                              "malformed Rust control-boundary result row");
+            }
+            success = successValue != 0U;
+            totalLoss = FloatFromBits(lossBits);
+            totalWeightedLoss = FloatFromBits(weightedLossBits);
+            hasResult = true;
+        }
+        else
+        {
+            return Expect(false, output,
+                          "unknown Rust control-boundary fixture record");
+        }
+    }
+    return Expect(!progress.empty() && hasReports && hasResult,
+                  output,
+                  "Rust separator control-boundary fixture is incomplete");
+}
+
+bool TestSeparatorThresholdAndIterationBoundaries(std::ostream& output)
+{
+    std::vector<std::pair<std::size_t, float>> expectedProgress;
+    std::size_t expectedReports = 0U;
+    bool expectedSuccess = false;
+    std::size_t expectedEvaluations = 0U;
+    std::size_t expectedMoves = 0U;
+    std::size_t expectedIterations = 0U;
+    std::size_t expectedPlacements = 0U;
+    float expectedLoss = 0.0F;
+    float expectedWeightedLoss = 0.0F;
+    if (!ReadSeparatorControlBoundaryTrace(
+            expectedProgress,
+            expectedReports,
+            expectedSuccess,
+            expectedEvaluations,
+            expectedMoves,
+            expectedIterations,
+            expectedPlacements,
+            expectedLoss,
+            expectedWeightedLoss,
+            output))
+    {
+        return false;
+    }
+
+    std::ifstream inputFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+             "../SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\SeparatorRoundRustTrace.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+            break;
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(), output,
+                "separator control-boundary input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const auto instance = MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "separator control-boundary input must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "separator control-boundary problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(9.0).HasValue(), output,
+                "separator control-boundary strip resize failed"))
+    {
+        return false;
+    }
+    const auto initial = jaguar::Transform2d::FromRotationTranslation(
+        0.0, {1.0, 1.0});
+    for (std::size_t index = 0U; index < 9U; ++index)
+    {
+        if (!Expect(problem.PlaceItem({0U, initial}).HasValue(), output,
+                    "separator control-boundary placement failed"))
+        {
+            return false;
+        }
+    }
+
+    auto separatorResult = sparrow::Separator::Create(std::move(problem), 0U);
+    if (!Expect(separatorResult.HasValue(), output,
+                "separator control-boundary creation failed"))
+    {
+        return false;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 2U;
+    config.noImprovementLimit = 2U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 1U;
+    sparrow::OptimizationTerminator terminator;
+    SeparatorRoundRecordingListener listener;
+    const auto result = separator.Run(config, terminator, &listener);
+    if (!Expect(result.HasValue(), output,
+                "separator control-boundary run failed"))
+    {
+        return false;
+    }
+    if (!Expect(listener.progress.size() == expectedProgress.size()
+                    && listener.reports.size() == expectedReports
+                    && listener.result.has_value(),
+                output,
+                "Rust/C++ threshold-boundary event counts differ"))
+    {
+        output << "Rust(progress=" << expectedProgress.size()
+               << ", reports=" << expectedReports << ") C++(progress="
+               << listener.progress.size() << ", reports="
+               << listener.reports.size() << ")\n";
+        return false;
+    }
+    for (std::size_t index = 0U; index < expectedProgress.size(); ++index)
+    {
+        if (!Expect(listener.progress[index].iteration
+                            == expectedProgress[index].first
+                        && std::abs(listener.progress[index].minimumLoss
+                                    - expectedProgress[index].second)
+                               <= 2.0e-3F,
+                    output,
+                    "Rust/C++ threshold-boundary progress differs"))
+        {
+            output << std::setprecision(10) << "progress=" << index
+                   << " Rust=(" << expectedProgress[index].first << ','
+                   << expectedProgress[index].second << ") C++=("
+                   << listener.progress[index].iteration << ','
+                   << listener.progress[index].minimumLoss << ")\n";
+            return false;
+        }
+    }
+    if (!Expect(expectedProgress.size() == 17U
+                    && expectedProgress[5].second
+                           < expectedProgress[4].second * 0.98F
+                    && expectedProgress[11].second
+                           < expectedProgress[10].second
+                    && expectedProgress[11].second
+                           >= expectedProgress[10].second * 0.98F,
+                output,
+                "Rust fixture must exercise both sides of the 0.98 threshold"))
+    {
+        return false;
+    }
+    const auto& summary = listener.result.value();
+    const auto& value = result.Value();
+    const auto& tracker = separator.Tracker();
+    if (!Expect(value.iterations == expectedIterations
+                    && value.totalEvaluationCount == expectedEvaluations
+                    && value.totalMoveCount == expectedMoves
+                    && listener.result->iterations == expectedIterations
+                    && listener.result->totalEvaluations == expectedEvaluations
+                    && listener.result->totalMoves == expectedMoves
+                    && listener.result->success == expectedSuccess
+                    && value.solution.layoutSnapshot.placements.size()
+                           == expectedPlacements
+                    && std::abs(tracker.TotalLoss() - expectedLoss) <= 2.0e-2F
+                    && std::abs(tracker.TotalWeightedLoss()
+                                - expectedWeightedLoss) <= 5.0e-2F,
+                output,
+                "Rust/C++ threshold and iteration-limit result differs"))
+    {
+        output << "Rust(iter=" << expectedIterations << ", evals="
+               << expectedEvaluations << ", moves=" << expectedMoves
+               << ", loss=" << expectedLoss << ", weighted="
+               << expectedWeightedLoss << ") C++(iter=" << value.iterations
+               << ", evals=" << value.totalEvaluationCount << ", moves="
+               << value.totalMoveCount << ", loss=" << tracker.TotalLoss()
+               << ", weighted=" << tracker.TotalWeightedLoss() << ")\n";
+        return false;
+    }
+    return Expect(listener.progress.back().iteration == 16U
+                      && summary.iterations == 16U,
+                  output,
+                  "inner iteration limit must stop after the second consecutive no-improvement round");
+}
+
+bool TestSeparatorZeroLimitsAndFourWorkerInvariant(std::ostream& output)
+{
+    const auto run = [&](std::size_t strikeLimit,
+                         std::size_t noImprovementLimit,
+                         std::size_t workerCount,
+                         bool expectWork) {
+        std::ifstream inputFile;
+        for (const char* path : {
+                 "SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+                 "../SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+                 "../JaguarRun/SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+                 "..\\SparrowCore\\Tests\\Fixtures\\SeparatorRoundRustTrace.json"})
+        {
+            inputFile.open(path);
+            if (inputFile.is_open())
+                break;
+            inputFile.clear();
+        }
+        if (!Expect(inputFile.is_open(), output,
+                    "separator boundary input must be readable"))
+            return false;
+        const std::string json{
+            std::istreambuf_iterator<char>(inputFile),
+            std::istreambuf_iterator<char>()};
+        const auto instance =
+            MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+        if (!Expect(instance.HasValue(), output,
+                    "separator boundary input import failed"))
+            return false;
+        auto problemResult = jaguar::SPProblem::Create(instance.Value());
+        if (!Expect(problemResult.HasValue(), output,
+                    "separator boundary problem creation failed"))
+            return false;
+        jaguar::SPProblem problem = std::move(problemResult.Value());
+        if (!Expect(problem.ChangeStripWidth(9.0).HasValue(), output,
+                    "separator boundary strip resize failed"))
+            return false;
+        const auto initial = jaguar::Transform2d::FromRotationTranslation(
+            0.0, {1.0, 1.0});
+        const std::size_t placementCount = expectWork ? 0U : 9U;
+        for (std::size_t index = 0U; index < placementCount; ++index)
+        {
+            if (!Expect(problem.PlaceItem({0U, initial}).HasValue(), output,
+                        "separator boundary placement failed"))
+                return false;
+        }
+        auto created = sparrow::Separator::Create(std::move(problem), 42U);
+        if (!Expect(created.HasValue(), output,
+                    "separator boundary creation failed"))
+            return false;
+        sparrow::Separator separator = std::move(created.Value());
+        sparrow::SeparatorConfig config;
+        config.strikeLimit = strikeLimit;
+        config.noImprovementLimit = noImprovementLimit;
+        config.nContainerSamples = expectWork ? 0U : 1U;
+        config.nFocussedSamples = 0U;
+        config.nCoordinateDescents = 1U;
+        config.nWorkers = workerCount;
+        sparrow::OptimizationTerminator terminator;
+        SeparatorRoundRecordingListener listener;
+        const auto result = separator.Run(config, terminator, &listener);
+        if (!Expect(result.HasValue(), output,
+                    "separator zero-limit or multiworker run failed"))
+            return false;
+        const auto& value = result.Value();
+        if (!expectWork)
+        {
+            return Expect(listener.progress.size() == 1U
+                              && listener.progress.front().iteration == 0U
+                              && listener.reports.empty()
+                              && value.iterations == 0U
+                              && value.totalEvaluationCount == 0U
+                              && value.totalMoveCount == 0U
+                              && value.solution.layoutSnapshot.placements.size()
+                                     == 9U,
+                          output,
+                          "zero strike/inner-iteration limit must not start a worker round");
+        }
+        jaguar::Layout finalLayout(value.solution.layoutSnapshot.container);
+        if (!Expect(finalLayout.Restore(value.solution.layoutSnapshot).HasValue(),
+                    output,
+                    "four-worker final layout restore failed"))
+            return false;
+        return Expect(listener.progress.size() == 2U
+                          && listener.progress[0].iteration == 0U
+                          && listener.progress[1].iteration == 1U
+                          && listener.reports.empty()
+                          && listener.result.has_value()
+                          && value.iterations == 0U
+                          && value.totalEvaluationCount == 0U
+                          && value.totalMoveCount == 0U
+                          && value.solution.layoutSnapshot.placements.empty()
+                          && separator.Tracker().IsSeparated()
+                          && finalLayout.IsFeasible()
+                          && listener.result->success,
+                      output,
+                      "natural four-worker empty round must preserve valid state and stop semantics");
+    };
+
+    return run(0U, 2U, 1U, false)
+        && run(2U, 0U, 1U, false)
+        && run(1U, 1U, 4U, true);
+}
+
 bool SameSeparatorSample(
     const jaguar::Transform2d& actualTransform,
     const sparrow::SampleEval& actualEvaluation,
@@ -1978,6 +2349,14 @@ bool RunSeparatorTests(std::ostream& output)
     }
     if (!TestRustSeparatorRound(
             3U, 43U, "SeparatorThreeWorkerSeed43RoundRustTrace.tsv", output))
+    {
+        return false;
+    }
+    if (!TestSeparatorThresholdAndIterationBoundaries(output))
+    {
+        return false;
+    }
+    if (!TestSeparatorZeroLimitsAndFourWorkerInvariant(output))
     {
         return false;
     }

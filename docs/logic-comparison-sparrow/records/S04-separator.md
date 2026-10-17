@@ -106,3 +106,11 @@
 5. **【核对确认：SeparatorResult 内容】** 现场（Separator.h:16-26 + Separator.cpp:690-707）确认 Result 携带 solution/trackerSnapshot/elapsed/surrogateReject/exactCollision/evals/moves/iterations 八字段，主文条目 12/差异 #11 判定维持。
 6. **【核对确认：行号漂移】** 当前 Separator.cpp 为 709 行、Separator.h 为 64 行；主文头部行数与关键引用按当前源码更新。
 7. **【2026-10-07 修正：Run 中断后的内部状态】** Rust `separate` 的外层 terminator 检查发生在 strike 之间；每个已运行 strike 都会先 rollback 到 `min_loss_sol`。因此“最后 worker 轮状态直接泄漏出 `separate`”不是实际分离点。S08 新增的 `OptimizerTerminationHandoffRustReference.tsv` 证明状态分离发生在 `exploration_phase` 收到 `ExplInfeas` 后继续执行 pool 选择和 disruption、再于下一轮检查终止。C++ 的 `ExplorationResult.separatorState` 与 `solution` 分开返回，`Optimize` 将两者分别交给 `Compress`；固定 handoff trace 已通过。
+
+### 控制边界补充（2026-10-17）
+
+新增 Rust reference fixture SeparatorThresholdIterationRustTrace.tsv 与对应 Rust/C++ 用例，固定单 worker、seed=0、width=9、9 个重叠 placement、strikeLimit=2、no-improvement limit=2。trace 包含 progress 事件、报告数、迭代/评估/移动计数及最终 tracker loss bits；共 16 次迭代后停止。测试显式证明一次改善比例低于 0.98 会重置 no-improvement 计数，而改善比例达到或超过 0.98 时按一次无改进计数，并由连续两次无改进触发上限。最终报告数为 7、评估数为 5510、移动数为 111；total loss bits=0x40a528d8，weighted loss bits=0x41a15e78。
+
+补充两个零边界：strikeLimit=0 与 no-improvement limit=0 均只产生 progress 0，不报告、不评估、不移动、不开始 worker round。worker 数大于 3 的用例设置 4 workers，在初始空布局上执行一次自然空 worker round，检查 progress [0,1]、零统计、空布局可行且已分离、成功结果。该项按 D4 只验证合法状态与停止语义；用例不证明有负载的 4-worker 轨迹，也不推广到任意调度顺序。
+
+验证：RustReference Debug/Release 全量脚本退出码 0；该文件新增的 3 项测试在两个 profile 均通过。SparrowCore Debug/Release 全套 runner 均退出码 0。S04 按上述固定矩阵完成，D4 范围外的自然多 worker 轨迹和 RNG 次序不属于等价承诺。

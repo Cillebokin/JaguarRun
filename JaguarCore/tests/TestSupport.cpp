@@ -21,6 +21,7 @@ void runJsonCodecTests();
 void runSvgExportTests();
 void runSoaTests();
 void runGeometryDifferentialTests();
+void runSurrogateDifferentialTests();
 void runProblemDifferentialTests();
 void runCollisionDifferentialTests();
 void runEdgeMatrixDifferentialTests();
@@ -144,6 +145,7 @@ int main()
     runSvgExportTests();
     runSoaTests();
     runGeometryDifferentialTests();
+    runSurrogateDifferentialTests();
     runProblemDifferentialTests();
     runCollisionDifferentialTests();
     runEdgeMatrixDifferentialTests();

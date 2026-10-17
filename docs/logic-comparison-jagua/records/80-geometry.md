@@ -235,6 +235,13 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - 当前 B1 仍为进行中：78 个显式公开函数和 33 个 trait 实现块已有静态覆盖矩阵；第四至第七轮扩展了对拍，剩余差异见“B1 第七轮”。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rect 无效缩放的拒绝集合已对齐，panic→`InvalidInput` 属于失败通道映射；Rect 象限退化结果与 Rust panic 不同，SPolygon 原始点 helper 没有 C++ 公共映射，均继续登记为差异。
 - 第三轮之前的既有验证：Rust 1.98.1 Debug/Release geometry-only oracle 新增 6 个键逐值一致；当时 fixture 共 48 个键，默认 oracle 与 geometry-only oracle 的对应输出逐值一致；JaguarCore Debug/Release 全套 `JaguarCoreTests.exe` 均以退出码 0 结束。第四轮更新后的 52 键和双 profile 验证见本记录“B1 第四轮”。
 
+## B3 第一轮：固定代理生成与 fail-fast 碰撞对拍
+
+- 新增 `--fail-fast-parity-only`，按 `JaguarCore/Tools/RustOracle/Cargo.lock` 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 与 Rust 1.98.1 输出 Debug/Release fixture。配置为 pole limits `[(8, 0.0), (4, 0.75), (2, 0.9)]`、fail-fast pole area ratio `0.5`、2 个 piers；输入为 U/L/C 三种凹多边形。
+- `surrogate_b3_{debug,release}.txt` 各有 49 个唯一键：三种形状的全部 22 个 pole、6 个 pier、pole 与 fail-fast 前缀数量、凸包索引/面积，以及 notch 高/低 `cd_threshold` 的检测与收集结果和 pier-only 检测结果。新增 `CompareSurrogate.cpp` 按 RustF32 容差比较坐标、半径、长度和面积，精确比较计数、凸包索引及碰撞结果，并挂入 `JaguarCoreTests.pro` / `TestSupport.cpp`。
+- TDD 红测因 profile fixture 尚不存在而失败；生成锁定 oracle 输出后，Debug/Release stdout 均与各自 fixture 逐行一致，49 个键无重复。MSVC 2019 x64 定向 runner 只调用 `runSurrogateDifferentialTests()`，Debug 与 Release 均退出码 0；Release runner 强制包含 `TestReleaseAsserts.h`，断言保持有效。完整 `JaguarCoreTests.exe` 未运行。
+- 本轮没有修改 `Surrogate.cpp` 或公共 API。证据覆盖三种固定凹多边形和一组 notch/pier-only 查询；不外推为任意输入等价。极点覆盖阈值临界、fail-fast ratio 边界、pole 生成错误出口及 pier 无可用射线等场景仍需后续 fixture，B3 继续标为“部分”。
+
 ## 证据位置
 
 - pinned Rust：`geometry/{convex_hull,d_transformation,geo_enums,geo_traits,original_shape,shape_modification,transformation}.rs`、`geometry/fail_fast/{piers,pole,sp_surrogate}.rs`、`geometry/primitives/{circle,edge,point,rect,simple_polygon}.rs`。

@@ -214,6 +214,91 @@ fn run_collision_parity_oracle() {
     println!("collision.notch.detect_pier_only={pier_only_detect}");
 }
 
+fn run_b3_surrogate_parity_oracle() {
+    let config = SPSurrogateConfig {
+        n_pole_limits: [(8, 0.0), (4, 0.75), (2, 0.9)],
+        ff_pole_area_ratio: 0.5,
+        n_ff_piers: 2,
+    };
+    let shapes = [
+        (
+            "u",
+            vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (6.0, 10.0),
+                (6.0, 4.0),
+                (4.0, 4.0),
+                (4.0, 10.0),
+                (0.0, 10.0),
+            ],
+        ),
+        (
+            "l",
+            vec![
+                (0.0, 0.0),
+                (8.0, 0.0),
+                (8.0, 3.0),
+                (3.0, 3.0),
+                (3.0, 8.0),
+                (0.0, 8.0),
+            ],
+        ),
+        (
+            "c",
+            vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 2.0),
+                (3.0, 2.0),
+                (3.0, 8.0),
+                (10.0, 8.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+            ],
+        ),
+    ];
+
+    for (name, points) in shapes {
+        let mut shape = polygon(&points);
+        shape.generate_surrogate(config).unwrap();
+        let surrogate = shape.surrogate();
+        println!("b3.{name}.poles.count={}", surrogate.poles.len());
+        println!(
+            "b3.{name}.fail_fast_poles.count={}",
+            surrogate.ff_poles().len()
+        );
+        println!("b3.{name}.piers.count={}", surrogate.piers.len());
+        println!(
+            "b3.{name}.convex_hull_area={:.12}",
+            surrogate.convex_hull_area
+        );
+        println!(
+            "b3.{name}.convex_hull_indices={:?}",
+            surrogate.convex_hull_indices
+        );
+        for (index, pole) in surrogate.poles.iter().enumerate() {
+            println!(
+                "b3.{name}.pole[{index}]={:.12},{:.12},{:.12}",
+                pole.center.0, pole.center.1, pole.radius
+            );
+        }
+        for (index, pier) in surrogate.piers.iter().enumerate() {
+            println!(
+                "b3.{name}.pier[{index}]={:.12},{:.12},{:.12},{:.12},{:.12}",
+                pier.start.0,
+                pier.start.1,
+                pier.end.0,
+                pier.end.1,
+                pier.length()
+            );
+        }
+    }
+
+    run_collision_parity_oracle();
+}
+
 fn run_model_boundary_parity_oracle() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -1601,6 +1686,10 @@ fn run_b1_geometry_oracle() {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--fail-fast-parity-only") {
+        run_b3_surrogate_parity_oracle();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--restore-boundary-parity-only") {
         run_restore_boundary_parity_oracle();
         return;

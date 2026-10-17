@@ -50,6 +50,7 @@ SOURCES += \
     $$PWD/TestSoa.cpp \
     $$PWD/../Source/Collision/SoaGeometry.cpp \
     $$PWD/Differential/CompareGeometry.cpp \
+    $$PWD/Differential/CompareSurrogate.cpp \
     $$PWD/Differential/CompareProblem.cpp \
     $$PWD/Differential/CompareMatrix.cpp \
     $$PWD/Differential/CompareTrajectory.cpp \

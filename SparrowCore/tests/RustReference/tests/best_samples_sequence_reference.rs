@@ -87,6 +87,17 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        Case {
+            name: "exact_equal_loss_distinct_transforms",
+            capacity: 3,
+            threshold: 0.5,
+            operations: vec![
+                clear(0.0, f32::from_bits(0x3f80_0000)),
+                clear(10.0, f32::from_bits(0x3f80_0000)),
+                clear(20.0, f32::from_bits(0x3f80_0000)),
+                clear(30.0, f32::from_bits(0x3f80_0000)),
+            ],
+        },
     ]
 }
 
@@ -119,7 +130,13 @@ fn main_trace() -> Vec<String> {
             let retained = samples
                 .samples
                 .iter()
-                .map(|(_, evaluation)| evaluation_tag(*evaluation))
+                .map(|(transform, evaluation)| {
+                    format!(
+                        "{}={}",
+                        float_bits(transform.translation().0),
+                        evaluation_tag(*evaluation)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(",");
             rows.push(format!(

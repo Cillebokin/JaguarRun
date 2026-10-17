@@ -583,6 +583,13 @@ bool TestBestSamplesSequenceAndNanFailuresMatchRustReference(std::ostream& outpu
         std::memcpy(&value, &bits, sizeof(value));
         return true;
     };
+    const auto encodeFloat = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        std::ostringstream encoded;
+        encoded << std::hex << std::setw(8) << std::setfill('0') << bits;
+        return encoded.str();
+    };
     const auto decodeEvaluation = [&](const std::string& encoded,
                                       sparrow::SampleEval& evaluation) {
         if (encoded == "invalid")
@@ -616,19 +623,15 @@ bool TestBestSamplesSequenceAndNanFailuresMatchRustReference(std::ostream& outpu
         }
         return true;
     };
-    const auto encodeEvaluation = [](const sparrow::SampleEval& evaluation) {
+    const auto encodeEvaluation = [&](const sparrow::SampleEval& evaluation) {
         if (evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID)
         {
             return std::string("invalid");
         }
-        std::uint32_t bits = 0U;
-        std::memcpy(&bits, &evaluation.loss, sizeof(bits));
-        std::ostringstream encoded;
-        encoded << (evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
-                        ? "clear:"
-                        : "collision:")
-                << std::hex << std::setw(8) << std::setfill('0') << bits;
-        return encoded.str();
+        return std::string(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                               ? "clear:"
+                               : "collision:")
+            + encodeFloat(evaluation.loss);
     };
 
     sparrow::BestSamples samples(0U, 0.0F);
@@ -647,7 +650,7 @@ bool TestBestSamplesSequenceAndNanFailuresMatchRustReference(std::ostream& outpu
         }
         if (!headerSeen)
         {
-            if (!Expect(line == "case\tstep\tcapacity\tthreshold_bits\trotation_bits\tx_bits\ty_bits\tevaluation\toutcome\tsize\tretained_best_to_worst\tupper_bound",
+            if (!Expect(line == "case\tstep\tcapacity\tthreshold_bits\trotation_bits\tx_bits\ty_bits\tevaluation\toutcome\tsize\tretained_x_bits_and_eval_best_to_worst\tupper_bound",
                         output,
                         "malformed BestSamples sequence fixture header"))
             {
@@ -741,7 +744,8 @@ bool TestBestSamplesSequenceAndNanFailuresMatchRustReference(std::ostream& outpu
             {
                 actualRetained += ',';
             }
-            actualRetained += encodeEvaluation(sample.second);
+            actualRetained += encodeFloat(static_cast<float>(sample.first.translation.x))
+                + "=" + encodeEvaluation(sample.second);
         }
         if (actualRetained.empty())
         {
@@ -761,9 +765,9 @@ bool TestBestSamplesSequenceAndNanFailuresMatchRustReference(std::ostream& outpu
         }
         ++rowCount;
     }
-    return Expect(headerSeen && rowCount == 40U,
+    return Expect(headerSeen && rowCount == 44U,
                   output,
-                  "BestSamples sequence fixture must cover 32 reports and four two-step NaN cases");
+                  "BestSamples sequence fixture must cover 32 reports, four two-step NaN cases, and four exact-tie steps");
 }
 
 bool TestNonTransitiveSampleEvalSortMatchesRustReference(std::ostream& output)

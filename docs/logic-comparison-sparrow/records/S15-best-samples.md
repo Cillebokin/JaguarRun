@@ -2,9 +2,9 @@
 
 **Rust**: `CodeResource/sparrow/src/sample/best_samples.rs`（107 行）
 **C++**: SparrowCore/Include/SparrowCore/Sampling/BestSamples.h（37 行）+ SparrowCore/Source/Sampling/BestSamples.cpp（178 行）
-**判定**: 接受、正容量淘汰与相似度路径在当前固定参考轨迹上对应；S15 参考覆盖平移 f32 舍入、x/y 的 5% 严格边界、1° 严格边界、NaN/±∞ 平移阈值分类、容量未满/恰满/容量 1 的拒绝与替换，以及 32 项混合非传递插入轨迹。C++ 现先把两个 double 平移坐标各自舍入为 f32，再按 f32 相减，与 Rust `DTransformation` 一致。零容量按 Rust profile 行为处理：Debug 的下溢 panic 对应 C++ `std::underflow_error`；Release 的 wrapping 行为会使集合超过容量，C++ 也保留该结果。当前 LBF 与 Separator 搜索入口都把原始 `nCoordinateDescents` 传给 BestSamples，0 容量会实际触发这些 profile 行为；该基线边界是 Rust 自身的不安全配置，不应将其误写成“正常安全调用点将容量抬至 1”。Rust `sort_by_key` 与 C++ 稳定插入排序在列明的 S10 排列和 S15 32 项序列上逐步匹配；Rust 比较器仍非传递，不能据此保证其他一般序列。正负无穷 loss 可比较；四种固定 BestSamples NaN 比较路径分别验证了失败触发时点或跨 kind 不触发比较，C++ `std::domain_error` 映射 Rust panic。
+**判定**: 接受、正容量淘汰与相似度路径在当前固定参考轨迹上对应；S15 参考覆盖平移 f32 舍入、x/y 的 5% 严格边界、1° 严格边界、NaN/±∞ 平移阈值分类、容量未满/恰满/容量 1 的拒绝与替换、32 项混合非传递插入轨迹，以及不同 transform 的精确同 loss tie。C++ 现先把两个 double 平移坐标各自舍入为 f32，再按 f32 相减，与 Rust `DTransformation` 一致。零容量按 Rust profile 行为处理：Debug 的下溢 panic 对应 C++ `std::underflow_error`；Release 的 wrapping 行为会使集合超过容量，C++ 也保留该结果。当前 LBF 与 Separator 搜索入口都把原始 `nCoordinateDescents` 传给 BestSamples，0 容量会实际触发这些 profile 行为；该基线边界是 Rust 自身的不安全配置，不应将其误写成“正常安全调用点将容量抬至 1”。Rust `sort_by_key` 与 C++ 稳定插入排序在列明的 S10 排列、S15 32 项序列和精确 tie 轨迹上逐步匹配；Rust 比较器仍非传递，不能据此保证其他一般序列。正负无穷 loss 可比较；四种固定 BestSamples NaN 比较路径分别验证了失败触发时点或跨 kind 不触发比较，C++ `std::domain_error` 映射 Rust panic。
 
-C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search trace 的 report/keep 行核对 accepted 标志、retained 数量及保留列表，离散字段精确比较，loss/transform 按各自容差比较。S10 通过真实 BestSamples 消费路径比较七组边界输入的全部六种排列，以及四项非传递链的全部 24 种输入排列；S15 再逐步比较一条 32 项混合插入序列。新增 NaN reference 覆盖满容量 upper-bound 比较失败、相似样本比较失败、插入后排序失败三种触发位置，并验证不同 kind 只按 rank 比较时不触发 NaN loss 比较；每步核对失败/接受结果、样本集合与 upper bound。BestSamples 及其 S15 直接用例不调用 RNG，因此 RNG-after 不适用；搜索编排的 RNG-after 由 S13 trace 检查。证据限定于锁定 Rust 工具链和列出的输入，不证明任意非传递序列。
+C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search trace 的 report/keep 行核对 accepted 标志、retained 数量及保留列表，离散字段精确比较，loss/transform 按各自容差比较。S10 通过真实 BestSamples 消费路径比较七组边界输入的全部六种排列，以及四项非传递链的全部 24 种输入排列；S15 逐步比较 32 项混合插入序列和四项不同 transform、raw loss 完全相同的容量边界轨迹。新增 NaN reference 覆盖满容量 upper-bound 比较失败、相似样本比较失败、插入后排序失败三种触发位置，并验证不同 kind 只按 rank 比较时不触发 NaN loss 比较；每步核对失败/接受结果、样本状态与 upper bound。BestSamples 及其 S15 直接用例不调用 RNG，因此 RNG-after 不适用；搜索编排的 RNG-after 由 S13 trace 检查。证据限定于锁定 Rust 工具链和列出的输入，不证明任意非传递序列。
 
 ## 函数逐条比对
 
@@ -58,10 +58,15 @@ C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search tr
 | 5 | 平移阈值域：NaN/负值不相似，`+∞` 对有限平移差通过 | C++ 与 Rust 的三种边界分类已由实际 BestSamples 路径验证 | 覆盖 NaN、负无穷和正无穷阈值；不替代其他输入的相似度轨迹 | BestSamples.cpp:24-27; best_samples.rs:96-104; BestSamplesBoundaryRustReference.tsv |
 | 6 | Rust debug_assert!（样本唯一性与排序不变量）→ C++ 无对应断言 | Debug-only 检查差异；无正常路径行为影响 | Rust 对不变量失败会 panic；C++ 不额外检查 | best_samples.rs:60-74 |
 | 7 | 相似度边界：x/y 5% 和旋转 1° 均采用严格 `<` | 恰好等于阈值为不相似，紧邻下方为相似；已由 Rust/C++ 实际 BestSamples 路径核对 | 证据限于阈值、相邻 f32 值及列明输入 | best_samples.rs:99-104; BestSamplesBoundaryRustReference.tsv |
+| 8 | 精确同 loss tie：四个彼此不相似的 transform 使用相同 Clear loss raw bits，容量为 3 | Rust/C++ Debug/Release 均接受前三项并按插入顺序保留，第四项因不严格优于 upper bound 而拒绝 | 只证明该固定轨迹，不推广任意非传递比较序列 | BestSamplesSequenceRustReference.tsv; best_samples_sequence_reference.rs; TestLbfLoss.cpp |
 
 ## 结论
 
-BestSamples 的平移 f32 舍入、严格 5%/1° 相似度阈值和正容量淘汰路径已通过 Rust 参考轨迹核对。S15 的 32 项混合非传递插入轨迹与四种 NaN 比较路径逐步比较 accepted/失败结果、集合大小、loss bits 和 upper bound；RustReference Debug/Release 及 SparrowCore C++ Debug/Release 全量测试均通过。NaN 上界和相似项失败时集合未变，排序失败发生在候选 push 后且两项均保留；跨 kind 排序按 rank 通过。容量为零也按 profile 复现 Rust：Debug 下溢对应 C++ `std::underflow_error`；Release 返回成功并允许集合超过容量。该 Release 行为来自 Rust `size - 1` wrapping 后无法命中尾项，是基线缺陷；LBF/Separator 搜索调用点现在保留该原始配置值，使其与 Rust 一致。±Inf 仍可排序。Rust Ord 合同非传递，32 项 fixture 只证明这一条固定插入轨迹，不能据此声称任意序列等价。
+BestSamples 的平移 f32 舍入、严格 5%/1° 相似度阈值和正容量淘汰路径已通过 Rust 参考轨迹核对。S15 的 32 项混合非传递插入轨迹、四种 NaN 比较路径和精确同 loss tie 均逐步比较 accepted/失败结果、集合状态与 upper bound；tie fixture 使用容量 3、四个相距 10 的平移、loss bits `0x3f800000`，前三项按 x 位模式 `00000000,41200000,41a00000` 保留，第四项因与上界相等而拒绝。RustReference Debug/Release 及 SparrowCore C++ Debug/Release 全量测试均通过。NaN 上界和相似项失败时集合未变，排序失败发生在候选 push 后且两项均保留；跨 kind 排序按 rank 通过。容量为零也按 profile 复现 Rust：Debug 下溢对应 C++ `std::underflow_error`；Release 返回成功并允许集合超过容量。该 Release 行为来自 Rust `size - 1` wrapping 后无法命中尾项，是基线缺陷；LBF/Separator 搜索调用点现在保留该原始配置值，使其与 Rust 一致。±Inf 仍可排序。Rust Ord 合同非传递；已验证的 32 项混合序列和 tie fixture 只证明列出的输入，不能据此声称任意序列等价。
+
+### 补充验证（2026-10-17）
+
+扩展 `BestSamplesSequenceRustReference.tsv` 与 `best_samples_sequence_reference.rs`，直接调用锁定 Rust `best_samples.rs`，并让 Rust/C++ 保留列表包含 transform x 位模式；C++ `TestLbfLoss.cpp` 经真实 `BestSamples::Report` 逐步比较 accepted、保留顺序、集合大小及 upper bound。Rust Debug/Release reference 全量校验和 SparrowCore C++ Debug/Release 全量 runner 均通过。该结果关闭 S15 的固定精确 tie 缺口，R3 的任意非传递插入顺序仍未认证。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：107 行逐项覆盖】** best_samples.rs 全量复核：结构（3 字段）、new、report（三分支+排序+双 debug_assert）、best、upper_bound、dtransfs_are_similar——主文 5 小节全覆盖无遗漏。

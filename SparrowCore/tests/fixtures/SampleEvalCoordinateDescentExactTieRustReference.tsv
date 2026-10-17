@@ -1,0 +1,9 @@
+# Coordinate descent trace with candidate and initial losses sharing raw bits 0x3f800000
+# candidate rotation_bits translation_x_bits translation_y_bits
+candidate	3f000000	3f800000	00000000
+candidate	3f000000	40400000	c0000000
+candidate	3f000000	3f800000	3f3504f3
+candidate	3f000000	3f800000	bf3504f3
+candidate	3f000000	3e95f61a	3f87c3b6
+candidate	3f000000	3fda827a	3eb504f3
+result	3f000000	3e95f61a	3f87c3b6	3f800000	6

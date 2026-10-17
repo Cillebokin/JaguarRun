@@ -4,11 +4,15 @@ use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::eval::sample_eval::{SampleEval, SampleEvaluator};
 use sparrow::sample::{CDConfig, refine_coord_desc};
 use std::cmp::Ordering;
+#[cfg(debug_assertions)]
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const REFERENCE: &str =
     include_str!("../../Fixtures/SampleEvalComparatorBoundaryRustReference.tsv");
 const COORDINATE_REFERENCE: &str =
     include_str!("../../Fixtures/SampleEvalCoordinateDescentRustReference.tsv");
+const EXACT_TIE_COORDINATE_REFERENCE: &str =
+    include_str!("../../Fixtures/SampleEvalCoordinateDescentExactTieRustReference.tsv");
 
 #[derive(Clone, Copy)]
 struct ComparatorCase {
@@ -145,6 +149,30 @@ impl SampleEvaluator for ApproximateTieEvaluator {
     }
 }
 
+struct LongImprovementEvaluator {
+    evaluations: usize,
+}
+
+impl SampleEvaluator for LongImprovementEvaluator {
+    fn evaluate_sample(
+        &mut self,
+        _transform: DTransformation,
+        _upper_bound: Option<SampleEval>,
+    ) -> SampleEval {
+        self.evaluations += 1;
+        let loss = if self.evaluations <= 1100 {
+            2000.0 - self.evaluations as f32
+        } else {
+            900.0
+        };
+        SampleEval::Clear { loss }
+    }
+
+    fn n_evals(&self) -> usize {
+        self.evaluations
+    }
+}
+
 fn encode_order(order: &[usize; 3]) -> String {
     order
         .iter()
@@ -201,12 +229,9 @@ fn signed_zero_equality_matches_derived_rust_partial_eq() {
     assert_eq!(positive_zero, negative_zero);
 }
 
-#[test]
-fn coordinate_descent_uses_rust_approximate_tie_ordering() {
+fn coordinate_descent_trace(initial_loss: f32) -> Vec<String> {
     let initial = DTransformation::new(0.5, (2.0, -1.0));
-    let initial_eval = SampleEval::Clear {
-        loss: f32::from_bits(0x3f80_0004),
-    };
+    let initial_eval = SampleEval::Clear { loss: initial_loss };
     let config = CDConfig {
         t_step_init: 1.0,
         t_step_limit: 0.6,
@@ -248,19 +273,94 @@ fn coordinate_descent_uses_rust_approximate_tie_ordering() {
         evaluator.n_evals(),
     ));
 
+    actual_rows
+}
+
+fn assert_coordinate_descent_reference(actual_rows: Vec<String>, reference: &str) {
     if std::env::var_os("SPARROW_DUMP_SAMPLE_EVAL_BOUNDARY_REFERENCE").is_some() {
         for row in &actual_rows {
             println!("{row}");
         }
     }
-    let expected_rows = COORDINATE_REFERENCE
+    let expected_rows = reference
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(str::to_owned)
         .collect::<Vec<_>>();
     assert_eq!(
         actual_rows, expected_rows,
-        "coordinate descent comparator boundary trace changed",
+        "coordinate descent tie trace changed",
+    );
+}
+
+#[test]
+fn coordinate_descent_uses_rust_approximate_tie_ordering() {
+    assert_coordinate_descent_reference(
+        coordinate_descent_trace(f32::from_bits(0x3f80_0004)),
+        COORDINATE_REFERENCE,
+    );
+}
+
+#[test]
+fn coordinate_descent_keeps_first_candidate_for_exact_loss_tie() {
+    assert_coordinate_descent_reference(
+        coordinate_descent_trace(f32::from_bits(0x3f80_0000)),
+        EXACT_TIE_COORDINATE_REFERENCE,
+    );
+}
+
+fn long_coordinate_descent_config() -> CDConfig {
+    CDConfig {
+        t_step_init: 1.0e-30,
+        t_step_limit: 1.0e-31,
+        r_step_init: 0.0,
+        r_step_limit: 0.0,
+        wiggle: false,
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn coordinate_descent_debug_asserts_at_1000_evaluations() {
+    let mut evaluator = LongImprovementEvaluator { evaluations: 0 };
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        refine_coord_desc(
+            (
+                DTransformation::new(0.0, (0.0, 0.0)),
+                SampleEval::Clear { loss: 2000.0 },
+            ),
+            &mut evaluator,
+            long_coordinate_descent_config(),
+            &mut rng,
+        )
+    }));
+
+    assert!(
+        result.is_err(),
+        "Rust Debug must enforce its 1000-evaluation assertion"
+    );
+    assert_eq!(evaluator.n_evals(), 1000);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn coordinate_descent_release_continues_past_1000_evaluations() {
+    let mut evaluator = LongImprovementEvaluator { evaluations: 0 };
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
+    let _ = refine_coord_desc(
+        (
+            DTransformation::new(0.0, (0.0, 0.0)),
+            SampleEval::Clear { loss: 2000.0 },
+        ),
+        &mut evaluator,
+        long_coordinate_descent_config(),
+        &mut rng,
+    );
+
+    assert!(
+        evaluator.n_evals() > 1000,
+        "Rust Release must not enforce the Debug-only 1000-evaluation assertion"
     );
 }
 

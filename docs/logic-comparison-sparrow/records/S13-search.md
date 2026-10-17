@@ -69,7 +69,7 @@ LBF 与 Separator 的锁定 Rust trace 均在最终 Result 后输出 `rng_after 
 - 判定：【参数公式对应；角度字面计算的 ULP 差异详见 S14】
 
 ### 配置边界：零 samples / 零坐标下降
-Rust `SampleConfig` 本身没有对应的运行时校验。`n_coord_descents=0` 会原样传给 `BestSamples::new`（search.rs:242-245）；BestSamples 的零容量在 Rust Debug 下触发 size-1 下溢 panic，在 Release 下因 wrapping 使互不相似的样本可能突破容量（S15）。C++ 搜索调用点现也传入原始容量，不再 clamp 至 1；C++ Debug 以 `std::underflow_error` 对应 Rust panic，Release 保留同类超容量行为。`n_container_samples=0` 在 LBF `ref_pk=None` 路径会跳过采样并返回无候选，两侧均不调用 evaluator；在 `ref_pk=Some` 路径，container/focused 零迭代仍先评估 reference placement，随后执行精化。C++ `SeparatorConfig::Validate` 现只限制 worker 数为正，允许两个采样数为零；Rust/C++ 定向用例覆盖空放置、参考放置与无 sample phase 事件。Rust 默认 `n_focussed_samples=0` 也是有效配置。`search_zero_boundary_reference.rs`、`TestSampling.cpp` 与 `TestSeparator.cpp` 覆盖这些指定边界，不能外推到其他 sampler 创建失败、CD 预算或非零采样轨迹。
+Rust `SampleConfig` 本身没有对应的运行时校验。`n_coord_descents=0` 会原样传给 `BestSamples::new`（search.rs:242-245）；BestSamples 的零容量在 Rust Debug 下触发 size-1 下溢 panic，在 Release 下因 wrapping 使互不相似的样本可能突破容量（S15）。C++ 搜索调用点现也传入原始容量，不再 clamp 至 1；C++ Debug 以 `std::underflow_error` 对应 Rust panic，Release 保留同类超容量行为。`n_container_samples=0` 在 LBF `ref_pk=None` 路径会跳过采样并返回无候选，两侧均不调用 evaluator；在 `ref_pk=Some` 路径，container/focused 零迭代仍先评估 reference placement，随后执行精化。C++ `SeparatorConfig::Validate` 现只限制 worker 数为正，允许两个采样数为零；Rust/C++ 定向用例覆盖空放置、参考放置与无 sample phase 事件。Rust 默认 `n_focussed_samples=0` 也是有效配置。`search_zero_boundary_reference.rs`、`TestSampling.cpp` 与 `TestSeparator.cpp` 覆盖这些指定边界，不能外推到其他 sampler 创建失败、Search-level CD 预算回退或非零采样轨迹；低层 `RefineCoordinateDescent` 的 maxEvaluations 边界和 Rust profile 断言见 S14。
 
 ## 差异汇总表
 
@@ -102,4 +102,4 @@ Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最�
    - Separator `16/8/2` 既有 trace 与新增 `5/3/2` (`SeparatorSearchBudgetRustTrace.tsv`)；新增 trace 共 59 次 evaluator 调用，post-search `next_u64=0x7405e883d0b9af7b`。
 2. **精确 tie**：`SearchExactTie.json` 将 2×2 方形放入 2×2 strip，两个同位置放置形成碰撞；Separator 搜索预算 `5/3/1`。Rust reference 的 reference-placement report 接受 `Collision(loss_bits=0x40afead0)`；focused/container 采样因 transform 和 loss 完全相同而被拒绝。`SeparatorSearchExactTieRustTrace.tsv` 最终 47 次 evaluator 调用，post-search `next_u64=0xdf321e3788bd2ceb`。C++ test 对 Rust 与 C++ trace 都直接断言存在同类、同 loss、同 transform 的“先接受、后拒绝”报告。
 3. **验证**：`cargo fmt` 完成；`verify-rust-reference.ps1` 的 Rust Debug/Release 全套通过；SparrowCore Debug/Release 全量 runner 通过。C++ trace 比较保留既有字段规则，Separator tie 的核心相等判定另用精确 float equality。
-4. **范围**：这轮补的是两组指定的非默认预算和重复同 transform 的同 loss tie。其他预算/配置、不同 transform 的同 loss tie、一般 sampler 失败与 C++ 扩展 CD 预算仍未认证；S13 继续标为部分。
+4. **范围**：这轮补的是两组指定的非默认搜索预算和重复同 transform 的同 loss tie。其他搜索预算/配置、不同 transform 的同 loss tie、一般 sampler 失败与 Search-level CD 预算耗尽后的调用方回退仍未认证；低层 C++ `maxEvaluations` 边界由 S14 单独覆盖；S13 继续标为部分。

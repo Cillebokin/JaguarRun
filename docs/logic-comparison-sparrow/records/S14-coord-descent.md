@@ -4,7 +4,7 @@
 **C++**: `SparrowCore/Include/SparrowCore/Sampling/CoordinateDescent.h`（32 行）+ `SparrowCore/Source/Sampling/CoordinateDescent.cpp`（239 行）
 **判定**: 候选方向、状态更新和随机轴映射结构对应；CD 角度常量已改为 Rust 等价的 factor-first `f32` 换算，并以位模式和实际 LBF/worker 消费路径回归核验
 
-C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/State` 辅助类型，与 Rust 的 `refine_coord_desc` + `CoordinateDescent`/`CDAxis` 结构一一对应。主 fixture `SamplingCoordinateDescentRustReference.tsv` 含 8 条 sample、54 条 coordinate 和 1 条 result；测试对候选与结果按数值容差比较（变换 1e-6、loss 1e-5），不做逐位相等断言。另一个 `SampleEvalCoordinateDescentRustReference.tsv` 专门覆盖 FPA 近似并列：候选 loss 比初始值好 4 ULP，但比较器判为相等，Rust/C++ 对候选访问顺序、最终变换/loss 和评估数进行对照。该用例覆盖近似并列规则，不代表 loss 位模式完全相同的精确相等输入已单独覆盖。
+C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/State` 辅助类型，与 Rust 的 `refine_coord_desc` + `CoordinateDescent`/`CDAxis` 结构一一对应。主 fixture `SamplingCoordinateDescentRustReference.tsv` 含 8 条 sample、54 条 coordinate 和 1 条 result；测试对候选与结果按数值容差比较（变换 1e-6、loss 1e-5），不做逐位相等断言。`SampleEvalCoordinateDescentRustReference.tsv` 覆盖候选比初始 loss 好 4 ULP、但 FPA comparator 判等的近似 tie；新增 `SampleEvalCoordinateDescentExactTieRustReference.tsv` 覆盖候选和初始 loss 位模式完全相同的精确 tie。两条 Rust/C++ trace 均逐行核对候选顺序、最终变换/loss bits 和评估数；结论限于所列 fixture。
 
 ## 函数逐条比对
 
@@ -19,7 +19,7 @@ C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/S
   2. ask→evaluate→选 best 循环（Rust :46-58）：`while let Some(c) = cd.ask()`；两候选各评估一次；`c.into_iter().zip(c_eval).min_by_key(|(_, eval)| *eval)` 取最小。Rust `Iterator::min_by_key` 在多个元素并列最小时返回**第一个**（[标准库文档](https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.min_by_key)）。C++（cpp:189-234）逐一评估（:205-216），`bestIndex = IsBetterSample(evaluated[1].second, evaluated[0].second) ? 1 : 0`（:218-219），近似相等时比较器不认为候选 1 更优，因此同样选 index 0。Rust/C++ 专项近似并列 fixture 已验证这一 FPA 相等情形；两侧 tie-break 一致。【指定近似并列输入一致】
   3. 返回 `(cd.pos, cd.eval)`（Rust :61）↔ C++ `FromValue({state.position, state.evaluation})`（cpp:236-237）。【一致】
 - 判定：【一致】（并列选择方向一致；其余逐行等价）
-- 证据：上述行号；主 fixture `SamplingCoordinateDescentRustReference.tsv` 的 54 条 coordinate 候选在 TestSampling.cpp:868-893 按容差比对通过；`SampleEvalCoordinateDescentRustReference.tsv` 由 Rust `coordinate_descent_uses_rust_approximate_tie_ordering` 与 C++ `TestCoordinateDescentApproximateTieMatchesRustReference` 比较候选序列、结果位模式与评估数。它覆盖 FPA 近似并列，不证明任意浮点输入逐位相等。
+- 证据：上述行号；主 fixture `SamplingCoordinateDescentRustReference.tsv` 的 54 条 coordinate 候选在 TestSampling.cpp:868-893 按容差比对通过；两个 `SampleEvalCoordinateDescent*RustReference.tsv` fixture 分别由 Rust 近似 tie/精确 tie 测试与 C++ `TestCoordinateDescentTieMatchesRustReference` 比较候选序列、结果位模式与评估数。它们覆盖列明的两种相等边界，不证明任意浮点输入逐位相等。
 
 ### `CoordinateDescent::ask`（coord_descent.rs:87-112）
 - C++ 对应：`HasCandidates`（cpp:75-82）+ `BuildCandidates`（cpp:84-130）。三处细节：
@@ -53,23 +53,29 @@ C++ 为自由函数 `RefineCoordinateDescent` + 匿名命名空间内的 `Axis/S
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | `CDConfig` 额外字段 `maxEvaluations`（默认 SIZE_MAX）+ 配置/初始变换有限性校验 | C++ 额外 | 正常路径无影响；预算触发时返回 TimeLimit 错误（Rust 无此通道） | CoordinateDescent.h:23, cpp:51-63,165-177,198-212 vs coord_descent.rs 全文 |
-| 2 | 两候选 loss 按 FPA 比较并列时的选择：Rust `min_by_key` 与 C++ 严格优胜比较均保留第一个候选 | 固定近似并列用例一致 | 4 ULP 更优候选被比较器判为相等；该 fixture 不覆盖 loss 位模式完全相等的独立输入 | coord_descent.rs:50-52; `SampleEvalCoordinateDescentRustReference.tsv`; Rust `coordinate_descent_uses_rust_approximate_tie_ordering`; C++ `TestCoordinateDescentApproximateTieMatchesRustReference` |
+| 2 | 两候选 loss 按 FPA 比较并列时的选择：Rust `min_by_key` 与 C++ 严格优胜比较均保留第一个候选 | FPA 近似并列与 raw bits 完全相同的精确并列均有固定 trace | 固定 fixture 覆盖两类输入；不证明任意浮点输入逐位相同 | coord_descent.rs:50-52; 两个 `SampleEvalCoordinateDescent*RustReference.tsv`; Rust 近似/精确 tie tests; C++ `TestCoordinateDescentTieMatchesRustReference` |
 | 3 | Rust `debug_assert!`（1000 eval 上限）→ C++ Result 错误通道 | 差异 | 既定形态差异（panic→Result） | coord_descent.rs:57 vs cpp:198-201 |
 | 4 | Rust `trace!` 日志 → C++ 无 | 差异 | 无行为影响 | coord_descent.rs:56,59 |
 | 5 | 角度步长常量：Rust f32 `to_radians()` vs C++ conversion | 已修复（factor-first `f32` 计算） | 旧 C++ `degrees * PI / 180` 对 5° 得 `0x3db2b8c3`，Rust 为 `0x3db2b8c2`；共享 `RustF32DegreesToRadians` 后，5°/1°/0.5°/0.05° 四项 raw bits 精确匹配。LBF search 与 Separator worker 的 Rust reference traces 继续验证实际候选/结果 | `consts.rs:20,26`; `CoordinateDescent.h::RustF32DegreesToRadians`; `LbfSearch.cpp`; `SeparatorWorker.cpp`; `TestSampling.cpp`; `rotation_reference.rs` |
 
 ## 结论
 
-坐标下降的状态机和五轴候选公式可对应。旧角度常量表达式在 5° 下曾稳定复现 1 ULP 差异；当前 LBF 与 Separator worker 共用 factor-first `f32` 转换，5°/1°/0.5°/0.05° 分别与 Rust `to_radians()` raw bits 一致。LBF/worker Rust reference traces 和 FPA 近似并列专项 fixture 均通过 Debug/Release；精确相同 loss 的独立 tie fixture 尚未建立。C++ 另有评估预算/配置校验；搜索调用点原样传递零坐标下降数，因此 BestSamples 的零容量 Debug/Release 行为按 Rust 基线复现（见 S13/S15）。
+坐标下降的状态机和五轴候选公式可对应。旧角度常量表达式在 5° 下曾稳定复现 1 ULP 差异；当前 LBF 与 Separator worker 共用 factor-first `f32` 转换，5°/1°/0.5°/0.05° 分别与 Rust `to_radians()` raw bits 一致。LBF/worker reference traces、FPA 近似并列与 raw-bit 精确并列 fixture 均在 Debug/Release 通过。C++ `maxEvaluations` 是 Rust 没有的扩展：C++ 预算 0/1/2 的错误时点、评估数和 RNG 副作用已有断言；Rust Debug 在累计 1000 次评估后触发 `debug_assert!`，Release 继续运行，C++ 默认配置也已验证可超过 1000 次。该预算扩展按各自运行契约记录，不宣称参数级 parity。搜索调用点原样传递零坐标下降数，因此 BestSamples 的零容量 Debug/Release 行为按 Rust 基线复现（见 S13/S15）。
 
 ### 实现与回归验证（2026-10-09）
 1. RustReference `coordinate_descent_degree_constants_match_rust_f32_to_radians` 锁定 `[5°, 1°, 0.5°, 0.05°]` 的位模式 `[0x3db2b8c2, 0x3c8efa35, 0x3c0efa35, 0x3a64c388]`。
 2. C++ RED 在旧表达式下首项为 `0x3db2b8c3`，证明 1 ULP 差异；改用 `RustF32DegreesToRadians(degrees)` 后四项与 Rust 相同。LBF Search 和 SeparatorWorker 两个生产配置入口都调用该 helper。
 3. 角度换算修复时 RustReference Debug/Release 的 87 个 integration tests 与 SparrowCore 全量 runner 通过（当时包含 LBF search trace 与 Separator worker 对照）；随后新增 S14/S16 references 后各为 94 个；2026-10-09 加入 S03 扩宽、零采样和 S04 空 round 三个 Rust 测试后当前各为 97 个测试函数，见 README。证据限于当前 Windows x64 MSVC/Rust 1.98.1 scalar profile。
 
+### 收口复核（2026-10-17）
+1. `SampleEvalCoordinateDescentExactTieRustReference.tsv` 固定 seed=42、初始 loss 与 evaluator 返回 loss 均为 `0x3f800000`；Rust `min_by_key` 与 C++ 严格优胜比较都选取候选对中的第一个。两侧逐行比较 6 次候选评估、最终 transform/loss bits 和评估数。
+2. C++ 预算边界用例核对 `maxEvaluations=0` 在评估和 RNG 消耗前返回 `TimeLimit`；预算为 1 时完成首个候选评估后、第二候选前返回 `TimeLimit`，仅消耗轴初始化随机数；预算为 2 的完整候选对超限路径由既有 `TestCoordinateDescentAxesAndBudget` 覆盖。默认预算测试确认可超过 1000 次评估。
+3. Rust 共享长轨迹 evaluator：Debug 捕获 `debug_assert!` 并确认评估计数恰为 1000；Release 完成超过 1000 次评估。该断言是 Debug-only 源行为，C++ 的 `maxEvaluations` 是单独的调用限制。
+4. 验证：`verify-rust-reference.ps1` 在 Rust Debug/Release 全套测试通过；SparrowCore Debug/Release 全量 runner 通过；`cargo fmt --check` 通过。范围限于锁定 Rust 1.98.1、Windows x64 MSVC、当前 scalar feature 与列明输入。
+
 ### 补充审计（2026-09-29）
 1. **【核对确认：180 行逐项覆盖】** coord_descent.rs 全量复核：CDConfig（5 字段）、refine_coord_desc、CoordinateDescent 结构（8 字段）、ask、tell、CDAxis（5 变体+random）——主文 5 小节全覆盖无遗漏。
 2. **【2026-10-06 更正：min_by_key 并列语义】** 先前审计把 Rust `Iterator::min_by_key` 的并列规则记反了。标准库规定多个最小键并列时返回**第一个**；C++ 的 `IsBetterSample(candidate1, candidate0) ? 1 : 0` 在并列时也选择 0。差异表已改为一致。截至 2026-10-06 尚无针对并列键的专门用例；2026-10-09 已补 FPA 近似并列 reference，结论更新见主文与本节第 5 条。
-3. **【核对确认：tell 的 !worse 更新含 Equal】** Rust `if !worse` 和 C++ `if (!worse)` 在 Equal 时都接受所选候选（coord_descent.rs:121-124；cpp:223-227）。S14 近似并列 fixture 现覆盖该 FPA 相等路径；精确同位模式 loss 的独立轨迹仍未建立。
+3. **【核对确认：tell 的 !worse 更新含 Equal】** Rust `if !worse` 和 C++ `if (!worse)` 在 Equal 时都接受所选候选（coord_descent.rs:121-124；cpp:223-227）。2026-10-17 新增的精确 tie fixture 与原 FPA 近似并列 fixture 分别覆盖同位模式和 comparator 判等路径。
 4. **【核对确认：CDAxis::random 的 4..6 双值映射】** `0..6` 时 4、5 均映射 Wiggle（coord_descent.rs:171-178）——即 Wiggle 被抽中概率 2/6、其余各 1/6；C++ `UniformIndex(6U)` switch 同映射（cpp:34-47）。主文"switch 映射完全相同"判定成立，此概率分布细节补记供后续验证随机流。
 5. **【2026-10-09 执行记录：FPA 近似并列】** Rust fixture 以初始 loss `0x3f800004` 和 4 ULP 更优的候选触发 comparator equality，记录候选序列及最终结果；C++ comparator fixture 复用同一 TSV，Rust Debug/Release 与 SparrowCore Debug/Release 均通过。该用例证明该近似并列输入下保留首候选及评估轨迹一致；不覆盖精确同 loss 位模式的独立组合或任意 evaluator。

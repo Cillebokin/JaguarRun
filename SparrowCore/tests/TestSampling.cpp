@@ -2285,6 +2285,66 @@ bool TestCoordinateDescentAxesAndBudget(std::ostream& output)
     return true;
 }
 
+bool TestCoordinateDescentEvaluationBudgetBoundaries(std::ostream& output)
+{
+    const jaguar::Transform2d initialTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {10.0, 20.0});
+    const sparrow::SampleEval initialEval{
+        sparrow::SampleKind::SAMPLE_KIND_CLEAR, 0.0F};
+    sparrow::CoordinateDescentConfig config;
+    config.translationStepInit = 1.0F;
+    config.translationStepLimit = 0.5F;
+    config.rotationStepInit = 0.0F;
+    config.rotationStepLimit = 0.0F;
+    config.rotationWiggle = false;
+
+    config.maxEvaluations = 0U;
+    CoordinateTestEvaluator zeroBudgetEvaluator(CoordinateTestEvaluator::Mode::Worse);
+    sparrow::SparrowRng zeroBudgetRng(42U);
+    sparrow::SparrowRng zeroBudgetControlRng(42U);
+    const auto zeroBudgetResult = sparrow::RefineCoordinateDescent(
+        {initialTransform, initialEval},
+        zeroBudgetEvaluator,
+        config,
+        zeroBudgetRng);
+    if (!Expect(!zeroBudgetResult.HasValue()
+                    && zeroBudgetResult.GetError().code == jaguar::ErrorCode::TimeLimit,
+                output,
+                "Zero coordinate descent budget must return TimeLimit"))
+    {
+        return false;
+    }
+    if (!Expect(zeroBudgetEvaluator.EvaluationCount() == 0U
+                    && zeroBudgetRng.State() == zeroBudgetControlRng.State(),
+                output,
+                "Zero coordinate descent budget must not evaluate or consume RNG"))
+    {
+        return false;
+    }
+
+    config.maxEvaluations = 1U;
+    CoordinateTestEvaluator oneBudgetEvaluator(CoordinateTestEvaluator::Mode::Worse);
+    sparrow::SparrowRng oneBudgetRng(42U);
+    sparrow::SparrowRng oneBudgetControlRng(42U);
+    static_cast<void>(oneBudgetControlRng.UniformIndex(4U));
+    const auto oneBudgetResult = sparrow::RefineCoordinateDescent(
+        {initialTransform, initialEval},
+        oneBudgetEvaluator,
+        config,
+        oneBudgetRng);
+    if (!Expect(!oneBudgetResult.HasValue()
+                    && oneBudgetResult.GetError().code == jaguar::ErrorCode::TimeLimit,
+                output,
+                "One coordinate descent evaluation budget must return TimeLimit"))
+    {
+        return false;
+    }
+    return Expect(oneBudgetEvaluator.EvaluationCount() == 1U
+                      && oneBudgetRng.State() == oneBudgetControlRng.State(),
+                  output,
+                  "One evaluation budget must stop between candidates without extra RNG use");
+}
+
 bool TestCoordinateDescentOutcomes(std::ostream& output)
 {
     const jaguar::Transform2d initialTransform =
@@ -2368,16 +2428,21 @@ bool TestCoordinateDescentOutcomes(std::ostream& output)
                   "Worse evaluation must keep the current coordinate and loss");
 }
 
-bool TestCoordinateDescentApproximateTieMatchesRustReference(std::ostream& output)
+bool TestCoordinateDescentTieMatchesRustReference(
+    std::ostream& output,
+    const char* fixtureName,
+    std::uint32_t initialLossBits,
+    const char* tieDescription)
 {
     std::ifstream referenceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
-             "../SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/SampleEvalCoordinateDescentRustReference.tsv",
-             "..\\SparrowCore\\Tests\\Fixtures\\SampleEvalCoordinateDescentRustReference.tsv"})
+    const std::array<std::string, 4> paths = {
+        std::string("SparrowCore/Tests/Fixtures/") + fixtureName,
+        std::string("../SparrowCore/Tests/Fixtures/") + fixtureName,
+        std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + fixtureName,
+        std::string("..\\SparrowCore\\Tests\\Fixtures\\") + fixtureName};
+    for (const std::string& path : paths)
     {
-        referenceFile.open(path);
+        referenceFile.open(path.c_str());
         if (referenceFile.is_open())
         {
             break;
@@ -2385,7 +2450,7 @@ bool TestCoordinateDescentApproximateTieMatchesRustReference(std::ostream& outpu
         referenceFile.clear();
     }
     if (!Expect(referenceFile.is_open(), output,
-                "Rust coordinate-descent comparator boundary trace must be readable"))
+                "Rust coordinate-descent tie trace must be readable"))
     {
         return false;
     }
@@ -2402,8 +2467,7 @@ bool TestCoordinateDescentApproximateTieMatchesRustReference(std::ostream& outpu
     const jaguar::Transform2d initialTransform =
         jaguar::Transform2d::FromRotationTranslation(0.5, {2.0, -1.0});
     const sparrow::SampleEval initialEvaluation{
-        sparrow::SampleKind::SAMPLE_KIND_CLEAR,
-        FloatFromBits(0x3f800004U)};
+        sparrow::SampleKind::SAMPLE_KIND_CLEAR, FloatFromBits(initialLossBits)};
     sparrow::CoordinateDescentConfig config;
     config.translationStepInit = 1.0F;
     config.translationStepLimit = 0.6F;
@@ -2464,9 +2528,10 @@ bool TestCoordinateDescentApproximateTieMatchesRustReference(std::ostream& outpu
             }
         }
     }
-    return Expect(actualRows == expectedRows,
-                  output,
-                  "SparrowCore coordinate descent comparator-boundary trace must match Rust");
+    const std::string message =
+        std::string("SparrowCore coordinate descent ") + tieDescription
+        + " tie trace must match Rust";
+    return Expect(actualRows == expectedRows, output, message.c_str());
 }
 
 bool TestCoordinateDescentDefaultBudgetMatchesRust(std::ostream& output)
@@ -3176,9 +3241,19 @@ bool RunSamplingTests(std::ostream& output)
         && TestRustSamplingCoordinateDescentTrace(output)
         && TestLocalSearchSampler(output)
         && TestCoordinateDescentAxesAndBudget(output)
+        && TestCoordinateDescentEvaluationBudgetBoundaries(output)
         && TestCoordinateDescentDefaultBudgetMatchesRust(output)
         && TestCoordinateDescentOutcomes(output)
-        && TestCoordinateDescentApproximateTieMatchesRustReference(output)
+        && TestCoordinateDescentTieMatchesRustReference(
+            output,
+            "SampleEvalCoordinateDescentRustReference.tsv",
+            0x3f800004U,
+            "approximate")
+        && TestCoordinateDescentTieMatchesRustReference(
+            output,
+            "SampleEvalCoordinateDescentExactTieRustReference.tsv",
+            0x3f800000U,
+            "exact")
         && TestLbfEvaluatorBasicCollisionAndLoss(output)
         && TestLbfEvaluatorUsesPointOfInaccessibility(output)
         && TestLbfEvaluatorHoleAndQualityFilter(output)

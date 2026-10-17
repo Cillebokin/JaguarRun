@@ -321,6 +321,29 @@ bool TestUniformRectSampler(std::ostream& output)
         }
     }
 
+    const auto signedZeroSampler = sparrow::UniformRectSampler::Create(
+        {0.0, 0.0, 0.0, 5.0}, item.Value(), {-0.0, 0.0, 10.0, 10.0});
+    if (!Expect(signedZeroSampler.HasValue() && signedZeroSampler.Value().has_value(),
+                output,
+                "Signed-zero singleton sample bbox must be feasible"))
+    {
+        return false;
+    }
+    sparrow::SparrowRng signedZeroRng(42U);
+    const jaguar::Transform2d signedZeroSample =
+        signedZeroSampler.Value()->Sample(signedZeroRng);
+    const float signedZeroX = static_cast<float>(signedZeroSample.translation.x);
+    std::uint32_t signedZeroBits = 0U;
+    std::memcpy(&signedZeroBits, &signedZeroX, sizeof(signedZeroX));
+    if (signedZeroBits != 0x0000'0000U)
+    {
+        output << "signed-zero singleton X expected=0x00000000 actual=0x"
+               << std::hex << signedZeroBits << std::dec << '\n';
+        return Expect(false,
+                      output,
+                      "Signed-zero intersection must match Rust f32::max semantics");
+    }
+
     const auto noFitSampler = sparrow::UniformRectSampler::Create(
         {20.0, 0.0, 25.0, 5.0}, item.Value(), roomyContainerBounds);
     if (!Expect(noFitSampler.HasValue() && !noFitSampler.Value().has_value(),

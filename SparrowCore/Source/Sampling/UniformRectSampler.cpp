@@ -19,6 +19,26 @@ UniformRectSamplerResult NoFitSampler()
     return UniformRectSamplerResult::FromValue(std::nullopt);
 }
 
+float RustF32Max(float lhs, float rhs) noexcept
+{
+    if (lhs == rhs && lhs == 0.0F)
+    {
+        // Rust f32::max treats +0.0 as greater than -0.0; std::max keeps lhs.
+        return std::signbit(lhs) ? rhs : lhs;
+    }
+    return lhs < rhs ? rhs : lhs;
+}
+
+float RustF32Min(float lhs, float rhs) noexcept
+{
+    if (lhs == rhs && lhs == 0.0F)
+    {
+        // Rust f32::min treats -0.0 as less than +0.0; std::min keeps lhs.
+        return std::signbit(lhs) ? lhs : rhs;
+    }
+    return lhs < rhs ? lhs : rhs;
+}
+
 constexpr float TWO_PI = 6.28318530717958647692F;
 constexpr std::size_t ROT_N_SAMPLES = 16U;
 
@@ -134,10 +154,10 @@ Result<std::optional<UniformRectSampler>> UniformRectSampler::Create(
             - static_cast<float>(rotatedBounds.yMin);
         const float feasibleYMax = containerYMax
             - static_cast<float>(rotatedBounds.yMax);
-        const float xMin = std::max(feasibleXMin, sampleXMin);
-        const float xMax = std::min(feasibleXMax, sampleXMax);
-        const float yMin = std::max(feasibleYMin, sampleYMin);
-        const float yMax = std::min(feasibleYMax, sampleYMax);
+        const float xMin = RustF32Max(feasibleXMin, sampleXMin);
+        const float xMax = RustF32Min(feasibleXMax, sampleXMax);
+        const float yMin = RustF32Max(feasibleYMin, sampleYMin);
+        const float yMax = RustF32Min(feasibleYMax, sampleYMax);
         if (std::isfinite(xMin) && std::isfinite(xMax)
             && std::isfinite(yMin) && std::isfinite(yMax)
             && xMin <= xMax && yMin <= yMax)

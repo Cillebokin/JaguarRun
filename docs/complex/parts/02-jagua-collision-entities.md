@@ -64,7 +64,7 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 ## 九、疑点、隐含假设与风险
 
-detect_poly_collision 的源码分支存在需要验证的风险：第一阶段通过 collides 检测边，并经 strongest(filter) 忽略被 filter 排除的 hazard；第二阶段遍历虚拟根 hazard 时，Rust 对 Entire 分支执行 unreachable!，未见该分支再次检查 filter。这确认了 Rust 在该分支上的实现行为，但尚未证明合法输入能够让一个被忽略的 hazard 以 Entire 到达此处。min_quality 与 lbf_spp.rs:53-57 提供了候选调用路径，不足以证明“常见”或“可复现”。需用 pinned revision 构造最小合法输入，记录是否 panic；若不可达，应将其登记为不可达分支而不是运行缺陷。C++ 在对应分支返回 true，仍需比较该语义差异是否可观察。
+`detect_poly_collision` 的风险已在 B4a 通过 pinned revision 的运行用例确认可达：过滤掉 virtual-root 中的 Hole/`Entire` 后，Rust 的 containment pass 仍遍历该条目并执行 `unreachable!()`，C++ 返回 false。该结果表明此 Rust 路径的可观察性已经确认；`min_quality` 与 `lbf_spp.rs:53–57` 仍只是候选业务调用路径，不能据此说该失败在排样中常见。处置见 B4a 记录。
 
 第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
 

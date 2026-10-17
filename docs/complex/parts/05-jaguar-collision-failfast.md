@@ -16,7 +16,7 @@
 
 ## 三、碰撞查询的调用链
 
-多边形检测的主路径是 `DetectPolygonCollision`（`CollisionEngine.cpp` 568-599），它调用 `CollectPolygonCollisionsUntil`（486-557）并在首个命中处停止。`CollectPolygonCollisionsUntil` 的第一步是包围盒预筛：`isOutside`（40-45）判断被查询形状的包围盒是否完全落在引擎边界外，若是则直接报告外部障碍物（`Exterior`）的命中，并跳过四叉树遍历。随后它对每条边调用 `NodeCollidesWithEdge` 或 `CollectEdgeCollisionsUntil`，在四叉树节点上递归。对于形状内部包含障碍物的情况，`DetectContainmentCollision`（58-72）以一个代表点（点在多边形内部的 POI）测试，并依据障碍物的 `HazardKind` 与 `scope`（Interior 或 Exterior）决定是否算作碰撞，其真值表与 Rust 版 `detect_containment_collision`（`collision_detection/cd_engine.rs` 233-258）逐条一致，即内部障碍物只在被查询形状位于其内部时才算碰撞，外部障碍物则相反。
+`DetectPolygonCollision`（`CollisionEngine.cpp` 568-599）先检查越界，再逐边调用 `NodeCollidesWithEdge`，最后仅对 virtual root 中的 `Partial` hazard 执行包含检测；它不调用 collector API。`CollectPolygonCollisionsUntil`（486-557）是独立路径：先用 `isOutside`（40-45）处理越界并报告 `Exterior`，随后逐边委托 `CollectEdgeCollisionsUntil`，最后对 `Partial` hazard 做包含检测。`DetectContainmentCollision`（58-76）以代表点（POI）测试包含，并依据 `HazardKind` 与 scope（Interior 或 Exterior）决定碰撞方向；其真值表与 Rust `detect_containment_collision`（`cd_engine.rs` 233-258）相对应。B4a 已另外确认 `DetectPolygonCollision` 的过滤 `Entire` 行为与 pinned Rust 有运行差异。
 
 Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同构：先做边界外检查，再遍历边，最后做包含检测。`collect_poly_collisions_until`（273-325）在 Rust 中同样以回调返回 `bool` 控制提前停止，C++ 的 `stopAfterCollision` 语义与之相同。
 

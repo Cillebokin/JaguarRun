@@ -3,6 +3,7 @@ use geo_types::{LineString, Polygon};
 use jagua_rs::collision_detection::hazards::collector::BasicHazardCollector;
 use jagua_rs::collision_detection::hazards::filter::{HazKeyFilter, NoFilter};
 use jagua_rs::collision_detection::hazards::{Hazard, HazardEntity};
+use jagua_rs::collision_detection::quadtree::QTHazPresence;
 use jagua_rs::collision_detection::{CDEConfig, CDEngine};
 use jagua_rs::entities::{Container, InferiorQualityZone, Item, Layout};
 use jagua_rs::geometry::convex_hull::convex_hull_from_points;
@@ -110,6 +111,69 @@ fn print_buffer_components(name: &str, points: &[(f32, f32)], distance: f64) {
             y_max
         );
     }
+}
+
+fn run_b4a_entire_branch_oracle() {
+    let root = Rect::try_new(0.0, 0.0, 10.0, 10.0).unwrap();
+    let mut engine = CDEngine::new(
+        root,
+        vec![Hazard::new(
+            HazardEntity::Exterior,
+            Arc::new(polygon(&[
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+            ])),
+            false,
+        )],
+        CDEConfig {
+            quadtree_depth: 4,
+            cd_threshold: 8,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+    );
+    engine.register_hazard(Hazard::new(
+        HazardEntity::Hole { idx: 0 },
+        Arc::new(polygon(&[(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)])),
+        false,
+    ));
+
+    let hole_key = engine
+        .hazards_map
+        .iter()
+        .find(|(_, hazard)| matches!(hazard.entity, HazardEntity::Hole { idx: 0 }))
+        .map(|(key, _)| key)
+        .unwrap();
+    let query = polygon(&[(4.1, 4.1), (4.3, 4.1), (4.3, 4.3), (4.1, 4.3)]);
+    let virtual_root = engine.get_virtual_root(query.bbox);
+    let entire_is_present = virtual_root
+        .hazards
+        .iter()
+        .any(|hazard| hazard.hkey == hole_key && matches!(&hazard.presence, QTHazPresence::Entire));
+    assert!(
+        entire_is_present,
+        "probe must reach an Entire hazard in the virtual root"
+    );
+    println!("b4a.virtual_root_contains_filtered_entire={entire_is_present}");
+    println!(
+        "b4a.detect_without_filter={}",
+        engine.detect_poly_collision(&query, &NoFilter)
+    );
+
+    let ignore_hole = HazKeyFilter::from_keys([hole_key]);
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let filtered_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.detect_poly_collision(&query, &ignore_hole)
+    }));
+    std::panic::set_hook(previous_hook);
+    let filtered_outcome = match filtered_result {
+        Ok(true) => "collision",
+        Ok(false) => "clear",
+        Err(_) => "panic",
+    };
+    println!("b4a.detect_filtering_entire={filtered_outcome}");
 }
 
 fn run_collision_parity_oracle() {
@@ -1919,6 +1983,10 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--collision-parity-only") {
         run_collision_parity_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--collision-entire-b4a-parity-only") {
+        run_b4a_entire_branch_oracle();
         return;
     }
     if std::env::args().any(|arg| arg == "--geometry-primitives-parity-only") {

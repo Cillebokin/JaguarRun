@@ -3,7 +3,7 @@
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对照**：`JaguarCore/Include/JaguarCore/Collision/*`、`JaguarCore/Source/Collision/*`  
 **关联工作项**：B4、B5、B6、B9、B11、B13  
-**证据类型**：pinned Rust 与当前 C++ 源码静态核对；未运行碰撞测试或差分对拍
+**证据类型**：pinned Rust 与当前 C++ 静态核对；B4a 的最小 `Entire` 过滤用例已在 Rust 1.98.1 Debug/Release 与 C++ MSVC 2019 x64 Debug/Release 定向 runner 实测。B4 其余矩阵仍未由本轮覆盖
 
 ## `jagua-rs/src/collision_detection/cd_engine.rs`
 
@@ -15,13 +15,24 @@
 | `deregister_hazard_by_entity/key` (72–96) | 按 entity 线性查 key，未找到 `expect` panic；按 key remove 的 `None` 也 `expect` panic；先/后更新树的次序不同，随后 Debug 检 dangling；返回移除 Hazard | `DeregisterHazard(handle)`（178–194）检查无效句柄并返回 `InvalidInput`；不暴露按 entity 注销入口；错误而非 panic |
 | `save/restore` (99–150) | snapshot 只 clone 动态 hazards。restore 将当前动态实体列出，按 entity 做差分：当前有、snapshot 无则移除；snapshot 有、当前无则添加；双方有则不替换 shape 等字段；最后 Debug 断言动态 hazard 数相等。函数无 `Result`，无显式错误恢复 | `Save/Restore`（`CollisionEngine.cpp:736–887`）同样聚焦动态 hazards，但 Restore 校验快照、使用 C++ generation handles，错误以 `Result<void>` 返回，并在更新期间重建/验证内部索引；具体顺序差异由 B4/B6 对拍确认 |
 | `hazards` (153–155) | 按 SlotMap 返回所有 hazards 的借用迭代器（包括静态与动态） | C++ 未提供同形公开全量 hazards iterator；快照只提供 dynamic hazards |
-| `detect_poly_collision` (161–198) | 查询 bbox 未被 CDE bbox 完全包围时立即 `true`（越界视作撞 Exterior）；否则从 virtual root 开始，对输入多边形每条边做树查询。随后只看 root hazard 为 Partial 的 containment 候选；`Entire` 在这一阶段 `unreachable!`。任何边碰撞或 interior/exterior containment 命中返回 true | `DetectPolygonCollision`（`CollisionEngine.cpp:568–599`）采用相同的边检测加包含判定总体路径；C++ 几何实现包含 RustF32 专用 predicates。越界、边界接触及 POI 包含边界需 B4 运行对拍，静态同构不能替代数值验证 |
+| `detect_poly_collision` (161–198) | 查询 bbox 未被 CDE bbox 完全包围时立即 `true`；否则逐边查询 virtual root，再对其中的 hazard 做 containment 检查。第二阶段 `None` 跳过、`Partial` 先检查 filter 再测试包含，而 `Entire` 无条件 `unreachable!`。若 relevant `Entire` 存在，第一阶段会先返回 true；但若 filter 忽略该 hazard，边查询会跳过它，随后第二阶段仍会 panic | `DetectPolygonCollision`（`CollisionEngine.cpp:568–599`）逐边调用 `NodeCollidesWithEdge`，后续 containment 只处理 `Partial` 并应用 filter。`NodeCollidesWithEdge` 的 `Entire → true`（255 行）对应 Rust 第一阶段对 relevant `Entire` 的早退，不对应第二阶段的 Rust `unreachable!`。B4a 实测：合法 Hole 被 filter 忽略后，pinned Rust panic，C++ 返回 false；未过滤时两侧均返回 true |
+
 | `detect_surrogate_collision` (205–224) | 依次变换 fast-fail pole 与 pier，并用整棵 quadtree 查询；任一碰撞早退。仅作快速拒绝，不表示精确多边形检查 | C++ `DetectSurrogateCollision`（657–689）接受 `Surrogate + Transform2d`，通过 Result 报错；C++ 的圆/边碰撞路径在 `CollisionEngine.cpp` 内实现。API 错误形态不同 |
 | `detect_containment_collision` (233–257) | 先以 bbox `almost_relation_to`；Surrounding 测 query POI 是否在 hazard 内，Enclosed 测 hazard POI 是否在 query 内，Disjoint/Intersecting 不做 containment。再按 scope 真值表：Interior 且 contained → collision；Exterior 且非 contained → collision | C++ 匿名函数 `DetectContainmentCollision`（`CollisionEngine.cpp:58–76`）用 `AlmostRelationToRustF32` 和 POI 测试，`interiorScope == contained` 对应上述真值表；精确边界需 B4 fixture |
 | `collect_poly_collisions(_until)` (263–321) | 普通版本以永不停止的 callback 包装 until 版。until 版：若 shape bbox 未在引擎 bbox 内且 collector 没有 Exterior key，则先插 Exterior 并回调；边逐条委托 quadtree collector，回调 true 即早退；最后扫描 virtual-root 的 Partial hazards 做 containment，去重依 key；遍历顺序文档标为 unspecified | C++ `CollectPolygonCollisions[Until]`（454–567）提供同等入口；返回 vector 的重载对实体排序，因而顺序被稳定化；collector until 有 handle/entity 双过滤。C++ API 有显式 `HazardFilter`，Rust 收集接口主要把 collector 自身作为 filter |
 | `collect_surrogate_collisions(_until)` (327–365) | 仅遍历 `shape.surrogate.ff_poles()`；surrogate 缺失返回 false；不会检查 piers，也不构成完整多边形碰撞收集。回调可早停 | C++ `CollectSurrogateCollisionsUntil`（691–735）也基于 pole 集合并返回 `Result<bool>`；C++ 同样有显式错误层。勿与 `detect_surrogate_collision` 的 poles+piers 检查混为一谈 |
 | `get_virtual_root/bbox/haz_key_from_pi_key` (370–399) | 沿完全包围 query bbox 的第一个 child 向下直到无法继续；bbox 返回 root；PItemKey 映射以遍历 hazards 的线性查找，缺失时返回 `None` | C++ `QuadTree::VirtualRootFor/VirtualRootBounds` 与 `CollisionEngine::FindHazardHandle` 提供近似入口；C++ slot/generation 为内部 handle 管理。索引性能与边界由 B4/B6 核实 |
 | `CDEConfig/CDESnapshot` (404–417) | 配置含 quadtree depth、edge-count threshold、item surrogate config；snapshot 仅含动态 hazard Vec | C++ `CDEConfig` 字段名/默认值及 `CollisionSnapshot` 对应类型见 `CollisionEngine.h:20–54`；C++ 另有批量/并行查询配置，不属于 pinned Rust API |
+
+### B4a：虚拟根中的 filtered `Entire` hazard
+
+基线为 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`，Rust 1.98.1。最小输入为 `[0,10]²` CDE bounds、同 bounds 的 Exterior、`[2,8]²` 的合法 Hole、四叉树深度 4，以及位于 Hole 内部的小查询多边形 `[4.1,4.3]²`。运行时确认该 Hole 在 query virtual root 中为 `Entire`。
+
+`NoFilter` 时，输入边查询先命中 `Entire`，Debug/Release 均返回 true，后续 `unreachable!()` 不会执行。使用 `HazKeyFilter` 忽略该 Hole 时，边查询正确跳过它；Rust 随后在 `cd_engine.rs` containment pass 对仍存在于 `virtual_root.hazards` 的 `Entire` 无条件 panic。该 panic 在 Debug 和 Release 均由 oracle 捕获，三个输出键见 `collision_entire_b4a.txt`。
+
+同一输入下 C++ `DetectPolygonCollision` 对 relevant `Entire` 仍由边查询早退；忽略 Hole 后，边查询过滤掉该 hazard，containment pass 只访问 `Partial`，最终返回 false。MSVC 2019 x64 Debug/Release 定向 runner 均通过，Release 测试断言启用。
+
+**处置**：B4a 核对完成，确认这是 pinned Rust 上可达的 panic 与 C++ 正常 false 返回之间的运行时差异。过滤器契约是忽略指定 hazard；该输入下 false 符合查询语义，因此不把 Rust panic 映射成 C++ 碰撞或失败，也未改生产算法。将 pinned 行为作为上游缺陷/兼容性残差登记；结论限定于此固定合法输入，B4 整体仍为部分。
 
 ## `jagua-rs/src/collision_detection/hazards/hazard.rs`
 

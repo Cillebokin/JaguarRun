@@ -1,0 +1,5 @@
+# jagua-rs revision f5e2b5ffd14931f17a20ce283a2122e877953ceb / Rust 1.98.1
+# --collision-entire-b4a-parity-only; Debug and Release output are identical
+b4a.virtual_root_contains_filtered_entire=true
+b4a.detect_without_filter=true
+b4a.detect_filtering_entire=panic

@@ -1457,11 +1457,43 @@ std::shared_ptr<const jaguar::SimplePolygon> rectangleShape(
 
 void runCollisionDifferentialTests()
 {
+    const ReferenceMap b4aReference = loadReferenceMap("collision_entire_b4a.txt");
+    assert(referenceValue(b4aReference,
+                         "b4a.virtual_root_contains_filtered_entire") == "true");
+    assert(referenceValue(b4aReference, "b4a.detect_without_filter") == "true");
+    assert(referenceValue(b4aReference, "b4a.detect_filtering_entire") == "panic");
+
     const auto bounds = jaguar::Rect2d::Create(0.0, 0.0, 10.0, 10.0);
     assert(bounds.HasValue());
     jaguar::CDEConfig config{};
     config.quadtreeDepth = 4;
     config.cdThreshold = 8;
+
+    // Pinned Rust panics in the post-edge Entire arm if the filter removes
+    // that hazard; C++ preserves the filter contract and reports no collision.
+    jaguar::CollisionEngine entireFilterEngine(bounds.Value(), config);
+    const auto entireExterior = entireFilterEngine.RegisterHazard({
+        {jaguar::HazardKind::Exterior, 0, 0, 0},
+        rectangleShape(0.0, 0.0, 10.0, 10.0), false});
+    assert(entireExterior.HasValue());
+    const auto entireHole = entireFilterEngine.RegisterHazard({
+        {jaguar::HazardKind::Hole, 0, 0, 0},
+        rectangleShape(2.0, 2.0, 8.0, 8.0), false});
+    assert(entireHole.HasValue());
+    const auto filteredEntireQuery = jaguar::SimplePolygon::Create({
+        {4.1, 4.1}, {4.3, 4.1}, {4.3, 4.3}, {4.1, 4.3}});
+    assert(filteredEntireQuery.HasValue());
+    assert(entireFilterEngine.DetectPolygonCollision(
+        filteredEntireQuery.Value(), jaguar::NoFilter{}));
+    jaguar::HazardFilter ignoreEntireHole{};
+    ignoreEntireHole.irrelevantHandle =
+        [handle = entireHole.Value()](jaguar::HazardHandle candidate,
+                                      const jaguar::HazardEntity&) {
+            return candidate == handle;
+        };
+    assert(!entireFilterEngine.DetectPolygonCollision(
+        filteredEntireQuery.Value(), ignoreEntireHole));
+
     jaguar::CollisionEngine engine(bounds.Value(), config);
 
     const auto dynamic = engine.RegisterHazard({

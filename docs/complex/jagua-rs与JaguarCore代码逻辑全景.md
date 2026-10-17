@@ -28,7 +28,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 
 本文区分源码可直接确认的实现事实、由实现推导的风险和待运行验证的行为。文中 Rust 路径主要指向 CodeResource/jagua-rs 本地镜像；此前记录该镜像与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在文件差异。oracle 配置已统一不代表旧分析和 fixture 已自动按该 revision 更新；凡依赖 Rust 行为的结论，应注明参考 revision，并在 E4 完成后复核。
 
-在 CodeResource/jagua-rs 本地镜像中已确认一处分支实现差异：cd_engine.rs 174–179 行 Rust 对虚拟根第二阶段的 Entire 分支执行 unreachable!，而 JaguarCore 对应分支返回 true。该差异尚未对照 oracle 锁定的 f5e2b5f revision，也不能证明合法输入会到达此分支。原先“大面积低质量区是常见触发路径”的表述证据不足，应保留为待复现假设。后续用 pinned revision 构造最小合法用例，验证 filter 忽略的 Entire hazard 能否触发；运行结果决定是否按运行缺陷处理。
+B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小合法输入确认：虚拟根中的 Hole/`Entire` 若未被过滤，两侧边查询均早退返回 true；若 `HazKeyFilter` 忽略该 Hole，Rust 先在边查询中跳过它，再在 containment pass 的无条件 `unreachable!()` panic，C++ 仅处理 `Partial` 并返回 false。C++ 的 `NodeCollidesWithEdge` `Entire → true` 对应的是 Rust 第一阶段，不是出问题的 containment 分支。该输入证明路径可达，但不证明实际排样中常见。因 filter 的契约是忽略指定 hazard，保留 C++ false 处理，不传播 Rust panic，并将其登记为 pinned Rust 的已知兼容性差异；见 B4a 执行记录。
 
 其二，Rust filter.rs 中 from_irrelevant_qzones 的条件为 quality < required_quality，而其注释写成忽略质量高于或等于阈值的区域，源码和注释方向相反。container.rs 与 item.rs 的注释提供了业务语义线索，但尚不足以单独决定实现哪一侧有误。须先确认业务契约，再用最小实例验证放置接受/拒绝结果。
 
@@ -38,7 +38,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 
 待核实的问题较多，以下条目仍需按目标 revision 与最小用例验证。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一问题；平行/共线边与自相交检测的关系；piers.rs:57 的 forfeit_distance 量纲；debug_assertions 对 piers 参数的影响；同心圆 bounding_circle 的 NaN 边界；BPP 未放置物品的处理；Layout 与 MSPProblem 的失败原子性；无布局 Density 的 NaN；JSON、SVG、MSPP 边界。bounds-only RegisterHazard 以对角 Edge 近似包围盒且不向子节点分发，但全仓库无调用者，直接查询影响未验证，应记录为未使用扩展路径风险。除明确标注为源码事实的项目外，这些均不应仅凭静态阅读写成已复现缺陷。
 
-本文结论按静态源码事实、由源码推导的风险和待复现行为区分。本次文档修订没有运行构建或测试；当前工作区可找到 cargo/rustc，项目 oracle 配置为 Rust 1.98.1，但是否能成功运行、下载依赖或生成 fixture 尚未在此验证。10 月 16 日 SparrowCore 测试与 SparrowCli 的 MSVC 执行记录见移植工作项清单第十四节，由用户提供；这些记录不覆盖 JaguarCore 的 MSVC 验证，本次也未独立复跑。优先为 Entire/filter 路径和质量区语义补最小输入，再按固定 revision 复验其他疑点。
+本文结论按静态源码事实、源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；10 月 17 日已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过；完整 `JaguarCoreTests.exe` 未运行。10 月 16 日 SparrowCore 与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 全量验证。下一步先处理 B4b 的质量比较方向，再按固定 revision 复验其他疑点。
 
 
 ---
@@ -147,7 +147,7 @@ LBF 的预算切分为 `n_samples × ls_frac` 用于局部搜索，其余用于�
 # 附录 B：jagua-rs 碰撞检测与实体
 
 
-范围与约定：本文覆盖 jagua-rs/src/collision_detection/**、jagua-rs/src/entities/** 及必要的 lbf 调用链。文中路径相对 CodeResource/jagua-rs 本地镜像。此前记录该镜像与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在文件差异，因此涉及 Rust 行为的结论应注明目标基线，并在 E4 fixture 复核完成后重新核验。本次文档修订没有运行构建或测试；本地可找到 cargo/rustc，但工具可用不代表测试或 fixture 已通过。
+范围与约定：本文覆盖 jagua-rs/src/collision_detection/**、jagua-rs/src/entities/** 及必要的 lbf 调用链。文中路径主要相对 CodeResource/jagua-rs 本地镜像；该镜像与 JaguarCore/tools/RustOracle 锁定的 Git revision `f5e2b5f` 存在文件差异，因此 Rust 行为结论以对应记录注明的基线为准。B2 与 B4a 已按 Rust 1.98.1 和该 pinned revision 复核；其他行为仍需逐项对照，不能由这两项结果外推。
 
 ## 一、数据结构总览与所有权
 
@@ -211,7 +211,7 @@ filter 与 collector 的关系需要特别留意。`HazardFilter` trait（`hazar
 
 ## 九、疑点、隐含假设与风险
 
-detect_poly_collision 的源码分支存在需要验证的风险：第一阶段通过 collides 检测边，并经 strongest(filter) 忽略被 filter 排除的 hazard；第二阶段遍历虚拟根 hazard 时，Rust 对 Entire 分支执行 unreachable!，未见该分支再次检查 filter。这确认了 Rust 在该分支上的实现行为，但尚未证明合法输入能够让一个被忽略的 hazard 以 Entire 到达此处。min_quality 与 lbf_spp.rs:53-57 提供了候选调用路径，不足以证明“常见”或“可复现”。需用 pinned revision 构造最小合法输入，记录是否 panic；若不可达，应将其登记为不可达分支而不是运行缺陷。C++ 在对应分支返回 true，仍需比较该语义差异是否可观察。
+`detect_poly_collision` 的风险已在 B4a 通过 pinned revision 的运行用例确认可达：过滤掉 virtual-root 中的 Hole/`Entire` 后，Rust 的 containment pass 仍遍历该条目并执行 `unreachable!()`，C++ 返回 false。该结果表明此 Rust 路径的可观察性已经确认；`min_quality` 与 `lbf_spp.rs:53–57` 仍只是候选业务调用路径，不能据此说该失败在排样中常见。处置见 B4a 记录。
 
 第二个疑点在 from_irrelevant_qzones（filter.rs:113-135）。源码条件 quality < required_quality 与函数注释中“质量高于或等于要求的区域被忽略”方向相反；container.rs:86 说明质量越高越好，item.rs:52 将 min_quality 描述为最低质量要求。这确认了代码与注释不一致，但业务要求究竟是忽略低质量区还是高质量区，尚需以产品契约和最小实例确认。当前应记录为“源码/注释冲突，语义待决”，不能直接定性为算法错误。
 
@@ -427,7 +427,7 @@ Debug 与 Release 的行为差异需要特别说明。`assert` 在失败时直�
 
 ## 三、碰撞查询的调用链
 
-多边形检测的主路径是 `DetectPolygonCollision`（`CollisionEngine.cpp` 568-599），它调用 `CollectPolygonCollisionsUntil`（486-557）并在首个命中处停止。`CollectPolygonCollisionsUntil` 的第一步是包围盒预筛：`isOutside`（40-45）判断被查询形状的包围盒是否完全落在引擎边界外，若是则直接报告外部障碍物（`Exterior`）的命中，并跳过四叉树遍历。随后它对每条边调用 `NodeCollidesWithEdge` 或 `CollectEdgeCollisionsUntil`，在四叉树节点上递归。对于形状内部包含障碍物的情况，`DetectContainmentCollision`（58-72）以一个代表点（点在多边形内部的 POI）测试，并依据障碍物的 `HazardKind` 与 `scope`（Interior 或 Exterior）决定是否算作碰撞，其真值表与 Rust 版 `detect_containment_collision`（`collision_detection/cd_engine.rs` 233-258）逐条一致，即内部障碍物只在被查询形状位于其内部时才算碰撞，外部障碍物则相反。
+`DetectPolygonCollision`（`CollisionEngine.cpp` 568-599）先检查越界，再逐边调用 `NodeCollidesWithEdge`，最后仅对 virtual root 中的 `Partial` hazard 执行包含检测；它不调用 collector API。`CollectPolygonCollisionsUntil`（486-557）是独立路径：先用 `isOutside`（40-45）处理越界并报告 `Exterior`，随后逐边委托 `CollectEdgeCollisionsUntil`，最后对 `Partial` hazard 做包含检测。`DetectContainmentCollision`（58-76）以代表点（POI）测试包含，并依据 `HazardKind` 与 scope（Interior 或 Exterior）决定碰撞方向；其真值表与 Rust `detect_containment_collision`（`cd_engine.rs` 233-258）相对应。B4a 已另外确认 `DetectPolygonCollision` 的过滤 `Entire` 行为与 pinned Rust 有运行差异。
 
 Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同构：先做边界外检查，再遍历边，最后做包含检测。`collect_poly_collisions_until`（273-325）在 Rust 中同样以回调返回 `bool` 控制提前停止，C++ 的 `stopAfterCollision` 语义与之相同。
 

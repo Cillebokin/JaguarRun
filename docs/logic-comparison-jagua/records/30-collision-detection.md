@@ -2,8 +2,8 @@
 
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对照**：`JaguarCore/Include/JaguarCore/Collision/*`、`JaguarCore/Source/Collision/*`  
-**关联工作项**：B4、B5、B6、B9、B11、B13  
-**证据类型**：pinned Rust 与当前 C++ 静态核对；B4a 的最小 `Entire` 过滤用例已在 Rust 1.98.1 Debug/Release 与 C++ MSVC 2019 x64 Debug/Release 定向 runner 实测。B4 其余矩阵仍未由本轮覆盖
+**关联工作项**：B4、B5、B6、B9、B10、B11、B13  
+**证据类型**：pinned Rust 与当前 C++ 静态核对；B4a 的最小 `Entire` 过滤用例已在 Rust 1.98.1 Debug/Release 与 C++ MSVC 2019 x64 Debug/Release 定向 runner 实测；B10 SoA/AVX2 矩阵已在当前 workspace 的 MSVC 2019 x64 Debug/Release 定向 runner 实测。B4 其余矩阵与物理无 AVX2 主机验证仍未覆盖
 
 ## `jagua-rs/src/collision_detection/cd_engine.rs`
 
@@ -33,6 +33,16 @@
 同一输入下 C++ `DetectPolygonCollision` 对 relevant `Entire` 仍由边查询早退；忽略 Hole 后，边查询过滤掉该 hazard，containment pass 只访问 `Partial`，最终返回 false。MSVC 2019 x64 Debug/Release 定向 runner 均通过，Release 测试断言启用。
 
 **处置**：B4a 核对完成，确认这是 pinned Rust 上可达的 panic 与 C++ 正常 false 返回之间的运行时差异。过滤器契约是忽略指定 hazard；该输入下 false 符合查询语义，因此不把 Rust panic 映射成 C++ 碰撞或失败，也未改生产算法。将 pinned 行为作为上游缺陷/兼容性残差登记；结论限定于此固定合法输入，B4 整体仍为部分。
+
+### B10：SoA、AVX2 与标量回退矩阵（2026-10-17）
+
+Rust 侧没有与 `PolygonSoA`/AVX2 核对应的实现，因此 B10 使用 JaguarCore 的 `Scalar` 模式作参考，不调用 E4 RustOracle。SoA 查询 API 返回 `bool`；模式输出不具备浮点 raw-bit 表示。raw-bit 断言只用于核对 SoA 复制的顶点、边端点和 bounding-box `double` 字段是否与 `SimplePolygon` 字段逐位一致；`intersectsBoundary` 与 `Intersects` 则对 `Scalar`、`Auto`、`Avx2` 返回值做严格布尔比较。
+
+`TestSoa.cpp` 的确定性矩阵使用 3 至 11 个顶点的凸多边形，覆盖 AVX2 每四条边一个 SIMD 批次的整块与 0、1、2、3 条尾项；对每条边构造穿越线，另检查多边形内部线段、包含关系和每个顶点数 128 条固定种子的随机线段。穿越与随机查询使用 tolerance `0`、`1e-9`、`1e-3`；距每条边 `1e-3` 的平行线另在 tolerance `0.5e-3`、`1e-3`、`2e-3` 下检查，覆盖粗筛容差附近的候选；带负零坐标的矩形用于 raw-bit 保留检查。现有矩形烟雾测试继续保留。
+
+定向 runner 按 MSVC 2019 x64 分别使用 Debug/Release 与 AVX2/标量回退构建。四次构建和运行均通过；Release 编译命令带 `/UNDEBUG`、`JAGUARCORE_TEST_RELEASE` 与 `TestReleaseAsserts.h` 强制包含。AVX2 Debug/Release runner 报告 `avx2_compiled=1, avx2_runtime_supported=1`，因此实际执行了 SIMD 核；`CONFIG+=jaguarcore_no_avx2` 的 Debug/Release runner 编译 `SoaGeometryAvx2Fallback.cpp` 并报告 `0/0`。qmake 对 `simd.prf` 发出 `Cannot find feature qt_build_config` 警告，但后续 MSVC 编译、链接和矩阵运行均退出码 0。
+
+**结论**：固定矩阵内未观察到标量、自动派发、AVX2 与编译期标量回退之间的布尔分叉，SoA 复制字段 raw-bit 检查通过。尚未在物理上不支持 AVX2 的 CPU 上运行 AVX2 已编译的二进制，因此运行时 CPUID/XCR0 不支持分支仍缺硬件证据；完整 `JaguarCoreTests.exe` 未运行。B10 对本次固定矩阵完成，硬件验证保留为剩余项，不把结果外推为任意多边形和任意浮点环境下的证明。
 
 ## `jagua-rs/src/collision_detection/hazards/hazard.rs`
 

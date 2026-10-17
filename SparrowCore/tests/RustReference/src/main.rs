@@ -68,6 +68,66 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::write(output_path, tracker_pair_matrix_reference_tsv()?)?;
         return Ok(());
     }
+    if requested_mode.as_deref() == Some("--write-s13-search-references") {
+        let lbf_budget_output = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/LbfSearchBudgetRustTrace.tsv".to_owned());
+        let separator_budget_output = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/SeparatorSearchBudgetRustTrace.tsv".to_owned());
+        let separator_tie_output = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/SeparatorSearchExactTieRustTrace.tsv".to_owned());
+
+        let lbf_instance = read_trace_instance(Path::new("../Fixtures/RustSppSingleItem.json"))?;
+        let separator_input = Path::new("../Fixtures/SeparatorRustTrace.json");
+        let tie_input = Path::new("../Fixtures/SearchExactTie.json");
+
+        let lbf_budget = lbf_search_trace_tsv(
+            &lbf_instance,
+            SampleConfig {
+                n_container_samples: 5,
+                n_focussed_samples: 0,
+                n_coord_descents: 2,
+            },
+            10.0,
+            "RustSppSingleItem.json",
+        );
+        let separator_budget = separator_search_trace_tsv(
+            separator_input,
+            SampleConfig {
+                n_container_samples: 5,
+                n_focussed_samples: 3,
+                n_coord_descents: 2,
+            },
+            8.0,
+            DTransformation::new(0.0, (1.0, 1.0)),
+            "SeparatorRustTrace.json",
+        )?;
+        let separator_tie = separator_search_trace_tsv(
+            tie_input,
+            SampleConfig {
+                n_container_samples: 5,
+                n_focussed_samples: 3,
+                n_coord_descents: 1,
+            },
+            2.0,
+            DTransformation::new(0.0, (1.0, 1.0)),
+            "SearchExactTie.json",
+        )?;
+
+        for (path, contents) in [
+            (lbf_budget_output, lbf_budget),
+            (separator_budget_output, separator_budget),
+            (separator_tie_output, separator_tie),
+        ] {
+            if let Some(parent) = Path::new(&path).parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(path, contents)?;
+        }
+        return Ok(());
+    }
 
     let mut args = env::args().skip(1);
     let input_path = args
@@ -147,8 +207,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         n_focussed_samples: 0,
         n_coord_descents: 1,
     };
-    let search_trace = lbf_search_trace_tsv(&instance);
-    let separator_trace = separator_search_trace_tsv(Path::new(&separator_input_path))?;
+    let lbf_input_name = Path::new(&input_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&input_path);
+    let search_trace = lbf_search_trace_tsv(
+        &instance,
+        SampleConfig {
+            n_container_samples: 16,
+            n_focussed_samples: 0,
+            n_coord_descents: 2,
+        },
+        10.0,
+        lbf_input_name,
+    );
+    let separator_input_name = Path::new(&separator_input_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&separator_input_path);
+    let separator_trace = separator_search_trace_tsv(
+        Path::new(&separator_input_path),
+        SampleConfig {
+            n_container_samples: 16,
+            n_focussed_samples: 8,
+            n_coord_descents: 2,
+        },
+        8.0,
+        DTransformation::new(0.0, (1.0, 1.0)),
+        separator_input_name,
+    )?;
     let separator_round_trace =
         separator_round_trace_tsv(Path::new(&separator_round_input_path), 1, 42)?;
     let separator_multi_worker_round_trace =
@@ -404,12 +491,25 @@ fn uniform_sampler_continuous_grid_reference_tsv() -> Result<String, Box<dyn Err
     Ok(output)
 }
 
-fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -> String {
-    let sample_config = SampleConfig {
-        n_container_samples: 16,
-        n_focussed_samples: 0,
-        n_coord_descents: 2,
-    };
+fn read_trace_instance(
+    input_path: &Path,
+) -> Result<jagua_rs::probs::spp::entities::SPInstance, Box<dyn Error>> {
+    let (external_instance, _) = sparrow::util::io::read_spp_input(input_path)?;
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    Ok(import_instance(&importer, &external_instance)?)
+}
+
+fn lbf_search_trace_tsv(
+    instance: &jagua_rs::probs::spp::entities::SPInstance,
+    sample_config: SampleConfig,
+    strip_width: f32,
+    input_name: &str,
+) -> String {
     let mut builder = LBFBuilder::new(
         instance.clone(),
         Xoshiro256PlusPlus::seed_from_u64(TRACE_SEED),
@@ -417,19 +517,22 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
     );
     builder
         .prob
-        .change_strip_width(10.0)
+        .change_strip_width(strip_width)
         .expect("trace strip width must form a valid container");
     let item = builder.instance.item(0);
     let evaluator = LBFEvaluator::new(&builder.prob.layout, item);
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(TRACE_SEED);
-    let mut output = String::from(
+    let mut output = format!(
         "# generator=Sparrow Rust search_placement with LBFEvaluator\n\
-         # input=RustSppSingleItem.json seed=42 container_width=10 n_container_samples=16 n_focussed_samples=0 n_coord_descents=2\n\
+         # input={input_name} seed=42 container_width={strip_width} n_container_samples={} n_focussed_samples={} n_coord_descents={}\n\
          # eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count\n\
          # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # rng_after next_u64_after_search_hex\n",
+        sample_config.n_container_samples,
+        sample_config.n_focussed_samples,
+        sample_config.n_coord_descents,
     );
     let mut eval_ordinals = [0_usize; 5];
     let mut report_ordinals = [0_usize; 5];
@@ -513,7 +616,13 @@ fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -
     output
 }
 
-fn separator_search_trace_tsv(input_path: &Path) -> Result<String, Box<dyn Error>> {
+fn separator_search_trace_tsv(
+    input_path: &Path,
+    sample_config: SampleConfig,
+    strip_width: f32,
+    initial_transform: DTransformation,
+    input_name: &str,
+) -> Result<String, Box<dyn Error>> {
     let (external_instance, _) = sparrow::util::io::read_spp_input(input_path)?;
     let config = DEFAULT_SPARROW_CONFIG;
     let importer = Importer::new(
@@ -523,8 +632,7 @@ fn separator_search_trace_tsv(input_path: &Path) -> Result<String, Box<dyn Error
     );
     let instance = import_instance(&importer, &external_instance)?;
     let mut problem = SPProblem::new(instance)?;
-    problem.change_strip_width(8.0)?;
-    let initial_transform = DTransformation::new(0.0, (1.0, 1.0));
+    problem.change_strip_width(strip_width)?;
     let moving_key = problem.place_item(SPPlacement {
         item_idx: 0,
         d_transf: initial_transform,
@@ -536,21 +644,19 @@ fn separator_search_trace_tsv(input_path: &Path) -> Result<String, Box<dyn Error
     let tracker = CollisionTracker::new(&problem.layout);
     let moving_item = &problem.layout.placed_items[moving_key].item;
     let evaluator = SeparationEvaluator::new(&problem.layout, moving_item, moving_key, &tracker);
-    let sample_config = SampleConfig {
-        n_container_samples: 16,
-        n_focussed_samples: 8,
-        n_coord_descents: 2,
-    };
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(TRACE_SEED);
-    let mut output = String::from(
+    let mut output = format!(
         "# generator=Sparrow Rust search_placement with SeparationEvaluator\n\
-         # input=SeparatorRustTrace.json seed=42 strip_width=8 n_container_samples=16 n_focussed_samples=8 n_coord_descents=2\n\
+         # input={input_name} seed=42 strip_width={strip_width} n_container_samples={} n_focussed_samples={} n_coord_descents={}\n\
          # cde=quadtree_depth:4 cd_threshold:64 poles:64@0,16@0.8,8@0.9 fail_fast_area_ratio:0.5\n\
          # eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count\n\
          # keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits\n\
          # rng_after next_u64_after_search_hex\n",
+        sample_config.n_container_samples,
+        sample_config.n_focussed_samples,
+        sample_config.n_coord_descents,
     );
     let mut eval_ordinals = [0_usize; 5];
     let mut report_ordinals = [0_usize; 5];

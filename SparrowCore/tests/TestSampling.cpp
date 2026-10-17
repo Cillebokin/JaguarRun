@@ -1118,14 +1118,15 @@ bool ParseSearchKind(const std::string& text,
 bool ReadLbfSearchRustTrace(
     std::vector<sparrow::LbfSearchTraceEvent>& events,
     std::uint64_t& expectedNextU64AfterSearch,
+    const char* fixtureName,
     std::ostream& output)
 {
     std::ifstream traceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/LbfSearchRustTrace.tsv",
-             "../SparrowCore/Tests/Fixtures/LbfSearchRustTrace.tsv",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfSearchRustTrace.tsv",
-             "..\\SparrowCore\\Tests\\Fixtures\\LbfSearchRustTrace.tsv"})
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("../SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + fixtureName})
     {
         traceFile.open(path);
         if (traceFile.is_open())
@@ -1981,23 +1982,30 @@ bool TestUniformSamplerDegenerateBboxRustReference(std::ostream& output)
                   "Rust degenerate-bbox fixture must cover 24 ordered samples");
 }
 
-bool TestRustLbfSearchTrace(std::ostream& output)
+bool TestRustLbfSearchTrace(
+    std::ostream& output,
+    const char* inputFixtureName,
+    const char* traceFixtureName,
+    double stripWidth,
+    std::size_t sampleBudget,
+    std::size_t coordinateDescentCapacity)
 {
     std::vector<sparrow::LbfSearchTraceEvent> expected;
     std::uint64_t expectedNextU64AfterSearch = 0U;
     if (!ReadLbfSearchRustTrace(expected,
                                 expectedNextU64AfterSearch,
+                                traceFixtureName,
                                 output))
     {
         return false;
     }
 
     std::ifstream instanceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
-             "../SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
-             "..\\SparrowCore\\Tests\\Fixtures\\RustSppSingleItem.json"})
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("../SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + inputFixtureName})
     {
         instanceFile.open(path);
         if (instanceFile.is_open())
@@ -2024,7 +2032,7 @@ bool TestRustLbfSearchTrace(std::ostream& output)
         return false;
     }
     jaguar::Strip strip = instance.Value().BaseStrip();
-    if (!Expect(strip.SetWidth(10.0).HasValue(),
+    if (!Expect(strip.SetWidth(stripWidth).HasValue(),
                 output,
                 "LBF search trace strip must resize successfully"))
     {
@@ -2041,8 +2049,8 @@ bool TestRustLbfSearchTrace(std::ostream& output)
     const jaguar::NoFilter filter;
     sparrow::LbfConfig config;
     config.seed = 42U;
-    config.samplesPerItem = 16U;
-    config.nCoordinateDescents = 2U;
+    config.samplesPerItem = sampleBudget;
+    config.nCoordinateDescents = coordinateDescentCapacity;
     sparrow::SparrowRng rng(config.seed);
     std::vector<sparrow::LbfSearchTraceEvent> actual;
     const auto result = sparrow::SearchLbfWithTrace(
@@ -3175,6 +3183,11 @@ bool RunSamplingTests(std::ostream& output)
         && TestLbfEvaluatorUsesPointOfInaccessibility(output)
         && TestLbfEvaluatorHoleAndQualityFilter(output)
         && TestLbfEvaluatorSurrogatePath(output)
-        && TestRustLbfSearchTrace(output)
+        && TestRustLbfSearchTrace(
+            output, "RustSppSingleItem.json", "LbfSearchRustTrace.tsv",
+            10.0, 16U, 2U)
+        && TestRustLbfSearchTrace(
+            output, "RustSppSingleItem.json", "LbfSearchBudgetRustTrace.tsv",
+            10.0, 5U, 2U)
         && TestLbfSearch(output);
 }

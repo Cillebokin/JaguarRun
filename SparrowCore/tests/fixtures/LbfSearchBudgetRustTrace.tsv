@@ -1,0 +1,170 @@
+# generator=Sparrow Rust search_placement with LBFEvaluator
+# input=RustSppSingleItem.json seed=42 container_width=10 n_container_samples=5 n_focussed_samples=0 n_coord_descents=2
+# eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count
+# keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# rng_after next_u64_after_search_hex
+eval container 0 00000000 40633c80 403df03e clear 42afe4d4
+report container 0 1 00000000 40633c80 403df03e clear 42afe4d4 1
+keep container 0 0 00000000 40633c80 403df03e clear 42afe4d4
+eval container 1 00000000 40eb231c 400b46cf clear 43225028
+report container 1 1 00000000 40eb231c 400b46cf clear 43225028 2
+keep container 1 0 00000000 40633c80 403df03e clear 42afe4d4
+keep container 1 1 00000000 40eb231c 400b46cf clear 43225028
+eval container 2 00000000 40bae94e 3fb52cf2 clear 4302a685
+report container 2 1 00000000 40bae94e 3fb52cf2 clear 4302a685 2
+keep container 2 0 00000000 40633c80 403df03e clear 42afe4d4
+keep container 2 1 00000000 40bae94e 3fb52cf2 clear 4302a685
+eval container 3 00000000 40af3dfa 402ccdc7 clear 42fbda54
+report container 3 1 00000000 40af3dfa 402ccdc7 clear 42fbda54 2
+keep container 3 0 00000000 40633c80 403df03e clear 42afe4d4
+keep container 3 1 00000000 40af3dfa 402ccdc7 clear 42fbda54
+eval container 4 00000000 3fc732f8 3fe72fce clear 4236f2d8
+report container 4 1 00000000 3fc732f8 3fe72fce clear 4236f2d8 2
+keep container 4 0 00000000 3fc732f8 3fe72fce clear 4236f2d8
+keep container 4 1 00000000 40633c80 403df03e clear 42afe4d4
+eval prerefine 0 00000000 4003997c 401397e7 clear 4262f2d8
+eval prerefine 1 00000000 3f8732f8 3fa72fce clear 420af2d8
+eval prerefine 2 00000000 3fca52a7 3fea4f7d clear 423918a1
+eval prerefine 3 00000000 3f082692 3f48203e invalid 00000000
+eval prerefine 4 00000000 3fb6a9ab 3fa72fce clear 42289d09
+eval prerefine 5 00000000 3f2f788a 3fa72fce invalid 00000000
+eval prerefine 6 00000000 3f9eee52 3fa72fce clear 4219c7f0
+eval prerefine 7 00000000 3f5eef3d 3fa72fce invalid 00000000
+eval prerefine 8 00000000 3f9310a5 3fd6a681 clear 421554ce
+eval prerefine 9 00000000 3f76aa96 3f6f7236 invalid 00000000
+eval prerefine 10 00000000 3f8732f8 3fc8bfa6 clear 420d0bd5
+eval prerefine 11 00000000 3f8732f8 3f859ff6 clear 4208d9da
+eval prerefine 12 00000000 3f8732f8 3faa8afd clear 420b288b
+eval prerefine 13 00000000 3f8732f8 3f4169de invalid 00000000
+eval prerefine 14 00000000 3f8f96ee 3f859ff6 clear 420e1854
+eval prerefine 15 00000000 3f7d9e04 3f859ff6 invalid 00000000
+eval prerefine 16 00000000 3f8300fd 3f981579 clear 420761f5
+eval prerefine 17 00000000 3f8b64f3 3f6654e5 invalid 00000000
+eval prerefine 18 00000000 3f7d352d 3fab71a2 invalid 00000000
+eval prerefine 19 00000000 3f876763 3f84b950 clear 4208ec34
+eval prerefine 20 00000000 3f861d79 3fa5c602 clear 420a2ecb
+eval prerefine 21 00000000 3f7fc902 3f8a64f0 invalid 00000000
+eval prerefine 22 00000000 3f853430 3fa1c38d clear 42095cd7
+eval prerefine 23 00000000 3f80cdca 3f8e6765 clear 42056714
+eval prerefine 24 00000000 3f831c7a 3f988e6d clear 42077ab3
+eval prerefine 25 00000000 3f7cfe33 3f84405d invalid 00000000
+eval prerefine 26 00000000 3f7e5838 3f959530 invalid 00000000
+eval prerefine 27 00000000 3f826f78 3f87399a clear 4205f945
+report prerefine 0 1 00000000 3f80cdca 3f8e6765 clear 42056714 2
+keep prerefine 0 0 00000000 3f80cdca 3f8e6765 clear 42056714
+keep prerefine 0 1 00000000 3fc732f8 3fe72fce clear 4236f2d8
+eval prerefine 28 00000000 40633c80 405df03e invalid 00000000
+eval prerefine 29 00000000 40633c80 401df03e clear 42ade4d4
+eval prerefine 30 00000000 40633c80 40412371 invalid 00000000
+eval prerefine 31 00000000 40633c80 3ff57a16 clear 42abb1a1
+eval prerefine 32 00000000 40633c80 4021755d clear 42ae1d26
+eval prerefine 33 00000000 40633c80 3fa80972 clear 42a9461c
+eval prerefine 34 00000000 40633c80 3ffd388d clear 42abef94
+eval prerefine 35 00000000 40633c80 3f25b4ae invalid 00000000
+eval prerefine 36 00000000 40433c80 3fd2a100 clear 42969ad8
+eval prerefine 37 00000000 40819e40 3f7ae3c9 invalid 00000000
+eval prerefine 38 00000000 4021aca8 3fff4cbe clear 4283064f
+eval prerefine 39 00000000 4064cc58 3fa5f542 clear 42aa2f61
+eval prerefine 40 00000000 3ffcf2ea 40171353 clear 425cfa3c
+eval prerefine 41 00000000 4044dfdb 3fd072d6 clear 42978f81
+eval prerefine 42 00000000 3fb31cdd 402fa4fb clear 4231e6a9
+eval prerefine 43 00000000 4023647c 3ffd0355 clear 428406e8
+eval prerefine 44 00000000 3f4b5874 404969a1 invalid 00000000
+eval prerefine 45 00000000 400046c0 4015e055 clear 425f147b
+eval prerefine 46 00000000 3fe9df00 4041dd84 invalid 00000000
+eval prerefine 47 00000000 3f78b575 401d6c72 invalid 00000000
+eval prerefine 48 00000000 3f8c648c 403c874e clear 421b4fc1
+eval prerefine 49 00000000 3fd9d52e 4022c2a8 clear 42487d92
+eval prerefine 50 00000000 3f4790d7 404a0a9e invalid 00000000
+eval prerefine 51 00000000 3fb500ac 402f03fe clear 423300ec
+eval prerefine 52 00000000 3fa91bb8 403c874e clear 422d423d
+eval prerefine 53 00000000 3f5f5ac0 403c874e invalid 00000000
+eval prerefine 54 00000000 3f9ac022 40461568 invalid 00000000
+eval prerefine 55 00000000 3f7c11ec 4032f934 invalid 00000000
+eval prerefine 56 00000000 3f968b94 404348f6 invalid 00000000
+eval prerefine 57 00000000 3f823d84 4035c5a6 clear 42141f27
+eval prerefine 58 00000000 3f8ce367 403cdbba clear 421ba998
+eval prerefine 59 00000000 3f6f2f42 402eaf92 invalid 00000000
+eval prerefine 60 00000000 3f823d84 403ac865 clear 4214bf7f
+eval prerefine 61 00000000 3f823d84 4030c2e7 clear 42137ecf
+eval prerefine 62 00000000 3f823d84 403645ed clear 42142f30
+eval prerefine 63 00000000 3f823d84 402b3fe1 clear 4212ce6f
+eval prerefine 64 00000000 3f823d84 40315001 clear 42139073
+eval prerefine 65 00000000 3f823d84 40252fc1 clear 42120c6b
+eval prerefine 66 00000000 3f823d84 402bdb17 clear 4212e1d5
+eval prerefine 67 00000000 3f823d84 401e846b clear 42113700
+eval prerefine 68 00000000 3f823d84 4025da7d clear 421221c2
+eval prerefine 69 00000000 3f823d84 40172e59 clear 42104c3e
+eval prerefine 70 00000000 3f823d84 401f403a clear 42114e7a
+eval prerefine 71 00000000 3f823d84 400f1c78 clear 420f4a02
+eval prerefine 72 00000000 3f823d84 4017fcef clear 42106610
+eval prerefine 73 00000000 3f823d84 40063c01 clear 420e2df3
+eval prerefine 74 00000000 3f823d84 400fffb7 clear 420f6669
+eval prerefine 75 00000000 3f823d84 3ff8f096 clear 420cf57c
+eval prerefine 76 00000000 3f823d84 400735fa clear 420e4d32
+eval prerefine 77 00000000 3f823d84 3fe37539 clear 420b9dc6
+eval prerefine 78 00000000 3f823d84 3ffb1686 clear 420d17db
+eval prerefine 79 00000000 3f823d84 3fcbd3ec clear 420a23b1
+eval prerefine 80 00000000 3f823d84 3fe5d227 clear 420bc395
+eval prerefine 81 00000000 3f823d84 3fb1d5b1 clear 420883ce
+eval prerefine 82 00000000 3f823d84 3fce6d59 clear 420a4d48
+eval prerefine 83 00000000 3f823d84 3f953e09 clear 4206ba53
+eval prerefine 84 00000000 3f823d84 3fb4b1a8 clear 4208b18d
+eval prerefine 85 00000000 3f823d84 3f6b94d4 invalid 00000000
+eval prerefine 86 00000000 3f756c0b 3fa4f7d8 invalid 00000000
+eval prerefine 87 00000000 3f89c502 3f85843a clear 420a7365
+eval prerefine 88 00000000 3f879076 3fa05cb6 clear 420ac015
+eval prerefine 89 00000000 3f79d525 3f8a1f5c invalid 00000000
+eval prerefine 90 00000000 3f7cf38a 3f9d1af1 invalid 00000000
+eval prerefine 91 00000000 3f860143 3f8d6121 clear 420896dc
+eval prerefine 92 00000000 3f823d84 3f9acd60 clear 42071348
+eval prerefine 93 00000000 3f823d84 3f8faeb2 clear 4206615e
+eval prerefine 94 00000000 3f823d84 3f95cc5e clear 4206c338
+eval prerefine 95 00000000 3f823d84 3f899106 clear 4205ff83
+eval prerefine 96 00000000 3f823d84 3f904b43 clear 42066b27
+eval prerefine 97 00000000 3f823d84 3f82d6c9 clear 420593df
+eval prerefine 98 00000000 3f823d84 3f8a3d40 clear 42060a46
+eval prerefine 99 00000000 3f823d84 3f76e0a4 invalid 00000000
+report prerefine 1 0 00000000 3f823d84 3f82d6c9 clear 420593df 2
+keep prerefine 1 0 00000000 3f80cdca 3f8e6765 clear 42056714
+keep prerefine 1 1 00000000 3fc732f8 3fe72fce clear 4236f2d8
+eval finalrefine 0 00000000 3f7c7cdc 3f90f6c1 invalid 00000000
+eval finalrefine 1 00000000 3f835d26 3f8bd809 clear 4206d7b8
+eval finalrefine 2 00000000 3f7dfcc2 3f9036ce invalid 00000000
+eval finalrefine 3 00000000 3f829d33 3f8c97fc clear 42066bc0
+eval finalrefine 4 00000000 3f821578 3f8e6765 clear 420633e1
+eval finalrefine 5 00000000 3f7f0c38 3f8e6765 invalid 00000000
+eval finalrefine 6 00000000 3f80cdca 3f8faf13 clear 42057b8f
+eval finalrefine 7 00000000 3f80cdca 3f8d1fb7 clear 4205529a
+eval finalrefine 8 00000000 3f80cdca 3f8e882a clear 42056921
+eval finalrefine 9 00000000 3f80cdca 3f8bb744 clear 42053c12
+eval finalrefine 10 00000000 3f80cdca 3f8d43c2 clear 420554da
+eval finalrefine 11 00000000 3f80cdca 3f8a2ac6 clear 4205234a
+eval finalrefine 12 00000000 3f80cdca 3f8bdeea clear 42053e8d
+eval finalrefine 13 00000000 3f80cdca 3f8876a2 clear 42050808
+eval finalrefine 14 00000000 3f80cdca 3f8a5664 clear 42052604
+eval finalrefine 15 00000000 3f80cdca 3f8696e0 clear 4204ea0c
+eval finalrefine 16 00000000 3f80cdca 3f88a69b clear 42050b08
+eval finalrefine 17 00000000 3f80cdca 3f848725 clear 4204c910
+eval finalrefine 18 00000000 3f80cdca 3f86cba6 clear 4204ed58
+eval finalrefine 19 00000000 3f80cdca 3f8242a4 clear 4204a4c8
+eval finalrefine 20 00000000 3f80cdca 3f84c132 clear 4204ccb1
+eval finalrefine 21 00000000 3f80cdca 3f7f882c invalid 00000000
+eval finalrefine 22 00000000 3f8171a1 3f8381eb clear 42051f23
+eval finalrefine 23 00000000 3f8029f3 3f81035d clear 42042a6e
+eval finalrefine 24 00000000 3f80d5c9 3f82523a clear 4204aac1
+eval finalrefine 25 00000000 3f7efc3a 3f7f6901 invalid 00000000
+eval finalrefine 26 00000000 3f80a375 3f81035d clear 4204765e
+eval finalrefine 27 00000000 3f7f60e2 3f81035d invalid 00000000
+eval finalrefine 28 00000000 3f8029f3 3f81f025 clear 4204393b
+eval finalrefine 29 00000000 3f8029f3 3f801695 clear 42041ba2
+eval finalrefine 30 00000000 3f8029f3 3f811b0b clear 42042be9
+eval finalrefine 31 00000000 3f8029f3 3f7e243e invalid 00000000
+eval finalrefine 32 00000000 3f8066b4 3f8098d0 clear 420449be
+eval finalrefine 33 00000000 3f7fda64 3f7f28b4 invalid 00000000
+eval finalrefine 34 00000000 3f8054e9 3f8072ab clear 42043c3c
+eval finalrefine 35 00000000 3f7ffdfb 3f7f74fe invalid 00000000
+result 141 1 00000000 3f8029f3 3f801695 clear 42041ba2
+rng_after 3dfc82c5e51ecd63

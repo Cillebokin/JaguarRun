@@ -129,14 +129,15 @@ bool ParseSeparatorPhase(const std::string& text,
 bool ReadRustSeparatorTrace(
     std::vector<sparrow::SeparatorSearchTraceEvent>& events,
     std::uint64_t& expectedNextU64AfterSearch,
+    const char* fixtureName,
     std::ostream& output)
 {
     std::ifstream traceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/SeparatorSearchRustTrace.tsv",
-             "../SparrowCore/Tests/Fixtures/SeparatorSearchRustTrace.tsv",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/SeparatorSearchRustTrace.tsv",
-             "..\\SparrowCore\\Tests\\Fixtures\\SeparatorSearchRustTrace.tsv"})
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("../SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + fixtureName,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + fixtureName})
     {
         traceFile.open(path);
         if (traceFile.is_open())
@@ -905,23 +906,33 @@ bool SameSeparatorSample(
                    <= 2.0e-3F);
 }
 
-bool TestRustSeparatorSearchTrace(std::ostream& output)
+bool TestRustSeparatorSearchTrace(
+    std::ostream& output,
+    const char* inputFixtureName,
+    const char* traceFixtureName,
+    double stripWidth,
+    std::size_t focussedBudget,
+    std::size_t containerBudget,
+    std::size_t coordinateDescentCapacity,
+    jaguar::Point2d initialTranslation,
+    bool requireExactTie)
 {
     std::vector<sparrow::SeparatorSearchTraceEvent> expected;
     std::uint64_t expectedNextU64AfterSearch = 0U;
     if (!ReadRustSeparatorTrace(expected,
                                 expectedNextU64AfterSearch,
+                                traceFixtureName,
                                 output))
     {
         return false;
     }
 
     std::ifstream instanceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/SeparatorRustTrace.json",
-             "../SparrowCore/Tests/Fixtures/SeparatorRustTrace.json",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/SeparatorRustTrace.json",
-             "..\\SparrowCore\\Tests\\Fixtures\\SeparatorRustTrace.json"})
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("../SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + inputFixtureName,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + inputFixtureName})
     {
         instanceFile.open(path);
         if (instanceFile.is_open())
@@ -955,14 +966,15 @@ bool TestRustSeparatorSearchTrace(std::ostream& output)
         return false;
     }
     jaguar::SPProblem problem = std::move(problemResult.Value());
-    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+    if (!Expect(problem.ChangeStripWidth(stripWidth).HasValue(),
                 output,
                 "separator trace strip resize failed"))
     {
         return false;
     }
     const jaguar::Transform2d initialTransform =
-        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0});
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, initialTranslation);
     if (!Expect(problem.PlaceItem({0U, initialTransform}).HasValue()
                     && problem.PlaceItem({0U, initialTransform}).HasValue(),
                 output,
@@ -987,9 +999,9 @@ bool TestRustSeparatorSearchTrace(std::ostream& output)
     }
     sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
     sparrow::SeparatorConfig config;
-    config.nContainerSamples = 16U;
-    config.nFocussedSamples = 8U;
-    config.nCoordinateDescents = 2U;
+    config.nContainerSamples = containerBudget;
+    config.nFocussedSamples = focussedBudget;
+    config.nCoordinateDescents = coordinateDescentCapacity;
     sparrow::SparrowRng rng(42U);
     std::vector<sparrow::SeparatorSearchTraceEvent> actual;
     const auto result = sparrow::FindBestSeparatorMoveWithTrace(
@@ -1014,6 +1026,98 @@ bool TestRustSeparatorSearchTrace(std::ostream& output)
         output << std::hex << "expected next_u64=0x"
                << expectedNextU64AfterSearch << '\n';
         return false;
+    }
+    if (requireExactTie)
+    {
+        const auto hasExactRepeatedTie = [](const auto& trace) {
+            for (std::size_t later = 0U; later < trace.size(); ++later)
+            {
+                const auto& rejected = trace[later];
+                if (rejected.type
+                        != sparrow::SeparatorSearchTraceEvent::Type::Report
+                    || rejected.accepted
+                    || rejected.evaluation.kind
+                           == sparrow::SampleKind::SAMPLE_KIND_INVALID)
+                {
+                    continue;
+                }
+                for (std::size_t earlier = 0U; earlier < later; ++earlier)
+                {
+                    const auto& accepted = trace[earlier];
+                    if (accepted.type
+                            == sparrow::SeparatorSearchTraceEvent::Type::Report
+                        && accepted.accepted
+                        && accepted.evaluation.kind == rejected.evaluation.kind
+                        && accepted.evaluation.loss == rejected.evaluation.loss
+                        && accepted.transform.rotationRad
+                               == rejected.transform.rotationRad
+                        && accepted.transform.translation.x
+                               == rejected.transform.translation.x
+                        && accepted.transform.translation.y
+                               == rejected.transform.translation.y)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        if (!Expect(hasExactRepeatedTie(expected)
+                        && hasExactRepeatedTie(actual),
+                    output,
+                    "exact separator loss tie must reject the repeated candidate in Rust and C++"))
+        {
+            return false;
+        }
+        bool crossLanguageTieIsExact = false;
+        for (std::size_t acceptedIndex = 0U;
+             acceptedIndex < expected.size() && !crossLanguageTieIsExact;
+             ++acceptedIndex)
+        {
+            const auto& accepted = expected[acceptedIndex];
+            if (accepted.type
+                    != sparrow::SeparatorSearchTraceEvent::Type::Report
+                || !accepted.accepted)
+            {
+                continue;
+            }
+            for (std::size_t rejectedIndex = acceptedIndex + 1U;
+                 rejectedIndex < expected.size();
+                 ++rejectedIndex)
+            {
+                const auto& rejected = expected[rejectedIndex];
+                if (rejected.type
+                        != sparrow::SeparatorSearchTraceEvent::Type::Report
+                    || rejected.accepted
+                    || accepted.evaluation.kind != rejected.evaluation.kind
+                    || accepted.evaluation.loss != rejected.evaluation.loss
+                    || accepted.transform.rotationRad
+                           != rejected.transform.rotationRad
+                    || accepted.transform.translation.x
+                           != rejected.transform.translation.x
+                    || accepted.transform.translation.y
+                           != rejected.transform.translation.y
+                    || rejectedIndex >= actual.size())
+                {
+                    continue;
+                }
+                crossLanguageTieIsExact =
+                    actual[acceptedIndex].evaluation.loss
+                        == accepted.evaluation.loss
+                    && actual[rejectedIndex].evaluation.loss
+                        == rejected.evaluation.loss;
+                if (crossLanguageTieIsExact)
+                {
+                    break;
+                }
+            }
+        }
+        if (!Expect(crossLanguageTieIsExact,
+                    output,
+                    "Rust/C++ repeated separator tie loss must match exactly"))
+        {
+            return false;
+        }
     }
     const std::size_t sharedCount = std::min(actual.size(), expected.size());
     for (std::size_t index = 0U; index < sharedCount; ++index)
@@ -1877,7 +1981,23 @@ bool RunSeparatorTests(std::ostream& output)
     {
         return false;
     }
-    if (!TestRustSeparatorSearchTrace(output))
+    if (!TestRustSeparatorSearchTrace(
+            output, "SeparatorRustTrace.json", "SeparatorSearchRustTrace.tsv",
+            8.0, 8U, 16U, 2U, {1.0, 1.0}, false))
+    {
+        return false;
+    }
+    if (!TestRustSeparatorSearchTrace(
+            output, "SeparatorRustTrace.json",
+            "SeparatorSearchBudgetRustTrace.tsv", 8.0, 3U, 5U, 2U,
+            {1.0, 1.0}, false))
+    {
+        return false;
+    }
+    if (!TestRustSeparatorSearchTrace(
+            output, "SearchExactTie.json",
+            "SeparatorSearchExactTieRustTrace.tsv", 2.0, 3U, 5U, 1U,
+            {1.0, 1.0}, true))
     {
         return false;
     }

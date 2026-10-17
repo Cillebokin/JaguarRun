@@ -1,0 +1,101 @@
+# generator=Sparrow Rust search_placement with SeparationEvaluator
+# input=SeparatorRustTrace.json seed=42 strip_width=8 n_container_samples=5 n_focussed_samples=3 n_coord_descents=2
+# cde=quadtree_depth:4 cd_threshold:64 poles:64@0,16@0.8,8@0.9 fail_fast_area_ratio:0.5
+# eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count
+# keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# rng_after next_u64_after_search_hex
+eval reference 0 00000000 3f800000 3f800000 collision 40afead0
+report reference 0 1 00000000 3f800000 3f800000 collision 40afead0 1
+keep reference 0 0 00000000 3f800000 3f800000 collision 40afead0
+eval focused 0 00000000 3fa8cf20 3ffdf03e collision 408203af
+report focused 0 1 00000000 3fa8cf20 3ffdf03e collision 408203af 2
+keep focused 0 0 00000000 3fa8cf20 3ffdf03e collision 408203af
+keep focused 0 1 00000000 3f800000 3f800000 collision 40afead0
+eval focused 1 00000000 3fe5918e 3fcb46cf collision 408a0a86
+report focused 1 1 00000000 3fe5918e 3fcb46cf collision 408a0a86 2
+keep focused 1 0 00000000 3fa8cf20 3ffdf03e collision 408203af
+keep focused 1 1 00000000 3fe5918e 3fcb46cf collision 408a0a86
+eval focused 2 00000000 3fcd74a7 3f9a9679 invalid 00000000
+report focused 2 0 00000000 3fcd74a7 3f9a9679 invalid 00000000 2
+keep focused 2 0 00000000 3fa8cf20 3ffdf03e collision 408203af
+keep focused 2 1 00000000 3fe5918e 3fcb46cf collision 408a0a86
+eval container 0 00000000 408b6e7c 402ccdc7 clear 00000000
+report container 0 1 00000000 408b6e7c 402ccdc7 clear 00000000 2
+keep container 0 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep container 0 1 00000000 3fa8cf20 3ffdf03e collision 408203af
+eval container 1 00000000 3fb5663a 3fe72fce invalid 00000000
+report container 1 0 00000000 3fb5663a 3fe72fce invalid 00000000 2
+keep container 1 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep container 1 1 00000000 3fa8cf20 3ffdf03e collision 408203af
+eval container 2 00000000 4011b817 3f8ce254 collision 405f2496
+report container 2 1 00000000 4011b817 3f8ce254 collision 405f2496 2
+keep container 2 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep container 2 1 00000000 4011b817 3f8ce254 collision 405f2496
+eval container 3 00000000 4073472f 3fa96566 clear 00000000
+report container 3 1 00000000 4073472f 3fa96566 clear 00000000 2
+keep container 3 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep container 3 1 00000000 4073472f 3fa96566 clear 00000000
+eval container 4 00000000 409d4a6b 40034374 clear 00000000
+report container 4 0 00000000 409d4a6b 40034374 clear 00000000 2
+keep container 4 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep container 4 1 00000000 4073472f 3fa96566 clear 00000000
+eval prerefine 0 00000000 4076dcf8 404ccdc7 invalid 00000000
+eval prerefine 1 00000000 409b6e7c 400ccdc7 clear 00000000
+eval prerefine 2 00000000 40a6becb 400ccdc7 clear 00000000
+eval prerefine 3 00000000 40901e2d 400ccdc7 clear 00000000
+eval prerefine 4 00000000 40a6becb 40236e65 clear 00000000
+eval prerefine 5 00000000 40a6becb 3fec5a51 clear 00000000
+eval prerefine 6 00000000 40a116a3 402ebeb4 clear 00000000
+eval prerefine 7 00000000 40ac66f3 40181e16 clear 00000000
+eval prerefine 8 00000000 40a516a3 4036beb4 clear 00000000
+eval prerefine 9 00000000 409d16a3 4026beb4 clear 00000000
+eval prerefine 10 00000000 40a2428f 403c66dc clear 00000000
+eval prerefine 11 00000000 40a7eab7 4031168c clear 00000000
+eval prerefine 12 00000000 40a4428f 403c66dc clear 00000000
+eval prerefine 13 00000000 40a0428f 403c66dc clear 00000000
+eval prerefine 14 00000000 40a5428f 404066dc invalid 00000000
+eval prerefine 15 00000000 40a3428f 403866dc clear 00000000
+eval prerefine 16 00000000 40a3f794 403b3af0 clear 00000000
+eval prerefine 17 00000000 40a28d8a 403592c8 clear 00000000
+report prerefine 0 0 00000000 40a3f794 403b3af0 clear 00000000 2
+keep prerefine 0 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep prerefine 0 1 00000000 4073472f 3fa96566 clear 00000000
+eval prerefine 18 00000000 4053472f 3fe96566 clear 00000000
+eval prerefine 19 00000000 4089a398 3f52cacc invalid 00000000
+eval prerefine 20 00000000 4069e7cd 400b5351 clear 00000000
+eval prerefine 21 00000000 403ca691 3fbc2429 invalid 00000000
+eval prerefine 22 00000000 4059e7cd 401b5351 clear 00000000
+eval prerefine 23 00000000 4079e7cd 3ff6a6a2 clear 00000000
+eval prerefine 24 00000000 4059e7cd 4026a3a0 clear 00000000
+eval prerefine 25 00000000 4059e7cd 40100302 clear 00000000
+eval prerefine 26 00000000 4065381c 402c4bc8 clear 00000000
+eval prerefine 27 00000000 404e977e 4020fb78 clear 00000000
+eval prerefine 28 00000000 405d381c 40304bc8 clear 00000000
+eval prerefine 29 00000000 406d381c 40284bc8 clear 00000000
+eval prerefine 30 00000000 40578ff4 40331fdc clear 00000000
+eval prerefine 31 00000000 4062e044 402d77b4 clear 00000000
+eval prerefine 32 00000000 405b8ff4 40331fdc clear 00000000
+eval prerefine 33 00000000 40538ff4 40331fdc clear 00000000
+report prerefine 1 0 00000000 405b8ff4 40331fdc clear 00000000 2
+keep prerefine 1 0 00000000 408b6e7c 402ccdc7 clear 00000000
+keep prerefine 1 1 00000000 4073472f 3fa96566 clear 00000000
+eval finalrefine 0 00000000 408c1253 402e1575 clear 00000000
+eval finalrefine 1 00000000 408acaa5 402b8619 clear 00000000
+eval finalrefine 2 00000000 408c862d 402e1575 clear 00000000
+eval finalrefine 3 00000000 408b9e79 402e1575 clear 00000000
+eval finalrefine 4 00000000 408c862d 402efd29 clear 00000000
+eval finalrefine 5 00000000 408c862d 402d2dc1 clear 00000000
+eval finalrefine 6 00000000 408cc01a 402f7103 clear 00000000
+eval finalrefine 7 00000000 408c4c40 402e894f clear 00000000
+eval finalrefine 8 00000000 408ce910 402fc2ef clear 00000000
+eval finalrefine 9 00000000 408c9724 402f1f17 clear 00000000
+eval finalrefine 10 00000000 408ccc19 402ffcdc clear 00000000
+eval finalrefine 11 00000000 408d0607 402f8902 clear 00000000
+eval finalrefine 12 00000000 408ce094 402ffcdc clear 00000000
+eval finalrefine 13 00000000 408cb79e 402ffcdc clear 00000000
+eval finalrefine 14 00000000 408cead1 403025d2 clear 00000000
+eval finalrefine 15 00000000 408cd657 402fd3e6 clear 00000000
+result 59 1 00000000 408cead1 403025d2 clear 00000000
+rng_after 7405e883d0b9af7b

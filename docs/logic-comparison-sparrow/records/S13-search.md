@@ -2,9 +2,11 @@
 
 **Rust**: `CodeResource/sparrow/src/sample/search.rs`（343 行）
 **C++**: `SparrowCore/Include/SparrowCore/Sampling/LocalSearchSampler.h`（50 行）+ `SparrowCore/Source/Sampling/LocalSearchSampler.cpp`（206 行）；搜索编排本身在 `SparrowCore/Source/Optimizer/LbfSearch.cpp`（296 行）与 `SparrowCore/Source/Optimizer/SeparatorWorker.cpp`（FindBestSeparatorMoveImpl，128-280 行）
-**判定**: 固定 LBF 与 Separator trace、零采样/零容量边界均按 Rust 基线对齐；`n_coord_descents=0` 的 Rust profile-specific 容量行为已带入 C++ 搜索入口，错误机制仍因语言不同而不同，参考轨迹只覆盖列出的输入。
+**判定**: 固定 LBF 与 Separator trace、零采样/零容量边界均按 Rust 基线对齐；2026-10-17 又增加两组采样预算与 Separator 精确重复 loss tie 的 reference。`n_coord_descents=0` 的 Rust profile-specific 容量行为已带入 C++ 搜索入口；错误机制仍因语言不同而不同，全部结论只覆盖列出的输入。
 
 说明：Rust 的 `search_placement` 是一个"编排函数"，把 UniformBBoxSampler + BestSamples + refine_coord_desc + evaluator 串成 Algorithm 6。C++ 没有单一对应文件，而是拆成两处内联编排（`SearchLbfImpl` 对应 ref_pk=None 的 LBF 构造路径；`FindBestSeparatorMoveImpl` 对应 ref_pk=Some 的分离路径），另提供一个独立的 `LocalSearchSampler`（高斯局部搜索器，Rust sparrow 中不存在，属于 C++ 额外的公共 API，供外部调用方使用，见 S13-4）。`LbfSearchRustTrace.tsv` 有 159 条数据记录：104 条 eval（16 container / 56 prerefine / 32 finalrefine），另有一条末尾 RNG 哨兵；`SeparatorSearchRustTrace.tsv` 有 162 条 trace record，其中 81 条 eval（1 reference / 8 focused / 16 container / 38 prerefine / 18 finalrefine），并在最终 Result 后有一条 `rng_after` 哨兵。两条 trace 均在 Rust/C++ 比较搜索完成后的下一 RNG 输出；Separator 哨兵为 `3977cd3a3da1d1b7`。零预算空 LBF 路径也比较 seed=42 未消费 RNG 时的下一 `u64`（15021278609987233951）。两者都是指定 seed/config 轨迹；测试精确比较阶段、事件和报告决策等离散字段，浮点样本使用各自容差，具体边界见 S09/S11。该覆盖支持这些固定路径，不是完整输入域的逐位等价证明。
+
+本轮新增的 LBF/Separator 预算 trace 和 Separator 精确 tie fixture 及其边界见文末“本轮复核与补覆盖（2026-10-17）”。
 
 ## 函数逐条比对
 
@@ -85,10 +87,19 @@ Rust `SampleConfig` 本身没有对应的运行时校验。`n_coord_descents=0` 
 
 ## 结论
 
-Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最终精化）在 C++ 侧被拆为 `SearchLbfImpl`（无参照，三阶段）与 `FindBestSeparatorMoveImpl`（全五阶段）。固定 seed/config trace 核对了列明路径的事件顺序和离散字段，浮点样本按容差比较；另有零 sample 与零 CD 容量的 Debug/Release 边界 reference。不构成任意输入的位级证明。C++ 额外提供的 `LocalSearchSampler` 不参与这两条搜索编排。
+Rust `search_placement` 的五阶段编排（参照/聚焦/容器/预精化/最终精化）在 C++ 侧被拆为 `SearchLbfImpl`（无参照，三阶段）与 `FindBestSeparatorMoveImpl`（全五阶段）。现有和新增固定 seed/config trace 核对了列明路径的阶段顺序、离散决策与搜索后 RNG；Separator 重合放置 fixture 还核对了精确同 loss 时的接受/拒绝。另有零 sample 与零 CD 容量的 Debug/Release 边界 reference。这些结果不构成任意输入的位级证明。C++ 额外提供的 `LocalSearchSampler` 不参与这两条搜索编排。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：343 行逐项覆盖】** search.rs 全量复核：SampleConfig、SearchPhase、SearchObserver trait（3 方法默认空体）、NoopSearchObserver、ObservedEvaluator（set_phase/report/evaluate 转发）、SearchTracePhase+SearchTraceEvent+CallbackSearchObserver+From（oracle-trace 门控）、search_placement、search_placement_with_trace、search_placement_impl（五阶段主体）、prerefine_cd_config、final_refine_cd_config——主文 8 小节 + 差异表全覆盖无遗漏。
 2. **【浅覆盖补全：impl 形态与阶段枚举的调用方】** 主文条目 2 已对齐 SearchPhase 枚举；补记：`impl From<SearchPhase> for SearchTracePhase`（search.rs:166-181）把**私有枚举映射到 trace 公有枚举**——C++ 对应物是两个独立的 trace 枚举类型（LbfSearchTrace.h 三值/SeparatorSearchTrace.h 五值），**无 From 桥**（类型即阶段集）——形态差异已隐含在主文条目 2，判定维持。
 3. **【浅覆盖补全：n_focussed_samples=0 时 focussed_sampler 仍构造】** Rust `ref_pk=Some` 时**无条件构造** focussed_sampler（search.rs:264-268，构造本身消耗计算但不耗 rng），随后 `for _ in 0..0` 零循环（:274-282）——即 LBF 路径 ref_pk=None 才跳过构造；C++ SeparatorWorker.cpp:188-196 同构（构造+HasValue 检查）。主文条目 3 的"失败则跳过聚焦阶段"指 sampler 构造失败（放不下），n=0 的零循环路径两侧一致。判定维持。
 4. **【核对确认：final_refine 的结果不回 report】** 主文条目 4 已确认两侧一致；现场复核 C++ 位置（SeparatorWorker.cpp:253-267 的 refinedBest 回退链 + LbfSearch.cpp:246-248），行号有效。
+
+### 本轮复核与补覆盖（2026-10-17）
+
+1. **新增预算组合**：RustReference generator `--write-s13-search-references` 生成以下锁定 trace；输入均为 seed=42，预算顺序为 container/focused/coordinate-descent capacity。
+   - LBF `16/0/2` 既有 trace 与新增 `5/0/2` (`LbfSearchBudgetRustTrace.tsv`)；新增 trace 共 141 次 evaluator 调用，post-search `next_u64=0x3dfc82c5e51ecd63`。
+   - Separator `16/8/2` 既有 trace 与新增 `5/3/2` (`SeparatorSearchBudgetRustTrace.tsv`)；新增 trace 共 59 次 evaluator 调用，post-search `next_u64=0x7405e883d0b9af7b`。
+2. **精确 tie**：`SearchExactTie.json` 将 2×2 方形放入 2×2 strip，两个同位置放置形成碰撞；Separator 搜索预算 `5/3/1`。Rust reference 的 reference-placement report 接受 `Collision(loss_bits=0x40afead0)`；focused/container 采样因 transform 和 loss 完全相同而被拒绝。`SeparatorSearchExactTieRustTrace.tsv` 最终 47 次 evaluator 调用，post-search `next_u64=0xdf321e3788bd2ceb`。C++ test 对 Rust 与 C++ trace 都直接断言存在同类、同 loss、同 transform 的“先接受、后拒绝”报告。
+3. **验证**：`cargo fmt` 完成；`verify-rust-reference.ps1` 的 Rust Debug/Release 全套通过；SparrowCore Debug/Release 全量 runner 通过。C++ trace 比较保留既有字段规则，Separator tie 的核心相等判定另用精确 float equality。
+4. **范围**：这轮补的是两组指定的非默认预算和重复同 transform 的同 loss tie。其他预算/配置、不同 transform 的同 loss tie、一般 sampler 失败与 C++ 扩展 CD 预算仍未认证；S13 继续标为部分。

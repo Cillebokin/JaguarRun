@@ -1,0 +1,77 @@
+# generator=Sparrow Rust search_placement with SeparationEvaluator
+# input=SearchExactTie.json seed=42 strip_width=2 n_container_samples=5 n_focussed_samples=3 n_coord_descents=1
+# cde=quadtree_depth:4 cd_threshold:64 poles:64@0,16@0.8,8@0.9 fail_fast_area_ratio:0.5
+# eval phase ordinal rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# report phase ordinal accepted rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits retained_count
+# keep phase report_ordinal rank rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# result evaluation_count present rotation_f32_bits x_f32_bits y_f32_bits kind loss_f32_bits
+# rng_after next_u64_after_search_hex
+eval reference 0 00000000 3f800000 3f800000 collision 40afead0
+report reference 0 1 00000000 3f800000 3f800000 collision 40afead0 1
+keep reference 0 0 00000000 3f800000 3f800000 collision 40afead0
+eval focused 0 00000000 3f800000 3f800000 collision 40afead0
+report focused 0 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep focused 0 0 00000000 3f800000 3f800000 collision 40afead0
+eval focused 1 00000000 3f800000 3f800000 collision 40afead0
+report focused 1 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep focused 1 0 00000000 3f800000 3f800000 collision 40afead0
+eval focused 2 00000000 3f800000 3f800000 collision 40afead0
+report focused 2 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep focused 2 0 00000000 3f800000 3f800000 collision 40afead0
+eval container 0 00000000 3f800000 3f800000 collision 40afead0
+report container 0 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep container 0 0 00000000 3f800000 3f800000 collision 40afead0
+eval container 1 00000000 3f800000 3f800000 collision 40afead0
+report container 1 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep container 1 0 00000000 3f800000 3f800000 collision 40afead0
+eval container 2 00000000 3f800000 3f800000 collision 40afead0
+report container 2 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep container 2 0 00000000 3f800000 3f800000 collision 40afead0
+eval container 3 00000000 3f800000 3f800000 collision 40afead0
+report container 3 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep container 3 0 00000000 3f800000 3f800000 collision 40afead0
+eval container 4 00000000 3f800000 3f800000 collision 40afead0
+report container 4 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep container 4 0 00000000 3f800000 3f800000 collision 40afead0
+eval prerefine 0 00000000 3fc00000 3f800000 invalid 00000000
+eval prerefine 1 00000000 3f000000 3f800000 invalid 00000000
+eval prerefine 2 00000000 3f400000 3fc00000 invalid 00000000
+eval prerefine 3 00000000 3fa00000 3f000000 invalid 00000000
+eval prerefine 4 00000000 3f96a09e 3fad413d invalid 00000000
+eval prerefine 5 00000000 3f52bec3 3f257d86 invalid 00000000
+eval prerefine 6 00000000 3f600000 3fa00000 invalid 00000000
+eval prerefine 7 00000000 3f900000 3f400000 invalid 00000000
+eval prerefine 8 00000000 3f8b504f 3f96a09e invalid 00000000
+eval prerefine 9 00000000 3f695f62 3f52bec4 invalid 00000000
+eval prerefine 10 00000000 3f880000 3f800000 invalid 00000000
+eval prerefine 11 00000000 3f700000 3f800000 invalid 00000000
+eval prerefine 12 00000000 3f800000 3f900000 invalid 00000000
+eval prerefine 13 00000000 3f800000 3f600000 invalid 00000000
+eval prerefine 14 00000000 3f840000 3f880000 invalid 00000000
+eval prerefine 15 00000000 3f780000 3f700000 invalid 00000000
+eval prerefine 16 00000000 3f82d414 3f800000 invalid 00000000
+eval prerefine 17 00000000 3f7a57d8 3f800000 invalid 00000000
+eval prerefine 18 00000000 3f816a0a 3f800000 invalid 00000000
+eval prerefine 19 00000000 3f7d2bec 3f800000 invalid 00000000
+eval prerefine 20 00000000 3f80b505 3f85a828 invalid 00000000
+eval prerefine 21 00000000 3f7e95f6 3f74afb1 invalid 00000000
+report prerefine 0 0 00000000 3f800000 3f800000 collision 40afead0 1
+keep prerefine 0 0 00000000 3f800000 3f800000 collision 40afead0
+eval finalrefine 0 00000000 3f828f5c 3f800000 invalid 00000000
+eval finalrefine 1 00000000 3f7ae148 3f800000 invalid 00000000
+eval finalrefine 2 00000000 3f7d70a4 3f828f5c invalid 00000000
+eval finalrefine 3 00000000 3f8147ae 3f7ae148 invalid 00000000
+eval finalrefine 4 00000000 3f80e7b4 3f81cf69 invalid 00000000
+eval finalrefine 5 00000000 3f7e3097 3f7c612e invalid 00000000
+eval finalrefine 6 00000000 3f80a3d7 3f8147ae invalid 00000000
+eval finalrefine 7 00000000 3f7eb852 3f7d70a4 invalid 00000000
+eval finalrefine 8 00000000 3f7f184c 3f80e7b4 invalid 00000000
+eval finalrefine 9 00000000 3f8073da 3f7e3097 invalid 00000000
+eval finalrefine 10 00000000 3f8051ec 3f800000 invalid 00000000
+eval finalrefine 11 00000000 3f7f5c29 3f800000 invalid 00000000
+eval finalrefine 12 00000000 3f800000 3f80a3d7 invalid 00000000
+eval finalrefine 13 00000000 3f800000 3f7eb852 invalid 00000000
+eval finalrefine 14 00000000 3f7fae14 3f8051ec invalid 00000000
+eval finalrefine 15 00000000 3f8028f6 3f7f5c29 invalid 00000000
+result 47 1 00000000 3f800000 3f800000 collision 40afead0
+rng_after df321e3788bd2ceb

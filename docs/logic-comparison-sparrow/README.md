@@ -57,7 +57,7 @@
 
 | # | 记录 | 判定 | 差异条数 |
 |---|---|---|---|
-| S01 | [records/S01-config.md](records/S01-config.md) | seed 缺省/零值语义和纳秒时限已在 2026-10-09 闭合；Importer 参数归属及 C++ 更强 Validate 的非法配置边界仍需单独认证 | 8 |
+| S01 | [records/S01-config.md](records/S01-config.md) | seed/时限语义、探索与压缩的 Rust 有效闭端点、cold/warm phase 子 seed 顺序已核对；有效域外的 C++ 前置校验作为入口保护登记 | 8 |
 | S02 | [records/S02-consts-lib.md](records/S02-consts-lib.md) | 空 RNG range 已按 Rust 在状态消耗前失败；有效整数/均匀 float 映射有 Rust reference；Normal01F32 是 C++ 额外 helper；上层 sampler 错误转换归 S16 | 7 |
 | S03 | [records/S03-lbf.md](records/S03-lbf.md) | 基本等价（排序键、宽度上限和等号停止已定向验证；零样本、构造失败及超过 32 次扩宽有 Rust/C++ reference；Rust Sparrow SPP 不支持 quality zones，C++ focused 字段未映射，默认 1000/0/3 完整构造仍未覆盖；SparrowLbfBuilder 默认不设次数 cap、显式正数 cap 为 C++ 扩展；通用 LbfConfig/SolveSppLbf 默认 cap=32 且 0 不表示无限，单独标作低层 C++ API 行为） | 13 |
 | S04 | [records/S04-separator.md](records/S04-separator.md) | 基本等价（worker RNG 与状态交接已有定向核对；初始已分离、正内层预算时空 worker round 和 progress `[0,1]` 已对齐；零预算只留不可观察的内部 strike 次数差别） | 12 |

@@ -14,7 +14,7 @@
 
 | 记录 | 建议迁移决策 | 最低验收门槛 |
 |---|---|---|
-| [S01 配置 seed/时限](records/S01-config.md) | **已闭合（2026-10-09）**：absent 与 explicit-zero seed 可区分；缺省运行生成并报告 effective seed，固定该值可复现；phase/global duration 与 TimeBased elapsed 采用纳秒 | Rust/C++ default/zero seed 与 500µs duration reference；C++ 无 seed run→metrics effective seed→显式 seed replay；CLI absent/`--seed 0` smoke；继续单独审计非法配置 Validate 差异 |
+| [S01 配置 seed/时限](records/S01-config.md) | **已闭合（2026-10-17）**：absent 与 explicit-zero seed 可区分；缺省运行报告 effective seed 并可重放；时限按纳秒保存；探索 `shrinkStep`、压缩 shrink 范围和 FailureBased ratio 的 Rust 有效闭端点已对齐；cold/warm Optimize 的子 RNG 顺序与宿主入口调用链已核对 | Rust/C++ 固定 seed cold-start、warm-start 与有效配置端点 reference；CLI absent/`--seed 0` smoke；CLI/WASM/Bench 共用 Optimize 入口源码核对；范围外配置按 S01 记录声明为 parity 域外 |
 | [S02 RNG 空范围](records/S02-consts-lib.md) | **primitive 已闭合（2026-10-09）**：Rust 空范围 panic 对应 C++ `invalid_argument`；双方在 RNG 状态消费前失败。有效整数/float 映射的既有 fixtures 通过 | C++/Rust 都断言失败后状态和下一随机输出；S16 的构造入口错误映射与所有有效调用点调用序仍需覆盖 |
 | [S03 LBF 构造](records/S03-lbf.md) | **已实施并补充核验**：Rust Sparrow 构造路径的 f32 排序/宽度与 `>=` 停止已定向验证；构造失败 item 0、零 container samples 与超过 32 次扩宽的成功出口有 Rust/C++ reference；后者逐位比较最终宽度和位姿。Rust SPP 输入不能表达 quality zones，BPP 质量区是 C++ 扩展。Sparrow constructor 默认 growth-attempt cap 为 0（无上限）匹配 Rust；通用 `LbfConfig`/直接 `SolveSppLbf` 仍默认 cap=32，且 0 不表示无限，作为低层 C++ API 单独记录；显式正数 constructor cap 是扩展。C++ `nFocussedSamples` 未映射，Rust LBF 固定 0 | 保留已列 references；仍需默认 1000/0/3 完整 builder 输出及其他相邻宽度输入；低层 `SolveSppLbf` 默认 cap=32 和其他 C++ 配置作为独立 API 差异评估，不与 Sparrow constructor 混同 |
 | [S04 分离器](records/S04-separator.md) | 已按源码区分 `separate` 回滚与 `exploration_phase` 失败报告后扰动；C++ 将 `separatorState` 与 best 快照分别交给压缩。worker RNG 在宽度变化时立即重派生；初始已分离且正内层预算时，Rust/C++ 空 worker round、progress `[0,1]`、零统计/布局/tracker/root RNG 已由独立 references 对齐；零预算只剩不可观察的内部 strike 次数差别 | `OptimizerTerminationHandoffRustReference.tsv` 比较 best、separatorState、压缩报告/事件/最终解；保留更多终止时点与 worker 配置的限定覆盖，不再把正预算空 round 列为未修差异 |
@@ -32,7 +32,7 @@
 
 | 记录 | 建议迁移决策 | 最低验收门槛 |
 |---|---|---|
-| [S01 配置与 importer](records/S01-config.md) | P0 seed/纳秒时限已闭合；Rust/C++ Importer 默认值经 helper 桥接。C++ `Validate()` 对 shrink、stddev、percentile 和 decay rate 的接受域更窄，可能使 Rust 可运行配置被提前拒绝 | 检查 helper 每个映射值及 CLI/WASM/Bench 三个默认调用点；逐字段对照非法/边界配置的触发点、错误类别和状态副作用；自定义 ImporterConfig 不被默认 helper 覆盖 |
+| [S01 配置与 importer](records/S01-config.md) | seed/纳秒时限、默认 Importer 桥接及声明有效域内的配置端点已闭合。探索 shrinkStep 为 `[0,1]`；压缩 `0 <= shrinkMin <= shrinkMax <= 1`，FailureBased ratio 为 `[0,1]`。stddev、百分位、时限及 worker 条件定义有效域；范围外的 Rust 结构体值不计 parity 输入 | Rust/C++ 实际 phase endpoint references；逐项说明额外 Validate 的边界与运行时风险；CLI/WASM/Bench 默认 Importer/Optimize 接线；自定义 ImporterConfig 不被默认 helper 覆盖 |
 | [S02 常量与 RNG](records/S02-consts-lib.md) | 空 RNG range primitive 已闭合；有效播种/整数/均匀 float 映射和 normal sampler 有 Rust reference。C++ `Normal01F32` 是额外 API，不能替代探索 `rand_distr::Normal` 路径 | 现有 trace 精确覆盖五个 seed、四个标准差下的 2,560 个样本；仍需对一般 Explore 中 pool 索引、disruption 与后续调用的随机消耗序建立跨语言 trace |
 | [S05 worker](records/S05-worker.md) | 对齐 Rust 的候选收集、shuffle 消耗、逐件移动和搜索阶段顺序；错误通道可变，但不得静默跳过 Rust 会处理的有效候选 | 固定 seed 覆盖 1/2/3 worker 轨迹；增加空 best 候选、失败移动和 worker 恢复路径，并比较每轮选择 |
 | [S09 LBF evaluator](records/S09-lbf-evaluator.md) | Rust shared borrow 与 C++ evaluator 稳定性前置条件已对齐；过滤、碰撞判定、double geometry 中间精度和 loss 仍有边界风险，C++ 额外校验限定在 Rust 有效输入之外 | 覆盖 hole/filter、合法旋转、碰撞/无碰撞和边界变换；kind 精确断言，浮点按记录容差，继续补 f32/double 近边界几何 |

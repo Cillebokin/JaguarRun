@@ -69,13 +69,28 @@ fn make_problem() -> Result<SPProblem, Box<dyn Error>> {
 }
 
 fn compression_attempt_count(step: f32) -> Result<usize, Box<dyn Error>> {
+    compression_attempt_count_with_decay(step, 1.0)
+}
+
+fn compression_attempt_count_with_decay(
+    step: f32,
+    failure_decay: f32,
+) -> Result<usize, Box<dyn Error>> {
+    compression_attempt_count_for_range(step, step, failure_decay)
+}
+
+fn compression_attempt_count_for_range(
+    shrink_max: f32,
+    shrink_min: f32,
+    failure_decay: f32,
+) -> Result<usize, Box<dyn Error>> {
     let problem = make_problem()?;
     let initial = problem.save();
     let defaults = DEFAULT_SPARROW_CONFIG;
     let mut config = defaults.cmpr_cfg;
-    config.shrink_range = (step, step);
+    config.shrink_range = (shrink_max, shrink_min);
     config.time_limit = Duration::from_secs(1);
-    config.shrink_decay = ShrinkDecayStrategy::FailureBased(1.0);
+    config.shrink_decay = ShrinkDecayStrategy::FailureBased(failure_decay);
     config.separator_config.strike_limit = 0;
     config.separator_config.n_workers = 1;
     config.separator_config.sample_config = SampleConfig {
@@ -100,6 +115,30 @@ fn compression_attempt_count(step: f32) -> Result<usize, Box<dyn Error>> {
         &config,
     );
     Ok(listener.0)
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn failure_decay_endpoint_attempt_counts() -> Result<Vec<(f32, usize)>, Box<dyn Error>> {
+    [0.0_f32, 1.0_f32]
+        .into_iter()
+        .map(|failure_decay| {
+            compression_attempt_count_with_decay(0.01, failure_decay)
+                .map(|attempts| (failure_decay, attempts))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn shrink_range_endpoint_attempt_counts() -> Result<Vec<(f32, f32, usize)>, Box<dyn Error>> {
+    [(0.0_f32, 0.0_f32), (0.01, 0.0), (1.0, 1.0)]
+        .into_iter()
+        .map(|(shrink_max, shrink_min)| {
+            compression_attempt_count_for_range(shrink_max, shrink_min, 0.9)
+                .map(|attempts| (shrink_max, shrink_min, attempts))
+        })
+        .collect()
 }
 
 pub fn compression_minimum_width_trace_tsv() -> Result<String, Box<dyn Error>> {

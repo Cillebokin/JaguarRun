@@ -13,3 +13,17 @@ fn compression_minimum_width_and_threshold_behavior_match_locked_rust_trace() {
         "Rust compression minimum-width boundary trace changed"
     );
 }
+
+#[test]
+fn failure_based_decay_zero_and_one_reach_the_compression_phase() {
+    let actual = compression_minimum_width_trace::failure_decay_endpoint_attempt_counts()
+        .expect("run failure-decay endpoint oracle");
+    assert_eq!(actual, vec![(0.0, 1), (1.0, 1)]);
+}
+
+#[test]
+fn shrink_range_zero_and_one_endpoints_follow_compression_width_guards() {
+    let actual = compression_minimum_width_trace::shrink_range_endpoint_attempt_counts()
+        .expect("run compression shrink-range endpoint oracle");
+    assert_eq!(actual, vec![(0.0, 0.0, 0), (0.01, 0.0, 1), (1.0, 1.0, 0)]);
+}

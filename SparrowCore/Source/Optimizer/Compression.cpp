@@ -158,9 +158,9 @@ namespace sparrow
 Result<void> CompressionConfig::Validate() const
 {
     if (!std::isfinite(shrinkMin) || !std::isfinite(shrinkMax)
-        || shrinkMin <= 0.0 || shrinkMax < shrinkMin || shrinkMax >= 1.0
-        || !std::isfinite(failureDecay) || failureDecay <= 0.0
-        || failureDecay >= 1.0 || timeLimit.count() < 0)
+        || shrinkMin < 0.0 || shrinkMax < shrinkMin || shrinkMax > 1.0
+        || !std::isfinite(failureDecay) || failureDecay < 0.0
+        || failureDecay > 1.0 || timeLimit.count() < 0)
     {
         return Result<void>::FromError(
             {jaguar::ErrorCode::InvalidInput,

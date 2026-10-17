@@ -4040,50 +4040,61 @@ bool TestRustF32ShrinkRoundingBoundary(std::ostream& output)
     {
         return false;
     }
-    auto problemResult = jaguar::SPProblem::Create(instance.Value());
-    if (!Expect(problemResult.HasValue(),
-                output,
-                "shrink-boundary problem must be created"))
-    {
-        return false;
-    }
-    jaguar::SPProblem problem = std::move(problemResult.Value());
-    if (!Expect(problem.ChangeStripWidth(4.0).HasValue()
-                    && problem.PlaceItem({0U, {0.0, {2.0, 2.0}}}).HasValue(),
-                output,
-                "shrink-boundary initial placement must be valid"))
-    {
-        return false;
-    }
+    const auto verifyShrinkBoundary = [&](double shrinkStep,
+                                          const char* caseName) {
+        auto problemResult = jaguar::SPProblem::Create(instance.Value());
+        if (!Expect(problemResult.HasValue(),
+                    output,
+                    "shrink-boundary problem must be created"))
+        {
+            return false;
+        }
+        jaguar::SPProblem problem = std::move(problemResult.Value());
+        if (!Expect(problem.ChangeStripWidth(4.0).HasValue()
+                        && problem.PlaceItem({0U, {0.0, {2.0, 2.0}}}).HasValue(),
+                    output,
+                    "shrink-boundary initial placement must be valid"))
+        {
+            return false;
+        }
 
-    sparrow::ExplorationConfig config;
-    config.shrinkStep = std::ldexp(1.0, -25);
-    config.maxIterations = 2U;
-    config.separator.strikeLimit = 0U;
-    config.separator.nWorkers = 1U;
-    sparrow::OptimizationTerminator terminator({
-        0U, std::chrono::seconds{2}});
-    terminator.Start();
-    terminator.StartPhase(std::chrono::seconds{2});
-    const auto result = sparrow::Explore(
-        instance.Value(), problem.Save(), config, 42U, terminator);
-    if (!Expect(result.HasValue(),
-                output,
-                "Rust f32 shrink-boundary exploration must complete"))
-    {
-        return false;
-    }
-    const std::size_t feasibleReports = static_cast<std::size_t>(std::count_if(
-        result.Value().history.begin(),
-        result.Value().history.end(),
-        [](const sparrow::OptimizationSolutionReport& report) {
-            return report.type
-                == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE;
-        }));
-    return Expect(result.Value().separatorState.StripWidth() == 4.0
-                      && feasibleReports == 1U,
-                  output,
-                  "Rust f32 rounding must stop before a sub-half-ULP shrink");
+        sparrow::ExplorationConfig config;
+        config.shrinkStep = shrinkStep;
+        config.maxIterations = 2U;
+        config.separator.strikeLimit = 0U;
+        config.separator.nWorkers = 1U;
+        sparrow::OptimizationTerminator terminator({
+            0U, std::chrono::seconds{2}});
+        terminator.Start();
+        terminator.StartPhase(std::chrono::seconds{2});
+        const auto result = sparrow::Explore(
+            instance.Value(), problem.Save(), config, 42U, terminator);
+        if (!Expect(result.HasValue(), output, caseName))
+        {
+            return false;
+        }
+        const std::size_t feasibleReports = static_cast<std::size_t>(std::count_if(
+            result.Value().history.begin(),
+            result.Value().history.end(),
+            [](const sparrow::OptimizationSolutionReport& report) {
+                return report.type
+                    == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE;
+            }));
+        return Expect(result.Value().separatorState.StripWidth() == 4.0
+                          && feasibleReports == 1U,
+                      output,
+                      caseName);
+    };
+
+    return verifyShrinkBoundary(
+               0.0,
+               "Rust zero shrink step must complete without changing width")
+        && verifyShrinkBoundary(
+            std::ldexp(1.0, -25),
+            "Rust half-ULP shrink rounding must leave the width unchanged")
+        && verifyShrinkBoundary(
+            1.0,
+            "Rust unit shrink step must stop below positive minimum width");
 }
 
 bool TestRustF32AreaCutoffBoundary(std::ostream& output)
@@ -9061,7 +9072,66 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
             return false;
         }
     }
-    return true;
+
+    const auto verifyCompressionBoundary = [&](double shrinkMin,
+                                               double shrinkMax,
+                                               double failureDecay,
+                                               std::size_t expectedProgress,
+                                               const char* caseName) {
+        sparrow::CompressionConfig config;
+        config.decayStrategy =
+            sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+        config.failureDecay = failureDecay;
+        config.maxIterations = 1U;
+        config.maxConsecutiveFailures = 1U;
+        config.shrinkMin = shrinkMin;
+        config.shrinkMax = shrinkMax;
+        config.separator.strikeLimit = 0U;
+        config.separator.nWorkers = 1U;
+        config.separator.nContainerSamples = 0U;
+        config.separator.nFocussedSamples = 0U;
+        config.separator.nCoordinateDescents = 0U;
+        sparrow::OptimizationTerminator terminator({
+            1U, std::chrono::seconds{2}});
+        terminator.Start();
+        terminator.StartPhase(std::chrono::seconds{2});
+        Progress progress;
+        const auto result = sparrow::Compress(
+            instance.Value(), initial, config, 0U, terminator, &progress);
+        return Expect(result.HasValue() && progress.count == expectedProgress,
+                      output,
+                      caseName);
+    };
+    return verifyCompressionBoundary(
+               0.01,
+               0.01,
+               0.0,
+               1U,
+               "Rust zero failure-decay ratio must permit one bounded attempt")
+        && verifyCompressionBoundary(
+            0.01,
+            0.01,
+            1.0,
+            1U,
+            "Rust unit failure-decay ratio must permit one bounded attempt")
+        && verifyCompressionBoundary(
+            0.0,
+            0.0,
+            0.9,
+            0U,
+            "Rust zero shrink range must stop before an unchanged-width attempt")
+        && verifyCompressionBoundary(
+            0.0,
+            0.01,
+            0.9,
+            1U,
+            "Rust zero minimum shrink ratio must allow a bounded attempt")
+        && verifyCompressionBoundary(
+            1.0,
+            1.0,
+            0.9,
+            0U,
+            "Rust unit shrink ratio must stop before zero-width attempt");
 }
 }
 
@@ -9108,6 +9178,15 @@ bool RunExplorationTests(std::ostream& output)
                     && subMillisecondTerminator.ShouldTerminate(0U),
                 output,
                 "sub-millisecond phase durations must be preserved and honored"))
+    {
+        return false;
+    }
+
+    const bool explorationShrinkBoundaries =
+        TestRustF32ShrinkRoundingBoundary(output);
+    const bool compressionDecayBoundaries =
+        TestCompressionMinimumWidthMatchesRustBoundary(output);
+    if (!explorationShrinkBoundaries || !compressionDecayBoundaries)
     {
         return false;
     }
@@ -9296,19 +9375,11 @@ bool RunExplorationTests(std::ostream& output)
     {
         return false;
     }
-    if (!TestCompressionMinimumWidthMatchesRustBoundary(output))
-    {
-        return false;
-    }
     if (!TestExploreMinimumWidthInfinityMatchesRust(output))
     {
         return false;
     }
     if (!TestExploreRotationHeightBoundaryMatchesRust(output))
-    {
-        return false;
-    }
-    if (!TestRustF32ShrinkRoundingBoundary(output))
     {
         return false;
     }

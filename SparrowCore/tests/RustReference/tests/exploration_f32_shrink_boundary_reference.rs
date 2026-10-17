@@ -59,51 +59,57 @@ fn load_single_item_instance() -> jagua_rs::probs::spp::entities::SPInstance {
 }
 
 #[test]
-fn f32_shrink_rounding_stops_when_the_next_width_equals_the_current_width() {
-    let instance = load_single_item_instance();
-    let mut problem = SPProblem::new(instance).expect("create shrink-boundary problem");
-    problem
-        .change_strip_width(4.0)
-        .expect("set shrink-boundary width");
-    problem.place_item(SPPlacement {
-        item_idx: 0,
-        d_transf: DTransformation::new(0.0, (2.0, 2.0)),
-    });
-    assert!(Layout::from_snapshot(&problem.save().layout_snapshot).is_feasible());
+fn shrink_step_zero_one_and_half_ulp_are_accepted_and_stop_without_shrinking() {
+    for (name, shrink_step) in [
+        ("zero", 0.0_f32),
+        ("half_ulp", 2.0_f32.powi(-25)),
+        ("one", 1.0_f32),
+    ] {
+        let instance = load_single_item_instance();
+        let mut problem = SPProblem::new(instance).expect("create shrink-boundary problem");
+        problem
+            .change_strip_width(4.0)
+            .expect("set shrink-boundary width");
+        problem.place_item(SPPlacement {
+            item_idx: 0,
+            d_transf: DTransformation::new(0.0, (2.0, 2.0)),
+        });
+        assert!(Layout::from_snapshot(&problem.save().layout_snapshot).is_feasible());
 
-    let mut config = DEFAULT_SPARROW_CONFIG.expl_cfg;
-    config.shrink_step = 2.0_f32.powi(-25);
-    config.separator_config.strike_limit = 0;
-    config.separator_config.n_workers = 1;
-    config.separator_config.sample_config = SampleConfig {
-        n_container_samples: 0,
-        n_focussed_samples: 0,
-        n_coord_descents: 0,
-    };
-    let mut separator = Separator::new(
-        problem,
-        Xoshiro256PlusPlus::seed_from_u64(42),
-        config.separator_config,
-    );
-    let mut listener = RecordingListener::default();
-    let solutions = exploration_phase(
-        &mut separator,
-        &mut listener,
-        &StopAfterOneExploreRound {
-            checks: Cell::new(0),
-        },
-        &config,
-    );
+        let mut config = DEFAULT_SPARROW_CONFIG.expl_cfg;
+        config.shrink_step = shrink_step;
+        config.separator_config.strike_limit = 0;
+        config.separator_config.n_workers = 1;
+        config.separator_config.sample_config = SampleConfig {
+            n_container_samples: 0,
+            n_focussed_samples: 0,
+            n_coord_descents: 0,
+        };
+        let mut separator = Separator::new(
+            problem,
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            config.separator_config,
+        );
+        let mut listener = RecordingListener::default();
+        let solutions = exploration_phase(
+            &mut separator,
+            &mut listener,
+            &StopAfterOneExploreRound {
+                checks: Cell::new(0),
+            },
+            &config,
+        );
 
-    assert_eq!(
-        solutions.len(),
-        1,
-        "the initial feasible solution is retained"
-    );
-    assert_eq!(listener.reports, vec![ReportType::ExplFeas]);
-    assert_eq!(
-        separator.prob.strip_width().to_bits(),
-        4.0_f32.to_bits(),
-        "f32 computes 1 - 2^-25 as exactly 1, so Rust stops before shrinking"
-    );
+        assert_eq!(
+            solutions.len(),
+            1,
+            "{name}: retain the initial feasible solution"
+        );
+        assert_eq!(listener.reports, vec![ReportType::ExplFeas], "{name}");
+        assert_eq!(
+            separator.prob.strip_width().to_bits(),
+            4.0_f32.to_bits(),
+            "{name}: Rust exits before changing the current width"
+        );
+    }
 }

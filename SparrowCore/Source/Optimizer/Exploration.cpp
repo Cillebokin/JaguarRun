@@ -908,8 +908,8 @@ namespace sparrow
 {
 Result<void> ExplorationConfig::Validate() const
 {
-    if (!std::isfinite(shrinkStep) || shrinkStep <= 0.0
-        || shrinkStep >= 1.0
+    if (!std::isfinite(shrinkStep) || shrinkStep < 0.0
+        || shrinkStep > 1.0
         || !std::isfinite(solutionPoolDistributionStddev)
         || solutionPoolDistributionStddev <= 0.0
         || !std::isfinite(largeItemChAreaCutoffPercentile)

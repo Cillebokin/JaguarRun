@@ -53,9 +53,9 @@
 - 判定：一致（双侧配置均无 JSON 反序列化语义；任务背景中"serde vs JsonCodec"的疑点经核实不适用于 config.rs——JSON 反序列化只存在于实例/解输入，走 JaguarCore `Importer::ImportSPInstanceJson`，见 S22/S23）。
 
 ### `Validate()`（C++ 额外）
-- C++：`SparrowConfig::Validate` 实现在 `SparrowConfig.cpp:5-23`；`ExplorationConfig::Validate` 在 `Exploration.cpp:868-884`，`CompressionConfig::Validate` 在 `Compression.cpp:157-169`（头文件声明见 SparrowConfig.h:39/63/75）。`SparrowConfig::Validate` 负责按顺序委托到这些子配置校验。
+- C++：`SparrowConfig::Validate` 在 `SparrowConfig.cpp`；`ExplorationConfig::Validate` 在 `Exploration.cpp`，`CompressionConfig::Validate` 在 `Compression.cpp`（头文件声明见 SparrowConfig.h）。`SparrowConfig::Validate` 负责委托到这些子配置校验。
 - 判定：C++ 额外。
-- 证据与说明：Rust 无对应配置验证链；C++ 在 `Optimize` 入口统一 `config.Validate()`（SparrowOptimizer.cpp:100-105），校验链 constructor→exploration→compression→terminator。不能笼统视作无行为影响的防御：C++ 拒绝 `shrinkStep<=0`/`>=1`、非正 stddev、percentile 越界；Rust `shrinkStep=0/1` 会按宽度边界退出，`Normal(0,stddev=0)` 可构造，越界 percentile 会继续参与候选筛选。压缩侧 C++ 拒绝 `shrinkMin<=0`、`shrinkMax<shrinkMin`/`>=1`、FailureBased ratio 不在 `(0,1)`；Rust enum/tuple 无同类校验，0 衰减率可能令步长立即低于下限，1 衰减率可持续尝试直至其他停止条件。以上是边界配置的代码级语义差异，当前 fixtures 均使用常规合法配置，无专门 reference。
+- 证据与说明：Rust 无对应的统一配置验证链；C++ 在 `Optimize` 入口调用 `config.Validate()`，各 phase 入口也验证子配置。2026-10-17 按实际算法补齐两侧端点：探索 `shrinkStep` 允许 `[0,1]`；压缩允许 `0 <= shrinkMin <= shrinkMax <= 1`，`FailureBased` 的 `failureDecay` 允许 `[0,1]`。Rust/C++ 实际 phase fixture 覆盖探索 0、1 和半 ULP 不收缩，压缩 `(shrinkMax, shrinkMin)` 的 `(0,0)`、`(0.01,0)`、`(1,1)`，以及 FailureBased 衰减率 0、1；闭区间端点在两侧产生相同的阶段进入/停止行为。其他约束构成本文声明的有效配置域：stddev 有限且大于 0、面积百分位在 `[0,1]`、worker 数大于 0、phase 时限非负、压缩区间有序且都在 `[0,1]`；Rust 非有限、越域或运行时无法构造的值不作为 parity 输入。C++ 的拒绝路径是入口保护，不能据此声称 Rust 结构体本身具备相同校验。
 
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
@@ -65,12 +65,12 @@
 | 3 | `ShrinkDecayStrategy::FailureBased(f32)` vs 枚举+`failureDecay` 平字段 | 差异 | 载荷外提；默认值均 0.9，行为等价 | config.rs:44-49 vs SparrowConfig.h:17-21/60 |
 | 4 | `log::Level`（expl Info/cmpr Debug）字段 | C++缺失 | 日志分级属应用层；SparrowCore 库无日志依赖，CLI 不分级 | config.rs:61/78 vs SparrowConfig.h:23-64 |
 | 5 | C++ 额外 `warmStart`/`constructor`/`terminator` 配置子块 | C++额外 | 把 Rust 散在 optimize() 参数（初始解、LBF 构造参数、无全局终止器）收敛进配置；见 S08/S20 | SparrowConfig.h:69-70/73 vs config.rs:8-23 |
-| 6 | `Validate()` 校验链 | C++额外 | 入参前置校验（Result 通道），Rust 无；实现分布在 SparrowConfig/Exploration/Compression | SparrowConfig.cpp:5-23; Exploration.cpp:868-884; Compression.cpp:157-169 vs config.rs（无） |
+| 6 | `Validate()` 校验链 | C++额外 | 入参前置校验（Result 通道），Rust 无；共享有效域的 shrink/decay 闭端点已对齐，其余校验用于排除有效域外输入 | SparrowConfig/Exploration/Compression `Validate()` vs config.rs（无）；2026-10-17 实际 phase endpoint references |
 | 7 | `Option<usize>` 与 `optional<size_t>` 失败上限 | 已对齐 | `None`/无值表示不限，`Some(0)`/有值 0 表示第一次失败后停止；固定收缩失败输入已逐项比较报告顺序 | config.rs:29; explore.rs:239-245 vs SparrowConfig.h:29; Exploration.cpp; S06 reference |
 | 8 | Rust `Duration` 与 SparrowCore phase/global duration 的存储精度 | 已对齐（纳秒配置语义） | exploration/compression timeLimit、global maxDuration、phase deadline 和 TimeBased elapsed 比率使用纳秒；平台时钟的硬件分辨率另行限定 | config.rs:5,37-40 vs SparrowConfig.h/OptimizationTerminator.h/.cpp/Compression.cpp；Rust 与 C++ 500µs boundary tests |
 
 ## 结论
-SparrowConfig 的两阶段字段与默认值（shrink 0.001、9min/60s、0.25、0.75、separator 200/3 与 100/5、50/25/3）与 Rust 逐项对应。2026-10-09 P0 更新已恢复 absent/explicit-zero seed 区分、有效 seed 重放信息和纳秒时限精度。仍存在的形态/边界差异包括：导入参数下沉 JaguarCore 层、枚举载荷外提、C++ 额外配置块及比 Rust 更强的 Validate 校验；这些不是本轮闭合项。失败次数上限已通过 `std::optional` 保留 Rust 的 `None`/`Some(0)` 区分。Rust 的 config.rs 无 serde 反序列化，输入 JSON 的解析语义归 S22/S23 记录。
+SparrowConfig 的两阶段字段与默认值（shrink 0.001、9min/60s、0.25、0.75、separator 200/3 与 100/5、50/25/3）与 Rust 逐项对应。2026-10-09 P0 更新恢复 absent/explicit-zero seed 区分、有效 seed 重放信息和纳秒时限精度；2026-10-17 S01 执行补齐声明有效域内 shrink/decay 闭端点，并复核冷/热启动子 RNG 顺序与 CLI/WASM/Bench 共用入口。已登记的剩余结构差异是导入参数下沉 JaguarCore 层、枚举载荷外提及 C++ 额外配置块；比 Rust 更强的 Validate 只负责拒绝声明有效域外配置。失败次数上限通过 `std::optional` 保留 Rust 的 `None`/`Some(0)` 区分。Rust 的 config.rs 无 serde 反序列化，输入 JSON 的解析语义归 S22/S23 记录。
 
 ## P0 闭合记录（2026-10-09）
 
@@ -78,6 +78,13 @@ SparrowConfig 的两阶段字段与默认值（shrink 0.001、9min/60s、0.25、
 - phase/global 时限配置改为 `std::chrono::nanoseconds`；`OptimizationTerminator::StartPhase`、`Elapsed` 和 Compression TimeBased 比率保留纳秒单位。Rust 和 C++ reference 均覆盖 500µs；C++ phase deadline 在等待超过限值后结束。
 - 空范围 RNG：Rust `random_range(0..0)` panic；C++ `UniformIndex(0)` 抛 `std::invalid_argument`。两边均在 RNG 状态消费前失败。此为错误出口语言机制映射，不要求异常文本相同。调用方有效构造下不会传入空范围；sampler 构造器的错误分类另由 S16 闭合。
 - 验证：RustReference Debug/Release 全量测试通过；SparrowCore Debug/Release 全量 runner 通过；SparrowCli Release 重建成功，缺省 seed 和显式零 seed smoke 均 exit 0。该记录只闭合本节列明的 S01/S02 差异，不表示整个 P0 清单完成。
+
+## S01 执行记录（2026-10-17）
+
+- **配置边界**：先以 Rust oracle 建立实际入口行为，再扩展 C++ `Validate()` 的合法闭区间。`ExplorationConfig::shrinkStep` 由 `(0,1)` 改为 `[0,1]`；`CompressionConfig` 的 shrink 范围由 `0 < min <= max < 1` 改为 `0 <= min <= max <= 1`，FailureBased `failureDecay` 由 `(0,1)` 改为 `[0,1]`。其他验证仍限制为上文声明的共享有效域。
+- **Rust 参考用例**：`exploration_f32_shrink_boundary_reference` 对 0、1、`2^-25` 运行真实探索 phase；`compression_minimum_width_reference` 对 FailureBased 0/1 以及 shrink 范围三组闭端点运行真实压缩 phase，并保留原最小宽度阈值 trace。
+- **入口 RNG 顺序**：Rust `optimize()` 冷启动依次派生 LBF 构造、探索、压缩子 RNG；warm-start 跳过构造子 RNG，探索与压缩依次取前两个。C++ `OptimizeWithTerminator` 同序；构造失败时两侧均只取构造子流。C++ 在探索前预取压缩子 seed，Rust 在探索成功后才取；探索失败时 C++ 多消耗的 word 留在函数私有 root RNG 中，不进入任何可观察结果。CLI、WASM、Bench 都直接进入同一个 `Optimize()`，各入口只传 seed/config，不另行派生 phase seed；无 seed 熵源因语言实现不同，仍须用返回的 effective seed 重放。
+- **验证结果**：`cargo fmt --check` 与 `verify-rust-reference.ps1` 通过，RustReference Debug/Release 全量测试均通过。SparrowCore Debug/Release runner 重新构建后均通过。Debug 首轮与 Release 编译并行时，有一条既有 disruption fixture 被其 2 秒 terminator 提前结束；负载结束后 Debug 全量重跑退出码 0。MSVC 测试编译保留若干既有 C4189 未引用局部变量警告。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：逐行覆盖完整性】** config.rs 98 行全量复核：3 结构体（SparrowConfig 7 字段 / ExplorationConfig 6 字段 / CompressionConfig 4 字段）、1 枚举（ShrinkDecayStrategy 2 变体）、1 常量（DEFAULT_SPARROW_CONFIG 98 行展开）——主文 5 个小节 + JSON 小节全覆盖，无遗漏项；derive（Debug/Clone/Copy）与 doc 注释不构成逻辑项。

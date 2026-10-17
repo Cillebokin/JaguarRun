@@ -111,6 +111,12 @@ Result<std::size_t> toSize(std::uint64_t value, const char* field)
     return Result<std::size_t>::FromValue(static_cast<std::size_t>(value));
 }
 
+bool validMinItemSeparation(double separation) noexcept
+{
+    return std::isfinite(separation) && separation >= 0.0 &&
+           std::isfinite(static_cast<float>(separation));
+}
+
 ImporterConfig withSeparation(const ImporterConfig& source, double separation)
 {
     ImporterConfig result = source;
@@ -400,8 +406,7 @@ JAGUARCORE_API Result<Item> Importer::ImportItem(
     const ExternalItem& external,
     ItemIndex internalIndex) const
 {
-    if (!std::isfinite(m_Config.minItemSeparation) ||
-        m_Config.minItemSeparation < 0.0)
+    if (!validMinItemSeparation(m_Config.minItemSeparation))
     {
         return Result<Item>::FromError(
             {ErrorCode::InvalidInput, "minimum item separation must be finite and nonnegative"});
@@ -428,8 +433,7 @@ JAGUARCORE_API Result<Item> Importer::ImportItem(
 JAGUARCORE_API Result<Container> Importer::ImportContainer(
     const ExternalContainer& external) const
 {
-    if (!std::isfinite(m_Config.minItemSeparation) ||
-        m_Config.minItemSeparation < 0.0)
+    if (!validMinItemSeparation(m_Config.minItemSeparation))
     {
         return Result<Container>::FromError(
             {ErrorCode::InvalidInput, "minimum item separation must be finite and nonnegative"});
@@ -517,8 +521,7 @@ JAGUARCORE_API Result<Container> Importer::ImportContainerJson(
 JAGUARCORE_API Result<SPInstance> Importer::ImportSPInstance(
     const ExternalSPInstance& external) const
 {
-    if (!std::isfinite(external.minItemSeparation) ||
-        external.minItemSeparation < 0.0)
+    if (!validMinItemSeparation(external.minItemSeparation))
     {
         return Result<SPInstance>::FromError(
             {ErrorCode::InvalidInput,
@@ -590,8 +593,7 @@ JAGUARCORE_API Result<SPSolution> Importer::ImportSPSolutionJson(
 JAGUARCORE_API Result<BPInstance> Importer::ImportBPInstance(
     const ExternalBPInstance& external) const
 {
-    if (!std::isfinite(external.minItemSeparation) ||
-        external.minItemSeparation < 0.0)
+    if (!validMinItemSeparation(external.minItemSeparation))
     {
         return Result<BPInstance>::FromError(
             {ErrorCode::InvalidInput,
@@ -669,8 +671,7 @@ JAGUARCORE_API Result<BPSolution> Importer::ImportBPSolutionJson(
 JAGUARCORE_API Result<MSPInstance> Importer::ImportMSPInstance(
     const ExternalMSPInstance& external) const
 {
-    if (!std::isfinite(external.minItemSeparation) ||
-        external.minItemSeparation < 0.0)
+    if (!validMinItemSeparation(external.minItemSeparation))
     {
         return Result<MSPInstance>::FromError(
             {ErrorCode::InvalidInput,

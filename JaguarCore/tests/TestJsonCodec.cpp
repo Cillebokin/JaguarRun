@@ -94,13 +94,15 @@ void runJsonCodecTests()
     assert(reparsedContainer.Value().id == 800);
     assert(reparsedContainer.Value().zones.size() == 1);
 
-    const auto missingOrientation = jaguar::ParseExternalItemJson(
-        R"json({"id": 1, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    const auto missingOrientation = jaguar::Importer{}.ImportItemJson(
+        R"json({"id": 1, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json",
+        0);
     assert(!missingOrientation.HasValue());
     assert(missingOrientation.GetError().code == jaguar::ErrorCode::SerializationFailure);
 
-    const auto legacyOrientation = jaguar::ParseExternalItemJson(
-        R"json({"id": 1, "allowed_orientations": [0], "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json");
+    const auto legacyOrientation = jaguar::Importer{}.ImportItemJson(
+        R"json({"id": 1, "allowed_orientations": [0], "orientation": {"rotation": {"mode": "continuous"}}, "shape": {"type": "simple_polygon", "data": [[0,0],[1,0],[0,1]]}})json",
+        0);
     assert(!legacyOrientation.HasValue());
     assert(legacyOrientation.GetError().code == jaguar::ErrorCode::SerializationFailure);
 
@@ -160,6 +162,17 @@ void runJsonCodecTests()
     assert(parsedSpp.Value().items.size() == 1);
     assert(parsedSpp.Value().items.front().demand == 3);
     assert(parsedSpp.Value().stripHeight == 10.0);
+
+    const auto nullSeparation = jaguar::ParseExternalSPInstanceJson(
+        R"json({"name":"null-separation","min_item_separation":null,"items":[],"strip_height":1})json");
+    assert(!nullSeparation.HasValue());
+    assert(nullSeparation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto outOfRangeJsonSeparation = jaguar::ParseExternalSPInstanceJson(
+        R"json({"name":"f32-overflow-separation","min_item_separation":1e39,"items":[],"strip_height":1})json");
+    assert(!outOfRangeJsonSeparation.HasValue());
+    assert(outOfRangeJsonSeparation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
 
     const auto serializedSpp = jaguar::SerializeExternalSPInstanceJson(
         parsedSpp.Value());
@@ -242,6 +255,47 @@ void runJsonCodecTests()
     assert(importedSpp.HasValue());
     assert(importedSpp.Value().ItemCount() == 1);
     assert(!importedSpp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
+
+    const auto maxItemIdSpp = importer.ImportSPInstanceJson(
+        R"json({"name":"max-item-id","items":[{"id":18446744073709551615,"demand":1,"orientation":{"rotation":{"mode":"continuous"}},"shape":{"type":"rectangle","data":{"x_min":0,"y_min":0,"width":1,"height":1}}}],"strip_height":10})json");
+    assert(maxItemIdSpp.HasValue());
+    assert(maxItemIdSpp.Value().GetItem(0).ExternalId() ==
+           std::numeric_limits<jaguar::ItemId>::max());
+
+    jaguar::ExternalDemandItem duplicatePositive{};
+    duplicatePositive.item.id = 6601;
+    duplicatePositive.demand = 1;
+    jaguar::ExternalDemandItem duplicateZero = duplicatePositive;
+    duplicateZero.demand = 0;
+    const std::vector<jaguar::ExternalDemandItem> duplicateItemIds{
+        duplicatePositive, duplicateZero};
+    jaguar::ExternalSPInstance duplicateIdSpp{};
+    duplicateIdSpp.items = duplicateItemIds;
+    const auto rejectedDuplicateIdSpp =
+        importer.ImportSPInstance(duplicateIdSpp);
+    assert(!rejectedDuplicateIdSpp.HasValue());
+    assert(rejectedDuplicateIdSpp.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    jaguar::ExternalBPInstance duplicateIdBpp{};
+    duplicateIdBpp.items = duplicateItemIds;
+    const auto rejectedDuplicateIdBpp =
+        importer.ImportBPInstance(duplicateIdBpp);
+    assert(!rejectedDuplicateIdBpp.HasValue());
+    assert(rejectedDuplicateIdBpp.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    jaguar::ExternalMSPInstance duplicateIdMspp{};
+    duplicateIdMspp.items = duplicateItemIds;
+    const auto rejectedDuplicateIdMspp =
+        importer.ImportMSPInstance(duplicateIdMspp);
+    assert(!rejectedDuplicateIdMspp.HasValue());
+    assert(rejectedDuplicateIdMspp.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+
+    const auto rejectedHoleItemSpp = importer.ImportSPInstanceJson(
+        R"json({"name":"hole-item","items":[{"id":6701,"demand":1,"orientation":{"rotation":{"mode":"discrete","angles":[0]}},"shape":{"type":"polygon","data":{"outer":[[0,0],[10,0],[10,10],[0,10]],"inner":[[[4,4],[6,4],[6,6],[4,6]]]}}}],"strip_height":10})json");
+    assert(!rejectedHoleItemSpp.HasValue());
+    assert(rejectedHoleItemSpp.GetError().code ==
+           jaguar::ErrorCode::UnsupportedShape);
 
     const auto overflowingDemandSpp = importer.ImportSPInstanceJson(
         R"json({
@@ -511,6 +565,102 @@ void runJsonCodecTests()
     assert(separatedSpp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
     assert(std::abs(*separatedSpp.Value().BaseStrip().shapeModifyConfig.offset - 1.0) <
            1.0e-12);
+    assert(std::abs(separatedSpp.Value().GetItem(0)
+                        .CollisionShape().BoundingBox().Width() - 4.0) <
+           1.0e-9);
+
+    const auto rejectedNegativeSeparation = importer.ImportSPInstanceJson(
+        R"json({"name":"negative-separation","min_item_separation":-1,"items":[],"strip_height":1})json");
+    assert(!rejectedNegativeSeparation.HasValue());
+    assert(rejectedNegativeSeparation.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    jaguar::ExternalSPInstance nanSeparation{};
+    nanSeparation.minItemSeparation =
+        std::numeric_limits<double>::quiet_NaN();
+    const auto rejectedNanSeparation = importer.ImportSPInstance(nanSeparation);
+    assert(!rejectedNanSeparation.HasValue());
+    assert(rejectedNanSeparation.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    jaguar::ExternalSPInstance infiniteSeparation{};
+    infiniteSeparation.minItemSeparation =
+        std::numeric_limits<double>::infinity();
+    const auto rejectedInfiniteSeparation =
+        importer.ImportSPInstance(infiniteSeparation);
+    assert(!rejectedInfiniteSeparation.HasValue());
+    assert(rejectedInfiniteSeparation.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+
+    jaguar::ExternalBPInstance invalidSeparationBpp{};
+    invalidSeparationBpp.minItemSeparation = -1.0;
+    const auto rejectedNegativeSeparationBpp =
+        importer.ImportBPInstance(invalidSeparationBpp);
+    assert(!rejectedNegativeSeparationBpp.HasValue());
+    assert(rejectedNegativeSeparationBpp.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    jaguar::ExternalMSPInstance invalidSeparationMspp{};
+    invalidSeparationMspp.minItemSeparation = -1.0;
+    const auto rejectedNegativeSeparationMspp =
+        importer.ImportMSPInstance(invalidSeparationMspp);
+    assert(!rejectedNegativeSeparationMspp.HasValue());
+    assert(rejectedNegativeSeparationMspp.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+
+    jaguar::ExternalSPInstance outOfRangeSeparation{};
+    outOfRangeSeparation.name = "f32-overflow-separation";
+    outOfRangeSeparation.minItemSeparation = 1.0e39;
+    jaguar::ExternalItem outOfRangeSeparationItem{};
+    outOfRangeSeparationItem.id = 602;
+    outOfRangeSeparationItem.rotation = jaguar::RotationPolicy::None();
+    outOfRangeSeparationItem.shape = jaguar::ExternalShape::Rectangle(
+        0.0, 0.0, 2.0, 2.0);
+    outOfRangeSeparation.items.push_back({outOfRangeSeparationItem, 1});
+    outOfRangeSeparation.stripHeight = 1.0e40;
+    const auto rejectedOutOfRangeSeparation =
+        importer.ImportSPInstance(outOfRangeSeparation);
+    assert(!rejectedOutOfRangeSeparation.HasValue());
+    assert(rejectedOutOfRangeSeparation.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    assert(rejectedOutOfRangeSeparation.GetError().message ==
+           "minimum item separation must be finite and nonnegative");
+
+    jaguar::ExternalItem separatedItem{};
+    separatedItem.id = 6801;
+    separatedItem.rotation = jaguar::RotationPolicy::Discrete({0.0});
+    separatedItem.shape = jaguar::ExternalShape::Rectangle(0.0, 0.0, 2.0, 2.0);
+    jaguar::ExternalDemandItem separatedDemand{separatedItem, 1};
+    jaguar::ExternalBPInstance separatedBppInput{};
+    separatedBppInput.minItemSeparation = 2.0;
+    separatedBppInput.items.push_back(separatedDemand);
+    jaguar::ExternalBin separatedBin{};
+    separatedBin.container.id = 6802;
+    separatedBin.container.shape = jaguar::ExternalShape::Rectangle(
+        0.0, 0.0, 10.0, 10.0);
+    separatedBin.stock = 1;
+    separatedBppInput.bins.push_back(separatedBin);
+    const auto separatedBpp = importer.ImportBPInstance(separatedBppInput);
+    assert(separatedBpp.HasValue());
+    assert(std::abs(separatedBpp.Value().GetItem(0)
+                        .CollisionShape().BoundingBox().Width() - 4.0) <
+           1.0e-9);
+    assert(separatedBpp.Value().GetBin(0)
+               .container.GetOriginalShape().modifyConfig.offset.has_value());
+    assert(std::abs(*separatedBpp.Value().GetBin(0)
+                         .container.GetOriginalShape().modifyConfig.offset - 1.0) <
+           1.0e-12);
+
+    jaguar::ExternalMSPInstance separatedMsppInput{};
+    separatedMsppInput.minItemSeparation = 2.0;
+    separatedMsppInput.items.push_back(separatedDemand);
+    separatedMsppInput.strips = {4.0, 10.0};
+    const auto separatedMspp = importer.ImportMSPInstance(separatedMsppInput);
+    assert(separatedMspp.HasValue());
+    assert(std::abs(separatedMspp.Value().GetItem(0)
+                        .CollisionShape().BoundingBox().Width() - 4.0) <
+           1.0e-9);
+    assert(separatedMspp.Value().BaseStrip().shapeModifyConfig.offset.has_value());
+    assert(std::abs(*separatedMspp.Value().BaseStrip().shapeModifyConfig.offset - 1.0) <
+           1.0e-12);
+
     const auto importedMsppSolution = importer.ImportMSPSolutionJson(
         importedMspp.Value(),
         R"json({

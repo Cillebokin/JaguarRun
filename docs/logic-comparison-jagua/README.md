@@ -15,11 +15,13 @@
 | [10-utilities-and-assertions.md](records/10-utilities-and-assertions.md) | 浮点比较、NumericPolicy、断言函数与 `qt_traits` debug 检查 | B9、E8、B13 | B9 静态映射和最小边界 fixture 矩阵已记录；运行对拍仍归 B1/B4/B8/E8/B11 |
 | [20-entities.md](records/20-entities.md) | `entities/{container,item,layout,placed_item}.rs` | B6、B13 | 4 个文件已做函数、分支、失败出口与 C++ 符号静态映射；运行验收仍归 B6 |
 | [30-collision-detection.md](records/30-collision-detection.md) | `collision_detection/{cd_engine,hazards,quadtree}` 实现与测试 | B4、B5、B6、B9、B11、B13 | 10 个文件已静态登记；碰撞数值与差分验收仍待 B4/B11 |
-| [40-io.md](records/40-io.md) | `io/{export,ext_repr,import,svg/*}.rs` | B8、B13、B14 | 5 个文件已做静态映射；JSON/SVG 运行验收仍待 B8/B14 |
-| [50-bpp.md](records/50-bpp.md) | `probs/bpp/{entities,io}` 实现 | B7、B8、B13、B14 | 7 个文件已静态映射；实例、快照与 IO 对拍仍待 B7/B8/B14 |
-| [60-spp.md](records/60-spp.md) | `probs/spp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；状态与 IO 运行对拍仍待 B6/B7/B8/B14 |
-| [70-mspp.md](records/70-mspp.md) | `probs/mspp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；问题状态与 IO 运行对拍仍待 B6/B7/B8/B14 |
+| [40-io.md](records/40-io.md) | `io/{export,ext_repr,import,svg/*}.rs` | B8、B13、B14 | 5 个文件已静态映射；B14 输入契约已执行；完整 JSON/SVG 往返对拍仍归 B8 |
+| [50-bpp.md](records/50-bpp.md) | `probs/bpp/{entities,io}` 实现 | B7、B8、B13、B14 | 7 个文件已静态映射；B14 输入契约见 91；实例与快照验收仍归 B7/B8 |
+| [60-spp.md](records/60-spp.md) | `probs/spp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；B14 输入契约见 91；状态与完整 IO 对拍仍归 B6/B7/B8 |
+| [70-mspp.md](records/70-mspp.md) | `probs/mspp/{entities,io}` 实现 | B6、B7、B8、B13、B14 | 7 个文件已静态映射；B14 输入契约见 91；问题状态与完整 IO 对拍仍归 B6/B7/B8 |
 | [80-geometry.md](records/80-geometry.md) | `geometry/{primitives,fail_fast}` 与几何 helper | B1、B3、B9、B13 | 15 个实现文件已静态映射；B1 两轮确定性夹具与 Debug/Release 全套测试通过；逐函数余项、非有限 Edge 输入域差异与 fail-fast profile 对拍仍待 B1/B3/B9 |
+| [90-test-mapping.md](records/90-test-mapping.md) | pinned `jagua-rs/src` 单元测试与 `lbf/tests`；本地 fork 测试另行标识 | B15、R-3 | pinned 27 个测试实例和本地 30 个测试实例均有 C++ 功能测试映射；明确区分映射与覆盖等价，见未覆盖项 |
+| [91-input-contracts.md](records/91-input-contracts.md) | `io/ext_repr.rs`、`io/import.rs`、SPP/BPP/MSPP 实例导入 | B14 | 五项输入契约的 C++ 执行与回归记录，验证状态及边界见记录 |
 | [SOURCE-INVENTORY.md](records/SOURCE-INVENTORY.md) | `jagua-rs/src/**/*.rs` | B13 | 85 个 pinned 源文件均有记录：24 个模块边界记录，61 个实现/测试文件静态映射 |
 
 ## 证据规则

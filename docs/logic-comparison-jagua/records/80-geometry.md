@@ -130,27 +130,27 @@
 | Rust 文件 | Rust 公开函数 | C++ 对应路径与当前证据 | 覆盖状态及边界 |
 |---|---|---|---|
 | `primitives/circle.rs`（5） | `try_new` | `Circle2d::Create`；`geometry.circle_construction`、`geometry.circle_basics` | 直接对拍：零半径、负半径及非有限构造分支有记录；非有限中心/半径拒绝行为已比较 |
-| | `bounding_circle` | `Circle2d::BoundingCircleRustF32`；`circle.bounding_circle` | 直接对拍：当前为两个相离圆；空输入、单圆、包含关系等边界未覆盖 |
+| | `bounding_circle` | `Circle2d::BoundingCircleRustF32`；`circle.bounding_circle`、`geometry.circle_bounding_circle_*` | 两相离圆既有值继续对拍；新增空集、单圆、前圆包含后圆、后圆包含前圆、同心嵌套。空集 Rust panic/C++ Result 错误；单圆和前包含后相等；后圆包含前圆时两侧都返回圆心 `(5,0)`、半径 `6`，未包住半径 10 的输入圆；同心嵌套输入产生 NaN 圆心/半径，输入有限但输出非有限 |
 | | `area`、`bbox`、`diameter` | `AreaRustF32`、`BoundingBoxRustF32`、`DiameterRustF32`；`geometry.circle_basics` | 直接对拍；`diameter` 另出现在 `circle.distance` |
 | `primitives/edge.rs`（14） | `try_new` | `Edge2d::Create`；`geometry.edge_construction`、`geometry.edge_nonfinite_bbox_contract` | 直接对拍有限有效、零长、f32 收敛端点和所测 NaN/Inf 端点；两侧均接受非有限端点 |
-| | `extend_at_front`、`extend_at_back`、`scale`、`reverse` | `ExtendedAtFrontRustF32`、`ExtendedAtBackRustF32`、`ScaledRustF32`、`ReversedRustF32`；`edge.operations` | 直接对拍当前有效输入；负/非有限缩放等边界未覆盖 |
+| | `extend_at_front`、`extend_at_back`、`scale`、`reverse` | `ExtendedAtFrontRustF32`、`ExtendedAtBackRustF32`、`ScaledRustF32`、`ReversedRustF32`；`edge.operations`、`geometry.edge_zero_length_*` | 普通及原始零长输入已对拍：零长 extend 的被延长端产生 NaN；scale/reverse 保持同一点；与穿过该点的线段既不相交也不返回交点。负/非有限缩放仍未覆盖 |
 | | `collides_at` | `IntersectionPointRustF32`；`edge.intersection`、`geometry.edge_collides_at`、`geometry.edge_collides_at_points` | 直接对拍：内部相交、端点、T 形、共线、平行和线段外交点分支 |
 | | `closest_point_on_edge` | `ClosestPointRustF32`；`geometry.edge_closest`、`geometry.edge_zero_length_operations` | 投影样例与手工构造的零长 Edge 最近点均直接对拍；Rust 构造器仍拒绝零长端点 |
 | | `x_min`、`y_min`、`x_max`、`y_max`、`length`、`centroid` | 对应 RustF32 查询；`edge.operations`、`geometry.edge_zero_length_operations` | 有限普通样例及原始零长 Edge 的 bbox/长度/质心直接对拍 |
 | | `bbox` | `Edge2d::BoundingBox()`；`geometry.independent_accessors`、`geometry.edge_nan_bbox_values` | 有限边与 NaN 起点 bbox 数值已对拍；NaN 结果的 raw-bit 表示尚未单独固定 |
 | `primitives/point.rs`（2） | `x`、`y` | C++ `Point2d` 公共坐标字段；`geometry.independent_accessors` | 独立读取并对拍普通有限坐标；非有限/signed-zero accessor 值未单列 |
 | `primitives/rect.rs`（18） | `try_new` | `Rect2d::Create`；`geometry.rect_construction` | 直接对拍：有效、零宽/高、NaN 与正无穷上界 |
-| | `from_diagonal_corners`、`inflate_to_square`、`scale`、`resize_by` | 对应 `Rect2d` helper；`rect.operations`、`rect.distance`、`geometry.rect_boundary_resizes`、`geometry.rect_zero_scale_rejected` | 直接对拍有效分支、收缩至零的失败出口和零缩放拒绝；负比例及更多退化组合仍未覆盖 |
+| | `from_diagonal_corners`、`inflate_to_square`、`scale`、`resize_by` | 对应 `Rect2d` helper；`rect.operations`、`rect.distance`、`geometry.rect_boundary_resizes`、`geometry.rect_zero_scale_rejected`、`geometry.rect_degenerate_*` | 直接对拍有效分支、收缩至零、负比例、零宽/零高缩放及正向 resize 恢复。无效缩放 Rust panic、C++ Result 错误；有效退化组合两侧数值一致 |
 | | `relation_to` | `RelationToRustF32`；`geometry.rect_relations`、`geometry.rect_relation_ulp_boundary` | 直接对拍 Surrounding、Enclosed、Intersecting、Disjoint 与 ULP 邻界 |
 | | `almost_relation_to` | `AlmostRelationToRustF32`；`rect.almost_relation_cases`、`geometry.rect_relation_ulp_boundary` | 直接对拍关系枚举和 ULP 邻界；`AlmostCollidesWith` bool trait 另由 `geometry.trait_dispatch` 单独对拍 |
-| | `quadrants`、`centroid`、`width`、`height` | `QuadrantsRustF32`、`CentroidRustF32`、`Width/HeightRustF32`；`geometry.rect_basics`、`rect.operations`、`geometry.rect_quadrant_panic_contract` | 普通象限顺序、Rust 在 1-ULP/零宽矩形上的 panic 与 C++ 退化象限均已刻画；其他零面积度量和极端尺寸仍未覆盖 |
-| | `corners`、`intersection`、`bounding_rect` | `CornersRustF32`、`IntersectionRustF32`、`BoundingRectRustF32`；`rect.combination`、`geometry.rect_boundary_intersections` | 对拍正常相交、无交集、边/角接触及分离；零面积原始 Rect 的组合仍未覆盖 |
-| | `edges` | `EdgesRustF32`；`rect.edges` | 直接对拍四条边及顺序 |
-| | `sides` | `SidesRustF32()`；`geometry.independent_accessors` | 已独立对拍四条边及顺序；当前只测普通矩形，零宽/零高和非有限字段未测 |
-| | `area`、`diameter` | `AreaRustF32`、`DiameterRustF32`；`rect.operations` | 直接对拍正常矩形 |
+| | `quadrants`、`centroid`、`width`、`height` | `QuadrantsRustF32`、`CentroidRustF32`、`Width/HeightRustF32`；`geometry.rect_basics`、`rect.operations`、`geometry.rect_quadrant_panic_contract`、`geometry.rect_degenerate_metrics` | 普通象限顺序、零宽/零高度量，以及 Rust 在 1-ULP/零宽矩形上的 panic 与 C++ 退化象限均已刻画；错误出口仍不等价，极端尺寸未覆盖 |
+| | `corners`、`intersection`、`bounding_rect` | `CornersRustF32`、`IntersectionRustF32`、`BoundingRectRustF32`；`rect.combination`、`geometry.rect_boundary_intersections`、`geometry.rect_degenerate_boundary_shapes`、`geometry.rect_degenerate_intersections` | 退化 corners 与 intersection 已对拍；普通 `bounding_rect` 对拍仍未扩展到退化输入 |
+| | `edges` | `EdgesRustF32`；`rect.edges`、`geometry.rect_degenerate_boundary_shapes` | 普通与零宽/零高矩形的四条边坐标和顺序均直接对拍 |
+| | `sides` | `SidesRustF32()`；`geometry.independent_accessors` | 普通矩形四边顺序已独立对拍；零宽/零高输入尚未直接调用 `sides()` |
+| | `area`、`diameter` | `AreaRustF32`、`DiameterRustF32`；`rect.operations`、`geometry.rect_degenerate_metrics` | 正常、零宽和零高矩形度量直接对拍 |
 | `primitives/simple_polygon.rs`（12） | `new` | `SimplePolygon::Create`；`geometry.simple_polygon_construction`、`geometry.simple_polygon_basics`、`geometry.simple_polygon_clockwise_vertices` | 直接对拍有限有效、点数不足、重复、共线、自交、小面积及方向归一 |
 | | `vertex`、`edge`、`edge_iter`、`n_vertices` | `Vertices`、`Edges`、`VertexCount`、`Centroid`；`geometry.simple_polygon_basics`、`geometry.simple_polygon_clockwise_vertices` | `edge_iter`/`n_vertices` 有直接输出；`edge` 经迭代器、`vertex` 经质心计算间接执行；索引越界/panic 未覆盖 |
-| | `calculate_diameter`、`generate_bounding_box`、`calculate_area`、`calculate_poi` | Rust 直接调用并输出 `geometry.simple_polygon_helpers`、`geometry.simple_polygon_helper_failures`、`geometry.simple_polygon_helper_rejections`；C++ 对照 `SimplePolygon::Create` 的正常缓存值和退化构造拒绝 | 正常矩形派生值、空/单点 panic、两点/共线 POI 的 `Err` 以及构造拒绝已记录；C++ 无同构静态 helper API，退化 `area`/bbox/diameter 数值尚未全覆盖 |
+| | `calculate_diameter`、`generate_bounding_box`、`calculate_area`、`calculate_poi` | Rust 直接调用并输出 `geometry.simple_polygon_helpers`、`geometry.simple_polygon_helper_failures`、`geometry.simple_polygon_helper_rejections`、`geometry.simple_polygon_degenerate_*`；C++ 对照 `SimplePolygon::Create` 的正常缓存值和退化构造拒绝 | 新增重复点与共线 helper 的 area/diameter/bbox 数值及 panic/Err 状态；C++ 无同构静态 helper API，退化 helper 数值只有 Rust reference，不能声称已完成 C++ 值对拍 |
 | | `centroid` | `Centroid`；`geometry.simple_polygon_basics`、`geometry.original_shape` | 直接对拍普通多边形；数值退化边界另有 oracle 输出但未全部进入当前 comparator |
 | | `generate_surrogate`、`surrogate` | `Surrogate::Create`、surrogate accessor | 归 B3；B1 不把 surrogate 生成/索引行为计作已覆盖 |
 | `transformation.rs`（13） | `empty`、`from_translation`、`from_rotation`、`rotate`、`translate`、`rotate_translate`、`translate_rotate`、`transform`、`transform_from_decomposed`、`inverse` | `Transform2d::{Identity,FromRotationTranslation,FollowedByRustF32,InverseRustF32,ApplyRustF32}`；`geometry.transformation_apply`、`geometry.transformation_order`、`geometry.transformation_matrix_probes`、`geometry.transformation_decompositions`、`geometry.transform_followed_by`、`geometry.transform_inverse` | 直接对拍有限刚体变换路径和基向量作用；非刚体矩阵不是 C++ 类型可表达域 |
@@ -158,7 +158,7 @@
 | | `matrix` | Rust 3×3 matrix accessor；C++ 无同形 accessor | 仅以基向量作用结果间接核对；不构成原始矩阵字段逐项相等证明 |
 | `d_transformation.rs`（6） | `new`、`empty`、`rotation`、`translation`、`compose` | `Transform2d` 字段与组合 helper；`geometry.dtransformation`、`geometry.transformation_decompositions` | 直接对拍有限值；`NotNan` 输入 NaN 的 panic 行为和 infinity 域未独立覆盖 |
 | | `normalize_rotation` | `NormalizeRotationRustF32`；`geometry.normalize_rotation`、`geometry.normalize_rotation_nonfinite`、`geometry.normalize_rotation_negative_zero` | 直接对拍有限角、NaN、正负无穷和负零 |
-| `convex_hull.rs`（3） | `convex_hull_from_points` | `ConvexHull`；`geometry.convex_hull_tied_x`、`geometry.convex_hull_singleton_count` | 直接对拍 tied-x 排序和 singleton；pinned singleton 结果为 0 个点；空集、重复/共线等独立边界未覆盖 |
+| `convex_hull.rs`（3） | `convex_hull_from_points` | `ConvexHull`；`geometry.convex_hull_tied_x`、`geometry.convex_hull_singleton_count`、`geometry.convex_hull_finite_degenerates_*` | 直接对拍 empty、singleton、重复点、重复顶点云和水平/斜向共线输入的顶点数与顺序；六组结果相等 |
 | | `convex_hull_indices`、`convex_hull_from_surrogate` | `Surrogate` 凸包索引/点映射 | 归 B3；当前 B1 fixture 未覆盖 surrogate 依赖路径 |
 | `original_shape.rs`（5） | `convert_to_internal`、`centroid`、`area`、`bbox`、`diameter` | `geometry.original_shape`；`convert_to_internal` 与 C++ `OriginalShape::ConvertToInternal` 比较，Rust getter 与 C++ 保存的原始 `SimplePolygon` getter 比较 | `convert_to_internal` 直接对拍；4 个 getter 的值有对拍，但 C++ 侧读取的是底层原始 shape getter，并非同构的 `OriginalShape` getter API。仅一个 pre-transform、默认修改配置样例，offset/simplify 等修改模式归 B2 |
 
@@ -204,6 +204,16 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - Rust 1.98.1 Debug/Release oracle 均退出码 0；本轮新增输出除上述 profile-specific surrogate 键外逐项一致。C++ `runGeometryDifferentialTests` 的定向 Debug/Release 入口均退出码 0，`cargo fmt --check` 通过。完整 `JaguarCoreTests.exe` 本轮未完成：入口启动数分钟仍无输出后被停止，因此不记录全套测试结果。
 - 本轮先以缺 fixture 键确认比较器红测；排查 Release 首次失败后确认是把 Rust Debug pier 值用于 Release 对拍，改为 profile-specific fixture 后两侧通过。B1 仍为“部分”，剩余边界矩阵和已确认的 panic/退化象限差异仍待决策或逐项验收。
 
+## B1 第六轮：收口剩余有限退化边界
+
+- fixture 从 65 个键增至 80 个键。新增 15 个键，覆盖原始零长 Edge 的 extend/scale/reverse/intersection，零宽/零高 Rect 的度量、corners、edges、交集、正向 resize 恢复和负比例/零尺寸 scale，凸包 empty/singleton/重复/共线，以及 SPolygon helper 的重复点/共线数值与失败出口，Circle 包围圆的 empty/single/包含输入。
+- Edge：Rust 与 C++ 对零长边前/后延伸均产生 NaN；缩放和反向保持同一点；零长边即使落在线段上，也不被 Rust `collides_with` / `collides_at` 视为相交。Debug/Release comparator 均匹配。
+- Rect：零宽、零高的宽高/面积/直径/质心、四角、四边和交集结果逐值一致；`resize_by` 对称扩张可以恢复为正面积矩形。无效缩放时 Rust `scale` panic，C++ `ScaledRustF32` 返回错误；前轮已确认的 `quadrants()` 零退化 panic 与 C++ 返回退化象限仍不相同。
+- 凸包：六组输入 `[]`、单点、重复单点、重复顶点点集、斜向共线、水平共线的输出点数和坐标顺序在 C++ `ConvexHull` 中一致。SPolygon helper 新增直接 Rust 数值输出：两重合点直径为 0、面积为 0；水平共线 bbox panic；重复顶点点集的面积为 2、直径为 `sqrt(8)`、bbox 为 `[0,0,2,2]`。C++ 没有同构静态 helper API，因此这些 helper 数值作为 Rust reference 留档，C++ 侧只对照构造拒绝和可用的 `ConvexHull` API。
+- Circle：空输入 Rust panic/C++ Result 错误；单圆和首圆包住后续圆均保持首圆。后续大圆包住首圆时，两侧同得圆心 `(5,0)`、半径 `6`，但结果没有包住半径 10 的输入圆；同心嵌套则两侧都返回 NaN 圆心/半径。它们是相同的既有算法行为，不代表包围圆算法满足“最小包围圆”的几何定义。
+- TDD 红测先由缺失的新 fixture key 触发；补齐 reference 后，锁定 Rust 1.98.1 Debug/Release oracle 的 15 个新增值逐字匹配 fixture，C++ 定向 geometry differential Debug/Release 均退出码 0，`cargo fmt --check` 通过。fixture 共 80 个唯一 key；本轮没有运行全套 `JaguarCoreTests.exe`。
+- 本轮收口的是上述有限退化输入矩阵，不等于 B1 完成。仍需处理/确认 Rect `quadrants()` 与缩放的 panic→Result 合同、SPolygon helper 的 C++ API 映射；`Rect::sides()` 与退化 `bounding_rect` 也尚未用这轮输入直接对拍。B1 继续为“部分”。
+
 ## 结论边界与后续验收
 
 - 15 个 geometry 实现文件均已登记；`geometry/mod.rs`、`geometry/primitives/mod.rs` 与 `geometry/fail_fast/mod.rs` 的导出边界见 `00-module-exports.md`。
@@ -213,7 +223,7 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - `DTransformation` 不需要新增同名结构：它保存的旋转和平移可由 `Transform2d::rotationRad/translation` 表达，行为落在 `ApplyRustF32`、`FollowedByRustF32`、`InverseRustF32`；Rust 公开的 `normalize_rotation` 则新增直接对应 `NormalizeRotationRustF32(float)`，按 f32 remainder 及负角修正规则实现，并覆盖 NaN、正负无穷和负零。
 - B1 第二轮运行对拍（2026-10-16）：新增 `geometry.transformation_matrix_probes`，按 `empty/from_translation/from_rotation/rotate/translate/rotate_translate/translate_rotate/transform/transform_from_decomposed/inverse` 路径，对原点与两个单位基向量逐项比较；同时比较每条路径的分解字段与 `is_empty` 边界。C++ 没有原始 3×3 matrix accessor 或同名 `is_empty` 方法；矩阵作用映射到 `Transform2d::ApplyRustF32`，空变换判定映射到精确零旋转/零平移字段。Rust matrix 与 C++ 表示差异保留在 API 映射记录。
 - 第二轮还补了 `Edge::collides_at` 的 7 组用例：线段内部相交、端点接触、T 形接触、共线重叠、共线端点接触、平行分离及交点落在线段范围外；对应交点与存在性均和 `IntersectionPointRustF32` 比较。矩形 relation/`almost_relation_to` 的阈值矩阵覆盖距 `1.0f` 下方 1、2、3、4、8、16 ULP；严格 relation 均为 `Intersecting`，almost relation 在 1–4 ULP 归为 `Surrounding`，8/16 ULP 归为 `Intersecting`。
-- 当前 B1 仍为进行中：78 个显式公开函数和 33 个 trait 实现块已有静态覆盖矩阵；第四、第五轮扩展了对拍，但剩余边界见本记录“B1 第五轮”。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rust 与 C++ 的 Edge 构造都接受本轮探测的非有限端点，不再记录为构造输入域差异；Rust 与 C++ 的 Rect 象限退化行为仍有已确认差异。
+- 当前 B1 仍为进行中：78 个显式公开函数和 33 个 trait 实现块已有静态覆盖矩阵；第四至第六轮扩展了对拍，但剩余边界见本记录“B1 第六轮”。Surrogate 生成/索引映射归 B3，offset 与简化归 B2。Rust 与 C++ 的 Edge 构造都接受第五轮探测的非有限端点，不再记录为构造输入域差异；Rust 与 C++ 的 Rect 象限退化行为及无效缩放失败形态仍有已确认差异，SPolygon 的 C++ helper API 也未补齐。
 - 第三轮之前的既有验证：Rust 1.98.1 Debug/Release geometry-only oracle 新增 6 个键逐值一致；当时 fixture 共 48 个键，默认 oracle 与 geometry-only oracle 的对应输出逐值一致；JaguarCore Debug/Release 全套 `JaguarCoreTests.exe` 均以退出码 0 结束。第四轮更新后的 52 键和双 profile 验证见本记录“B1 第四轮”。
 
 ## 证据位置

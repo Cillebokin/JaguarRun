@@ -700,6 +700,55 @@ fn run_b1_geometry_oracle() {
         Circle::try_new(Point(0.0, 0.0), f32::INFINITY).is_ok()
     );
 
+    let bounding_single = Circle::try_new(Point(3.0, -4.0), 0.0).unwrap();
+    let single_bounding_circle = Circle::bounding_circle([&bounding_single]);
+    let outer_first_circles = [
+        Circle::try_new(Point(0.0, 0.0), 10.0).unwrap(),
+        Circle::try_new(Point(1.0, 0.0), 2.0).unwrap(),
+    ];
+    let outer_first = Circle::bounding_circle(outer_first_circles.iter());
+    let inner_first_circles = [
+        Circle::try_new(Point(0.0, 0.0), 1.0).unwrap(),
+        Circle::try_new(Point(1.0, 0.0), 10.0).unwrap(),
+    ];
+    let inner_first = Circle::bounding_circle(inner_first_circles.iter());
+    let concentric_nested_circles = [
+        Circle::try_new(Point(0.0, 0.0), 1.0).unwrap(),
+        Circle::try_new(Point(0.0, 0.0), 2.0).unwrap(),
+    ];
+    let concentric_nested = Circle::bounding_circle(concentric_nested_circles.iter());
+    println!(
+        "geometry.circle_bounding_circle_empty_contract={}",
+        std::panic::catch_unwind(|| Circle::bounding_circle(std::iter::empty::<&Circle>()))
+            .is_err()
+    );
+    println!(
+        "geometry.circle_bounding_circle_finite_values={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        single_bounding_circle.center.0,
+        single_bounding_circle.center.1,
+        single_bounding_circle.radius,
+        outer_first.center.0,
+        outer_first.center.1,
+        outer_first.radius,
+        inner_first.center.0,
+        inner_first.center.1,
+        inner_first.radius
+    );
+    println!(
+        "geometry.circle_bounding_circle_finite_contract={},{},{},{},{}",
+        single_bounding_circle == bounding_single,
+        outer_first.center == Point(0.0, 0.0) && outer_first.radius == 10.0,
+        inner_first.center == Point(5.0, 0.0) && inner_first.radius == 6.0,
+        inner_first
+            .center
+            .distance_to(&inner_first_circles[1].center)
+            + inner_first_circles[1].radius
+            > inner_first.radius,
+        concentric_nested.center.0.is_nan()
+            && concentric_nested.center.1.is_nan()
+            && concentric_nested.radius.is_nan()
+    );
+
     let edge = Edge::try_new(Point(0.0, 0.0), Point(3.0, 4.0)).unwrap();
     let closest = edge.closest_point_on_edge(&Point(1.0, 2.0));
     println!(
@@ -733,6 +782,42 @@ fn run_b1_geometry_oracle() {
         zero_length_bbox.x_max,
         zero_length_bbox.y_max,
         zero_length_edge.sq_distance_to(&Point(2.0, 3.0))
+    );
+    let zero_length_front = zero_length_edge.extend_at_front(2.0);
+    let zero_length_back = zero_length_edge.extend_at_back(2.0);
+    let zero_length_scaled = zero_length_edge.scale(3.0);
+    let zero_length_reversed = zero_length_edge.reverse();
+    let zero_length_crossing = Edge {
+        start: Point(0.0, 2.0),
+        end: Point(2.0, 2.0),
+    };
+    println!(
+        "geometry.edge_zero_length_finite_contract={},{},{},{},{},{},{},{},{},{}",
+        zero_length_front.start.0.is_nan(),
+        zero_length_front.start.1.is_nan(),
+        zero_length_front.end == zero_length_edge.end,
+        zero_length_back.start == zero_length_edge.start,
+        zero_length_back.end.0.is_nan(),
+        zero_length_back.end.1.is_nan(),
+        zero_length_scaled.start == zero_length_edge.start
+            && zero_length_scaled.end == zero_length_edge.end,
+        zero_length_reversed.start == zero_length_edge.end
+            && zero_length_reversed.end == zero_length_edge.start,
+        zero_length_edge.collides_with(&zero_length_crossing),
+        zero_length_edge
+            .collides_at(&zero_length_crossing)
+            .is_some()
+    );
+    println!(
+        "geometry.edge_zero_length_scale_reverse={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        zero_length_scaled.start.0,
+        zero_length_scaled.start.1,
+        zero_length_scaled.end.0,
+        zero_length_scaled.end.1,
+        zero_length_reversed.start.0,
+        zero_length_reversed.start.1,
+        zero_length_reversed.end.0,
+        zero_length_reversed.end.1
     );
 
     let smallest_normal = f32::MIN_POSITIVE;
@@ -940,6 +1025,78 @@ fn run_b1_geometry_oracle() {
     println!(
         "geometry.rect_zero_scale_rejected={}",
         std::panic::catch_unwind(|| boundary_rect.scale(0.0)).is_err()
+    );
+    let zero_width_rect = Rect {
+        x_min: 1.0,
+        y_min: 0.0,
+        x_max: 1.0,
+        y_max: 2.0,
+    };
+    let zero_height_rect = Rect {
+        x_min: 0.0,
+        y_min: 1.0,
+        x_max: 2.0,
+        y_max: 1.0,
+    };
+    println!(
+        "geometry.rect_degenerate_metrics={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        zero_width_rect.width(),
+        zero_width_rect.height(),
+        zero_width_rect.area(),
+        zero_width_rect.diameter(),
+        zero_width_rect.centroid().0,
+        zero_width_rect.centroid().1,
+        zero_height_rect.width(),
+        zero_height_rect.height(),
+        zero_height_rect.area(),
+        zero_height_rect.diameter(),
+        zero_height_rect.centroid().0,
+        zero_height_rect.centroid().1
+    );
+    let mut degenerate_rect_shapes = Vec::new();
+    for degenerate_rect in [zero_width_rect, zero_height_rect] {
+        for corner in degenerate_rect.corners() {
+            degenerate_rect_shapes.push(format!("{:.9},{:.9}", corner.0, corner.1));
+        }
+        for edge in degenerate_rect.edges() {
+            degenerate_rect_shapes.push(format!(
+                "{:.9},{:.9},{:.9},{:.9}",
+                edge.start.0, edge.start.1, edge.end.0, edge.end.1
+            ));
+        }
+    }
+    println!(
+        "geometry.rect_degenerate_boundary_shapes={}",
+        degenerate_rect_shapes.join(";")
+    );
+    let area_rect = Rect::try_new(0.0, 0.0, 2.0, 2.0).unwrap();
+    println!(
+        "geometry.rect_degenerate_intersections={},{},{},{}",
+        Rect::intersection(zero_width_rect, area_rect).is_some(),
+        Rect::intersection(zero_width_rect, zero_width_rect).is_some(),
+        Rect::intersection(zero_height_rect, area_rect).is_some(),
+        Rect::intersection(zero_height_rect, zero_height_rect).is_some()
+    );
+    let recover_width = zero_width_rect.resize_by(1.0, 0.0).unwrap();
+    let recover_height = zero_height_rect.resize_by(0.0, 1.0).unwrap();
+    println!(
+        "geometry.rect_degenerate_resize_recovery={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        recover_width.x_min,
+        recover_width.y_min,
+        recover_width.x_max,
+        recover_width.y_max,
+        recover_height.x_min,
+        recover_height.y_min,
+        recover_height.x_max,
+        recover_height.y_max
+    );
+    println!(
+        "geometry.rect_degenerate_scale_contract={},{},{},{},{}",
+        std::panic::catch_unwind(|| rect.scale(-1.0)).is_err(),
+        std::panic::catch_unwind(|| zero_width_rect.scale(1.0)).is_err(),
+        std::panic::catch_unwind(|| zero_width_rect.scale(2.0)).is_err(),
+        std::panic::catch_unwind(|| zero_height_rect.scale(1.0)).is_err(),
+        std::panic::catch_unwind(|| zero_height_rect.scale(2.0)).is_err()
     );
     let one_ulp_rect = Rect::try_new(1.0, 0.0, f32::from_bits(0x3f80_0001), 1.0).unwrap();
     let zero_width_rect = Rect {
@@ -1292,10 +1449,86 @@ fn run_b1_geometry_oracle() {
     );
     println!(
         "geometry.simple_polygon_helper_rejections={},{},{},{}",
-        SPolygon::new(empty_helper_points).is_err(),
-        SPolygon::new(singleton_helper_points).is_err(),
-        SPolygon::new(two_helper_points).is_err(),
-        SPolygon::new(collinear_helper_points).is_err()
+        SPolygon::new(empty_helper_points.clone()).is_err(),
+        SPolygon::new(singleton_helper_points.clone()).is_err(),
+        SPolygon::new(two_helper_points.clone()).is_err(),
+        SPolygon::new(collinear_helper_points.clone()).is_err()
+    );
+    let duplicate_pair_points = vec![Point(1.0, 2.0), Point(1.0, 2.0)];
+    let duplicate_vertex_points = vec![
+        Point(0.0, 0.0),
+        Point(2.0, 0.0),
+        Point(2.0, 0.0),
+        Point(0.0, 2.0),
+    ];
+    let horizontal_collinear_points = vec![Point(0.0, 0.0), Point(1.0, 0.0), Point(2.0, 0.0)];
+    let duplicate_pair_diameter = SPolygon::calculate_diameter(duplicate_pair_points.clone());
+    let duplicate_vertex_diameter = SPolygon::calculate_diameter(duplicate_vertex_points.clone());
+    let duplicate_vertex_bbox = SPolygon::generate_bounding_box(&duplicate_vertex_points);
+    let duplicate_vertex_area = SPolygon::calculate_area(&duplicate_vertex_points);
+    let horizontal_bbox_panics =
+        std::panic::catch_unwind(|| SPolygon::generate_bounding_box(&horizontal_collinear_points))
+            .is_err();
+    println!(
+        "geometry.simple_polygon_degenerate_metrics={:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+        SPolygon::calculate_area(&empty_helper_points),
+        SPolygon::calculate_area(&singleton_helper_points),
+        duplicate_pair_diameter,
+        SPolygon::calculate_area(&duplicate_pair_points),
+        duplicate_vertex_diameter,
+        duplicate_vertex_bbox.x_min,
+        duplicate_vertex_bbox.y_min,
+        duplicate_vertex_bbox.x_max,
+        duplicate_vertex_bbox.y_max,
+        duplicate_vertex_area,
+        collinear_helper_diameter,
+        SPolygon::calculate_area(&collinear_helper_points)
+    );
+    println!(
+        "geometry.simple_polygon_degenerate_helper_contract={},{},{},{},{},{},{}",
+        duplicate_pair_diameter == 0.0,
+        SPolygon::calculate_area(&duplicate_pair_points) == 0.0,
+        std::panic::catch_unwind(|| { SPolygon::generate_bounding_box(&duplicate_pair_points) })
+            .is_err(),
+        horizontal_bbox_panics,
+        duplicate_vertex_area == 2.0,
+        duplicate_vertex_bbox.x_min == 0.0
+            && duplicate_vertex_bbox.y_min == 0.0
+            && duplicate_vertex_bbox.x_max == 2.0
+            && duplicate_vertex_bbox.y_max == 2.0,
+        SPolygon::calculate_area(&collinear_helper_points) == 0.0
+    );
+    println!(
+        "geometry.simple_polygon_degenerate_construction={},{}",
+        SPolygon::new(duplicate_vertex_points.clone()).is_err(),
+        SPolygon::new(horizontal_collinear_points.clone()).is_err()
+    );
+
+    let degenerate_hull_inputs = vec![
+        vec![],
+        vec![Point(1.0, 2.0)],
+        vec![Point(1.0, 2.0), Point(1.0, 2.0)],
+        duplicate_vertex_points,
+        collinear_helper_points.clone(),
+        horizontal_collinear_points,
+    ];
+    let mut degenerate_hull_counts = Vec::new();
+    let mut degenerate_hull_points = Vec::new();
+    for points in degenerate_hull_inputs {
+        let hull = convex_hull_from_points(points);
+        degenerate_hull_counts.push(hull.len().to_string());
+        degenerate_hull_points.extend(
+            hull.into_iter()
+                .map(|point| format!("{:.9},{:.9}", point.0, point.1)),
+        );
+    }
+    println!(
+        "geometry.convex_hull_finite_degenerates_counts={}",
+        degenerate_hull_counts.join(",")
+    );
+    println!(
+        "geometry.convex_hull_finite_degenerates_points={}",
+        degenerate_hull_points.join(",")
     );
 
     let original = OriginalShape {

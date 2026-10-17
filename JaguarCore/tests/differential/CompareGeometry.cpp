@@ -418,6 +418,47 @@ void runB1PrimitiveReferenceTests()
     expectRustNumbers(reference, "circle.bounding_circle", {
         boundingCircle.Value().center.x, boundingCircle.Value().center.y,
         boundingCircle.Value().radius, boundingCircle.Value().DiameterRustF32()});
+
+    const jaguar::Circle2d boundingSingle{{3.0, -4.0}, 0.0};
+    const auto singleBoundingCircle =
+        jaguar::Circle2d::BoundingCircleRustF32({boundingSingle});
+    const auto outerFirst = jaguar::Circle2d::BoundingCircleRustF32({
+        jaguar::Circle2d{{0.0, 0.0}, 10.0},
+        jaguar::Circle2d{{1.0, 0.0}, 2.0}});
+    const auto innerFirst = jaguar::Circle2d::BoundingCircleRustF32({
+        jaguar::Circle2d{{0.0, 0.0}, 1.0},
+        jaguar::Circle2d{{1.0, 0.0}, 10.0}});
+    const auto concentricNested = jaguar::Circle2d::BoundingCircleRustF32({
+        jaguar::Circle2d{{0.0, 0.0}, 1.0},
+        jaguar::Circle2d{{0.0, 0.0}, 2.0}});
+    assert(singleBoundingCircle.HasValue() && outerFirst.HasValue() &&
+           innerFirst.HasValue() && concentricNested.HasValue());
+    expectRustBooleans(reference, "geometry.circle_bounding_circle_empty_contract", {
+        !jaguar::Circle2d::BoundingCircleRustF32({}).HasValue()});
+    expectRustNumbers(reference, "geometry.circle_bounding_circle_finite_values", {
+        singleBoundingCircle.Value().center.x,
+        singleBoundingCircle.Value().center.y,
+        singleBoundingCircle.Value().radius,
+        outerFirst.Value().center.x,
+        outerFirst.Value().center.y,
+        outerFirst.Value().radius,
+        innerFirst.Value().center.x,
+        innerFirst.Value().center.y,
+        innerFirst.Value().radius});
+    expectRustBooleans(reference, "geometry.circle_bounding_circle_finite_contract", {
+        singleBoundingCircle.Value().center.x == boundingSingle.center.x &&
+            singleBoundingCircle.Value().center.y == boundingSingle.center.y &&
+            singleBoundingCircle.Value().radius == boundingSingle.radius,
+        outerFirst.Value().center.x == 0.0 && outerFirst.Value().center.y == 0.0 &&
+            outerFirst.Value().radius == 10.0,
+        innerFirst.Value().center.x == 5.0 && innerFirst.Value().center.y == 0.0 &&
+            innerFirst.Value().radius == 6.0,
+        std::hypot(innerFirst.Value().center.x - 1.0,
+                   innerFirst.Value().center.y) + 10.0 > innerFirst.Value().radius,
+        std::isnan(concentricNested.Value().center.x) &&
+            std::isnan(concentricNested.Value().center.y) &&
+            std::isnan(concentricNested.Value().radius)});
+
     jaguar::Circle2d transformedCircle{{1.0, 0.0}, 1.0};
     transformedCircle.TransformRustF32(jaguar::Transform2d::FromRotationTranslation(
         0.5 * std::acos(-1.0), {10.0, 20.0}));
@@ -461,6 +502,31 @@ void runB1PrimitiveReferenceTests()
         zeroLengthBounds.xMin, zeroLengthBounds.yMin,
         zeroLengthBounds.xMax, zeroLengthBounds.yMax,
         zeroLengthEdge.SquaredDistanceToRustF32({2.0, 3.0})});
+    const auto zeroLengthFront = zeroLengthEdge.ExtendedAtFrontRustF32(2.0);
+    const auto zeroLengthBack = zeroLengthEdge.ExtendedAtBackRustF32(2.0);
+    const auto zeroLengthScaled = zeroLengthEdge.ScaledRustF32(3.0);
+    const auto zeroLengthReversed = zeroLengthEdge.ReversedRustF32();
+    const jaguar::Edge2d zeroLengthCrossing{{0.0, 2.0}, {2.0, 2.0}};
+    expectRustNumbers(reference, "geometry.edge_zero_length_scale_reverse", {
+        zeroLengthScaled.start.x, zeroLengthScaled.start.y,
+        zeroLengthScaled.end.x, zeroLengthScaled.end.y,
+        zeroLengthReversed.start.x, zeroLengthReversed.start.y,
+        zeroLengthReversed.end.x, zeroLengthReversed.end.y});
+    expectRustBooleans(reference, "geometry.edge_zero_length_finite_contract", {
+        std::isnan(zeroLengthFront.start.x), std::isnan(zeroLengthFront.start.y),
+        zeroLengthFront.end.x == zeroLengthEdge.end.x &&
+            zeroLengthFront.end.y == zeroLengthEdge.end.y,
+        zeroLengthBack.start.x == zeroLengthEdge.start.x &&
+            zeroLengthBack.start.y == zeroLengthEdge.start.y,
+        std::isnan(zeroLengthBack.end.x), std::isnan(zeroLengthBack.end.y),
+        zeroLengthScaled.start.x == 1.0 && zeroLengthScaled.start.y == 2.0 &&
+            zeroLengthScaled.end.x == 1.0 && zeroLengthScaled.end.y == 2.0,
+        zeroLengthReversed.start.x == zeroLengthEdge.end.x &&
+            zeroLengthReversed.start.y == zeroLengthEdge.end.y &&
+            zeroLengthReversed.end.x == zeroLengthEdge.start.x &&
+            zeroLengthReversed.end.y == zeroLengthEdge.start.y,
+        zeroLengthEdge.IntersectsRustF32(zeroLengthCrossing),
+        zeroLengthEdge.IntersectionPointRustF32(zeroLengthCrossing).has_value()});
 
     const float smallestNormal = std::numeric_limits<float>::min();
     const auto underflowLengthEdge = jaguar::Edge2d::Create(
@@ -707,6 +773,63 @@ void runB1PrimitiveReferenceTests()
     const auto zeroScale = boundaryRect.Value().ScaledRustF32(0.0);
     expectRustBooleans(reference, "geometry.rect_zero_scale_rejected", {
         !zeroScale.HasValue()});
+
+    const jaguar::Rect2d degenerateZeroWidthRect{1.0, 0.0, 1.0, 2.0};
+    const jaguar::Rect2d degenerateZeroHeightRect{0.0, 1.0, 2.0, 1.0};
+    const auto appendDegenerateRectMetrics = [](const jaguar::Rect2d& value,
+                                                std::vector<double>& output) {
+        const auto center = value.CentroidRustF32();
+        output.insert(output.end(), {
+            value.WidthRustF32(), value.HeightRustF32(), value.AreaRustF32(),
+            value.DiameterRustF32(), center.x, center.y});
+    };
+    std::vector<double> degenerateRectMetrics;
+    appendDegenerateRectMetrics(degenerateZeroWidthRect, degenerateRectMetrics);
+    appendDegenerateRectMetrics(degenerateZeroHeightRect, degenerateRectMetrics);
+    expectRustNumbers(reference, "geometry.rect_degenerate_metrics",
+                      degenerateRectMetrics);
+
+    std::vector<double> degenerateRectShapes;
+    for (const jaguar::Rect2d& degenerateRect : {
+             degenerateZeroWidthRect, degenerateZeroHeightRect})
+    {
+        const auto degenerateCorners = degenerateRect.CornersRustF32();
+        for (const auto& corner : degenerateCorners)
+            degenerateRectShapes.insert(
+                degenerateRectShapes.end(), {corner.x, corner.y});
+        for (const auto& degenerateEdge : degenerateRect.EdgesRustF32())
+            degenerateRectShapes.insert(degenerateRectShapes.end(), {
+                degenerateEdge.start.x, degenerateEdge.start.y,
+                degenerateEdge.end.x, degenerateEdge.end.y});
+    }
+    expectRustNumbers(reference, "geometry.rect_degenerate_boundary_shapes",
+                      degenerateRectShapes);
+    const jaguar::Rect2d areaRect{0.0, 0.0, 2.0, 2.0};
+    expectRustBooleans(reference, "geometry.rect_degenerate_intersections", {
+        jaguar::Rect2d::IntersectionRustF32(
+            degenerateZeroWidthRect, areaRect).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            degenerateZeroWidthRect, degenerateZeroWidthRect).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            degenerateZeroHeightRect, areaRect).has_value(),
+        jaguar::Rect2d::IntersectionRustF32(
+            degenerateZeroHeightRect, degenerateZeroHeightRect).has_value()});
+    const auto recoverWidth = degenerateZeroWidthRect.ResizeByRustF32(1.0, 0.0);
+    const auto recoverHeight = degenerateZeroHeightRect.ResizeByRustF32(0.0, 1.0);
+    assert(recoverWidth.has_value() && recoverHeight.has_value());
+    expectRustNumbers(reference, "geometry.rect_degenerate_resize_recovery", {
+        recoverWidth->xMin, recoverWidth->yMin, recoverWidth->xMax, recoverWidth->yMax,
+        recoverHeight->xMin, recoverHeight->yMin,
+        recoverHeight->xMax, recoverHeight->yMax});
+    const auto negativeScale = utilityRect.Value().ScaledRustF32(-1.0);
+    const auto unchangedWidthScale = degenerateZeroWidthRect.ScaledRustF32(1.0);
+    const auto expandedWidthScale = degenerateZeroWidthRect.ScaledRustF32(2.0);
+    const auto unchangedHeightScale = degenerateZeroHeightRect.ScaledRustF32(1.0);
+    const auto expandedHeightScale = degenerateZeroHeightRect.ScaledRustF32(2.0);
+    expectRustBooleans(reference, "geometry.rect_degenerate_scale_contract", {
+        !negativeScale.HasValue(), !unchangedWidthScale.HasValue(),
+        !expandedWidthScale.HasValue(), !unchangedHeightScale.HasValue(),
+        !expandedHeightScale.HasValue()});
 
     const float nextAfterOne = std::nextafter(1.0F, 2.0F);
     const auto oneUlpRect = jaguar::Rect2d::Create(
@@ -1034,6 +1157,17 @@ void runB1PrimitiveReferenceTests()
     assert((rustHelperFailures == std::vector<bool>{
         true, true, true, true, true, true, true, false, true, false}));
 
+    const auto duplicateVertexPolygon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 0.0}, {0.0, 2.0}});
+    const auto horizontalLinePolygon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {1.0, 0.0}, {2.0, 0.0}});
+    expectRustBooleans(reference, "geometry.simple_polygon_degenerate_construction", {
+        !duplicateVertexPolygon.HasValue(), !horizontalLinePolygon.HasValue()});
+    const auto& helperDegenerateContract = booleanValues(
+        referenceValue(reference, "geometry.simple_polygon_degenerate_helper_contract"));
+    assert((helperDegenerateContract == std::vector<bool>{
+        true, true, true, true, true, true, true}));
+
     const auto tiedXHull = jaguar::ConvexHull({
         {0.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, {1.0, 1.0}});
     std::vector<double> hullCoordinates;
@@ -1042,6 +1176,28 @@ void runB1PrimitiveReferenceTests()
     expectRustNumbers(reference, "geometry.convex_hull_tied_x", hullCoordinates);
     expectRustNumbers(reference, "geometry.convex_hull_singleton_count", {
         static_cast<double>(jaguar::ConvexHull({{1.0, 2.0}}).size())});
+
+    const std::vector<std::vector<jaguar::Point2d>> degenerateHullInputs = {
+        {},
+        {{1.0, 2.0}},
+        {{1.0, 2.0}, {1.0, 2.0}},
+        {{0.0, 0.0}, {2.0, 0.0}, {2.0, 0.0}, {0.0, 2.0}},
+        {{0.0, 0.0}, {1.0, 1.0}, {2.0, 2.0}},
+        {{0.0, 0.0}, {1.0, 0.0}, {1.0, 0.0}, {2.0, 0.0}}};
+    std::vector<double> degenerateHullCounts;
+    std::vector<double> degenerateHullPoints;
+    for (const auto& hullInput : degenerateHullInputs)
+    {
+        const auto hull = jaguar::ConvexHull(hullInput);
+        degenerateHullCounts.push_back(static_cast<double>(hull.size()));
+        for (const auto& point : hull)
+            degenerateHullPoints.insert(
+                degenerateHullPoints.end(), {point.x, point.y});
+    }
+    expectRustNumbers(reference, "geometry.convex_hull_finite_degenerates_counts",
+                      degenerateHullCounts);
+    expectRustNumbers(reference, "geometry.convex_hull_finite_degenerates_points",
+                      degenerateHullPoints);
 }
 }
 

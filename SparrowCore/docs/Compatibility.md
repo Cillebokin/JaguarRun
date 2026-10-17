@@ -29,6 +29,10 @@ evidence. The currently direct-checked surface is intentionally narrow:
 - Rust `LBFBuilder` and SparrowCore build the same one-item JSON fixture with seed 42 and the
   same sample configuration. Placed count, remaining demand, and feasibility must match exactly;
   strip width and density use tolerances documented in `Docs/Differential.md`.
+- A separate Rust/C++ LBF reference now exercises the default `1000/0/3` builder on a three-item
+  instance and a single-item instance with initial strip widths at the previous f32 value, exactly
+  `2.0f`, and the next f32 value. It compares the initial width bits, complete placement list,
+  feasibility and metrics; the fixed geometries do not establish parity for arbitrary inputs.
 - Actual Rust `Separator::separate` rounds with `(seed=42, workers=1)`, `(seed=42, workers=2)`, and
   `(seed=43, workers=3)` are compared end-to-end with C++: worker result selection, progress/reports,
   counters, final placements, and per-item/pair loss-weight state after rollback. The multi-worker

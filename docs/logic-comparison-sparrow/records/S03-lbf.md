@@ -1,7 +1,7 @@
 # S03. lbf.rs 逐文件逻辑比对
 **Rust**: `CodeResource/sparrow/src/optimizer/lbf.rs`（143 行）；损失公式参考 `eval/lbf_evaluator.rs:9-10,48`（X/Y 乘数），搜索算法参考 `sample/search.rs:191-343`
 **C++**: `SparrowCore/Include/SparrowCore/Optimizer/LbfLoss.h`（21 行）+ `Source/Optimizer/LbfLoss.cpp`（57 行）+ `Include/SparrowCore/Optimizer/LbfSearch.h`（34 行）+ `Source/Optimizer/LbfSearch.cpp`（296 行）+ `Source/Optimizer/LbfSearchTrace.h`（45 行）；构建流程对应 `SparrowLbfBuilder.cpp`（归 S08 详比）
-**判定**: 基本等价（lbf.rs 的三个职责在 C++ 被拆为 LbfLoss【数值包装】、LbfSearch【搜索】、SparrowLbfBuilder【构建循环】三件；构造排序键、宽度上限求值域和等号停止条件已对齐 Rust；默认 Sparrow 构造路径不再设置 Rust 无对应的尝试次数上限，显式正数上限保留为 C++ 扩展；通用 `LbfConfig` 的直接 `SolveSppLbf` 路径仍默认 cap=32，属于单独的 C++ API 行为）
+**判定**: 基本等价（固定参考矩阵已完成：构造排序键、宽度上限求值域和等号停止条件已对齐 Rust；零样本、构造失败、超过 32 次扩宽、多实例、默认 `1000/0/3` 完整 builder 输出及 `2.0f` 前一/精确/后一 ULP 初始宽度均有 Rust/C++ reference。默认 Sparrow 构造路径不设 Rust 无对应的尝试次数上限；显式正数上限保留为 C++ 扩展。通用 `LbfConfig` 的直接 `SolveSppLbf` 路径仍默认 cap=32，属于单独的 C++ API 行为）
 
 说明：Rust sparrow 没有独立的 "LbfSearch" 模块——`lbf.rs::LBFBuilder` 是唯一入口，它把 `LBFEvaluator`（eval/lbf_evaluator.rs）+ `search_placement`（sample/search.rs，S13 已比）组合起来完成构造。C++ 侧把这一组合的"搜索"半边抽成自由函数 `SearchLbf`，"构造循环"半边抽成 `ConstructSparrowInitialSolution`（SparrowLbfBuilder.cpp，S08 组内比对）。因此本记录以 lbf.rs 的函数为纲，LbfLoss/LbfSearch 给出与 Rust 侧对应片段的比对。
 
@@ -62,7 +62,7 @@
   6. **tighteningHistory（C++ 额外）**：C++ `recordTightening` 在每次被接受的 clear 样本上计算 `TransformedRustF32` 的 bbox→LbfLoss，若优于历史最优则 push（LbfSearch.cpp:176-193，:249）；`SearchResult.tighteningHistory`（LbfSearch.h:25）。Rust 无任何等价物（`search_placement` 只返回 `(final_sample, n_evals)`）。判定：C++ 额外（观测/追溯数据，不影响搜索行为本身——它只读不改 BestSamples）。
   7. **item_min_dim 检查**：Rust 直接 `f32::min(width, height)`（search.rs:240）无校验；C++ 校验非有限/≤0 报错（LbfSearch.cpp:163-168）：C++ 额外（防御）。
   8. **UniformBBoxSampler 失败**：Rust `UniformBBoxSampler::new` 返回 None→`container_sampler=None`→跳过整段采样（search.rs:270-271, 286-293），LbfSearch.cpp:152-160 显式注释了这一对应并返回 `FromValue(std::nullopt)`（区别于 Rust 仍会继续走 CD refine 既有 best——Rust 此时 best_samples 为空、最终返回 None）。判定：差异（边缘路径：容器放不下 item 时 Rust 会继续跑 0 个采样 + 0 个 CD 然后返回 None，C++ 直接返回 nullopt；两者最终都向调用方报"无可行放置"，触发上层宽度增长，行为等价）。
-  9. **fixture 覆盖**：`LbfSearchRustTrace.tsv` 的配置为 seed=42、16 个 container samples、0 focused samples、2 次 coordinate descent；TestSampling.cpp 对 transform/loss 分别用 2e-5/2e-3 容差，kind、事件与计数按测试断言精确比较。`SparrowLbfRustReference.tsv` 是 64/0/1 的单件 Rust reference。新增 `SparrowLbfMultiInstanceRustReference.tsv` 对 seed=42、64/0/1 的四个输入（单件、三件相同方件、异型两件、三件需求边界）逐个比较 placed/remaining/feasible、width/density 和按 item index 对齐的 placements；width/density 容差 4e-3/1e-3，rotation 1e-6、translation 5e-5。Rust 测试直接运行当前 LBFBuilder，C++ `TestSparrowRustMultiInstanceLbfParity` 执行对应 builder。`SppLbfCppReference.tsv` 是 C++ 自参考，不是 Rust 对照；新测试仍不覆盖默认 1000/3 或完整 optimize→compress。
+  9. **fixture 覆盖**：`LbfSearchRustTrace.tsv` 的配置为 seed=42、16 个 container samples、0 focused samples、2 次 coordinate descent；TestSampling.cpp 对 transform/loss 分别用 2e-5/2e-3 容差，kind、事件与计数按测试断言精确比较。`SparrowLbfRustReference.tsv` 是 64/0/1 的单件 Rust reference。`SparrowLbfMultiInstanceRustReference.tsv` 对 seed=42、64/0/1 的四个输入（单件、三件相同方件、异型两件、三件需求边界）逐个比较 placed/remaining/feasible、width/density 和按 item index 对齐的 placements；width/density 容差 4e-3/1e-3，rotation 1e-6、translation 5e-5。新增 `SparrowLbfDefaultBuilderRustReference.tsv` 对 seed=42 的默认 `1000/0/3` 配置比较三件方件完整 builder 输出，并比较单件初始条带宽度 `2.0f` 前一、精确、后一 ULP 三例；配置、初始 width bits、placed/remaining/feasible、最终 width/density 和逐件 placements 均纳入断言，width/density 容差 4e-3/1e-3，rotation 1e-6、translation 5e-5。RustReference Debug/Release 直接运行当前 `LBFBuilder` 并核对 TSV；C++ `TestSparrowRustDefaultLbfBuilderParity` 执行对应 builder。`SppLbfCppReference.tsv` 是 C++ 自参考，不是 Rust 对照；这些固定 fixture 不证明其他输入域或完整 optimize→compress。
 
 ### `TracingEvaluator`（LbfSearch.cpp:70-115）vs Rust `ObservedEvaluator`（search.rs:62-99）
 - 判定：一致（trace 观察者包装，C++ 以 `LbfSearchTraceCallback` 对应 Rust `oracle-trace` feature 的 `SearchTraceEvent`，search.rs:101-175；事件三型 Evaluation/Report/Result 对应 LbfSearchTrace.h:19-34）。
@@ -85,7 +85,11 @@
 | 13 | `SparrowConstructorConfig::nFocussedSamples` 未映射到实际 LBF 搜索 | 【C++ 配置缺陷/差异】 | Rust LBF 固定 focused=0；默认一致，但自定义 C++ 正数 focused 设置不增加采样。零 container samples 现在通过校验并按零循环返回无候选 | LbfConfig.h:68-85; SparrowLbfBuilder.cpp:34-46; LbfSearch.cpp vs consts.rs:51-55 |
 
 ## 结论
-Sparrow LBF 构造器的排序键、宽度增长边界和默认扩宽终止条件已按 Rust 语义定向核对。除四实例 64/0/1 布局参考外，新增长用例在相同 seed 和 1/0/1 搜索预算下验证 1000×1 零件从初始宽度 1 扩宽超过 32 次后，两侧均成功且最终宽度/位姿 f32 位模式一致；这不证明默认 1000/0/3 或完整 optimize→compress 的普遍结果一致。Sparrow constructor 默认不设增长次数 cap，但通用 `LbfConfig` 仍默认 32，直接 `SolveSppLbf` 的该路径尚未与 Rust 无次数上限语义对齐；显式正数 constructor cap、在 Sparrow SPP 输入域不可达的质量区过滤钩子、最终精调失败回退与观测历史仍是 C++ 扩展/实现差异。`samplesPerItem` 默认 5000 与 Rust 1000 的出入也只在绕过 SparrowLbfBuilder 的求解器入口（S08）可见。
+Sparrow LBF 构造器的排序键、宽度增长边界和默认扩宽终止条件已有定向核对；新增 reference 将固定矩阵扩至默认 `1000/0/3` 的三件方件完整构造，以及 `2.0f` 前一/精确/后一 ULP 的单件初始宽度。加上 64/0/1 四实例、多实例摆放序、零样本、item 0 构造失败、超过 32 次扩宽成功和等号上限边界，S03 按列明固定参考矩阵完成；width/density 与 transform 仍按上文容差比较。该结论不证明其他几何/实例分布或完整 optimize→compress。Sparrow constructor 默认不设增长次数 cap，但通用 `LbfConfig` 仍默认 32，直接 `SolveSppLbf` 的该路径尚未与 Rust 无次数上限语义对齐；显式正数 constructor cap、在 Sparrow SPP 输入域不可达的质量区过滤钩子、未映射的 focused 配置、最终精调失败回退与观测历史仍是 C++ 扩展/实现差异。`samplesPerItem` 默认 5000 与 Rust 1000 的出入也只在绕过 SparrowLbfBuilder 的求解器入口（S08）可见。
+
+### 补充审计（2026-10-17：默认预算与相邻初始宽度）
+
+新增 `SparrowLbfDefaultBuilderRustReference.tsv`，由 RustReference 直接调用 `LBFBuilder::construct` 生成。seed=42、默认 `SampleConfig {1000, 0, 3}` 的三件 2×2 方件用例比较初始宽度、完整摆放序、placed/remaining/feasible 和最终 width/density；另用单件 2×2 方件，分别将初始条带宽度设为 `0x3fffffff`、`0x40000000`、`0x40000001`，比较三条完整构造结果。Rust 与 C++ 对配置、初始宽度位模式、物品身份精确比较；width/density 容差分别为 `4e-3`/`1e-3`，rotation 为 `1e-6`，translation 为 `5e-5`。fixture SHA-256 为 `DF7AFB571333C59B62FC29CEAF23BE739219E75FD5AB6AE1917E0A4481E6CAAA`。RustReference Debug/Release 全量验证及 SparrowCore C++ Debug/Release 全量 runner 均通过。S03 按列明固定输入矩阵完成；不对其他几何、实例分布、平台或完整 `optimize → compress` 外推。
 
 ### 补充核验（2026-10-09）
 

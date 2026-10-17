@@ -1,0 +1,13 @@
+# generator=RustReference/tests/lbf_default_builder_reference.rs; seed=42; Sparrow LBF defaults 1000/0/3
+# cases: default three-square builder and a single-item instance with initial strip widths at prev/at/next f32 around 2.0
+# rows: case <name> <seed> <container_samples> <focused_samples> <coordinate_descents> <initial_width_bits> <placed> <remaining> <width> <density> <feasible>; placement <case> <item_index> <rotation> <x> <y>
+case	default_three_square	42	1000	0	3	40800000	3	0	6.000966549	0.666559279	true
+placement	default_three_square	0	0.000000000	1.000315905	1.010834098
+placement	default_three_square	1	0.000000000	3.000621319	1.001850009
+placement	default_three_square	2	0.000000000	5.000906467	1.002017260
+case	width_predecessor	42	1000	0	3	3fffffff	1	0	2.000124693	0.499968827	true
+placement	width_predecessor	0	0.000000000	1.000104666	1.002569914
+case	width_exact	42	1000	0	3	40000000	1	0	2.000905991	0.499773592	true
+placement	width_exact	0	0.000000000	1.000885963	1.000261068
+case	width_successor	42	1000	0	3	40000001	1	0	2.000020027	0.499994993	true
+placement	width_successor	0	0.000000000	1.000000119	1.003336668

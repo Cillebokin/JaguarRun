@@ -1140,6 +1140,299 @@ bool TestSparrowRustMultiInstanceLbfParity(std::ostream& output)
     }
     return true;
 }
+
+struct DefaultLbfCaseReference
+{
+    std::string name;
+    std::uint64_t seed = 0U;
+    std::size_t containerSamples = 0U;
+    std::size_t focusedSamples = 0U;
+    std::size_t coordinateDescents = 0U;
+    std::uint32_t initialWidthBits = 0U;
+    std::size_t placed = 0U;
+    std::size_t remaining = 0U;
+    double width = 0.0;
+    double density = 0.0;
+    bool feasible = false;
+    std::vector<MultiInstancePlacementReference> placements;
+};
+
+bool TestSparrowRustDefaultLbfBuilderParity(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowLbfDefaultBuilderRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowLbfDefaultBuilderRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowLbfDefaultBuilderRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowLbfDefaultBuilderRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "default Rust LBF builder reference fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    std::vector<DefaultLbfCaseReference> references;
+    DefaultLbfCaseReference* activeReference = nullptr;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string record;
+        row >> record;
+        if (record == "case")
+        {
+            DefaultLbfCaseReference reference;
+            if (!(row >> reference.name >> reference.seed
+                      >> reference.containerSamples >> reference.focusedSamples
+                      >> reference.coordinateDescents >> std::hex
+                      >> reference.initialWidthBits >> std::dec
+                      >> reference.placed >> reference.remaining >> reference.width
+                      >> reference.density >> std::boolalpha >> reference.feasible))
+            {
+                return Expect(false,
+                              output,
+                              "default Rust LBF case row is malformed");
+            }
+            references.push_back(std::move(reference));
+            activeReference = &references.back();
+        }
+        else if (record == "placement")
+        {
+            std::string caseName;
+            MultiInstancePlacementReference placement;
+            if (activeReference == nullptr
+                || !(row >> caseName >> placement.itemIndex >> placement.rotation
+                      >> placement.x >> placement.y)
+                || caseName != activeReference->name)
+            {
+                return Expect(false,
+                              output,
+                              "default Rust LBF placement row is malformed");
+            }
+            activeReference->placements.push_back(placement);
+        }
+        else
+        {
+            return Expect(false,
+                          output,
+                          "default Rust LBF reference has an unknown row type");
+        }
+    }
+
+    struct InputCase
+    {
+        const char* name;
+        const char* path;
+        std::optional<std::uint32_t> initialWidthBits;
+    };
+    constexpr std::uint32_t widthTwoBits = 0x40000000U;
+    constexpr InputCase inputs[] = {
+        {"default_three_square", "RustSppOptimizeColdStart.json", std::nullopt},
+        {"width_predecessor", "RustSppSingleItem.json", widthTwoBits - 1U},
+        {"width_exact", "RustSppSingleItem.json", widthTwoBits},
+        {"width_successor", "RustSppSingleItem.json", widthTwoBits + 1U},
+    };
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    for (const InputCase& input : inputs)
+    {
+        const auto expected = std::find_if(
+            references.begin(), references.end(), [&input](const auto& row) {
+                return row.name == input.name;
+            });
+        if (!Expect(expected != references.end(),
+                    output,
+                    "default Rust LBF reference is missing an input case"))
+        {
+            return false;
+        }
+
+        std::ifstream instanceFile;
+        const std::string fixturePath =
+            std::string{"SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string parentFixturePath =
+            std::string{"../SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string alternateFixturePath =
+            std::string{"../JaguarRun/SparrowCore/Tests/Fixtures/"} + input.path;
+        const std::string windowsFixturePath =
+            std::string{"..\\SparrowCore\\Tests\\Fixtures\\"} + input.path;
+        for (const std::string& path : {fixturePath,
+                                        parentFixturePath,
+                                        alternateFixturePath,
+                                        windowsFixturePath})
+        {
+            instanceFile.open(path);
+            if (instanceFile.is_open())
+            {
+                break;
+            }
+            instanceFile.clear();
+        }
+        if (!Expect(instanceFile.is_open(),
+                    output,
+                    "default Rust LBF input fixture cannot be opened"))
+        {
+            return false;
+        }
+        const std::string instanceJson{
+            std::istreambuf_iterator<char>(instanceFile),
+            std::istreambuf_iterator<char>()};
+        const auto imported = importer.ImportSPInstanceJson(instanceJson);
+        if (!Expect(imported.HasValue(),
+                    output,
+                    "default Rust LBF input must import with Rust defaults"))
+        {
+            return false;
+        }
+
+        jaguar::Strip baseStrip = imported.Value().BaseStrip();
+        if (input.initialWidthBits.has_value())
+        {
+            float initialWidth = 0.0F;
+            const std::uint32_t bits = *input.initialWidthBits;
+            static_assert(sizeof(initialWidth) == sizeof(bits));
+            std::memcpy(&initialWidth, &bits, sizeof(initialWidth));
+            baseStrip.width = static_cast<double>(initialWidth);
+        }
+        std::vector<jaguar::Item> items;
+        std::vector<std::size_t> demands;
+        items.reserve(imported.Value().ItemCount());
+        demands.reserve(imported.Value().ItemCount());
+        for (std::size_t index = 0U; index < imported.Value().ItemCount(); ++index)
+        {
+            items.push_back(imported.Value().GetItem(index));
+            demands.push_back(imported.Value().ItemDemand(index));
+        }
+        const auto adjustedInstance = jaguar::SPInstance::Create(
+            std::move(items), std::move(demands), baseStrip);
+        if (!Expect(adjustedInstance.HasValue(),
+                    output,
+                    "default Rust LBF explicit-width instance must be valid"))
+        {
+            return false;
+        }
+        const float actualInitialWidth =
+            static_cast<float>(adjustedInstance.Value().BaseStrip().width);
+        std::uint32_t actualInitialWidthBits = 0U;
+        std::memcpy(&actualInitialWidthBits,
+                    &actualInitialWidth,
+                    sizeof(actualInitialWidthBits));
+        if (!Expect(expected->initialWidthBits == actualInitialWidthBits,
+                    output,
+                    "C++ initial strip width must match the Rust f32 input"))
+        {
+            return false;
+        }
+
+        sparrow::SparrowConstructorConfig config;
+        config.seed = expected->seed;
+        if (!Expect(config.nContainerSamples == expected->containerSamples
+                        && config.nFocussedSamples == expected->focusedSamples
+                        && config.nCoordinateDescents == expected->coordinateDescents,
+                    output,
+                    "Sparrow constructor defaults must match the Rust LBF budget"))
+        {
+            return false;
+        }
+        const auto result = sparrow::ConstructSparrowInitialSolution(
+            adjustedInstance.Value(), config);
+        if (!Expect(result.HasValue(),
+                    output,
+                    "default Sparrow LBF construction must succeed"))
+        {
+            return false;
+        }
+
+        const auto& metrics = result.Value().metrics;
+        if (!(expected->seed == metrics.seed
+              && expected->placed == metrics.placedItemCount
+              && expected->remaining == metrics.remainingDemand
+              && expected->feasible == metrics.feasible
+              && std::abs(expected->width - metrics.stripWidth)
+                     < SPARROW_RUST_LBF_WIDTH_TOLERANCE
+              && std::abs(expected->density - metrics.density)
+                     < SPARROW_RUST_LBF_DENSITY_TOLERANCE))
+        {
+            output << std::setprecision(17) << "default LBF case " << input.name
+                   << " Rust(width=" << expected->width << ", density="
+                   << expected->density << ", placed=" << expected->placed
+                   << ", remaining=" << expected->remaining << ", feasible="
+                   << expected->feasible << ") C++(width=" << metrics.stripWidth
+                   << ", density=" << metrics.density << ", placed="
+                   << metrics.placedItemCount << ", remaining="
+                   << metrics.remainingDemand << ", feasible=" << metrics.feasible
+                   << ")\n";
+            return Expect(false,
+                          output,
+                          "default LBF metrics must match Rust within recorded tolerances");
+        }
+
+        std::vector<const jaguar::LayoutPlacementSnapshot*> placements;
+        for (const auto& placement : result.Value().solution.layoutSnapshot.placements)
+        {
+            placements.push_back(&placement);
+        }
+        std::sort(placements.begin(), placements.end(), [](const auto* left,
+                                                           const auto* right) {
+            const auto leftIndex = left->placedItem.GetItemIndex();
+            const auto rightIndex = right->placedItem.GetItemIndex();
+            if (leftIndex != rightIndex)
+            {
+                return leftIndex < rightIndex;
+            }
+            const auto& leftTransform = left->placedItem.Transform();
+            const auto& rightTransform = right->placedItem.Transform();
+            if (leftTransform.translation.x != rightTransform.translation.x)
+            {
+                return leftTransform.translation.x < rightTransform.translation.x;
+            }
+            return leftTransform.translation.y < rightTransform.translation.y;
+        });
+        if (!Expect(placements.size() == expected->placements.size(),
+                    output,
+                    "default LBF placement count must match Rust"))
+        {
+            return false;
+        }
+        for (std::size_t index = 0U; index < placements.size(); ++index)
+        {
+            const auto& actualPlacement = placements[index]->placedItem;
+            const auto& actualTransform = actualPlacement.Transform();
+            const auto& expectedPlacement = expected->placements[index];
+            if (!(actualPlacement.GetItemIndex() == expectedPlacement.itemIndex
+                  && std::abs(actualTransform.rotationRad
+                              - expectedPlacement.rotation) < 1.0e-6
+                  && std::abs(actualTransform.translation.x
+                              - expectedPlacement.x) < 5.0e-5
+                  && std::abs(actualTransform.translation.y
+                              - expectedPlacement.y) < 5.0e-5))
+            {
+                output << std::setprecision(17) << "default LBF case "
+                       << input.name << " placement " << index
+                       << " differs from Rust reference\n";
+                return Expect(false,
+                              output,
+                              "default LBF placement transforms must match Rust");
+            }
+        }
+    }
+
+    return Expect(references.size() == 4U,
+                  output,
+                  "default Rust LBF fixture must contain exactly four cases");
+}
 }
 
 bool RunSppLbfTests(std::ostream& output)
@@ -1155,5 +1448,6 @@ bool RunSppLbfTests(std::ostream& output)
         && TestSparrowBuilderRejectsWidthCeilingEquality(output)
         && TestLegacyLbfMetricsReferenceFixture(output)
         && TestSparrowRustReferenceMetrics(output)
-        && TestSparrowRustMultiInstanceLbfParity(output);
+        && TestSparrowRustMultiInstanceLbfParity(output)
+        && TestSparrowRustDefaultLbfBuilderParity(output);
 }

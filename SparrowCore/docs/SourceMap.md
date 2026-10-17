@@ -79,6 +79,7 @@ Task1 固定资产：
 - `Tests/Fixtures/LbfConfigSeed42.json`：四叉树深度 4、阈值 32、64 samples、`ls_frac=0.25`、seed=42 的参考配置；
 - `Tests/Fixtures/LbfSeed42Reference.tsv`：SparrowRng raw/float primitive 的字段定义和后续 seed=42 oracle 入口；
 - `Tests/Fixtures/LbfMetricsReference.tsv`：LBF reference 的 sample count、placed、remaining、width、density、cost 字段定义；SPP 的 cost=0，BPP 的 width=0 表示该指标不适用。
+- `Tests/Fixtures/SparrowLbfDefaultBuilderRustReference.tsv`：默认 `1000/0/3` 完整 builder 输出及 `2.0f` 相邻初始宽度对照；由 `Tests/RustReference/tests/lbf_default_builder_reference.rs` 生成并由 `TestSppLbf.cpp` 消费。
 
 两个 JSON fixture 使用 JaguarCore 已验证的 snake_case external representation：每个 Item 都有 `orientation.rotation`，不含 holes、legacy orientation 字段、NaN 或 Infinity。
 

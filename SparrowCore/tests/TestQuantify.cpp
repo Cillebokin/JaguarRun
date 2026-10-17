@@ -1167,6 +1167,281 @@ bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
                   "incremental tracker update must replace the moved handle and clear separated losses");
 }
 
+bool TestPairMatrixTrackerRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowPairMatrixTrackerRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowPairMatrixTrackerRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowPairMatrixTrackerRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowPairMatrixTrackerRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Rust PairMatrix/Tracker reference must be readable"))
+    {
+        return false;
+    }
+
+    std::vector<std::string> referenceRows;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            referenceRows.push_back(line);
+        }
+    }
+    if (!Expect(referenceRows.size() == 3U,
+                output,
+                "Rust PairMatrix/Tracker reference must contain three state rows"))
+    {
+        return false;
+    }
+
+    std::ifstream inputFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "../SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\CollisionTrackerWeightRust.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "Rust PairMatrix/Tracker input fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{std::istreambuf_iterator<char>(inputFile),
+                           std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust PairMatrix/Tracker input fixture import failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "Rust PairMatrix/Tracker problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "Rust PairMatrix/Tracker strip resize failed"))
+    {
+        return false;
+    }
+
+    std::vector<jaguar::PlacedItemHandle> handles;
+    handles.reserve(3U);
+    for (jaguar::ItemIndex index = 0U; index < 3U; ++index)
+    {
+        const auto placed = problem.PlaceItem({index, {0.0, {1.0, 1.0}}});
+        if (!Expect(placed.HasValue(),
+                    output,
+                    "Rust PairMatrix/Tracker placement failed"))
+        {
+            return false;
+        }
+        handles.push_back(placed.Value());
+    }
+
+    const jaguar::SPSolution initialSolution = problem.Save();
+    jaguar::Layout initialLayout(initialSolution.layoutSnapshot.container);
+    if (!Expect(initialLayout.Restore(initialSolution.layoutSnapshot).HasValue(),
+                output,
+                "Rust PairMatrix/Tracker initial layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(initialLayout);
+    if (!Expect(trackerResult.HasValue(),
+                output,
+                "Rust PairMatrix/Tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+
+    const auto compareState = [&](std::size_t rowIndex,
+                                  const char* expectedPhase) -> bool {
+        std::istringstream row(referenceRows[rowIndex]);
+        std::string phase;
+        if (!Expect(static_cast<bool>(row >> phase) && phase == expectedPhase,
+                    output,
+                    "Rust PairMatrix/Tracker state phase differs"))
+        {
+            return false;
+        }
+
+        const sparrow::CollisionTrackerSnapshot snapshot = tracker.Save();
+        const auto compareEntry = [&](float actualLoss,
+                                      float actualWeight,
+                                      const std::string& label) -> bool {
+            std::uint32_t expectedLossBits = 0U;
+            std::uint32_t expectedWeightBits = 0U;
+            if (!(row >> std::hex >> expectedLossBits >> expectedWeightBits))
+            {
+                return Expect(false,
+                              output,
+                              "Rust PairMatrix/Tracker state row has missing entry bits");
+            }
+            const std::uint32_t actualLossBits = FloatBits(actualLoss);
+            const std::uint32_t actualWeightBits = FloatBits(actualWeight);
+            if (actualLossBits != expectedLossBits
+                || actualWeightBits != expectedWeightBits)
+            {
+                output << "PairMatrix/Tracker phase=" << expectedPhase << ' '
+                       << label << " expected=(0x" << std::hex << expectedLossBits
+                       << ",0x" << expectedWeightBits << ") actual=(0x"
+                       << actualLossBits << ",0x" << actualWeightBits << ")"
+                       << std::dec << '\n';
+                return Expect(false,
+                              output,
+                              "PairMatrix/Tracker entry differs from Rust reference");
+            }
+            return true;
+        };
+
+        for (std::size_t first = 0U; first < 3U; ++first)
+        {
+            for (std::size_t second = first; second < 3U; ++second)
+            {
+                const sparrow::CollisionEntry& entry =
+                    snapshot.pairMatrix.At(first, second);
+                const std::string label = "pair[" + std::to_string(first) + ","
+                    + std::to_string(second) + "]";
+                if (!compareEntry(entry.loss, entry.weight, label))
+                {
+                    return false;
+                }
+            }
+        }
+        for (std::size_t index = 0U; index < 3U; ++index)
+        {
+            const sparrow::CollisionEntry& entry = snapshot.containerEntries[index];
+            const std::string label = "container[" + std::to_string(index) + "]";
+            if (!compareEntry(entry.loss, entry.weight, label))
+            {
+                return false;
+            }
+        }
+
+        std::uint32_t expectedTotalLossBits = 0U;
+        std::uint32_t expectedTotalWeightedLossBits = 0U;
+        std::string expectedSeparated;
+        std::string extra;
+        if (!(row >> std::hex >> expectedTotalLossBits
+                  >> std::hex >> expectedTotalWeightedLossBits
+                  >> expectedSeparated)
+            || (row >> extra))
+        {
+            return Expect(false,
+                          output,
+                          "Rust PairMatrix/Tracker total state row is malformed");
+        }
+        if (FloatBits(tracker.TotalLoss()) != expectedTotalLossBits
+            || FloatBits(tracker.TotalWeightedLoss())
+                   != expectedTotalWeightedLossBits
+            || (expectedSeparated == "1") != tracker.IsSeparated())
+        {
+            output << "PairMatrix/Tracker phase=" << expectedPhase
+                   << " totalLoss=0x" << std::hex << FloatBits(tracker.TotalLoss())
+                   << "/0x" << expectedTotalLossBits
+                   << " totalWeightedLoss=0x"
+                   << FloatBits(tracker.TotalWeightedLoss()) << "/0x"
+                   << expectedTotalWeightedLossBits << " separated="
+                   << tracker.IsSeparated() << "/" << expectedSeparated
+                   << std::dec << '\n';
+            return Expect(false,
+                          output,
+                          "PairMatrix/Tracker totals or separation state differ from Rust");
+        }
+        return true;
+    };
+
+    if (!compareState(0U, "initial"))
+    {
+        return false;
+    }
+
+    sparrow::CollisionTrackerSnapshot weightedSnapshot = tracker.Save();
+    std::size_t pairOrdinal = 0U;
+    for (std::size_t first = 0U; first < 3U; ++first)
+    {
+        for (std::size_t second = first; second < 3U; ++second)
+        {
+            weightedSnapshot.pairMatrix.At(first, second).weight =
+                1.0F + static_cast<float>(pairOrdinal++) * 0.25F;
+        }
+        weightedSnapshot.containerEntries[first].weight =
+            1.5F + static_cast<float>(first) * 0.5F;
+    }
+    if (!Expect(tracker.Restore(weightedSnapshot, initialLayout).HasValue(),
+                output,
+                "Rust PairMatrix/Tracker seeded weights restore failed"))
+    {
+        return false;
+    }
+    tracker.UpdateWeights();
+    if (!compareState(1U, "after_weight_update"))
+    {
+        return false;
+    }
+
+    const auto removed = problem.RemoveItem(handles[2]);
+    if (!Expect(removed.HasValue(),
+                output,
+                "Rust PairMatrix/Tracker moved item removal failed"))
+    {
+        return false;
+    }
+    const auto moved = problem.PlaceItem({
+        removed.Value().itemIndex,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {4.0, 1.0})});
+    if (!Expect(moved.HasValue(),
+                output,
+                "Rust PairMatrix/Tracker moved item replacement failed"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution movedSolution = problem.Save();
+    jaguar::Layout movedLayout(movedSolution.layoutSnapshot.container);
+    if (!Expect(movedLayout.Restore(movedSolution.layoutSnapshot).HasValue(),
+                output,
+                "Rust PairMatrix/Tracker moved layout restore failed"))
+    {
+        return false;
+    }
+    if (!Expect(tracker.UpdateMovedItem(
+                    movedLayout, handles[2], moved.Value()).HasValue(),
+                output,
+                "Rust PairMatrix/Tracker moved-row update failed"))
+    {
+        return false;
+    }
+    return compareState(2U, "after_move");
+}
+
 bool TestCollisionTrackerMoveRecomputesOnlyOneRow(std::ostream& output)
 {
     std::vector<jaguar::Item> items;
@@ -3266,6 +3541,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestSubnormalContainerLossThroughEvaluator(output)
         && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
+        && TestPairMatrixTrackerRustReference(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)
         && TestFinalMultiplyOverflowSquareMatchesRustConstruction(output)

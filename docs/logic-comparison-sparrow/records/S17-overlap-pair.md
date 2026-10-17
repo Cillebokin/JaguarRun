@@ -119,3 +119,11 @@ PairMatrix 的合法索引映射、物理遍历顺序、总损失 fold、profile
 ### P0 复核更正（2026-10-09）
 
 本节 2026-09-29 的第 3、4 条记录的是当时实现，不是当前状态：PairMatrix 现在采用 Rust 的上三角行顺序，size=4 的 `(0,3)` 两侧均落在物理槽位 3；Release 的非法逻辑坐标按 Rust unsigned flatten 算式访问并保留 alias，backing 越界由 checked access 失败；Debug 非法逻辑坐标由 Rust `debug_assert!` 与 C++ `std::out_of_range` 退出。`usize::MAX` 长度运算也有 Debug/Release Rust/C++ reference。当前结论以主文 PairMatrix 小节和 [共用错误分类表](../error-semantics.md) 为准，不能继续引用旧审计行作为现状差异。
+
+### PairMatrix 与 Tracker 组合核对（2026-10-17）
+
+新增共享 fixture `SparrowCore/Tests/Fixtures/SparrowPairMatrixTrackerRustReference.tsv`，由 RustReference 从 `CollisionTrackerWeightRust.json` 导入三个相同的 1×1 方形，在 strip width=8 下生成初始状态、设置区分权重并执行 GLS 更新、将第三件从 `(1,1)` 移到 `(4,1)` 后的状态。Rust 集成测试与 C++ `TestPairMatrixTrackerRustReference` 均读取同一 TSV 和输入 JSON。
+
+每个阶段逐位比较 6 个上三角 pair 项及 3 个 container 项的 loss/weight、总 loss、总加权 loss 和 `IsSeparated`；该组合夹具覆盖 PairMatrix 与 Tracker 交互时的初始化、权重传播及 moved-row 更新。RustReference Debug/Release 全量验证、SparrowCore Debug/Release 全量 runner 均通过；Rust fixture 生成器成功产出三阶段记录。
+
+范围仍固定在该三件布局与一次移动，不证明任意数量、几何或搬迁轨迹的一般等价。S17 PairMatrix 与 Tracker 组合缺口已收口；OverlapProxy 的 malformed 矩形表示边界及 S18/S12 各自记录的非有限状态、CDE 与 pole 顺序问题仍按对应条目开放。

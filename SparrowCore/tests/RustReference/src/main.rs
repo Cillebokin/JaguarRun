@@ -58,6 +58,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?;
         return Ok(());
     }
+    if requested_mode.as_deref() == Some("--write-tracker-pair-matrix-reference") {
+        let output_path = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/SparrowPairMatrixTrackerRustReference.tsv".to_owned());
+        if let Some(parent) = Path::new(&output_path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(output_path, tracker_pair_matrix_reference_tsv()?)?;
+        return Ok(());
+    }
 
     let mut args = env::args().skip(1);
     let input_path = args
@@ -269,6 +279,80 @@ fn slice_shuffle_reference_tsv() -> String {
         }
     }
     output
+}
+
+fn tracker_pair_matrix_reference_tsv() -> Result<String, Box<dyn Error>> {
+    let (external, _) = sparrow::util::io::read_spp_input(Path::new(
+        "../Fixtures/CollisionTrackerWeightRust.json",
+    ))?;
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external)?;
+    let mut problem = SPProblem::new(instance)?;
+    problem.change_strip_width(8.0)?;
+    let keys: Vec<_> = (0..3)
+        .map(|item_idx| {
+            problem.place_item(SPPlacement {
+                item_idx,
+                d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+            })
+        })
+        .collect();
+    let mut tracker = CollisionTracker::new(&problem.layout);
+
+    let mut output = String::from(
+        "# generator=locked Sparrow RustReference CollisionTracker and PairMatrix\n\
+         # input=CollisionTrackerWeightRust.json, 3 identical 1x1 squares, strip width=8\n\
+         # phase followed by pair loss/weight in upper-triangle order, container loss/weight, totals, separated flag\n",
+    );
+    append_tracker_pair_matrix_state(&mut output, "initial", &tracker);
+
+    for (ordinal, entry) in tracker.pair_collisions.data.iter_mut().enumerate() {
+        entry.weight = 1.0 + ordinal as f32 * 0.25;
+    }
+    for (index, entry) in tracker.container_collisions.iter_mut().enumerate() {
+        entry.weight = 1.5 + index as f32 * 0.5;
+    }
+    tracker.update_weights();
+    append_tracker_pair_matrix_state(&mut output, "after_weight_update", &tracker);
+
+    let old_key = keys[2];
+    let old_placement = problem.remove_item(old_key);
+    let new_key = problem.place_item(SPPlacement {
+        item_idx: old_placement.item_idx,
+        d_transf: DTransformation::new(0.0, (4.0, 1.0)),
+    });
+    tracker.register_item_move(&problem.layout, old_key, new_key);
+    append_tracker_pair_matrix_state(&mut output, "after_move", &tracker);
+    Ok(output)
+}
+
+fn append_tracker_pair_matrix_state(output: &mut String, phase: &str, tracker: &CollisionTracker) {
+    output.push_str(phase);
+    for entry in &tracker.pair_collisions.data {
+        output.push_str(&format!(
+            " {:08x} {:08x}",
+            entry.loss.to_bits(),
+            entry.weight.to_bits()
+        ));
+    }
+    for entry in &tracker.container_collisions {
+        output.push_str(&format!(
+            " {:08x} {:08x}",
+            entry.loss.to_bits(),
+            entry.weight.to_bits()
+        ));
+    }
+    output.push_str(&format!(
+        " {:08x} {:08x} {}\n",
+        tracker.get_total_loss().to_bits(),
+        tracker.get_total_weighted_loss().to_bits(),
+        u8::from(tracker.get_total_loss() == 0.0)
+    ));
 }
 
 fn uniform_sampler_continuous_grid_reference_tsv() -> Result<String, Box<dyn Error>> {

@@ -1,6 +1,6 @@
 # jagua-rs 碰撞检测与实体部分代码逻辑说明
 
-**范围与约定。** 本文覆盖 jagua-rs/src/collision_detection/** 与 jagua-rs/src/entities/**，并在必要处引用调用方（lbf/src/opt/search.rs 等）说明调用链。文中路径均相对仓库根 CodeResource/jagua-rs。需注意：该本地镜像曾被记录为与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在差异；涉及 Rust 行为的结论和 fixture 应注明实际基线，并在 E4 完成后复核。本篇静态分析未在本次修订中重跑测试。
+**范围与约定。** 本文覆盖 jagua-rs/src/collision_detection/** 与 jagua-rs/src/entities/**，并在必要处引用调用方（lbf/src/opt/search.rs 等）说明调用链。文中路径均相对仓库根 CodeResource/jagua-rs。该本地镜像曾被记录为与 JaguarCore/tools/RustOracle 锁定的 Git revision f5e2b5f 存在差异；E4 已完成锁定 oracle 与受影响 fixture 基线复核，涉及具体 Rust 行为的结论仍须注明基线，并按对应 B 工作项和当前 C++ 源码复核。本篇静态分析未在本次修订中重跑测试。
 
 ## 一、数据结构总览与所有权
 

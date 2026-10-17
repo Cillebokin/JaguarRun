@@ -546,8 +546,8 @@ SparrowCore/docs/SourceMap.md 记录了 jagua-rs/lbf 与 sparrow 的来源、许
 
 ## 五、发布门禁与文档一致性问题
 
-SparrowCore/docs/ReleaseChecklist.md 现已列出 MSVC/Qt Release 构建、测试程序、同平台 checksum、CLI 冒烟及退出码、Windows Ctrl-C、C++/Rust 比较、WASM、Demo 与最终解可行性检查。Bench checksum 只适合同一平台和工具链内比较。verify-rust-reference.ps1 只验证 Rust 侧，不能单独证明 C++ parity；在 E4 fixture 基线复核完成前，C++/Rust 项应继续标记未运行或未验收。
+SparrowCore/docs/ReleaseChecklist.md 现已列出 MSVC/Qt Release 构建、测试程序、同平台 checksum、CLI 冒烟及退出码、Windows Ctrl-C、C++/Rust 比较、WASM、Demo 与最终解可行性检查。Bench checksum 只适合同一平台和工具链内比较。verify-rust-reference.ps1 只验证 Rust 侧，不能单独证明 C++ parity；E4 fixture 基线及默认 cold-start 的 Rust/C++ Debug/Release 对照已有 2026-10-17 执行记录，其余门禁仍按各自状态验收。
 
-当前仍需处理的事项如下。其一，SparrowCore 同时存在 Include/include、Tests/tests 两套大小写不同的目录；当前 .pro 所引用的大写目录存在，因此仅凭大小写差异不能断言 Linux 构建失败，G1 的真实风险是两套目录内容漂移。其二，TestWasm.cpp 仍保留依赖目录布局的 fixture 候选路径，需在目标构建目录验证。其三，E4 的 oracle 配置已统一到 Rust 1.98.1 与 jagua-rs f5e2b5f，但受影响 fixture 的重新生成与对拍尚无记录。其四，ReleaseChecklist 已列入 Ctrl-C 探针、Demo 与 C++/Rust 比较；用户记录中浏览器 Demo 未运行，CLI 退出码 10 也未外部触发。SourceMap 与 Deployment 的旧绝对路径已清理，根目录生成的 Makefile 已删除。
+当前仍需处理的事项如下。其一，SparrowCore 同时存在 Include/include、Tests/tests 两套大小写不同的目录；当前 .pro 所引用的大写目录存在，因此仅凭大小写差异不能断言 Linux 构建失败，G1 的真实风险是两套目录内容漂移。其二，TestWasm.cpp 仍保留依赖目录布局的 fixture 候选路径，需在目标构建目录验证。其三，E4 的锁定 oracle 基线、受影响 fixture 核对及默认 cold-start 的 Debug/Release 对照已有记录。其四，ReleaseChecklist 已列入 Ctrl-C 探针、Demo 与 C++/Rust 比较；用户记录中浏览器 Demo 未运行，CLI 退出码 10 也未外部触发。SourceMap 与 Deployment 的旧绝对路径已清理，根目录生成的 Makefile 已删除。
 
 综上，SparrowCore 的结构包括静态库、CLI、WASM、Demo、Bench 与测试体系。当前应先闭合已决范围内的 oracle/fixture 基线复核与差分覆盖，再处理 Include/include、Tests/tests 双目录的内容漂移、TestWasm.cpp 路径假设和浏览器 Demo 验收。10 月 16 日的 MSVC Debug/Release 全套与 CLI Release 冒烟已有用户执行记录；它们支持该次配置下的构建与测试结论，尚不能替代 E4 的 Rust 基线复核或全范围 parity 验收。

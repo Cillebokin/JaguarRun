@@ -38,14 +38,14 @@ Windows Ctrl-C 探针由 `tests/TestWindowsConsoleCtrlC.cpp`（仅 `_WIN32`）�
 
 docs/SourceMap.md 记录 jagua-rs/lbf 与 sparrow 的来源、许可证和 C++ 文件映射。当前文档使用仓库内 CodeResource/jagua-rs 本地镜像说明，并注明 sparrow 工作源码由负责人本地指定；此前的 NestLab 绝对路径已清理。JaguarCore/tools/RustOracle 当前锁定 Git revision f5e2b5f，而本地镜像曾被记录为与该 revision 有差异；两者对应关系与 fixture 生成基线见移植工作项清单 D5/E4。
 
-docs/Differential.md 记录 fixture 矩阵、字段容差及 2026-10-08/09 的重复性运行结果。矩阵中的旧运行记录应按其日期与生成配置理解；新的默认 cold-start fixture 及 10 分钟 compression phase deadline override 尚需记录到覆盖矩阵。当前运行入口和构建目录应以 SparrowCore 当前 Deployment.md、ReleaseChecklist.md 与 qmake 工程配置为准，并在记录中保留命令和平台。
+docs/Differential.md 记录 fixture 矩阵、字段容差及 2026-10-08/09 的重复性运行结果。矩阵中的旧运行记录应按其日期与生成配置理解；默认 cold-start fixture 和 10 分钟 compression phase deadline override 已纳入 S08/S21 记录，并于 2026-10-17 复核 Rust 与 C++ Debug/Release 路径。当前运行入口和构建目录应以 SparrowCore 当前 Deployment.md、ReleaseChecklist.md 与 qmake 工程配置为准，并在记录中保留命令和平台。
 
 这里要区分三类证据：FloatBits 断言可证明指定字段和用例逐位相同；固定 fixture 的字段容差比较只证明该输入集合满足容差；SHA-256 重复性记录只证明同平台重复运行的输出稳定，不能证明 Rust 与 C++ 逐位一致。Exploration、Separator、Compression 等大部分轨迹比对属于固定种子回归，不是通用 bit-exact 证明。Differential.md 中的相关表述应按字段与测试逐条理解；矩阵未覆盖的 Rust 参考文件也不能仅凭目录存在推断已纳入 C++ 对拍。
 
 ## 五、发布门禁与文档一致性问题
 
-docs/ReleaseChecklist.md 现已列出 MSVC/Qt Release 构建、测试程序、同平台 checksum、CLI 冒烟及退出码、Windows Ctrl-C、C++/Rust 比较、WASM、Demo 与最终解可行性检查。Bench checksum 只适合同一平台和工具链内比较。verify-rust-reference.ps1 只验证 Rust 侧，不能单独证明 C++ parity；在 E4 fixture 基线复核完成前，C++/Rust 项应继续标记未运行或未验收。
+docs/ReleaseChecklist.md 现已列出 MSVC/Qt Release 构建、测试程序、同平台 checksum、CLI 冒烟及退出码、Windows Ctrl-C、C++/Rust 比较、WASM、Demo 与最终解可行性检查。Bench checksum 只适合同一平台和工具链内比较。verify-rust-reference.ps1 只验证 Rust 侧，不能单独证明 C++ parity；E4 fixture 基线及默认 cold-start 的 Rust/C++ Debug/Release 对照已有 2026-10-17 执行记录，其余门禁仍按各自状态验收。
 
-当前仍需处理的事项如下。其一，SparrowCore 同时存在 Include/include、Tests/tests 两套大小写不同的目录；当前 .pro 所引用的大写目录存在，因此仅凭大小写差异不能断言 Linux 构建失败，G1 的真实风险是两套目录内容漂移。其二，TestWasm.cpp 仍保留依赖目录布局的 fixture 候选路径，需在目标构建目录验证。其三，E4 的 oracle 配置已统一到 Rust 1.98.1 与 jagua-rs f5e2b5f，但受影响 fixture 的重新生成与对拍尚无记录。其四，ReleaseChecklist 已列入 Ctrl-C 探针、Demo 与 C++/Rust 比较；用户记录中浏览器 Demo 未运行，CLI 退出码 10 也未外部触发。SourceMap 与 Deployment 的旧绝对路径已清理，根目录生成的 Makefile 已删除。
+当前仍需处理的事项如下。其一，SparrowCore 同时存在 Include/include、Tests/tests 两套大小写不同的目录；当前 .pro 所引用的大写目录存在，因此仅凭大小写差异不能断言 Linux 构建失败，G1 的真实风险是两套目录内容漂移。其二，TestWasm.cpp 仍保留依赖目录布局的 fixture 候选路径，需在目标构建目录验证。其三，E4 的锁定 oracle 基线、受影响 fixture 核对及默认 cold-start 的 Debug/Release 对照已有记录。其四，ReleaseChecklist 已列入 Ctrl-C 探针、Demo 与 C++/Rust 比较；用户记录中浏览器 Demo 未运行，CLI 退出码 10 也未外部触发。SourceMap 与 Deployment 的旧绝对路径已清理，根目录生成的 Makefile 已删除。
 
 综上，SparrowCore 包含静态库、CLI、WASM、Demo、Bench 与测试体系。当前应先闭合已决范围内的 oracle/fixture 基线复核与差分覆盖，再处理 Include/include、Tests/tests 双目录的内容漂移、TestWasm.cpp 路径假设和浏览器 Demo 验收。10 月 16 日的 MSVC Debug/Release 全套与 CLI Release 冒烟已有用户执行记录；它们支持该次配置下的构建与测试结论，尚不能替代 E4 的 Rust 基线复核或全范围 parity 验收。

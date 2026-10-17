@@ -2,9 +2,9 @@
 
 ## 结论与边界
 
-两处 Rust oracle 已按锁定工具链与 jagua-rs revision 运行。Sparrow RustReference 的 Debug、Release 测试均通过；fixture 生成器连续运行两次得到相同结果，13 个生成文件在逐一核对后全部与工作区 fixture 一致。为匹配生成器输出，已更新 SeparatorRoundRustTrace.tsv 的注释头；C++ 读取器会跳过以 # 开头的注释行。
+两处 Rust oracle 已按锁定工具链与 jagua-rs revision 运行。Sparrow RustReference 的 Debug、Release 测试均通过；fixture 生成器连续运行两次得到相同结果，13 个生成文件在逐一核对后全部与工作区 fixture 一致。为匹配生成器输出，已更新 SeparatorRoundRustTrace.tsv 的注释头；C++ 读取器会跳过以 # 开头的注释行。2026-10-17 又在 Rust Debug/Release 下重跑默认 cold-start reference，并在重建后的 SparrowCore Debug/Release 全套测试程序中复核跨语言对照；E4 冷启动 fixture 待办据此收口。
 
-Jaguar RustOracle 的默认入口与专用入口在 Debug、Release 下均退出码 0。输出揭示了若干既有的 profile 差异，记录在下文。2026-10-17 按锁定配置重算 B2，并新增 B4a filtered-`Entire` 可达性探针复核 Debug/Release 输出。Rust oracle 通过只证明该参考程序成功运行，不代表 JaguarCore/SparrowCore 与 Rust 等价；E4 仍标为“部分”，墙钟驱动的 cold-start fixture 处理待完成。
+Jaguar RustOracle 的默认入口与专用入口在 Debug、Release 下均退出码 0。输出揭示了若干既有的 profile 差异，记录在下文。2026-10-17 按锁定配置重算 B2，并新增 B4a filtered-`Entire` 可达性探针复核 Debug/Release 输出。Rust oracle 通过只证明参考程序成功运行，不单独证明 JaguarCore/SparrowCore 与 Rust 等价；冷启动 fixture 已在下文完成复核，E4 的基线与受影响 fixture 验收项现已完成。
 
 2026-10-16 的 E4 baseline 运行未执行 C++ 构建或原生测试；2026-10-17 的 B2/B4a/B6/B7 复核各自记录了对应的 C++ 定向 runner。工作区中的构建产物未清理。
 
@@ -162,4 +162,20 @@ rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCor
 - offset 探针：NaN 输入在 Debug panic，在 Release 返回空多边形错误；正负无穷与 collapse 场景在 Release 返回空多边形错误。
 - import 探针的 stdout 在两种 profile 相同；stderr 中有被捕获异常的 panic hook 输出。
 - collision 和 zero-separation 两个探针的 Debug/Release stdout 完全相同。
-- E4 之后仍需处理墙钟截断的 cold-start Rust fixture；B2 的 pinned Debug/Release 复核已于 2026-10-17 记录在下节，oracle 通过不替代跨语言差分结果。
+- 默认 cold-start 的墙钟截断疑点已由下节的 Rust Debug/Release 重跑和 C++ Debug/Release 全套测试复核；B2/B4a 的 pinned Rust 运行仍只证明各自 oracle 与 fixture，不替代相应跨语言差分结果。
+
+## Sparrow 默认 cold-start fixture（2026-10-17）
+
+`optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。
+
+从仓库根目录分别执行：
+
+```powershell
+$env:SPARROW_PRINT_COLD_START_DEFAULT_REFERENCE = '1'
+rustup run 1.98.1 cargo test --locked --manifest-path SparrowCore/Tests/RustReference/Cargo.toml --test optimizer_cold_start_default_reference -- --exact optimize_cold_start_with_default_stage_configs_matches_reference --nocapture
+rustup run 1.98.1 cargo test --release --locked --manifest-path SparrowCore/Tests/RustReference/Cargo.toml --test optimizer_cold_start_default_reference -- --exact optimize_cold_start_with_default_stage_configs_matches_reference --nocapture
+```
+
+Debug 与 Release 均为 `1 passed, 0 failed`。测试将运行时 trace 与 `OptimizeColdStartDefaultRustReference.tsv` 的非注释行逐行比较；两种 profile 都匹配全部 33 行。事件行按 UTF-8、LF 和末尾 LF 规范化后的 SHA-256 为 `86A0AE51F180992DDD93C317506BE61069250E88BAC98FCBAB00EAFA6DB279CE`；fixture 文件 SHA-256 为 `ADCCFE002BAD7FEC206A6057BD400BAF68079361C60CEE1E5A1F803576402B73`。compression 汇总为 647 次 progress callback，首末 iteration 为 0/646，分离结果为 403489 eval、2343 moves、646 iterations。
+
+随后用 Qt 6.5.3 `msvc2019_64` qmake Makefile、Visual Studio 2022 MSVC x64 toolset 14.44.35207 重建并运行 `SparrowCoreTests.exe` Debug 与 Release 全套 runner，两者均退出码 0。该 runner 包含 `TestDefaultColdStartOptimizeMatchesRustReference`。Release runner 输出的四行 evaluator bit 诊断属于其他测试的正常输出；构建有既存的 C4189 未引用局部变量警告，不影响成功状态。

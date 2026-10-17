@@ -220,4 +220,4 @@
 
 B0 的 pinned 静态映射台账已补齐：crate 外可达模块、类型、显式字段/方法/枚举变体、feature IO、util helper，以及非重导出 `pub` 项的排除边界均已登记。仍有三项范围限制：本轮未生成编译器 rustdoc/API dump；不以静态映射证明算法或状态行为等价；需要行为裁决的差异须进入 B1–B15 对拍。没有运行构建、测试或 Rust oracle。
 
-E4 的导出图和上述静态签名核对已完成；E4 整体仍未完成，因为锁定 oracle 运行、受影响 fixture 复核/重生成及基线哈希尚未执行。另需注意 `Cargo.lock` 锁依赖版本和 Git revision；Rust 1.98.1 由两个 oracle 目录中的 `rust-toolchain.toml` 指定，不能说成由 Cargo.lock 锁定。
+E4 的导出图和上述静态签名核对已完成；锁定 oracle 运行、受影响 fixture 复核/重生成及基线哈希已按 [E4 执行记录](E4-oracle-fixture-baseline-2026-10-16.md) 完成。默认 cold-start Rust trace 已在 Debug/Release 下逐行匹配，SparrowCore Debug/Release 全套 runner 均通过。E4 完成不代表所有算法语义已等价；各项边界仍以工作项清单及对应记录为准。另需注意 `Cargo.lock` 锁依赖版本和 Git revision；Rust 1.98.1 由两个 oracle 目录中的 `rust-toolchain.toml` 指定，不能说成由 Cargo.lock 锁定。

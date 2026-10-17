@@ -26,5 +26,5 @@
 
 ## 证据规则
 
-源码行号均指向表中标明的 pinned revision；C++ 行号应在每次实现或复核时按当前工作区更新。运行结论必须附 oracle/fixture、命令和 profile；静态映射不得写成运行等价。E4 当前只闭合 oracle 与确定性 fixture 的首轮基线，仍有 B2 重算和 cold-start fixture 后续项，见 [E4 执行记录](../complex/E4-oracle-fixture-baseline-2026-10-16.md)。
+源码行号均指向表中标明的 pinned revision；C++ 行号应在每次实现或复核时按当前工作区更新。运行结论必须附 oracle/fixture、命令和 profile；静态映射不得写成运行等价。E4 的 oracle/fixture 基线、B2 重算和默认 cold-start fixture 已完成；cold-start 33 行 Rust Debug/Release trace 与 fixture 一致，C++ SparrowCore Debug/Release 全套 runner 通过。该基线结论不替代各工作项的跨语言行为验收，详见 [E4 执行记录](../complex/E4-oracle-fixture-baseline-2026-10-16.md)。
 

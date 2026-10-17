@@ -97,4 +97,6 @@ Rust 原生事件类型及完成阶段边界已有实现映射和定向跨语言
 
 本次修正还把 C++ cold-start 测试的步长范围上界改为 `double(float(0.0005))`，避免把合法的 Rust `f32(0.0005)` widening 值 `0.00050000002374872565` 错判为大于未量化的 `double 0.0005`。实现上的 `OnCompressionProgress` 转换保持 Rust f32 callback 语义，Debug/Release runner 均已验证。
 
+**E4 fixture 复核（2026-10-17）。** Rust 1.98.1 锁定测试在 Debug/Release 下重新运行，`PhaseTerminator::timeout_at()` 返回 `None`，两种 profile 的 33 行事件 trace 均逐行匹配 `OptimizeColdStartDefaultRustReference.tsv`；compression 仍为 647 次 progress callback、末次 iteration 646、最终分离统计 403489 eval / 2343 moves / 646 iterations。重建后的 SparrowCore Debug/Release 全套测试程序均退出码 0，其中包含本项跨语言用例。该结论限于固定三件方件、seed=42 和首个 separation result 后停止的路径，不代表自然跑满默认墙钟时限。
+
 **闭合结论。** Rust 原生 Listener 的触发点、默认 cold-start 的代表性顺序/计数/字段、阶段 stop/reset、已测分离进度 panic/exception 截断及 FINAL 返回边界已闭合到本记录列出的 profile。原 strict-parity 缺口已通过 API 隔离收口：`OptimizationListener` 只承载 Rust 原生回调，`OnProgress`/`OnImprovement` 放在必须显式传入的 C++ `OptimizationObserver`；Rust 对照运行不启用 observer。历史仍是 C++ 结果扩展。S20 的 SparrowCli SIGINT 和原生宿主跨线程取消接线已完成；Windows `CTRL_C_EVENT` 子进程自动化已按 Rust trace 在 Debug/Release 通过，真实键盘 Release 冒烟也已由用户回报通过；S12 中固定双 worker unsupported-hazard 的 Separator/Optimize 传播边界已闭合；WASM 同步 ABI 中途取消仍开放。

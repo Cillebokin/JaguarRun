@@ -69,6 +69,26 @@ ReferenceMap loadGeometryReference()
     return reference;
 }
 
+ReferenceMap loadReferenceMap(const char* fileName)
+{
+    const std::string contents = loadReference(fileName);
+    assert(!contents.empty());
+
+    ReferenceMap reference;
+    std::istringstream input(contents);
+    for (std::string line; std::getline(input, line);)
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        const std::size_t separator = line.find('=');
+        if (line.empty() || separator == std::string::npos || line[0] == '#')
+            continue;
+        reference.emplace(line.substr(0, separator), line.substr(separator + 1));
+    }
+    assert(!reference.empty());
+    return reference;
+}
+
 const std::string& referenceValue(const ReferenceMap& reference, const char* key)
 {
     const auto found = reference.find(key);
@@ -166,7 +186,7 @@ void expectRustNumbers(const ReferenceMap& reference,
     if (expected.size() != actual.size())
     {
         std::fprintf(stderr,
-                     "B1 reference %s field count: Rust %zu, C++ %zu\n",
+                     "Rust reference %s field count: Rust %zu, C++ %zu\n",
                      key,
                      expected.size(),
                      actual.size());
@@ -181,7 +201,7 @@ void expectRustNumbers(const ReferenceMap& reference,
         if (!matches)
         {
             std::fprintf(stderr,
-                         "B1 reference %s[%zu]: Rust %.9g, C++ %.9g\n",
+                         "Rust reference %s[%zu]: Rust %.9g, C++ %.9g\n",
                          key,
                          index,
                          expectedValue,
@@ -189,6 +209,18 @@ void expectRustNumbers(const ReferenceMap& reference,
         }
         assert(matches);
     }
+}
+
+std::vector<double> shapeModificationValues(const jaguar::SimplePolygon& shape)
+{
+    std::vector<double> values{
+        static_cast<double>(shape.VertexCount()), shape.Area()};
+    for (const jaguar::Point2d& point : shape.Vertices())
+    {
+        values.push_back(point.x);
+        values.push_back(point.y);
+    }
+    return values;
 }
 
 void expectRustBooleans(const ReferenceMap& reference,
@@ -1252,8 +1284,42 @@ void runB1PrimitiveReferenceTests()
 }
 }
 
+void runB2ShapeModificationDifferentialTests()
+{
+    const ReferenceMap b2Reference = loadReferenceMap("shape_modification_b2.txt");
+
+    const auto narrowNotch = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {6.0, 10.0},
+        {6.0, 9.9}, {4.0, 9.9}, {4.0, 10.0}, {0.0, 10.0}});
+    assert(narrowNotch.HasValue());
+    const auto narrowInflated = jaguar::CloseNarrowConcavities(
+        narrowNotch.Value(), jaguar::ShapeModifyMode::Inflate, {0.2, 0.0015});
+    expectRustNumbers(b2Reference, "b2.narrow_notch.inflate_half_open_area",
+                      shapeModificationValues(narrowInflated));
+
+    const auto wrappedNotch = jaguar::SimplePolygon::Create({
+        {0.1, 6.0}, {0.1, 4.0}, {0.0, 4.0}, {0.0, 0.0},
+        {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}, {0.0, 6.0}});
+    assert(wrappedNotch.HasValue());
+    const auto wrappedInflated = jaguar::CloseNarrowConcavities(
+        wrappedNotch.Value(), jaguar::ShapeModifyMode::Inflate, {0.2, 0.01});
+    expectRustNumbers(b2Reference, "b2.wrapped_notch.inflate",
+                      shapeModificationValues(wrappedInflated));
+
+    const auto convexBump = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {6.0, 10.0},
+        {5.0, 10.1}, {4.0, 10.0}, {0.0, 10.0}});
+    assert(convexBump.HasValue());
+    const auto bumpDeflated = jaguar::CloseNarrowConcavities(
+        convexBump.Value(), jaguar::ShapeModifyMode::Deflate, {0.2, 0.01});
+    expectRustNumbers(b2Reference, "b2.convex_bump.deflate",
+                      shapeModificationValues(bumpDeflated));
+}
+
 void runGeometryDifferentialTests()
 {
+    runB2ShapeModificationDifferentialTests();
+
     const auto rectangle = jaguar::Rect2d::Create(-2.0, -1.0, 3.0, 4.0);
     assert(rectangle.HasValue());
     assert(std::abs(rectangle.Value().Width() - 5.0) < 1.0e-12);

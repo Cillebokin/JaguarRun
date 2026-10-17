@@ -96,6 +96,16 @@
 | `close_narrow_concavities` (385–523) | O(n²) 枚举非相邻端点；候选边缩为 0.9999，受距离/面积比、内外模式和边相交限制；优先消除最多顶点，重建失败以 `expect` panic；无候选停止 | `CloseNarrowConcavities`（`NarrowConcavity.cpp:76–166`）实现相同候选目标并用 RustF32 helper；C++ 重建失败时 `break` 并返回当前形状，Rust 对应路径 panic |
 | `shape_modification_valid` (525–554) | 对原顶点逐项检查：Inflate 须落在新形状内或近边，Deflate 须在新形状外或近边；边容差为 `diameter * 1e-6`；失败打日志并返回 false | `ShapeModificationValid`（`Simplify.cpp:280–309`）对应；不同之处是 `OriginalShape::convert_to_internal` 只 Debug 断言，而 C++ ConvertToInternal 总会校验并将 false 转 `InvalidPolygon` |
 
+### B2：形状修改算法核对
+
+执行基线：Rust 1.98.1、Cargo.lock pinned jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。RustOracle 新增 `--shape-modification-b2-parity-only`，固定输出放在 `shape_modification_b2.txt`；Debug 与 Release 各 3 行，输出相同。
+
+- **半开切片阈值**：8 点窄凹陷在 Inflate 下用 `cutoff=(0.2, 0.0015)`。原形面积为 98，阈值上限为 0.147；Rust `vertices[i..j]` 和 C++ `[start,end)` 都计算到 0.1 的负子面积，候选被接受并闭合为 6 顶点、面积 100。将 j 纳入子数组会得到 0.2，超过上限而拒绝候选。该输入区分当前半开行为与包含 j 的变化。
+- **首尾环绕切片**：wrapped notch 用于覆盖 Rust `vertices[i..] + vertices[..j]` 与 C++ 对应拼接；两侧得到相同 6 顶点输出，面积 100。
+- **Deflate 符号与注释**：凸起输入的 Deflate cutoff 为 `(0.2, 0.01)`。Rust 源码注释称 Deflate 子形面积应为正，但实际筛选仍是 `if sub_shape_area >= 0.0 { continue; }`。Rust pinned 输出保持原 7 顶点、面积 `100.099998474`；C++ 同样过滤非负子面积并得到相同输出。判定为 Rust 注释与实现冲突，当前未观察到跨语言行为差异。
+
+本轮决定按 pinned Rust 当前行为保持兼容，不单侧纠正算法，也未改生产几何代码。C++ 使用本轮当前 workspace 源码的 MSVC 2019 x64 Debug/Release 重建；B2 定向差分双 profile 通过，Release 断言启用；完整 `CompareGeometry` Release runner 通过。完整 `JaguarCoreTests.exe` 未运行。B2 按上述固定差分矩阵范围完成，不外推到任意多边形和阈值。
+
 ### `jagua-rs/src/geometry/fail_fast/piers.rs`
 
 | Rust 函数/行 | 逻辑、profile 与失败出口 | JaguarCore 对应与差异 |

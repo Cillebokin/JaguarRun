@@ -10,13 +10,14 @@ The files under `../Fixtures/RustReference/` use the jagua-rs external JSON sche
 
 ## Current checks
 
-- `CompareGeometry.cpp`: pinned Rust geometry reference fixture for B1 primitives, transforms, convex hull and `OriginalShape`, plus rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering.
+- `CompareGeometry.cpp`: pinned Rust geometry reference fixture for B1 primitives, transforms, convex hull and `OriginalShape`, plus rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering. B2 additionally compares the narrow-concavity half-open area threshold, wrapped slice and Deflate sign behavior against `shape_modification_b2.txt`.
 - `CompareSurrogate.cpp`: B3 pinned Rust references for all poles/piers and fail-fast pole prefixes on U/L/C shapes, threshold and ratio boundary transitions, ratio rejection, pole/pier generation errors, plus surrogate collision detection and collection outcomes.
 - `CompareProblem.cpp`: SPP demand/width/density, BPP demand/stock/cost/density, and MSPP demand/max-width/total-width/density invariants, including Layout snapshot restore.
 - `CompareMatrix.cpp`: shared edge intersection and containment tables. The matrix explicitly preserves jagua-rs's non-collision rule for collinear segments and collision rule for non-collinear endpoint/T-junction contact.
 - `CompareTrajectory.cpp`: the same xorshift64* seed and 256-step operation grammar run in Rust and C++, including placement/removal/restore counts, active count, checksum, and final PRNG state.
 - `CompareOptimizer.cpp`: consumes a Rust LBF solution fixture generated with seed `42`; JaguarCore validates external placements, feasibility, item count, density, and strip width. It does not claim to reproduce LBF/Sparrow's search path.
 - `RustOracle --model-boundary-parity-only` and `--restore-boundary-parity-only`: probe Debug/Release demand underflow and snapshot restore state directly against jagua-rs. These probes report partial state after caught Rust panics; compare them with JaguarCore's `Result` outcome and state, rather than treating `panic` and `Infeasible` as interchangeable by default.
+- `RustOracle --shape-modification-b2-parity-only`: pinned Debug/Release references for B2's half-open narrow-concavity slices and the documented Deflate positive-area rule versus the implemented nonnegative-area rejection.
 
 The expected scalar values are derived from the corresponding jagua-rs import rules (`f32` geometry, centering transform, normalized rotation list, and total-area/fixed-height width). They are intentionally compared with explicit tolerances instead of comparing textual JSON; rotation values use a wider tolerance because JaguarCore stores `double` while jagua-rs stores `f32`.
 

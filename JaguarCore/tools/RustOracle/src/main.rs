@@ -14,7 +14,8 @@ use jagua_rs::geometry::geo_traits::{
 };
 use jagua_rs::geometry::primitives::{Circle, Edge, Point, Rect, SPolygon};
 use jagua_rs::geometry::shape_modification::{
-    ShapeModifyConfig, ShapeModifyMode, offset_shape, shape_modification_valid,
+    ShapeModifyConfig, ShapeModifyMode, close_narrow_concavities, offset_shape,
+    shape_modification_valid,
 };
 use jagua_rs::geometry::{DTransformation, OriginalShape};
 use jagua_rs::io::export::int_to_ext_transformation;
@@ -775,6 +776,77 @@ fn run_offset_boundary_oracle() {
         Ok(shape) => print_polygon("offset.boundary.collapse", &shape),
         Err(error) => println!("offset.boundary.collapse=error:{error}"),
     }
+}
+
+fn print_b2_shape_modification(
+    name: &str,
+    points: &[(f32, f32)],
+    mode: ShapeModifyMode,
+    cutoff: (f32, f32),
+) {
+    let original = polygon(points);
+    let modified = close_narrow_concavities(&original, mode, cutoff);
+    let mut values = vec![
+        modified.n_vertices().to_string(),
+        format!("{:.9}", modified.area),
+    ];
+    for point in &modified.vertices {
+        values.push(format!("{:.9}", point.0));
+        values.push(format!("{:.9}", point.1));
+    }
+    println!("{name}={}", values.join(","));
+}
+
+fn run_b2_shape_modification_oracle() {
+    let narrow_notch = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (6.0, 10.0),
+        (6.0, 9.9),
+        (4.0, 9.9),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ];
+    print_b2_shape_modification(
+        "b2.narrow_notch.inflate_half_open_area",
+        &narrow_notch,
+        ShapeModifyMode::Inflate,
+        (0.2, 0.0015),
+    );
+
+    let wrapped_notch = [
+        (0.1, 6.0),
+        (0.1, 4.0),
+        (0.0, 4.0),
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 6.0),
+    ];
+    print_b2_shape_modification(
+        "b2.wrapped_notch.inflate",
+        &wrapped_notch,
+        ShapeModifyMode::Inflate,
+        (0.2, 0.01),
+    );
+
+    let convex_bump = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (6.0, 10.0),
+        (5.0, 10.1),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ];
+    print_b2_shape_modification(
+        "b2.convex_bump.deflate",
+        &convex_bump,
+        ShapeModifyMode::Deflate,
+        (0.2, 0.01),
+    );
 }
 
 fn run_b1_geometry_oracle() {
@@ -1831,6 +1903,10 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--offset-boundary-parity-only") {
         run_offset_boundary_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--shape-modification-b2-parity-only") {
+        run_b2_shape_modification_oracle();
         return;
     }
     if std::env::args().any(|arg| arg == "--import-boundary-parity-only") {

@@ -4,7 +4,7 @@
 
 两处 Rust oracle 已按锁定工具链与 jagua-rs revision 运行。Sparrow RustReference 的 Debug、Release 测试均通过；fixture 生成器连续运行两次得到相同结果，13 个生成文件在逐一核对后全部与工作区 fixture 一致。为匹配生成器输出，已更新 SeparatorRoundRustTrace.tsv 的注释头；C++ 读取器会跳过以 # 开头的注释行。
 
-Jaguar RustOracle 的默认入口与 6 个专用入口在 Debug、Release 下均退出码 0。输出揭示了若干既有的 profile 差异，记录在下文。Rust oracle 通过只证明该参考程序成功运行，不代表 JaguarCore/SparrowCore 与 Rust 等价；E4 仍标为“部分”，B2 复核与墙钟驱动的 cold-start fixture 处理待后续工作项闭合。
+Jaguar RustOracle 的默认入口与专用入口在 Debug、Release 下均退出码 0。输出揭示了若干既有的 profile 差异，记录在下文。2026-10-17 按锁定配置重算 B2 并复核 Debug/Release 输出。Rust oracle 通过只证明该参考程序成功运行，不代表 JaguarCore/SparrowCore 与 Rust 等价；E4 仍标为“部分”，墙钟驱动的 cold-start fixture 处理待完成。
 
 本次没有运行 C++ 构建或原生测试。工作区中的构建产物未清理。
 
@@ -37,7 +37,7 @@ Cargo 文件 SHA-256：
 | SparrowCore/Tests/RustReference/src | 7 | A730A4AEE96895C2A64242B54AC1DE298E2CF76361A3C065DF30346DB4DDE7F9 |
 | SparrowCore/Tests/RustReference/tests | 56 | BA0EF8FF7D2E2DEAC2CA4D6E66A357A6B1AFD6F3C22BD47E342C93ED9A0F2846 |
 | SparrowCore/Tests/Fixtures（更新后） | 142 | 0EED773EDA2AAB3E3A8E5C263EFBF73446A53389F1CDDB94EED1C0E78F1E8B7B |
-| JaguarCore/tools/RustOracle/src | 1 | 4841184A922A85D48D388B4D25A007166FDD378EFE9391781A048837E2B46679 |
+| JaguarCore/tools/RustOracle/src | 1 | EFBF173077C25B951639D7491744E8793166DC3816149529025AA497683D7B00 |
 
 Sparrow fixture 生成器读取的输入 SHA-256：
 
@@ -96,6 +96,22 @@ Sparrow fixture 生成器读取的输入 SHA-256：
 | offset-boundary-parity-only | 4 | 8242A346022F53D9BB8E6D6A5AB2C8E0187519E1B5446CFBD21B155305DDEC05 | 2B0099713CF2073CF27B1FB82AE3787F9BFD02C7A56204C45CBFA71279A145D4 |
 | import-boundary-parity-only | 8 | 8EB10446F4F1C7B66CD4E5E238EB6D647494A538EDE6EBC827AF0FA56904CF21 | 8EB10446F4F1C7B66CD4E5E238EB6D647494A538EDE6EBC827AF0FA56904CF21 |
 | zero-separation-parity-only | 6 | 5BFCA78E7E7D79FFF6905731B7AB83EF3771CB7560CC88B9BF99451E9D2E5C45 | 5BFCA78E7E7D79FFF6905731B7AB83EF3771CB7560CC88B9BF99451E9D2E5C45 |
+| shape-modification-b2-parity-only（2026-10-17） | 3 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 |
+
+### B2 形状修改重算（2026-10-17）
+
+执行命令，Debug 与 Release 分别运行：
+
+```powershell
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --shape-modification-b2-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --shape-modification-b2-parity-only
+```
+
+两条命令均使用 `rustc 1.98.1`、Cargo 1.98.1 与 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。每个 profile 输出 3 行，Debug/Release 原始 stdout 均为 SHA-256 `DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71`；两者逐字匹配 fixture 非注释行。fixture `shape_modification_b2.txt` 共 3 个键，SHA-256 `540E5DEBB0123CD9A5FC6783EE9242EAF3AC2215AED5C4AF6276C8A38FE77F67`。
+
+矩阵包括：非环绕凹陷在 `cutoff_area_ratio=0.0015` 时由半开切片得到 0.1 子面积并闭合为 6 顶点；若切片包含 j 端点则面积为 0.2、超过 0.147 上限。首尾环绕凹陷用于覆盖 wrap 分支。Deflate 窄凸起在 Rust/C++ 中都保持 7 顶点、面积 `100.099998474`。pinned Rust 注释要求 Deflate 采用正子面积，但实际代码与 Inflate 一样过滤所有非负子面积。B2 本轮选择保持 pinned Rust 当前行为；这是已记录的源代码注释/实现冲突，不是 Rust/C++ 的观测行为差异。本轮未修改生产几何算法。
+
+当前 workspace JaguarCore 以 MSVC 2019 x64 分别新建 Debug/Release 构建；B2 定向 runner 双 profile 退出码 0，Release 断言启用；完整 `CompareGeometry` Release runner 也通过。完整 `JaguarCoreTests.exe` 未运行。RustOracle 源文件树指纹已更新至上表；B2 fixture 与详细行为结论见 [几何记录](../logic-comparison-jagua/records/80-geometry.md#b2-形状修改算法核对)。
 
 ## 当前可见的 profile 差异与后续项
 
@@ -105,4 +121,4 @@ Sparrow fixture 生成器读取的输入 SHA-256：
 - offset 探针：NaN 输入在 Debug panic，在 Release 返回空多边形错误；正负无穷与 collapse 场景在 Release 返回空多边形错误。
 - import 探针的 stdout 在两种 profile 相同；stderr 中有被捕获异常的 panic hook 输出。
 - collision 和 zero-separation 两个探针的 Debug/Release stdout 完全相同。
-- E4 之后仍需按清单顺序重算 B2，并处理墙钟截断的 cold-start Rust fixture；这些结果不能由本次 oracle 运行或固定 fixture 哈希替代。
+- E4 之后仍需处理墙钟截断的 cold-start Rust fixture；B2 的 pinned Debug/Release 复核已于 2026-10-17 记录在下节，oracle 通过不替代跨语言差分结果。

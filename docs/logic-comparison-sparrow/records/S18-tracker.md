@@ -170,3 +170,11 @@ Tracker 的 PairMatrix 次序、raw loss/weighted-loss 运算、GLS NaN/±Inf fl
 3. **改造点覆盖完整**：经 grep 复验，SparrowCore 内私有引擎注册 hazard 的位置共 3 处——SeparationEvaluator.cpp:76-101、CollisionTracker.cpp:488-506（EvaluateCandidateLoss）、CollisionTracker.cpp:673-682（BuildFromLayout），6910145 全部改齐（diff 确认 3 处同模式）；Exploration.cpp 的 `CollectContainedHandles`（:364-377）复用布局自带引擎快照（`engine->Restore(cdeSnapshot)`），实体来自 Layout::MakeHazard（Layout.cpp:97-103，本就带 handle+transform），无需改。**结论：实体唯一性修复已全覆盖，与 Rust pk 语义对应正确，主文"2026-09-29 修复注记"（S06 头部第②条）的描述准确**。
 4. **【浅覆盖补全】** 主文"register_item_move"条目的对账校验清单（cpp:77-138）经现场核对更新：容器 bbox 不变（:77-87）、previousHandle 在表（:89-94）、newHandle 在 layout（:96-108）、**逐项校验其余 item 的 transform 与缓存一致**（:110-138，通过 `candidate.handle == expectedHandle` 定位后比对旋转/平移）——主文已概括为"其余 item 的 itemIndex/rotation/translation 与缓存逐项相等"，判定维持。
 5. **【历史行数记录】** 2026-09-29 补充审计时 CollisionTracker.cpp 为 730 行；2026-10-07 当前基线为 864 行，主文引用已按当前函数位置更新。
+
+### 收口复核（2026-10-17）
+
+复核确认，S18 清单剩余的两项已有成对 Rust/C++ 证据，无需改生产代码：Rust `tracker_non_finite_losses_keep_ieee_values_and_rust_weight_floor` 与 C++ `TestCollisionTrackerAndSeparationEvaluator` 对 NaN、+Inf、-Inf 的 loss 传播和 GLS 权重下限进行检查；NaN 覆盖 pair/item/weighted-item/total/weighted-total getter，±Inf 覆盖总损失与总加权损失，权重更新后均回落到 `1.0`。这些用例直接构造 Tracker 状态，证明列明 IEEE 输入，不声称几何路径可生成这些状态。
+
+Debug-only 检查的调用链也已逐项核对：Rust `tracker_matches_layout` 在 tracker 创建、保留权重恢复、搬迁更新，以及 worker/separator 的移动前后检查处执行；C++ `DebugAssertMatchesLayout` 在 `BuildFromLayout`、`RestoreButKeepWeights`、`UpdateMovedItem` 及 worker/separator 对应状态边界执行。Rust/C++ Debug 全量 runner 覆盖该诊断启用 profile；Release 全量 runner 覆盖诊断编译关闭的 profile。真实 Exterior 碰撞 fixture 走容器损失核对，近等 bbox U 形 fixture 走单向 pair 发现告警分支；正常布局覆盖无碰撞零损失分支。
+
+本轮新鲜验证：`verify-rust-reference.ps1`（含 Debug、Release 与 `cargo fmt --check`）退出码 0；SparrowCore Debug 与 Release 全量测试 runner 均退出码 0。剩余限制是这些固定布局不代表任意几何、CDE/quadtree 状态或所有人为破坏 Tracker 内部状态后的断言失败组合。S18 指定的非有限 Tracker 传播/GLS 与 Debug-only CDE 检查项收口。

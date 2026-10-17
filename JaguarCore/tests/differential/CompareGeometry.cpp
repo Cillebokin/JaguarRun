@@ -804,6 +804,17 @@ void runB1PrimitiveReferenceTests()
     }
     expectRustNumbers(reference, "geometry.rect_degenerate_boundary_shapes",
                       degenerateRectShapes);
+    std::vector<double> degenerateRectSides;
+    for (const jaguar::Rect2d& degenerateRect : {
+             degenerateZeroWidthRect, degenerateZeroHeightRect})
+    {
+        for (const auto& side : degenerateRect.SidesRustF32())
+            degenerateRectSides.insert(degenerateRectSides.end(), {
+                side.start.x, side.start.y, side.end.x, side.end.y});
+    }
+    expectRustNumbers(reference, "geometry.rect_degenerate_sides",
+                      degenerateRectSides);
+
     const jaguar::Rect2d areaRect{0.0, 0.0, 2.0, 2.0};
     expectRustBooleans(reference, "geometry.rect_degenerate_intersections", {
         jaguar::Rect2d::IntersectionRustF32(
@@ -814,6 +825,22 @@ void runB1PrimitiveReferenceTests()
             degenerateZeroHeightRect, areaRect).has_value(),
         jaguar::Rect2d::IntersectionRustF32(
             degenerateZeroHeightRect, degenerateZeroHeightRect).has_value()});
+    const jaguar::Rect2d lowerLeftAreaRect{-2.0, -1.0, 0.0, 1.0};
+    const jaguar::Rect2d upperRightAreaRect{3.0, 2.0, 4.0, 3.0};
+    std::vector<double> degenerateBoundingRects;
+    for (const jaguar::Rect2d& bounds : {
+             jaguar::Rect2d::BoundingRectRustF32(
+                 degenerateZeroWidthRect, lowerLeftAreaRect),
+             jaguar::Rect2d::BoundingRectRustF32(
+                 degenerateZeroHeightRect, upperRightAreaRect),
+             jaguar::Rect2d::BoundingRectRustF32(
+                 degenerateZeroWidthRect, degenerateZeroHeightRect)})
+    {
+        degenerateBoundingRects.insert(degenerateBoundingRects.end(), {
+            bounds.xMin, bounds.yMin, bounds.xMax, bounds.yMax});
+    }
+    expectRustNumbers(reference, "geometry.rect_degenerate_bounding_rects",
+                      degenerateBoundingRects);
     const auto recoverWidth = degenerateZeroWidthRect.ResizeByRustF32(1.0, 0.0);
     const auto recoverHeight = degenerateZeroHeightRect.ResizeByRustF32(0.0, 1.0);
     assert(recoverWidth.has_value() && recoverHeight.has_value());
@@ -830,26 +857,50 @@ void runB1PrimitiveReferenceTests()
         !negativeScale.HasValue(), !unchangedWidthScale.HasValue(),
         !expandedWidthScale.HasValue(), !unchangedHeightScale.HasValue(),
         !expandedHeightScale.HasValue()});
+    const auto hasInvalidInputError = [](const jaguar::Result<jaguar::Rect2d>& result) {
+        return !result.HasValue() &&
+            result.GetError().code == jaguar::ErrorCode::InvalidInput;
+    };
+    assert(hasInvalidInputError(negativeScale));
+    assert(hasInvalidInputError(unchangedWidthScale));
+    assert(hasInvalidInputError(expandedWidthScale));
+    assert(hasInvalidInputError(unchangedHeightScale));
+    assert(hasInvalidInputError(expandedHeightScale));
 
     const float nextAfterOne = std::nextafter(1.0F, 2.0F);
     const auto oneUlpRect = jaguar::Rect2d::Create(
         1.0, 0.0, static_cast<double>(nextAfterOne), 1.0);
-    assert(oneUlpRect.HasValue());
+    const auto oneUlpHeightRect = jaguar::Rect2d::Create(
+        0.0, 1.0, 1.0, static_cast<double>(nextAfterOne));
+    assert(oneUlpRect.HasValue() && oneUlpHeightRect.HasValue());
     const auto oneUlpQuadrants = oneUlpRect.Value().QuadrantsRustF32();
+    const auto oneUlpHeightQuadrants =
+        oneUlpHeightRect.Value().QuadrantsRustF32();
     const bool oneUlpHasCollapsedQuadrant = std::any_of(
         oneUlpQuadrants.begin(), oneUlpQuadrants.end(), [](const jaguar::Rect2d& quadrant) {
             return quadrant.WidthRustF32() == 0.0 || quadrant.HeightRustF32() == 0.0;
         });
-    assert(oneUlpHasCollapsedQuadrant);
+    const bool oneUlpHeightHasCollapsedQuadrant = std::any_of(
+        oneUlpHeightQuadrants.begin(), oneUlpHeightQuadrants.end(),
+        [](const jaguar::Rect2d& quadrant) {
+            return quadrant.WidthRustF32() == 0.0 || quadrant.HeightRustF32() == 0.0;
+        });
+    assert(oneUlpHasCollapsedQuadrant && oneUlpHeightHasCollapsedQuadrant);
     const jaguar::Rect2d zeroWidthRect{1.0, 0.0, 1.0, 1.0};
     const auto zeroWidthQuadrants = zeroWidthRect.QuadrantsRustF32();
     assert(std::all_of(zeroWidthQuadrants.begin(), zeroWidthQuadrants.end(),
                        [](const jaguar::Rect2d& quadrant) {
                            return quadrant.WidthRustF32() == 0.0;
                        }));
+    const jaguar::Rect2d zeroHeightRect{0.0, 1.0, 1.0, 1.0};
+    const auto zeroHeightQuadrants = zeroHeightRect.QuadrantsRustF32();
+    assert(std::all_of(zeroHeightQuadrants.begin(), zeroHeightQuadrants.end(),
+                       [](const jaguar::Rect2d& quadrant) {
+                           return quadrant.HeightRustF32() == 0.0;
+                       }));
     const auto& rustQuadrantPanics =
         booleanValues(referenceValue(reference, "geometry.rect_quadrant_panic_contract"));
-    assert((rustQuadrantPanics == std::vector<bool>{true, true}));
+    assert((rustQuadrantPanics == std::vector<bool>{true, true, true, true}));
 
     const jaguar::Point2d pointA{1.25, -2.5};
     const jaguar::Point2d pointB{4.5, 2.5};

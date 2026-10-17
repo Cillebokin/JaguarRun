@@ -1069,6 +1069,19 @@ fn run_b1_geometry_oracle() {
         "geometry.rect_degenerate_boundary_shapes={}",
         degenerate_rect_shapes.join(";")
     );
+    let mut degenerate_rect_sides = Vec::new();
+    for degenerate_rect in [zero_width_rect, zero_height_rect] {
+        for side in degenerate_rect.sides() {
+            degenerate_rect_sides.push(format!(
+                "{:.9},{:.9},{:.9},{:.9}",
+                side.start.0, side.start.1, side.end.0, side.end.1
+            ));
+        }
+    }
+    println!(
+        "geometry.rect_degenerate_sides={}",
+        degenerate_rect_sides.join(";")
+    );
     let area_rect = Rect::try_new(0.0, 0.0, 2.0, 2.0).unwrap();
     println!(
         "geometry.rect_degenerate_intersections={},{},{},{}",
@@ -1076,6 +1089,28 @@ fn run_b1_geometry_oracle() {
         Rect::intersection(zero_width_rect, zero_width_rect).is_some(),
         Rect::intersection(zero_height_rect, area_rect).is_some(),
         Rect::intersection(zero_height_rect, zero_height_rect).is_some()
+    );
+    let lower_left_area_rect = Rect::try_new(-2.0, -1.0, 0.0, 1.0).unwrap();
+    let upper_right_area_rect = Rect::try_new(3.0, 2.0, 4.0, 3.0).unwrap();
+    let degenerate_bounding_rects = [
+        Rect::bounding_rect(zero_width_rect, lower_left_area_rect),
+        Rect::bounding_rect(zero_height_rect, upper_right_area_rect),
+        Rect::bounding_rect(zero_width_rect, zero_height_rect),
+    ];
+    println!(
+        "geometry.rect_degenerate_bounding_rects={:.9},{:.9},{:.9},{:.9};{:.9},{:.9},{:.9},{:.9};{:.9},{:.9},{:.9},{:.9}",
+        degenerate_bounding_rects[0].x_min,
+        degenerate_bounding_rects[0].y_min,
+        degenerate_bounding_rects[0].x_max,
+        degenerate_bounding_rects[0].y_max,
+        degenerate_bounding_rects[1].x_min,
+        degenerate_bounding_rects[1].y_min,
+        degenerate_bounding_rects[1].x_max,
+        degenerate_bounding_rects[1].y_max,
+        degenerate_bounding_rects[2].x_min,
+        degenerate_bounding_rects[2].y_min,
+        degenerate_bounding_rects[2].x_max,
+        degenerate_bounding_rects[2].y_max
     );
     let recover_width = zero_width_rect.resize_by(1.0, 0.0).unwrap();
     let recover_height = zero_height_rect.resize_by(0.0, 1.0).unwrap();
@@ -1105,10 +1140,13 @@ fn run_b1_geometry_oracle() {
         x_max: 1.0,
         y_max: 1.0,
     };
+    let one_ulp_height_rect = Rect::try_new(0.0, 1.0, 1.0, f32::from_bits(0x3f80_0001)).unwrap();
     println!(
-        "geometry.rect_quadrant_panic_contract={},{}",
+        "geometry.rect_quadrant_panic_contract={},{},{},{}",
         std::panic::catch_unwind(|| one_ulp_rect.quadrants()).is_err(),
-        std::panic::catch_unwind(|| zero_width_rect.quadrants()).is_err()
+        std::panic::catch_unwind(|| zero_width_rect.quadrants()).is_err(),
+        std::panic::catch_unwind(|| one_ulp_height_rect.quadrants()).is_err(),
+        std::panic::catch_unwind(|| zero_height_rect.quadrants()).is_err()
     );
 
     let rectangle = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]);

@@ -158,3 +158,43 @@ consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 
 3. **【浅覆盖补全：lib.rs 的 `pub use` 面（任务指定核对项）】** 现场核验：**lib.rs 不含任何 `pub use` 再导出**（全文仅 `pub mod` ×7 + EPOCH/FMT/特性开关）；sparrow 的公共导出面=各模块自身可见性（`quantify::mod` 的 `pub mod overlap_proxy/tracker/simd` + `mod pair_matrix` 私有 + 3 个 `pub fn`；`sample::mod` 的 oracle-trace 门控 `pub use coord_descent::{CDConfig, refine_coord_desc}`（feature=oracle-trace 时，sample/mod.rs:4）；`eval::mod` 的 `mod collision_loss` 私有 + `pub mod` ×3；`optimizer::mod` 的 `mod worker` 私有）。C++ 头文件导出面对照：PairMatrix 在 C++ 升为公共（S17 差异已记）；CDConfig/RefineCoordinateDescent 在 C++ 公共（CoordinateDescent.h）；`CollisionLossEvaluator` 双侧私有（C++ 摊进 SeparationEvaluator，S12）；`SeparatorWorker` 双侧私有（C++ 为自由函数 FindBestSeparatorMove，S05）——**逐项对齐，无未记录的导出面差异**。
 4. **【核对确认：19 个声明清单完整】** GLS×3、EPSILON_DIAM×1、CD_STEP×2、REFINE 组×4、UNIQUE_THRESHOLD×1、TIME_RATIO×2、MAX_CONSEQ_FAILS×1、FAIL_DECAY×1、LOG_FILTER×2、DRAW_OPTIONS×1、LBF_SAMPLE_CONFIG×1——合计 19 个声明，主文 11 个小节全覆盖。
 5. **【核对确认：SparrowRng 数学】** 抽验 `UniformIndex`（SparrowRng.cpp:61-81）Lemire+拒绝修正与 `NextU64` rotl(s0+s3,23)+s0 与 rand_xoshiro 参考一致，判定维持"一致"。
+
+### 补充复核（2026-10-17）：常量字段与实际 RNG 调用组合
+
+#### `consts.rs` 的 19 个常量逐字段复核
+
+| Rust 字段 | C++ 落点 / 对应值 | 复核结论 |
+|---|---|---|
+| `GLS_WEIGHT_MAX_INC_RATIO = 2.0` | `CollisionTracker.cpp:771`，倍率表达式上界 `2.0F` | 一致 |
+| `GLS_WEIGHT_MIN_INC_RATIO = 1.2` | `CollisionTracker.cpp:771`，倍率表达式下界 `1.2F` | 一致，表达式运算顺序另由 S18 fixture 锁定 |
+| `GLS_WEIGHT_DECAY = 0.95` | `CollisionTracker.cpp:770`，无损失项倍率 `0.95F` | 一致 |
+| `OVERLAP_PROXY_EPSILON_DIAM_RATIO = 0.01` | `OverlapProxy.cpp:118-120`，直径比例 `0.01F` | 一致，C++ 内联为局部常量 |
+| `CD_STEP_SUCCESS = 1.1` | `CoordinateDescent.cpp:229` | 一致 |
+| `CD_STEP_FAIL = 0.5` | `CoordinateDescent.cpp:229` | 一致 |
+| `PRE_REFINE_CD_TL_RATIOS = (0.25, 0.02)` | `LbfSearch.cpp:51-52`、`SeparatorWorker.cpp:41-42` | 一致；C++ 有两处同构配置副本 |
+| `PRE_REFINE_CD_R_STEPS = (5°, 1°)` | `LbfSearch.cpp:53-54`、`SeparatorWorker.cpp:43-44` | 一致，按 Rust f32 degree-to-radian helper 换算 |
+| `SND_REFINE_CD_TL_RATIOS = (0.01, 0.001)` | `LbfSearch.cpp:44-45`、`SeparatorWorker.cpp:34-35` | 一致；C++ 有两处同构配置副本 |
+| `SND_REFINE_CD_R_STEPS = (0.5°, 0.05°)` | `LbfSearch.cpp:46-47`、`SeparatorWorker.cpp:36-37` | 一致，按 Rust f32 degree-to-radian helper 换算 |
+| `UNIQUE_SAMPLE_THRESHOLD = 0.05` | `LbfSearch.cpp:172`、`SeparatorWorker.cpp:156` | 一致 |
+| `DEFAULT_EXPLORE_TIME_RATIO = 0.8` | C++ SparrowCore 无对应比例常量 | C++ 缺失；时间预算分配属于宿主入口，见 S23 |
+| `DEFAULT_COMPRESS_TIME_RATIO = 0.2` | C++ SparrowCore 无对应比例常量 | C++ 缺失；时间预算分配属于宿主入口，见 S23 |
+| `DEFAULT_MAX_CONSEQ_FAILS_EXPL = 10` | `SparrowCli/Main.cpp:154` 仅在 early-termination 路径设为 `10U` | 数值一致；两侧库默认均不限连续失败 |
+| `DEFAULT_FAIL_DECAY_RATIO_CMPR = 0.9` | `SparrowConfig.h:62`，`failureDecay = 0.9` | 一致 |
+| `LOG_LEVEL_FILTER_RELEASE = Info` | SparrowCore 无日志过滤器 | C++ 缺失；应用层日志设施，见 S22/S24 |
+| `LOG_LEVEL_FILTER_DEBUG = Debug` | SparrowCore 无日志过滤器 | C++ 缺失；应用层日志设施，见 S22/S24 |
+| `DRAW_OPTIONS` | SparrowCli `Main.cpp:233-235` 的 `SvgExportOptions` 接线 | 有意记录的选项差异：C++ 打开 surrogate 绘制，选项集由 JaguarCore 承担，见 JaguarCore 记录 36 |
+| `LBF_SAMPLE_CONFIG = {1000, 0, 3}` | `LbfConfig.h:67-69` 的 Sparrow constructor 默认值 | 三字段一致 |
+
+复核结果：19 个声明均有映射、宿主层归属或明确差异；没有发现未记录的算法常量数值漂移。`lib.rs` 现仍为 7 个 `pub mod`，无根级 `pub use`；另有公开 `EPOCH`、两组 feature-controlled SVG bool，`FMT` 为私有静态项。模块内部导出差异仍按 S05/S12/S17 等记录处理。
+
+#### rand 0.10.3 的实际调用点组合
+
+| Rust 调用点 | C++ 对应 | 已锁定的组合与边界 |
+|---|---|---|
+| `worker.rs:43` `SliceRandom::shuffle` | `Separator.cpp:88-145` `Shuffle` | 新增 `SparrowSliceShuffleRustReference.tsv`：seed `0/1/42/u64::MAX` × 长度 `0..=32` 共 132 组；逐项比排列并比对 shuffle 后 4 个 `u64`。包含空/单项零消耗、常规混洗及长度 13 起的 `IncreasingUniform` 随机块补取 |
+| `uniform_sampler.rs:81` `SliceRandom::choose` | `UniformRectSampler.cpp` 的旋转项 `UniformIndex` | S16 singleton、窄区间和离散 reference 覆盖既有路径；连续 sampler 的 16 个角 fixture 现逐项比较实际 `sample()` 后 4 个 `u64`，锁定多项 `choose` 与后续坐标采样共同消耗的 RNG 序 |
+| `explore.rs:386/397/401` `IteratorRandom::choose` | `Exploration.cpp:236-320, 323-337` `RustCoinFlipper` | 锁定 rand 0.10.3 `Filter` iterator 的 reservoir/CoinFlipper 路径；S06 的 actual Explore trace 覆盖第二选择池 1–10 个候选、空 distinct-pool fallback 与空 large-pool 失败出口，并比较 swap 结果及后续 RNG trace |
+
+新增 Rust 测试 `slice_shuffle_reference.rs` 校验 fixture 由锁定的 Rust RNG 实际生成；C++ `TestRng.cpp::TestSliceShuffleRustReference` 调用生产 shuffle 算法的测试入口，逐组比较排列及后续 RNG 输出。S16 连续 sampler fixture 同时由 Rust/C++ 比较 16 个实际旋转结果及每次采样后的 4 个 `u64`，其中采样器的 `SliceRandom::choose` 处理多项旋转候选。Debug/Release RustReference 全量套件和 SparrowCoreTests 全量程序均通过。
+
+本次收口覆盖的是 Sparrow 当前实际 RNG 调用点和表中固定 seed/长度/候选组合；结论不外推到任意外部迭代器 size hint、`usize` 极大长度或未列出的 Explore 几何轨迹。

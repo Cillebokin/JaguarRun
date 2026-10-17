@@ -1,4 +1,6 @@
 #include "SparrowCore/Optimizer/Separator.h"
+#include "SparrowCore/Random/SparrowRng.h"
+#include "SeparatorRandom.h"
 
 #ifndef NDEBUG
 #include <cassert>
@@ -303,6 +305,15 @@ sparrow::Result<WorkerRoundResult> RunWorkerRound(
         evaluationCount,
         moveCount};
     return sparrow::Result<WorkerRoundResult>::FromValue(std::move(result));
+}
+}
+
+namespace sparrow::detail
+{
+void ShuffleSliceRandom(std::vector<std::size_t>& values,
+                        SparrowRng& rng) noexcept
+{
+    Shuffle(values, rng);
 }
 }
 

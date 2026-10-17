@@ -6,6 +6,7 @@ use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem};
 use jagua_rs::probs::spp::io::import_instance;
 use rand::rngs::Xoshiro256PlusPlus;
+use rand::seq::SliceRandom;
 use rand::{Rng, RngExt, SeedableRng};
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::config::ExplorationConfig;
@@ -32,6 +33,32 @@ use std::path::Path;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let mut raw_args = env::args().skip(1);
+    let requested_mode = raw_args.next();
+    if requested_mode.as_deref() == Some("--write-slice-shuffle-reference") {
+        let output_path = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/SparrowSliceShuffleRustReference.tsv".to_owned());
+        if let Some(parent) = Path::new(&output_path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(output_path, slice_shuffle_reference_tsv())?;
+        return Ok(());
+    }
+    if requested_mode.as_deref() == Some("--write-continuous-sampler-reference") {
+        let output_path = raw_args
+            .next()
+            .unwrap_or_else(|| "../Fixtures/UniformSamplerContinuousGridRust.tsv".to_owned());
+        if let Some(parent) = Path::new(&output_path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            output_path,
+            uniform_sampler_continuous_grid_reference_tsv()?,
+        )?;
+        return Ok(());
+    }
+
     let mut args = env::args().skip(1);
     let input_path = args
         .next()
@@ -205,6 +232,92 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     fs::write(narrow_sampler_trace_output_path, narrow_sampler_trace)?;
     Ok(())
+}
+
+fn slice_shuffle_reference_tsv() -> String {
+    const SEEDS: [u64; 4] = [0, 1, 42, u64::MAX];
+    const MAX_LEN: usize = 32;
+
+    let mut output = String::from(
+        "# generator=locked Sparrow RustReference rand 0.10.3 SliceRandom::shuffle\n\
+         # seed length permutation next_u64_after_shuffle[0..3]\n",
+    );
+    for seed in SEEDS {
+        for length in 0..=MAX_LEN {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+            let mut values: Vec<usize> = (0..length).collect();
+            values.shuffle(&mut rng);
+            let permutation = if values.is_empty() {
+                "-".to_owned()
+            } else {
+                values
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let following = [
+                rng.next_u64(),
+                rng.next_u64(),
+                rng.next_u64(),
+                rng.next_u64(),
+            ];
+            output.push_str(&format!(
+                "shuffle {seed} {length} {permutation} {:016x} {:016x} {:016x} {:016x}\n",
+                following[0], following[1], following[2], following[3]
+            ));
+        }
+    }
+    output
+}
+
+fn uniform_sampler_continuous_grid_reference_tsv() -> Result<String, Box<dyn Error>> {
+    let (external, _) =
+        sparrow::util::io::read_spp_input(Path::new("../Fixtures/CollisionLossFloorRust.json"))?;
+    let config = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        config.cde_config,
+        config.poly_simpl_tolerance,
+        config.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external)?;
+    let bounds = Rect::try_new(-100.0, -100.0, 100.0, 100.0)
+        .expect("continuous sampler bounds must be valid");
+    let sampler = UniformBBoxSampler::new(bounds, instance.item(0), bounds)
+        .expect("continuous sampler must be constructible");
+
+    let mut seen_angles = Vec::new();
+    let mut output = String::from(
+        "# generator=locked Sparrow RustReference rand 0.10.3 UniformBBoxSampler::sample\n\
+         # input=CollisionLossFloorRust.json item[0], seed=first observed for each continuous angle\n\
+         # bounds=sample_bbox=container_bbox=[-100,100]x[-100,100]\n\
+         # seed expected_rotation_f32_bits next_u64_after_sample[0..3]\n",
+    );
+    for seed in 0..10_000_u64 {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let rotation_bits = sampler.sample(&mut rng).rotation().to_bits();
+        if seen_angles.contains(&rotation_bits) {
+            continue;
+        }
+        seen_angles.push(rotation_bits);
+        let following = [
+            rng.next_u64(),
+            rng.next_u64(),
+            rng.next_u64(),
+            rng.next_u64(),
+        ];
+        output.push_str(&format!(
+            "{seed} {rotation_bits:08x} {:016x} {:016x} {:016x} {:016x}\n",
+            following[0], following[1], following[2], following[3]
+        ));
+        if seen_angles.len() == 16 {
+            break;
+        }
+    }
+    if seen_angles.len() != 16 {
+        return Err("continuous sampler did not produce all 16 rotation entries".into());
+    }
+    Ok(output)
 }
 
 fn lbf_search_trace_tsv(instance: &jagua_rs::probs::spp::entities::SPInstance) -> String {

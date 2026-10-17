@@ -1623,6 +1623,7 @@ bool TestUniformSamplerContinuousGridRustReference(std::ostream& output)
 
     std::uint64_t seed = 0U;
     std::uint32_t expectedRotationBits = 0U;
+    std::array<std::uint64_t, 4> expectedFollowing{};
     std::string line;
     std::size_t rows = 0U;
     while (std::getline(referenceFile, line))
@@ -1634,8 +1635,22 @@ bool TestUniformSamplerContinuousGridRustReference(std::ostream& output)
 
         std::istringstream row(line);
         std::string extra;
-        if (!(row >> seed >> std::hex >> expectedRotationBits)
-            || (row >> extra))
+        if (!(row >> seed >> std::hex >> expectedRotationBits))
+        {
+            return Expect(false,
+                          output,
+                          "Rust continuous-grid row must match its schema");
+        }
+        for (std::uint64_t& expected : expectedFollowing)
+        {
+            if (!(row >> std::hex >> expected))
+            {
+                return Expect(false,
+                              output,
+                              "Rust continuous-grid row must contain four post-sample RNG words");
+            }
+        }
+        if (row >> extra)
         {
             return Expect(false,
                           output,
@@ -1655,6 +1670,20 @@ bool TestUniformSamplerContinuousGridRustReference(std::ostream& output)
             return Expect(false,
                           output,
                           "continuous sampler rotation differs from Rust reference");
+        }
+        for (std::size_t index = 0U; index < expectedFollowing.size(); ++index)
+        {
+            const std::uint64_t actual = rng.NextU64();
+            if (actual != expectedFollowing[index])
+            {
+                output << "continuous sampler seed=" << seed << " following="
+                       << index << " expected=0x" << std::hex
+                       << expectedFollowing[index] << " actual=0x" << actual
+                       << std::dec << '\n';
+                return Expect(false,
+                              output,
+                              "continuous sampler post-sample RNG differs from Rust reference");
+            }
         }
 
         sparrow::SparrowRng distributionRng(seed);

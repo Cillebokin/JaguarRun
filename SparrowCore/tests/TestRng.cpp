@@ -3,17 +3,21 @@
 #include "SparrowCore/Random/SparrowRng.h"
 
 #include "JaguarCore/Result.h"
+#include "../Source/Optimizer/SeparatorRandom.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -252,6 +256,180 @@ bool TestUniformIndexRustReference(std::ostream& output)
                   "Rust uniform-index reference fixture must end with a complete group");
 }
 
+bool TestSliceShuffleRustReference(std::ostream& output)
+{
+    std::ifstream input;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/SparrowSliceShuffleRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/SparrowSliceShuffleRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/SparrowSliceShuffleRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\SparrowSliceShuffleRustReference.tsv"})
+    {
+        input.open(path);
+        if (input.is_open())
+        {
+            break;
+        }
+        input.clear();
+    }
+    if (!Expect(input.is_open(),
+                output,
+                "Rust SliceRandom shuffle fixture must be readable"))
+    {
+        return false;
+    }
+
+    constexpr std::array<std::uint64_t, 4> seeds = {
+        0U, 1U, 42U, std::numeric_limits<std::uint64_t>::max()};
+    std::array<std::array<bool, 33>, seeds.size()> seen{};
+    std::size_t rows = 0U;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string record;
+        std::uint64_t seed = 0U;
+        std::size_t length = 0U;
+        std::string permutation;
+        std::array<std::string, 4> followingHex{};
+        std::string extra;
+        if (!(row >> record >> seed >> length >> permutation
+                  >> followingHex[0] >> followingHex[1]
+                  >> followingHex[2] >> followingHex[3])
+            || (row >> extra)
+            || record != "shuffle"
+            || length > 32U)
+        {
+            return Expect(false,
+                          output,
+                          "Rust SliceRandom shuffle row is malformed");
+        }
+
+        const auto seedIt = std::find(seeds.begin(), seeds.end(), seed);
+        if (!Expect(seedIt != seeds.end(),
+                    output,
+                    "Rust SliceRandom shuffle seed is unexpected"))
+        {
+            return false;
+        }
+        const std::size_t seedIndex = static_cast<std::size_t>(
+            std::distance(seeds.begin(), seedIt));
+        if (!Expect(!seen[seedIndex][length],
+                    output,
+                    "Rust SliceRandom shuffle row is duplicated"))
+        {
+            return false;
+        }
+        seen[seedIndex][length] = true;
+
+        std::vector<std::size_t> expectedValues;
+        if (length == 0U)
+        {
+            if (!Expect(permutation == "-",
+                        output,
+                        "empty Rust SliceRandom shuffle must use '-'"))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            std::istringstream values(permutation);
+            std::string value;
+            while (std::getline(values, value, ','))
+            {
+                try
+                {
+                    const auto parsed = std::stoull(value);
+                    if (parsed >= length)
+                    {
+                        return Expect(false,
+                                      output,
+                                      "Rust SliceRandom permutation value is out of range");
+                    }
+                    expectedValues.push_back(static_cast<std::size_t>(parsed));
+                }
+                catch (const std::exception&)
+                {
+                    return Expect(false,
+                                  output,
+                                  "Rust SliceRandom permutation value is malformed");
+                }
+            }
+            if (!Expect(expectedValues.size() == length,
+                        output,
+                        "Rust SliceRandom permutation length is incomplete"))
+            {
+                return false;
+            }
+        }
+
+        std::vector<std::size_t> actualValues;
+        actualValues.reserve(length);
+        for (std::size_t value = 0U; value < length; ++value)
+        {
+            actualValues.push_back(value);
+        }
+        sparrow::SparrowRng rng(seed);
+        sparrow::detail::ShuffleSliceRandom(actualValues, rng);
+        if (!Expect(actualValues == expectedValues,
+                    output,
+                    "production SliceRandom shuffle permutation differs from Rust"))
+        {
+            output << "seed=" << seed << " length=" << length << '\n';
+            return false;
+        }
+
+        for (std::size_t index = 0U; index < followingHex.size(); ++index)
+        {
+            std::uint64_t expected = 0U;
+            try
+            {
+                expected = std::stoull(followingHex[index], nullptr, 16);
+            }
+            catch (const std::exception&)
+            {
+                return Expect(false,
+                              output,
+                              "Rust SliceRandom post-shuffle RNG value is malformed");
+            }
+            if (!Expect(rng.NextU64() == expected,
+                        output,
+                        "production SliceRandom shuffle post-state differs from Rust"))
+            {
+                output << "seed=" << seed << " length=" << length
+                       << " following=" << index << '\n';
+                return false;
+            }
+        }
+        ++rows;
+    }
+
+    if (!Expect(rows == seeds.size() * 33U,
+                output,
+                "Rust SliceRandom shuffle fixture must cover every seed/length pair"))
+    {
+        return false;
+    }
+    for (const auto& seedRows : seen)
+    {
+        if (!Expect(std::all_of(seedRows.begin(), seedRows.end(), [](bool value) {
+                        return value;
+                    }),
+                    output,
+                    "Rust SliceRandom shuffle fixture is missing a length"))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TestUniformIndexRejectsEmptyRangeWithoutConsumingRng(
     std::ostream& output)
 {
@@ -471,6 +649,7 @@ bool RunRngTests(std::ostream& output)
     return TestSeed42Reference(output)
         && TestUniformIndexRejectsEmptyRangeWithoutConsumingRng(output)
         && TestUniformIndexRustReference(output)
+        && TestSliceShuffleRustReference(output)
         && TestStateAndIntegerDeterminism(output)
         && TestNormalCacheAndDeterminism(output)
         && TestConfigValidation(output)

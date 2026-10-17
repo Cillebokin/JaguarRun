@@ -1,6 +1,7 @@
 use jagua_rs::geometry::primitives::Rect;
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::io::import_instance;
+use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
@@ -40,11 +41,20 @@ fn uniform_sampler_continuous_grid_matches_the_rust_reference() {
         let expected_rotation =
             u32::from_str_radix(fields.next().expect("expected rotation bits"), 16)
                 .expect("valid rotation bits");
+        let expected_following = (0..4)
+            .map(|_| {
+                u64::from_str_radix(fields.next().expect("post-sample RNG word"), 16)
+                    .expect("valid post-sample RNG word")
+            })
+            .collect::<Vec<_>>();
         assert!(fields.next().is_none(), "unexpected fixture columns");
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let rotation = sampler.sample(&mut rng).rotation();
         assert_eq!(rotation.to_bits(), expected_rotation, "seed={seed}");
+        for (index, expected) in expected_following.iter().enumerate() {
+            assert_eq!(rng.next_u64(), *expected, "seed={seed} following={index}");
+        }
         expected_angles.insert(rotation.to_bits());
     }
 

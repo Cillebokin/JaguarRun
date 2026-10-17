@@ -1,20 +1,20 @@
-# generator=Rust rand 0.10.3 UniformBBoxSampler::sample with Xoshiro256++ seed_from_u64
-# input=CollisionLossFloorRust.json item[0] (Continuous); first seed per observed angle while scanning seeds 0..9999
-# bounds=sample_bbox=container_bbox=[-100,100]x[-100,100]; all 16 rotation entries are feasible
-# seed expected_rotation_f32_bits
-3 00000000
-15 3ec90fdb
-43 3f490fdb
-10 3f96cbe4
-5 3fc90fdb
-0 3ffb53d2
-8 4016cbe4
-40 402fede0
-41 40490fdb
-9 406231d6
-4 407b53d2
-6 408a3ae7
-1 4096cbe4
-11 40a35ce2
-28 40afede0
-19 40bc7edd
+# generator=locked Sparrow RustReference rand 0.10.3 UniformBBoxSampler::sample
+# input=CollisionLossFloorRust.json item[0], seed=first observed for each continuous angle
+# bounds=sample_bbox=container_bbox=[-100,100]x[-100,100]
+# seed expected_rotation_f32_bits next_u64_after_sample[0..3]
+0 3ffb53d2 02eebf8c3bbe5e1a 7eca04ebaf4a5eea 0543c37757f08d9a db7490c75ab5026e
+1 4096cbe4 bf08119f05cd56d6 2f47184b86186fa4 97299fcae7202345 fca3c79508f41507
+3 00000000 d8464738d525af37 a075b61e96972a46 1c774512120fb86b 2e20ac6082308439
+4 407b53d2 b9c07d9805988784 281cf87126c2ba84 c3229ebd79110458 a402a910529d62d4
+5 3fc90fdb 0f0124ccd0060d9e 86ed2b84822f1fff b4054adcc419bdaa 75aff3222f3cfc7d
+6 408a3ae7 24c696ba6ef3c389 c17cbb6fd1e2894d 7ba5a9131e16536a 026bd9dd0e9c0eec
+8 4016cbe4 b1c6c2148643a638 685a931f9bbc91e5 e64abda3da591910 4bfd95aa5f38234b
+9 406231d6 e24185a6702b94cb 11a8b0f5293d3921 22492ea767a5c5da 6b91055aff530da3
+10 3f96cbe4 c804054bf768e31a c4e2294cfb3eddc0 5231e557e54f6c3d b49d7201c0354c64
+11 40a35ce2 9a6c78b8852dc00d 432ab0518bbbcb12 b6934fab6ceacaa0 2156423640caf95c
+15 3ec90fdb 71622ca5f019419e b502b5d516230630 2e8fb3f3a7b5ef6e 598623c38592326c
+19 40bc7edd f38a2728a546d2b9 af96a2612e36491f 6d6690cf839993da 14b6240108d4bdc1
+28 40afede0 b84aecbe9580541d 5a55a4e96aa49da8 952fa34e071d9af0 e2100e8ce61be8f9
+40 402fede0 16c5ea3726e9272b 80bf1a7e3443c115 24e2eb2de768402d 61ad1ac8d4b817c3
+41 40490fdb 380775ce140e343a d1458562da538c44 d574e24a3f78db07 20ef46bde4bdcbd2
+43 3f490fdb f1ecac3df8025e0f 7970d83eaa9b503c 5682aa8fdce02bb1 03e47536fd1f6125

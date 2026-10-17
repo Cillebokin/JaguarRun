@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/sparrow/src/eval/sep_evaluator.rs`（102 行）
 **C++**: `SparrowCore/Include/SparrowCore/Eval/SeparationEvaluator.h`（46 行）+ `Source/Eval/SeparationEvaluator.cpp`（281 行）
-**判定**: 基本等价（逐 hazard 短路已实现并有定向 reference；端到端覆盖边界见下文）
+**判定**: 有界等价（2026-10-17 按固定 reference 清单收口；任意几何和所有 pole/上界组合仍不外推，端到端覆盖边界见下文）
 
 评估语义有直接搜索和整轮两层 Rust trace 覆盖。`SeparatorSearchRustTrace.tsv` 是 seed=42、16 container/8 focused/2 CD 的单次 separator move 搜索；测试精确比较事件类型、阶段、kind、accepted、retained 数量及结果计数，transform 容差 2e-5、非 Invalid loss 容差 2e-3（TestSeparator.cpp:782-799,901-958）。`loss_f32_bits` 字段会解析成 float 后用容差比较。单/多 worker round fixtures 只支持各自记录的输入、worker 数和 seed，pair loss/weight 容差分别为 2e-2/5e-2；不能外推为通用位级证明（见 S04/S05）。
 
@@ -63,6 +63,17 @@
 ## 结论
 
 SeparationEvaluator 的上界解析、surrogate/precise 两段检测、移动件自身过滤、正损失短路及 Clear 上界的零损失碰撞分类均有 Rust/C++ 定向 reference。三项 PlacedItem hazard 的指定累计顺序 raw bits 为 `0x4ab5c931`，逆序敏感性由 Rust oracle 给出 `0x4ab5c932`，低于 `1e-6` 的候选损失下限已移除，非对称方形/矩形的 11 个候选位模式一致。Rust f32 候选平移和旋转各分量 `±Inf` 的指定输入均覆盖 Debug/Release、上界、状态不变与有限恢复；C++ 还核对有限 double 转 f32 无穷的入口映射。旋转异常发生在变换合成，平移异常结果则由 evaluator 入口映射；这些 fixtures 不证明 C++ 几何公式对任意非有限输入普遍等价。多个无穷分量组合、S12 已测的两条有限输入边界之外的其他溢出、其他几何/pole 集合和退化公式输入仍未外推。`LegalizeTransform` 的边界见补充审计，损失公式和其他限制详见 S12。
+
+### 本轮复核与收口（2026-10-17）
+
+本轮把迁移矩阵中仍列为待办的几项逐一对照现有 Rust oracle、C++ 测试入口和 fixture，并补上了 C++ 的首个碰撞回调/收集前缀断言：
+
+1. **首个超预算 hazard 的收集前缀**：Rust `collision_loss_stream_reference.rs::collision_upper_bound_rejects_after_the_first_over_budget_hazard` 断言回调只执行一次，collector 中只留下预置的移动件和首个发现 hazard。C++ `TestQuantify.cpp::TestRustMultiHazardLossAndEarlyStop` 通过 handle filter 跳过移动件，并断言 stop=true、callback 数为 1、collector 只留一个非移动 PlacedItem，且该项正是回调收到的首项。两侧初始化当前 hazard 的机制不同（Rust 预置，C++ filter），因此总 collector 长度分别为 2 和 1；对照的是新增 hazard 前缀与停点。
+2. **上界与 evaluator 早停**：Rust 和 C++ 都覆盖 loss 以下、相等和以上的相邻 f32；小于或等于完整 loss 时为 Invalid，以上时保留指定 `Collision(0x4ab5c931)`。`0.01` 预算用例还断言 C++ 只增加一次 surrogate reject 且没有进入 exact collection；Rust 对应 evaluator 分类与底层首次超预算 hazard 回调均有断言。
+3. **其他已列待办**：Exterior 单独 hazard raw loss 由 `collision_loss_floor_reference.rs` 与 `TestExteriorHazardRawLossMatchesRust` 对照；固定 pole 几何和 sub-micro loss 由同文件族与 `TestSeparationEvaluatorPreservesTinyCollisionLoss` 对照。Hole/QZone evaluator failure 以及单 worker、双 worker failure 的 RNG/布局/Tracker/trace/callback 边界由 `collision_loss_unsupported_hazard_reference.rs`、`separator_multiworker_failure_reference.rs` 与 `TestQuantify.cpp` / `TestSeparator.cpp` 对照。候选分量 `±Inf` 的 Debug/Release 入口及恢复由 `collision_loss_stream_reference.rs` 与 `TestRustMultiHazardLossAndEarlyStop` 对照。固定 separator trace 比较每次候选的 `SampleEval` 分类、report 接受结果、保留数量与顺序、汇总 evaluation/move/iteration 计数及搜索后 RNG。
+4. **本轮运行结果**：按仓库固定 Rust toolchain 执行 `SparrowCore/Tests/RustReference/verify-rust-reference.ps1`，格式检查及 Debug/Release 全套 reference tests 均退出码 0。统一 VS2019 构建链后，SparrowCore Debug/Release 全量 `SparrowCoreTests.exe` 均退出码 0；新收集前缀断言已包含在两种配置的 `TestQuantify` 运行中。
+
+**结论**：S11 的清单范围按已列固定 reference 收口，判定为“已完成（有界 reference）”。该结论不覆盖任意几何、未测 hazard/pole 顺序、所有上界值、其他 worker 数或其他编译器/平台；Rust panic 与 C++ exception 也不视为相同错误表示。
 
 ### 补充审计（2026-09-29，实体句柄专项）
 **【任务指定核对项】SeparationEvaluator 私有引擎的实体句柄（2026-09-29 修复，commit 6910145）现场复验**：

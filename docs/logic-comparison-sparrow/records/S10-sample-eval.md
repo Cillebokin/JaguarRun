@@ -72,3 +72,9 @@ SampleEval 的三态单次比较规则（Clear < Collision < Invalid，同态按
 ### P0 顺序核验（2026-10-09）
 
 现有证据足以闭合计划中“列明合法输入序列”的工作项：RustReference 的 `sample_eval_boundary_reference.rs` 固定七组比较边界的 42 种排列，`sample_eval_order_reference.rs` 固定四项非传递链的 24 种排列，`best_samples_sequence_reference.rs` 固定 32 次 BestSamples 插入及四种 NaN 失败状态，`sample_eval_boundary_reference.rs` 另有近似并列 CoordinateDescent 消费轨迹。`TestLbfLoss.cpp` 与 `TestSampling.cpp` 在 SparrowCore Debug/Release 中消费对应 golden；2026-10-09 锁定 Rust 验证脚本的 Debug/Release 全量运行通过。该项只关闭这些固定用例；Rust `Ord` 对非传递比较仍违反排序合同，任意序列继续标为未定义/未认证域。
+
+### 固定 profile 范围收口（2026-10-17）
+
+本轮静态复核确认，清单和决策矩阵先前所写“仍需覆盖其他非传递组和更长插入序列”已过时：七组比较器边界共 42 个排列、四值非传递链共 24 个排列、BestSamples 32 项混合插入及四种 NaN 失败状态、CoordinateDescent 近似并列消费者轨迹均已有 Rust reference 和 C++ 对应断言。Rust `sample_eval_boundary_reference.rs`、`sample_eval_order_reference.rs`、`best_samples_sequence_reference.rs` 与 C++ `TestLbfLoss.cpp` / `TestSampling.cpp` 的直接消费者落点已逐项确认。
+
+据 D1 的声明输入域口径，S10 按上述固定 Rust 1.98.1 Debug/Release profile 与已枚举消费者范围标记完成。已有执行记录显示 RustReference 与 SparrowCore C++ Debug/Release 对应运行通过（2026-10-09）；本轮仅静态复核并同步文档，未重新运行测试。Rust `Ord` 对近似相等采用非传递关系，违反排序合同；其他任意非传递序列仍不认证并继续由 R3 跟踪。S15 的独立容量、相似度、精确 tie 等余项不因 S10 收口而关闭。

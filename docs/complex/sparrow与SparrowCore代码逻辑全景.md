@@ -375,7 +375,7 @@ SIMD 向量宽度为 4（`overlap_proxy_simd.rs:96`），按 4 个一组处理 `
 
 ## 十二、浮点精度与数值容差
 
-第一，`SampleEval` 的 `Ord` 使用 `FPA`，其相等判断基于 `float_cmp::approx_eq!`（`jagua-rs/src/util/fpa.rs:18-21`），这是带容差的比较。近似相等的关系不一定满足传递性，因此在排序与 `min_by_key` 中可能出现非确定的边界行为。由于容差取值依赖 `float_cmp` 的默认参数（本文未在依赖源码中核实具体数值），在 `loss` 很大时相对容差很小，在 `loss` 很小时绝对容差起主导，两者都可能使"微小改进"被视为平局，从而在坐标下降中被当作侧移。
+第一，`SampleEval` 的 `Ord` 使用 `FPA`，其相等判断基于锁定的 `float-cmp 0.10.0` `F32Margin` 默认值：绝对差不超过 `f32::EPSILON` 或 ULP 距离不超过 4 时视为相等。该近似相等关系不具传递性，因此 Rust `Ord` 契约被违反。固定 Rust 1.98.1 Debug/Release profile 已覆盖七组边界的 42 个排列、四值非传递链的 24 个排列、BestSamples 32 项真实插入及 CoordinateDescent 近似并列轨迹，C++ 对应消费者匹配这些 fixture；任意非传递序列仍属 R3 未认证域，不能推广固定排序结果。详见 [S10 逐文件记录](../logic-comparison-sparrow/records/S10-sample-eval.md)。
 
 第二，`update_weights` 的权重没有上界，且每次碰撞迭代都可能乘以最多 2 倍（`tracker.rs:146-153`）。一个持续碰撞的成对条目在约 128 次连续乘以 2 后会超过 f32 的最大值。此后衰减 `inf * 0.95` 仍为 `inf`，而 `get_weighted_loss` 中 `inf * 0.0` 会得到 `NaN`（`189-197`、`216-230`），进而污染总损失与工作线程的 `min_by_key`。权重在一次 `separate` 调用的多次应变之间保留（见第七节），因此理论上可能在长时间运行中累积到溢出。这是一个需要通过计数或上界钳制来防范的风险，目前代码中没有相应检查。
 
@@ -395,7 +395,7 @@ SIMD 向量宽度为 4（`overlap_proxy_simd.rs:96`），按 4 个一组处理 `
 
 第一，`search.rs:265-266` 与 `uniform_sampler.rs:257-258` 把绝对包围盒当作平移区间使用，其语义依赖于"平移 ≈ 质心"的近似，建议团队确认这是有意设计，并在注释中写明。第二，`best_samples.rs:444-447` 的旋转相似性判定不是循环距离，接近 0 与 2π 的样本可能被重复保留；对连续旋转物品建议改用 `normalize_rotation` 后的最小角差。第三，`best_samples.rs:426` 在 `size == 0` 时会下溢，需要在配置层校验。第四，`tracker.rs:146-153` 的权重无上界，存在溢出为 `inf` 并产生 `NaN` 的风险。第五，`sample_eval.rs:7` 的 `PartialEq` 与 `Ord` 不一致，`Eq` 实现（`39`）名不副实。第六，`SeparationEvaluator` 中 `Invalid` 的双重含义会让日志与追踪难以解读，建议在 `SampleEval` 的文档中明确区分"早停"与"几何无效"，或引入独立的 `Pruned` 变体。第七，坐标下降在 `Clear` 平台上继续运行（`search.rs:299-309` 对所有保留样本都运行），可以考虑在评估值已为 `Clear { loss: 0.0 }` 时跳过。第八，`collision_loss.rs:253` 的 `reload` 参数 `_shape` 在非 SIMD 构建中未使用，SIMD 构建中使用，条件编译下的参数命名容易误导阅读者。第九，`poles_overlap_area_proxy_simd_bounded`（`overlap_proxy_simd.rs:164-181`）的标量尾部循环中，第 `167` 行用同名变量 `p2` 遮蔽了参数 `p2`，虽然语义正确，但极易在修改时引入错误。第十，`tracker.rs` 中对称矩阵的后写覆盖语义在 CDE 检测不对称时可能导致漂移，目前仅以调试断言与 10% 容差兜底（`util/assertions.rs:30-31`）。
 
-最后，本文的结论来源于静态阅读，未运行单元测试或基准测试，也未验证 `rand 0.10` 中 `choose` 的随机数消耗次数与 `float_cmp` 的默认容差参数。上述数值与性能判断应在团队的基准环境中复核。
+本文初版结论来自静态阅读；后续执行证据以迁移决策矩阵和 S01–S24 逐文件记录为准。`float-cmp 0.10.0` 默认容差已在 S10 核实，`rand 0.10` 的有效 `choose` 调用组合与随机状态核对见 S02。性能判断仍需独立基准数据支持。
 
 
 # S4 SparrowCore 优化器层代码逻辑说明
@@ -467,7 +467,7 @@ Rust 侧 `eval/sep_evaluator.rs` 使用共享 `collector`，损失由 `collision
 
 `CoordinateDescent`（`Source/Sampling/CoordinateDescent.cpp`，239 行）的 `ChooseAxis`（30–49 行）用 `UniformIndex(6)` 或 `UniformIndex(4)` 选轴，其中 4、5 映射为 Wiggle。`BuildCandidates`（84–130 行）每步生成两个候选，对角方向步长乘以 `sqrt(multiplier)`（`UpdateSteps`，132–154 行）。`RefineCoordinateDescent`（159–238 行）比 Rust 多一个 `maxEvaluations` 预算，两个候选以 `state.evaluation` 为上界评估，最优候选由 `IsBetterSample(evaluated[1], evaluated[0]) ? 1 : 0` 选出，平局取索引 0，与 Rust `min_by_key` 行为一致。成功时步长乘 1.1，失败乘 0.5，并在每次未改进后重新选轴。Rust `sample/coord_descent.rs` 的 `ask`（97–123 行）、`tell`（126–162 行）与 `CDAxis::random`（180–194 行）等价，并带有 1000 次评估的 debug 断言。
 
-样本比较 `IsBetterSample`（`SampleEval.h` 80–87 行）的等级为 CLEAR 低于 COLLISION 低于 INVALID，损失用 `RustApproxEqualF32` 比较，NaN 直接抛出。该函数的语义是 `|diff| ≤ FLT_EPSILON` 或 4 ULP 以内，对应 Rust `jagua-rs` `util/fpa.rs` 的 `float_cmp::approx_eq!`，所用 `float_cmp` 的具体版本仍待确认。
+样本比较 `IsBetterSample`（`SampleEval.h` 80–87 行）的等级为 CLEAR 低于 COLLISION 低于 INVALID，损失用 `RustApproxEqualF32` 比较，同 kind NaN 比较会抛出 `std::domain_error`。它对应锁定 `float-cmp 0.10.0` 的 `f32::EPSILON` 或 4 ULP 默认 margin；Rust 同 kind NaN 在 `partial_cmp(...).unwrap()` 处 panic。已列明的边界排列、BestSamples 插入与 CoordinateDescent 近似并列路径有 Debug/Release 参考；Rust `Ord` 非传递造成的任意序列仍未认证，见 S10 与风险 R3。
 
 `UniformRectSampler`（`Source/Sampling/UniformRectSampler.cpp`，172 行）在 `Create`（95–199 行）中为每个旋转计算可行范围，即容器减去旋转后包围盒，再与采样包围盒求交。`Sample`（201–210 行）依次抽取旋转索引、x、y，与 Rust `uniform_sampler.rs` 的 `sample`（79–89 行）顺序一致。`SampleAxis`（69–77 行）使用 `minValue + (maxValue-minValue)*Uniform01F32()`，缺少 rand 在上端点的舍入重试，注释却声称与 rand 0.10 对齐，这一点需要修正注释或补齐逻辑。连续旋转角 `TWO_PI*i/16` 与 Rust `i*(2π/16)` 的 16 个角在当前构建下与 Rust 参考输出一致，由 `UniformSamplerContinuousGridRust.tsv` 按记录容差比较验证（S16）；这不证明跨平台或跨编译器的逐位相同。它被 `Optimizer/LbfSearch.cpp:148` 与 `SeparatorWorker.cpp:180、184` 调用。
 

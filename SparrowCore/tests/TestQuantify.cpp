@@ -3296,6 +3296,54 @@ bool TestRustMultiHazardLossAndEarlyStop(std::ostream& output)
         return false;
     }
 
+    auto collectionEngine = solution.layoutSnapshot.container.CreateCollisionEngine();
+    if (!Expect(collectionEngine
+                    && collectionEngine->Restore(solution.layoutSnapshot.cdeSnapshot).HasValue(),
+                output,
+                "multi-hazard CDE snapshot must restore for callback-cutoff reference"))
+    {
+        return false;
+    }
+    jaguar::HazardFilter ignoreMovingItem;
+    ignoreMovingItem.irrelevantHandle = [movingHandle = handles[3]](
+                                            jaguar::HazardHandle,
+                                            const jaguar::HazardEntity& hazard) {
+        return hazard.kind == jaguar::HazardKind::PlacedItem
+            && hazard.placedItemHandle == movingHandle;
+    };
+    jaguar::HazardCollector collectedPrefix;
+    const auto transformedCandidate =
+        instance.Value().GetItem(3U).CollisionShape().TransformedRustF32(transform);
+    if (!Expect(transformedCandidate.HasValue(),
+                output,
+                "multi-hazard candidate transform must succeed for callback-cutoff reference"))
+    {
+        return false;
+    }
+    std::size_t collisionCallbackCount = 0U;
+    std::optional<jaguar::HazardEntity> firstReportedHazard;
+    const bool stoppedAtFirstHazard = collectionEngine->CollectPolygonCollisionsUntil(
+        transformedCandidate.Value(),
+        collectedPrefix,
+        ignoreMovingItem,
+        [&](const jaguar::HazardEntity& hazard) {
+            ++collisionCallbackCount;
+            firstReportedHazard = hazard;
+            return true;
+        });
+    if (!Expect(stoppedAtFirstHazard
+                    && collisionCallbackCount == 1U
+                    && collectedPrefix.Size() == 1U
+                    && firstReportedHazard.has_value()
+                    && firstReportedHazard->kind == jaguar::HazardKind::PlacedItem
+                    && !(firstReportedHazard->placedItemHandle == handles[3])
+                    && collectedPrefix.Entries()[0].second == *firstReportedHazard,
+                output,
+                "polygon collision callback must stop at and retain only the first non-moving hazard"))
+    {
+        return false;
+    }
+
     sparrow::CollisionTrackerSnapshot zeroWeightSnapshot = tracker.Save();
     const float minimumPositiveWeight = std::numeric_limits<float>::denorm_min();
     for (std::size_t index = 0U; index < 3U; ++index)

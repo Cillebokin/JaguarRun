@@ -58,10 +58,16 @@
 
 - 本记录覆盖 MSPP 7 个待记实现文件；模块导出与 `probs/mspp/util/assertions.rs` 分别见 `00-module-exports.md`、`10-utilities-and-assertions.md`。
 - 需要进入后续行为对拍的差异包括：空条带 `fit_strip` 的 panic/`Infeasible`、需求耗尽放置、无效 key 与 restore 错误传播、MSPP solution 导入的 `unimplemented!`/`UnsupportedOperation`，以及 export 的时间戳与 snapshot 验证合同。
-- 静态映射未执行 Rust 或 C++ 测试，也未验证 JSON round-trip；不得据此判定 MSPP 运行等价。
+- JSON round-trip 与 solution 导入仍属 B8；空条带 fit、非法宽度、无效 key、需求耗尽及损坏快照等动态失败路径未由 B7 固定矩阵覆盖。
+
+## B7 固定有效流矩阵（2026-10-17）
+
+`CompareProblem.cpp` 与 pinned Rust oracle 同时读取 `mspp_instance.json`。固定流程核对实例总需求/面积/最大宽度/高度/初始宽度，随后新增基础条带布局、放置一件、改宽到 8、执行 `FitStrip`、保存、移除并恢复；逐步比较需求、放置数、布局数、条带宽度、总宽度与密度，并核对 restore 未重建 layout key。浮点值使用 `AlmostEqualRustF32`。
+
+Rust 1.98.1 / jagua-rs `f5e2b5f` Debug/Release 各 21 行总输出逐行匹配 fixture；MSVC 2019 x64 C++ Debug/Release 定向 runner 均通过，Release 断言启用。完整 `JaguarCoreTests.exe` 未运行；因此本节仅关闭该固定有效流矩阵，不声称 MSPP 所有状态和错误合同都已等价。
 
 ## 证据位置
 
 - pinned Rust：`probs/mspp/entities/{instance,problem,solution,strip}.rs`、`probs/mspp/io/{export,ext_repr,import}.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Problems/Mspp.h`、`JaguarCore/Source/Problems/MSPP/{MspInstance,MspProblem,MspSolution,MspStrip}.cpp`、`JaguarCore/Source/IO/{Importer,JsonCodec}.cpp`。
-- 本轮只更新静态记录与清单，未执行构建或测试。
+- 现有 `TestMspp.cpp`、JsonCodec/Importer 单元测试与完整 `JaguarCoreTests.exe` 本轮未执行；B7 定向 Rust/C++ runner 已执行，覆盖范围见上节。

@@ -3,7 +3,7 @@
   "items": [
     {
       "id": 301,
-      "demand": 1,
+      "demand": 2,
       "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
       "shape": {
         "type": "rectangle",

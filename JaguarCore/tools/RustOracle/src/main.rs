@@ -28,10 +28,13 @@ use jagua_rs::io::import::{Importer, import_simple_polygon};
 use jagua_rs::io::svg::{SvgDrawOptions, layout_to_svg};
 use jagua_rs::probs::bpp::entities::{BPInstance, BPLayoutType, BPPlacement, BPProblem, Bin};
 use jagua_rs::probs::bpp::io::ext_repr::ExtBPInstance;
+use jagua_rs::probs::bpp::io::import_instance as import_bpp_instance;
 use jagua_rs::probs::mspp::entities::{MSPInstance, MSPPlacement, MSPProblem, Strip};
 use jagua_rs::probs::mspp::io::ext_repr::{ExtMSPInstance, ExtMSPStrip};
+use jagua_rs::probs::mspp::io::import_instance as import_mspp_instance;
 use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem, Strip as SPStrip};
 use jagua_rs::probs::spp::io::ext_repr::{ExtSPInstance, ExtSPSolution};
+use jagua_rs::probs::spp::io::import_instance as import_spp_instance;
 use jagua_rs::probs::spp::io::import_solution as import_spp_solution;
 use std::sync::Arc;
 
@@ -2157,7 +2160,222 @@ fn run_b1_geometry_oracle() {
     );
 }
 
+fn run_problem_types_b7_parity_oracle() {
+    let importer = Importer::new(
+        CDEConfig {
+            quadtree_depth: 4,
+            cd_threshold: 32,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+        None,
+        None,
+    );
+
+    let spp_external: ExtSPInstance = serde_json::from_str(include_str!(
+        "../../../Tests/Fixtures/RustReference/spp_instance.json"
+    ))
+    .unwrap();
+    let spp_instance = import_spp_instance(&importer, &spp_external).unwrap();
+    println!(
+        "spp.instance={},{:.9},{:.9},{:.9}",
+        spp_instance.total_item_qty(),
+        spp_instance.item_area(),
+        spp_instance.base_strip.fixed_height,
+        spp_instance.base_strip.width
+    );
+    let mut spp_problem = SPProblem::new(spp_instance).unwrap();
+    spp_problem.change_strip_width(5.0).unwrap();
+    println!("spp.changed={:.9}", spp_problem.strip_width());
+    let spp_placed = spp_problem.place_item(SPPlacement {
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+    });
+    println!(
+        "spp.placed={},{},{:.9},{:.9}",
+        spp_problem.item_demand_qtys[0],
+        spp_problem.n_placed_items(),
+        spp_problem.density(),
+        spp_problem.strip_width()
+    );
+    let spp_solution = spp_problem.save();
+    println!(
+        "spp.solution={},{:.9},{:.9}",
+        spp_solution.layout_snapshot.placed_items.len(),
+        spp_solution.density(),
+        spp_solution.strip_width()
+    );
+    spp_problem.remove_item(spp_placed);
+    println!(
+        "spp.removed={},{},{:.9}",
+        spp_problem.item_demand_qtys[0],
+        spp_problem.n_placed_items(),
+        spp_problem.density()
+    );
+    spp_problem.restore(&spp_solution);
+    println!(
+        "spp.restored={},{},{:.9},{:.9}",
+        spp_problem.item_demand_qtys[0],
+        spp_problem.n_placed_items(),
+        spp_problem.density(),
+        spp_problem.strip_width()
+    );
+
+    let bpp_external: ExtBPInstance = serde_json::from_str(include_str!(
+        "../../../Tests/Fixtures/RustReference/bpp_instance.json"
+    ))
+    .unwrap();
+    let bpp_instance = import_bpp_instance(&importer, &bpp_external).unwrap();
+    println!(
+        "bpp.instance={},{:.9},{},{},{}",
+        bpp_instance.total_item_qty(),
+        bpp_instance.item_area(),
+        bpp_instance.bins.len(),
+        bpp_instance.bins[0].stock,
+        bpp_instance.bins[0].cost
+    );
+    let mut bpp_problem = BPProblem::new(bpp_instance.clone());
+    let (bpp_first_key, _) = bpp_problem.place_item(BPPlacement {
+        layout_id: BPLayoutType::Closed { bin_id: 0 },
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+    });
+    println!(
+        "bpp.closed={},{},{},{},{},{:.9}",
+        bpp_problem.item_demand_qtys[0],
+        bpp_problem.bin_stock_qtys[0],
+        bpp_problem.layouts.len(),
+        bpp_problem.n_placed_items(),
+        bpp_problem.bin_cost(),
+        bpp_problem.density()
+    );
+    let (_, bpp_second_item_key) = bpp_problem.place_item(BPPlacement {
+        layout_id: BPLayoutType::Open(bpp_first_key),
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (3.5, 1.0)),
+    });
+    println!(
+        "bpp.open={},{},{},{},{},{:.9}",
+        bpp_problem.item_demand_qtys[0],
+        bpp_problem.bin_stock_qtys[0],
+        bpp_problem.layouts.len(),
+        bpp_problem.n_placed_items(),
+        bpp_problem.bin_cost(),
+        bpp_problem.density()
+    );
+    let bpp_solution = bpp_problem.save();
+    println!(
+        "bpp.solution={},{},{},{:.9}",
+        bpp_solution.layout_snapshots.len(),
+        bpp_solution
+            .layout_snapshots
+            .values()
+            .map(|snapshot| snapshot.placed_items.len())
+            .sum::<usize>(),
+        bpp_solution.cost(&bpp_instance),
+        bpp_solution.density()
+    );
+    bpp_problem.remove_item(bpp_first_key, bpp_second_item_key);
+    println!(
+        "bpp.removed={},{},{},{},{},{:.9}",
+        bpp_problem.item_demand_qtys[0],
+        bpp_problem.bin_stock_qtys[0],
+        bpp_problem.layouts.len(),
+        bpp_problem.n_placed_items(),
+        bpp_problem.bin_cost(),
+        bpp_problem.density()
+    );
+    let bpp_rekeyed = bpp_problem.restore(&bpp_solution);
+    println!("bpp.restore_rekey={bpp_rekeyed}");
+    println!(
+        "bpp.restored={},{},{},{},{},{:.9}",
+        bpp_problem.item_demand_qtys[0],
+        bpp_problem.bin_stock_qtys[0],
+        bpp_problem.layouts.len(),
+        bpp_problem.n_placed_items(),
+        bpp_problem.bin_cost(),
+        bpp_problem.density()
+    );
+
+    let mspp_external: ExtMSPInstance = serde_json::from_str(include_str!(
+        "../../../Tests/Fixtures/RustReference/mspp_instance.json"
+    ))
+    .unwrap();
+    let mspp_instance = import_mspp_instance(&importer, &mspp_external).unwrap();
+    println!(
+        "mspp.instance={},{:.9},{:.9},{:.9},{:.9}",
+        mspp_instance.total_item_qty(),
+        mspp_instance.item_area(),
+        mspp_instance.base_strip.max_width,
+        mspp_instance.base_strip.fixed_height,
+        mspp_instance.base_strip.width
+    );
+    let mut mspp_problem = MSPProblem::new(mspp_instance);
+    let mspp_key = mspp_problem
+        .add_layout_from_strip(mspp_problem.instance.base_strip)
+        .unwrap();
+    println!(
+        "mspp.layout={},{:.9},{:.9}",
+        mspp_problem.layouts.len(),
+        mspp_problem.strips[mspp_key].width,
+        mspp_problem.total_strip_width()
+    );
+    mspp_problem.place_item(MSPPlacement {
+        lk: mspp_key,
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.0, 1.0)),
+    });
+    println!(
+        "mspp.placed={},{},{:.9},{:.9}",
+        mspp_problem.item_demand_qtys[0],
+        mspp_problem.n_placed_items(),
+        mspp_problem.density(),
+        mspp_problem.total_strip_width()
+    );
+    mspp_problem.change_strip_width(mspp_key, 8.0).unwrap();
+    println!(
+        "mspp.changed={:.9},{:.9},{:.9}",
+        mspp_problem.strips[mspp_key].width,
+        mspp_problem.total_strip_width(),
+        mspp_problem.density()
+    );
+    mspp_problem.fit_strip(mspp_key).unwrap();
+    let mspp_solution = mspp_problem.save();
+    println!(
+        "mspp.solution={},{:.9},{:.9}",
+        mspp_solution.layout_snapshots.len(),
+        mspp_solution.total_strip_width(),
+        mspp_solution.density()
+    );
+    let mspp_placed_key = mspp_problem.layouts[mspp_key]
+        .placed_items
+        .keys()
+        .next()
+        .unwrap();
+    mspp_problem.remove_item(mspp_key, mspp_placed_key);
+    println!(
+        "mspp.removed={},{},{:.9},{:.9}",
+        mspp_problem.item_demand_qtys[0],
+        mspp_problem.n_placed_items(),
+        mspp_problem.total_strip_width(),
+        mspp_problem.density()
+    );
+    let mspp_rekeyed = mspp_problem.restore(&mspp_solution);
+    println!("mspp.restore_rekey={mspp_rekeyed}");
+    println!(
+        "mspp.restored={},{},{:.9},{:.9},{:.9}",
+        mspp_problem.item_demand_qtys[0],
+        mspp_problem.n_placed_items(),
+        mspp_problem.strips[mspp_key].width,
+        mspp_problem.total_strip_width(),
+        mspp_problem.density()
+    );
+}
+
 fn main() {
+    if std::env::args().any(|arg| arg == "--problem-types-b7-parity-only") {
+        run_problem_types_b7_parity_oracle();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--layout-lifecycle-parity-only") {
         run_layout_lifecycle_parity_oracle();
         return;

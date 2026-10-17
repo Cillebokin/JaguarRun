@@ -70,9 +70,9 @@ private:
 // 放置目标布局的状态
 enum class LayoutTargetKind
 {
-    // 放入新布局
-    Open,
     // 放入已有布局
+    Open,
+    // 根据容器索引新开布局
     Closed,
 };
 

@@ -6,7 +6,7 @@
 
 Jaguar RustOracle 的默认入口与专用入口在 Debug、Release 下均退出码 0。输出揭示了若干既有的 profile 差异，记录在下文。2026-10-17 按锁定配置重算 B2，并新增 B4a filtered-`Entire` 可达性探针复核 Debug/Release 输出。Rust oracle 通过只证明该参考程序成功运行，不代表 JaguarCore/SparrowCore 与 Rust 等价；E4 仍标为“部分”，墙钟驱动的 cold-start fixture 处理待完成。
 
-2026-10-16 的 E4 baseline 运行未执行 C++ 构建或原生测试；2026-10-17 的 B2/B4a 复核各自记录了对应的 C++ 定向 runner。工作区中的构建产物未清理。
+2026-10-16 的 E4 baseline 运行未执行 C++ 构建或原生测试；2026-10-17 的 B2/B4a/B6/B7 复核各自记录了对应的 C++ 定向 runner。工作区中的构建产物未清理。
 
 ## 锁定基线与源码指纹
 
@@ -37,7 +37,7 @@ Cargo 文件 SHA-256：
 | SparrowCore/Tests/RustReference/src | 7 | A730A4AEE96895C2A64242B54AC1DE298E2CF76361A3C065DF30346DB4DDE7F9 |
 | SparrowCore/Tests/RustReference/tests | 56 | BA0EF8FF7D2E2DEAC2CA4D6E66A357A6B1AFD6F3C22BD47E342C93ED9A0F2846 |
 | SparrowCore/Tests/Fixtures（更新后） | 142 | 0EED773EDA2AAB3E3A8E5C263EFBF73446A53389F1CDDB94EED1C0E78F1E8B7B |
-| JaguarCore/tools/RustOracle/src | 1 | D1CF225DC2AC5A5C7E1F6FE0EE06A040F607DE8EC7E2696CF49A73D0214B9A78 |
+| JaguarCore/tools/RustOracle/src | 1 | 0309C39B21347826550636F5D485A26CCBEA850F7F9F7AA385548401234FE0AB |
 
 Sparrow fixture 生成器读取的输入 SHA-256：
 
@@ -99,6 +99,7 @@ Sparrow fixture 生成器读取的输入 SHA-256：
 | shape-modification-b2-parity-only（2026-10-17） | 3 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 |
 | collision-entire-b4a-parity-only（2026-10-17） | 3 | DD6BC8B5C0F4A986FB16A61335121306B52119F15F0852042E540A84B8D5FDFF | DD6BC8B5C0F4A986FB16A61335121306B52119F15F0852042E540A84B8D5FDFF |
 | layout-lifecycle-parity-only（2026-10-17） | 18 | F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36 | F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36 |
+| problem-types-b7-parity-only（2026-10-17） | 21 | 0E92E7EB1E17D3B02685DB54B68284E339A109D6CF91B1C35B409D04399C9121 | 0E92E7EB1E17D3B02685DB54B68284E339A109D6CF91B1C35B409D04399C9121 |
 
 ### B2 形状修改重算（2026-10-17）
 
@@ -140,6 +141,19 @@ rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCor
 两条 Rust 命令均使用 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。每个 profile 输出 18 行，Debug/Release 原始 stdout 的 SHA-256 均为 `F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36`，与 `layout_lifecycle.txt` 的非注释行逐行一致；fixture 文件 SHA-256 为 `867825C4F32C6F442CB083ACB72A8BD6AFA30F7CDCB72D1E8F5B2CCD3F31EAED`。
 
 矩阵覆盖容器复制和同值重建的基础身份、同源快照恢复、恢复前后句柄有效性、动态 hazard 数量、换容器后旧快照拒绝及失败状态，以及 `Items()` 首次出现/去重次序。C++ `CompareLayoutLifecycle.cpp` 已加入 `JaguarCoreTests.pro` 和 `TestSupport`；MSVC 2019 x64 Debug/Release 均重建通过，B6 定向 runner 双 profile 退出码为 0，Release 测试断言启用。完整 `JaguarCoreTests.exe` 未运行。B6 固定矩阵及对象地址身份差异详见[实体记录](../logic-comparison-jagua/records/20-entities.md#b6-固定生命周期差分矩阵2026-10-17)。
+
+### B7 SPP/BPP/MSPP 问题类型矩阵（2026-10-17）
+
+执行命令，Debug 与 Release 分别运行：
+
+```powershell
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --problem-types-b7-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --problem-types-b7-parity-only
+```
+
+两条命令使用 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。Debug/Release 各输出 21 行，逐行匹配 `problem_types_b7.txt`；两份 stdout SHA-256 均为 `0E92E7EB1E17D3B02685DB54B68284E339A109D6CF91B1C35B409D04399C9121`。fixture SHA-256 为 `17336ED674AB4D02230D3F8AA31C771E60008FB94B40807FCFB1590003B22B7E`。Rust oracle 通过 pinned `io::import_instance` 读取同一 SPP/BPP/MSPP JSON，C++ 通过现有 JsonCodec/Importer 导入相同文件。C++ `CompareProblem.cpp` 定向 runner 的 MSVC 2019 x64 Debug 与 Release 均通过，Release 使用 `/UNDEBUG`、`JAGUARCORE_TEST_RELEASE` 和 `TestReleaseAsserts.h` 保持断言启用。
+
+矩阵覆盖 SPP 初始化指标、改宽、放置、保存、移除与恢复；BPP 的 `Closed` 新开和 `Open` 复用、库存/成本/密度、保存、移除与恢复；MSPP 新增条带、放置、改宽、`FitStrip`、保存、移除与恢复。数值通过 `AlmostEqualRustF32` 比较。该结果关闭 B7 的固定有效流矩阵；欠需求/欠库存、空布局 fit、无效 key、损坏 snapshot 及完整 JSON round-trip 仍在矩阵外（solution IO 由 B8 跟踪），完整 `JaguarCoreTests.exe` 未运行。详见 [B7 问题类型记录](../logic-comparison-jagua/records/50-bpp.md#b7-固定有效流矩阵2026-10-17)、[SPP 记录](../logic-comparison-jagua/records/60-spp.md#b7-固定有效流矩阵2026-10-17) 与 [MSPP 记录](../logic-comparison-jagua/records/70-mspp.md#b7-固定有效流矩阵2026-10-17)。
 ## 当前可见的 profile 差异与后续项
 
 - 默认输出的 7 行在 Debug/Release 不同：pier_lattice_case 一行，以及 U/L/C 三个形状的 6 组 pier 坐标。现有四个 surrogate_l_c/surrogate_u_shape fixture 的对应数值与 pinned oracle 输出相符，但其注释头仍写 Rust 1.90；目前在 JaguarCore 源码中未找到这些文件的读取者，来源清理与是否保留列入 E7。

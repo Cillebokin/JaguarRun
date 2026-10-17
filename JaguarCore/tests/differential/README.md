@@ -12,7 +12,7 @@ The files under `../Fixtures/RustReference/` use the jagua-rs external JSON sche
 
 - `CompareGeometry.cpp`: pinned Rust geometry reference fixture for B1 primitives, transforms, convex hull and `OriginalShape`, plus rectangle area, centered internal contour, bounding box, normalized/floating-boundary rotations, offset and concave shape-modification behavior, PlacedItem/Exterior/Hole/InferiorQualityZone collision behavior and quality filtering. B2 additionally compares the narrow-concavity half-open area threshold, wrapped slice and Deflate sign behavior against `shape_modification_b2.txt`. B4a records a filtered `Entire` hazard that panics in pinned Rust after edge checks while the C++ query returns no collision, as required by the filter.
 - `CompareSurrogate.cpp`: B3 pinned Rust references for all poles/piers and fail-fast pole prefixes on U/L/C shapes, threshold and ratio boundary transitions, ratio rejection, pole/pier generation errors, plus surrogate collision detection and collection outcomes.
-- `CompareProblem.cpp`: SPP demand/width/density, BPP demand/stock/cost/density, and MSPP demand/max-width/total-width/density invariants, including Layout snapshot restore.
+- `CompareProblem.cpp`: pinned Rust B7 fixture for SPP instance/change-width/place/save/remove/restore; BPP Closed new-bin and Open reuse flows with stock/cost/density/save/remove/restore; and MSPP add-strip/place/change-width/FitStrip/save/remove/restore. Floating-point fields use `AlmostEqualRustF32`; the fixed valid-flow matrix is not an exhaustive error-contract proof.
 - `CompareLayoutLifecycle.cpp`: pinned Layout lifecycle fixture covering shared versus independently rebuilt container identity, save/restore key and placement state, container swap, mismatch failure atomicity, and `Items()` de-duplication order.
 - `CompareMatrix.cpp`: shared edge intersection and containment tables. The matrix explicitly preserves jagua-rs's non-collision rule for collinear segments and collision rule for non-collinear endpoint/T-junction contact.
 - `CompareTrajectory.cpp`: the same xorshift64* seed and 256-step operation grammar run in Rust and C++, including placement/removal/restore counts, active count, checksum, and final PRNG state.
@@ -70,6 +70,8 @@ cargo +1.90.0 run --offline --manifest-path jagua-rs/lbf/Cargo.toml -- `
 The recorded Rust result is approximately `strip_width = 4.398323`, `density = 0.53050524`, with three placed items. These values are acceptance bounds for the external result, not a promise that another optimizer or floating-point implementation will produce identical coordinates.
 
 The oracle is not a claim that Sparrow or any optimizer must produce identical placements. It checks the shared geometry and problem-model contract.
+
+The B7 problem-type matrix uses the pinned Rust 1.98.1 `--problem-types-b7-parity-only` entry point and the same three external instance JSON files as JaguarCore. Its 21 fixture lines match in Rust Debug and Release; the C++ differential entry point passes in MSVC 2019 x64 Debug and Release with Release assertions enabled. The BPP input has demand two and one bin so the matrix distinguishes creating a bin with `Closed` from placing into the existing layout with `Open`. Error contracts such as exhausted demand/stock, empty-strip fitting, invalid layout keys, and malformed snapshots remain outside this matrix; BPP/MSPP solution import availability remains under B8.
 
 ## Debug/Release state probes
 

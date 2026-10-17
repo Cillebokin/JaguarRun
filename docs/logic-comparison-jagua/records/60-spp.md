@@ -3,7 +3,7 @@
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对照**：`JaguarCore/Include/JaguarCore/Problems/Spp.h`、`Source/Problems/SPP/*`、`Source/IO/Importer.cpp`、`Source/IO/JsonCodec.cpp`  
 **关联工作项**：B6、B7、B8、B13、B14  
-**证据类型**：pinned Rust 与当前 C++ 源码静态核对；未运行 SPP 测试或对拍
+**证据类型**：pinned Rust 与当前 C++ 源码静态核对；B7 固定有效流矩阵另有 Rust Debug/Release 与 MSVC Debug/Release 定向对拍；完整 `JaguarCoreTests.exe` 未运行
 
 ## `jagua-rs/src/probs/spp/entities/instance.rs`
 
@@ -67,10 +67,16 @@
 
 - 本记录覆盖 SPP 7 个原先待记文件；`probs/spp/util/assertions.rs` 另在 `10-utilities-and-assertions.md`，模块导出另在 `00-module-exports.md`。
 - Rust 对 `SPProblem::change_strip_width` 的局部构造顺序与 C++ 的提交顺序目标一致，但 Rust Layout::swap_container 无 Result；Rust place/remove/empty fit 与 C++ 可恢复错误合同不同。
-- SPP import/export 中 external IDs、centering transform、min separation 与初始化 width 属 B8/B14 的对拍范围；本轮未运行测试或 JSON round-trip。
+- SPP import/export 中 external IDs、centering transform、min separation 与初始化 width 的完整字段语义仍属 B8/B14；B7 矩阵只使用给定 JSON 输入核对实例核心指标与问题状态操作。
+
+## B7 固定有效流矩阵（2026-10-17）
+
+`CompareProblem.cpp` 与 pinned Rust oracle 同时读取 `spp_instance.json`。固定流程核对导入实例的总需求、总面积、固定高度与初始宽度，之后改宽到 5、放置一件、保存、移除并恢复；每一步比较剩余需求、放置数、密度和宽度。浮点值使用 `AlmostEqualRustF32`。
+
+Rust 1.98.1 / jagua-rs `f5e2b5f` Debug/Release 各 21 行总输出逐行匹配 fixture；MSVC 2019 x64 C++ Debug/Release 定向 runner 均通过，Release 断言启用。异常宽度、空布局 `FitStrip`、需求耗尽与快照错误出口仍不属于本轮固定矩阵；完整 `JaguarCoreTests.exe` 未运行。
 
 ## 证据位置
 
 - pinned Rust：`probs/spp/entities/{instance,problem,solution,strip}.rs`、`probs/spp/io/{export,ext_repr,import}.rs`；实例断言见 `probs/spp/util/assertions.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Problems/Spp.h`、`JaguarCore/Source/Problems/SPP/{Instance,Problem,Solution,Strip}.cpp`、`JaguarCore/Source/IO/{Importer,JsonCodec}.cpp`。
-- 现有测试入口：`JaguarCore/Tests/TestSpp.cpp`、`TestIo.cpp`；本轮未执行。
+- 现有单元测试入口：`JaguarCore/Tests/TestSpp.cpp`、`TestIo.cpp`，本轮未执行；B7 定向 runner 及其范围见上节，JSON round-trip 仍未验证。

@@ -3,7 +3,7 @@
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对照**：`JaguarCore/Include/JaguarCore/Problems/Bpp.h`、`Source/Problems/BPP/*`、`Source/IO/Importer.cpp`、`Source/IO/JsonCodec.cpp`  
 **关联工作项**：B7、B8、B13、B14  
-**证据类型**：pinned Rust 与当前 C++ 源码静态核对；未运行 BPP 测试或对拍
+**证据类型**：pinned Rust 与当前 C++ 源码静态核对；B7 固定有效流矩阵另有 Rust Debug/Release 与 MSVC Debug/Release 定向对拍；完整 `JaguarCoreTests.exe` 未运行
 
 ## `jagua-rs/src/probs/bpp/entities/bin.rs`
 
@@ -26,14 +26,14 @@
 |---|---|---|
 | `BPProblem/new` (18–40) | 公共字段含 instance、`SlotMap<LayKey,Layout>`、layout→source-bin SecondaryMap、剩余 demand/stock 副本；无构造错误出口 | `BPProblem::Create`（`BppProblem.cpp:77–87`）以 Result 返回并用向量槽位/代数实现 Layout key；C++ 状态私有化，Rust 调用方可直接改写公开状态 |
 | `remove_layout` (42–45) | 委托 `deregister_layout`；不存在 LayKey 或其 bin 关联缺失会在 helper 的 `expect` panic | `BPProblem::RemoveLayout`（`BppProblem.cpp:260–290`）校验 layout/bin、返还内部 item demand 和 bin stock，错误以 Result 返回 |
-| `place_item` (47–66) | `BPLayoutType::Open(lkey)` 使用已有 layout；`Closed{bin_id}` 读取 bin、创建 Layout 并 register；随后按 item_idx 取 Item、Layout.place_item、递减 demand，返回 `(LayKey,PItemKey)`。无效 key/bin/item 会索引或 SlotMap panic；库存与 demand 无前置可行性校验，usize 减法在 Debug 下可能 panic、Release 下可能回绕 | `BPProblem::PlaceItem`（`BppProblem.cpp:166–221`）返回 Result，先检查 item index；库存检查在 `OpenLayout`；开放布局句柄过期会返回 InvalidInput。C++ 仅在 Debug 检查 demand 已耗尽；目标枚举命名与 Rust 相反：Rust `Open(key)`=已有、`Closed{bin}`=新建，C++ `LayoutTargetKind::Open` 注释为新布局、`Closed` 为已有布局，实际需按字段组合读取 |
+| `place_item` (47–66) | `BPLayoutType::Open(lkey)` 使用已有 layout；`Closed{bin_id}` 读取 bin、创建 Layout 并 register；随后按 item_idx 取 Item、Layout.place_item、递减 demand，返回 `(LayKey,PItemKey)`。无效 key/bin/item 会索引或 SlotMap panic；库存与 demand 无前置可行性校验，usize 减法在 Debug 下可能 panic、Release 下可能回绕 | `BPProblem::PlaceItem`（`BppProblem.cpp:166–221`）返回 Result，先检查 item index；库存检查在 `OpenLayout`；开放布局句柄过期会返回 InvalidInput。C++ 仅在 Debug 检查 demand 已耗尽。`LayoutTargetKind::Open` 表示已有布局、`Closed` 表示新开布局，与 Rust variant 语义一致；B7 修正了此前写反的 C++ 注释。C++ 用扁平字段表示 Rust tagged variant，调用者需按目标类型填写对应索引 |
 | `remove_item` (68–80) | 移除 item、恢复 demand；若 Layout 空，查 source bin 并 `deregister_layout`，返回 `Closed{bin_id}`，否则返回 `Open(lkey)`。无效 layout/key 与缺 bin mapping 会 panic | `RemoveItem`（`BppProblem.cpp:223–258`）以组合 handle 定位、返回 Result；删除最后一件时释放布局槽和 stock，并返回 Closed 目标 |
 | `save` (82–100) | 按当前 SlotMap key 保存每个 LayoutSnapshot，clone layout_bins，记录 `Instant::now()`；Debug 下执行完整 `problem_matches_solution` assertion | `BPProblem::Save`（`BppProblem.cpp:293–305`）保存 vector layouts 和 binIndex；C++ BPSolution 本体无对应时间戳字段。Debug 验证边界在 `DebugAssertBPSolution` |
 | `restore` (102–168) | 对当前 key：snapshot 有同 key 时先恢复 bin mapping，再尝试 layout.restore，失败则 `Layout::from_snapshot` 重建；snapshot 缺少则移除。对 solution 新 key 则从快照建 Layout 并插入 SlotMap（新 key 可能重分配），再映射 bin。最后从 instance 全量重置 demand/stock，并按现存 layout 和 placements 扣减；超额/非法 index 可触发索引或减法失败，Debug assertion 检验全局一致性。返回是否有 layout keys 改变 | `BPProblem::Restore`（`BppProblem.cpp:307–453`）先完整校验 layout key、bin/base、item definition/demand 与重复 slot，再构建新状态并 `Result<bool>` 原子提交；保存的 key 若无法保持则报告 changed。C++ 与 Rust 都按 layout 恢复 counters，但错误类型、校验强度、key 分配过程不同 |
 | `density/item_placed_qtys/bin_used_qtys/bin_cost` (170–208) | density=所有已用容器毛面积下的放置 item 原始面积，`0/0` 可产生 NaN；used qty 由原始需求/库存减剩余量；cost 为已打开 bin 类型 cost×数量累加 u64 | `BPProblem::Density/BinCost`（`BppProblem.cpp:486–510`）；C++ 用 double 对外暴露 density，是否保持相同 float 累加见实现/对拍 |
 | `register_layout/deregister_layout` (210–232) | register 时先扣 stock，已有内容逐项扣 demand，再插入 SlotMap 与 bin map；deregister 通过两次 `expect` 移除布局和源 bin、恢复 stock、逐项恢复 demand | C++ `OpenLayout/ReleaseLayoutSlot` 管理槽位与代数；`RemoveLayout` 先验证快照内容后返还 counters，避免 Rust helper 的缺失映射 panic |
 | demand/stock helpers, `n_placed_items` (234–254) | counters 直接 `-/+1`；无边界检查；placed count 汇总所有 layout 的 SlotMap len | C++ 对外 query 有越界返回 0，修改入口返回错误；数量语义见 `PlacedItemCount/OpenLayoutCount` |
-| `BPPlacement/BPLayoutType` (256–285) | Placement 保存目标 enum、item_idx、DTransformation；from_placed_item 由 PlacedItem 提取 idx/transform；Open 代表既有 key，Closed 代表待打开 bin | `Bpp.h::BPPlacement/LayoutTargetKind` 用扁平 `targetKind/layoutIndex/binIndex`；枚举命名反向且 C++ 还需组合布局/容器索引表达 Rust 的两种 variant |
+| `BPPlacement/BPLayoutType` (256–285) | Placement 保存目标 enum、item_idx、DTransformation；from_placed_item 由 PlacedItem 提取 idx/transform；Open 代表既有 key，Closed 代表待打开 bin | `Bpp.h::BPPlacement/LayoutTargetKind` 用扁平 `targetKind/layoutIndex/binIndex` 表达 Rust 的两种 variant；Open/Closed 语义相同，B7 将先前相反的枚举注释修正 |
 
 ## `jagua-rs/src/probs/bpp/entities/solution.rs`
 
@@ -69,10 +69,16 @@
 - 本记录覆盖 BPP 7 个原先待记源文件；模块 assertion 文件单列在 `10-utilities-and-assertions.md`，因此 BPInstance 构造与 snapshot 验证依赖并未在本文件重复展开。
 - Rust BPP 的多数实体操作是直接索引、SlotMap、计数器增减，缺 key/越界/库存不足主要依赖调用者不变量；C++ 改为 Result 并加入范围、库存、快照内容校验。Debug-only demand 检查不代表 Release 合同已变成防御式。
 - BPP `import_solution` pinned Rust 是 panic-prone `unimplemented!`，C++ 有接口但当前返回 UnsupportedOperation；不把“接口存在”记录成可导入。
-- 本轮只静态登记，`TestBpp.cpp` 与 JsonCodec/Importer 测试未运行。
+- `TestBpp.cpp` 与 JsonCodec/Importer 测试未运行；B7 定向矩阵使用 `CompareProblem.cpp` 独立 runner，只证明记录的有效流输入/操作结果相符，不覆盖所有失败出口。
+
+## B7 固定有效流矩阵（2026-10-17）
+
+`CompareProblem.cpp` 从 `bpp_instance.json` 解析同一外部实例；需求为 2、可用 bin 库存为 1。Rust oracle 通过 pinned `io::import_instance` 导入，先用 `Closed { bin_id: 0 }` 创建布局，再用 `Open(key)` 将第二件放入已有布局。矩阵比较实例需求/面积/bin 类型、两步的剩余需求与库存、布局数、放置数、成本、密度、保存解、移除第二件、恢复结果及 key 是否变化。结果中 `Closed` 后库存为 0 且布局数为 1，随后 `Open` 不再新开 bin。
+
+Rust 1.98.1 / jagua-rs `f5e2b5f` 的 Debug 与 Release 各输出 21 行，逐行匹配 `problem_types_b7.txt`；MSVC 2019 x64 定向 C++ runner 的 Debug 与 Release 均通过，Release 通过 `/UNDEBUG` 与 `TestReleaseAsserts.h` 保持断言启用。浮点值按 `AlmostEqualRustF32` 比较；BPP `import_solution` 仍由 B8 跟踪，需求/库存耗尽、无效 key 和损坏快照不在本矩阵内。
 
 ## 证据位置
 
 - pinned Rust：`probs/bpp/entities/{bin,instance,problem,solution}.rs`、`probs/bpp/io/{export,ext_repr,import}.rs`；构造不变量另见 `probs/bpp/util/assertions.rs:7–32`。
 - C++：`JaguarCore/Include/JaguarCore/Problems/Bpp.h`、`JaguarCore/Source/Problems/BPP/{BppInstance,BppProblem,BppSolution}.cpp`、`JaguarCore/Source/IO/{Importer,JsonCodec}.cpp`。
-- 现有测试入口：`JaguarCore/Tests/TestBpp.cpp`；本轮未执行。
+- 现有单元测试入口：`JaguarCore/Tests/TestBpp.cpp`，本轮未执行；B7 定向 runner 及其范围见上节，JsonCodec/Importer 完整测试仍未执行。

@@ -297,6 +297,137 @@ fn run_b3_surrogate_parity_oracle() {
     }
 
     run_collision_parity_oracle();
+    run_b3_surrogate_boundary_oracle();
+}
+
+fn run_b3_surrogate_boundary_oracle() {
+    let square_points = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+    let square = polygon(&square_points);
+    let three_pole_config = SPSurrogateConfig {
+        n_pole_limits: [(3, 0.0), (100, 2.0), (100, 2.0)],
+        ff_pole_area_ratio: 0.0,
+        n_ff_piers: 0,
+    };
+    let mut baseline_shape = square.clone();
+    baseline_shape
+        .generate_surrogate(three_pole_config)
+        .unwrap();
+    let baseline = baseline_shape.surrogate();
+    let mut covered_area_after_two = 0.0_f32;
+    for pole in baseline.poles.iter().take(2) {
+        covered_area_after_two += pole.area();
+    }
+    let coverage_after_two = covered_area_after_two / square.area;
+    let threshold_bits = coverage_after_two.to_bits();
+    let below_threshold = f32::from_bits(threshold_bits - 1);
+    let above_threshold = f32::from_bits(threshold_bits + 1);
+    println!("b3.boundary.baseline_poles={}", baseline.poles.len());
+    println!("b3.boundary.coverage_after_two={coverage_after_two:.9}");
+
+    for (name, threshold) in [
+        ("below", below_threshold),
+        ("equal", coverage_after_two),
+        ("above", above_threshold),
+    ] {
+        println!("b3.pole_threshold.{name}_value={threshold:.9}");
+        let config = SPSurrogateConfig {
+            n_pole_limits: [(2, threshold), (100, 2.0), (100, 2.0)],
+            ff_pole_area_ratio: 0.0,
+            n_ff_piers: 0,
+        };
+        let mut shape = square.clone();
+        let result = shape.generate_surrogate(config);
+        match result {
+            Ok(()) => println!(
+                "b3.pole_threshold.{name}_poles={}",
+                shape.surrogate().poles.len()
+            ),
+            Err(error) => println!("b3.pole_threshold.{name}_poles=err:{error}"),
+        }
+    }
+
+    for (name, ratio) in [
+        ("below", below_threshold),
+        ("equal", coverage_after_two),
+        ("above", above_threshold),
+    ] {
+        println!("b3.fail_fast_ratio.{name}_value={ratio:.9}");
+        let config = SPSurrogateConfig {
+            ff_pole_area_ratio: ratio,
+            ..three_pole_config
+        };
+        let mut shape = square.clone();
+        let result = shape.generate_surrogate(config);
+        match result {
+            Ok(()) => println!(
+                "b3.fail_fast_ratio.{name}_poles={}",
+                shape.surrogate().ff_poles().len()
+            ),
+            Err(error) => println!("b3.fail_fast_ratio.{name}_poles=err:{error}"),
+        }
+    }
+
+    let next_after_one = f32::from_bits(1.0_f32.to_bits() + 1);
+    let smallest_positive = f32::from_bits(1);
+    let invalid_ratios = [
+        ("negative", -smallest_positive),
+        ("above_one", next_after_one),
+        ("nan", f32::NAN),
+        ("positive_inf", f32::INFINITY),
+        ("negative_inf", f32::NEG_INFINITY),
+    ];
+    for (name, ratio) in invalid_ratios {
+        let config = SPSurrogateConfig {
+            ff_pole_area_ratio: ratio,
+            ..three_pole_config
+        };
+        let mut shape = square.clone();
+        let result = shape.generate_surrogate(config);
+        println!(
+            "b3.ratio.{name}={}",
+            if result.is_err() { "err" } else { "ok" }
+        );
+    }
+    for (name, ratio) in [("zero", 0.0), ("one", 1.0)] {
+        let config = SPSurrogateConfig {
+            ff_pole_area_ratio: ratio,
+            ..three_pole_config
+        };
+        let mut shape = square.clone();
+        let result = shape.generate_surrogate(config);
+        match result {
+            Ok(()) => println!("b3.ratio.{name}=ok:{}", shape.surrogate().ff_poles().len()),
+            Err(_) => println!("b3.ratio.{name}=err"),
+        }
+    }
+
+    let offset_square = polygon(&[
+        (100.0, 100.0),
+        (101.0, 100.0),
+        (101.0, 101.0),
+        (100.0, 101.0),
+    ]);
+    let pier_failure_config = SPSurrogateConfig {
+        n_pole_limits: [(1, 0.0), (0, 0.0), (0, 0.0)],
+        ff_pole_area_ratio: 0.0,
+        n_ff_piers: 1,
+    };
+    let mut pier_failure_shape = offset_square;
+    let pier_result = pier_failure_shape.generate_surrogate(pier_failure_config);
+    match pier_result {
+        Ok(()) => println!("b3.pier_generation_failure=ok"),
+        Err(error) => println!("b3.pier_generation_failure=err:{error}"),
+    }
+
+    let covering_pole = Circle::try_new(Point(0.5, 0.5), 100.0).unwrap();
+    let pole_result = jagua_rs::geometry::fail_fast::compute_pole(&square, &[covering_pole]);
+    match pole_result {
+        Ok(_) => println!("b3.pole_generation_failure=ok"),
+        Err(error) if error.to_string().contains("no pole found") => {
+            println!("b3.pole_generation_failure=err:no pole found")
+        }
+        Err(error) => println!("b3.pole_generation_failure=err:{error}"),
+    }
 }
 
 fn run_model_boundary_parity_oracle() {

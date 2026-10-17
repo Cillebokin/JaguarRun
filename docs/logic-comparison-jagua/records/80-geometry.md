@@ -242,8 +242,16 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - TDD 红测因 profile fixture 尚不存在而失败；生成锁定 oracle 输出后，Debug/Release stdout 均与各自 fixture 逐行一致，49 个键无重复。MSVC 2019 x64 定向 runner 只调用 `runSurrogateDifferentialTests()`，Debug 与 Release 均退出码 0；Release runner 强制包含 `TestReleaseAsserts.h`，断言保持有效。完整 `JaguarCoreTests.exe` 未运行。
 - 本轮没有修改 `Surrogate.cpp` 或公共 API。证据覆盖三种固定凹多边形和一组 notch/pier-only 查询；不外推为任意输入等价。极点覆盖阈值临界、fail-fast ratio 边界、pole 生成错误出口及 pier 无可用射线等场景仍需后续 fixture，B3 继续标为“部分”。
 
+## B3 第二轮：阈值边界与生成失败出口
+
+- 两个 profile fixture 从 49 增至 72 个唯一键。新增单位正方形用例：按两 pole 累计覆盖率前一 ULP、相等、后一 ULP 设 pole limit，数量结果为 `2/3/3`，锁定严格 `current_coverage > threshold`；fail-fast ratio 在同三点的前缀数量为 `2/2/3`，锁定累计 pole 面积 `>= target_area`。
+- ratio 边界包括有效端点 `0`、`1`，以及负最小 subnormal、`1.0f` 后一 ULP、NaN、正负无穷；前两者成功，后五者 Rust 返回 `Err`，C++ 返回 `InvalidInput`。
+- pole 失败出口用有效单位正方形和覆盖它的合法圆直接探测公开 `compute_pole` / C++ `ComputePointOfInaccessibility`：Rust 返回 `no pole found`，C++ 返回 `InvalidPolygon`。pier 失败出口用 `[100,101]²` 正方形经完整 surrogate 流程触发：Rust 返回 `no ray found`，C++ 返回 `Infeasible`。这两组对拍记录的是同一失败语义在 Rust `anyhow::Result` 与 C++ `ErrorCode` 中的映射。
+- Rust 1.98.1 Debug/Release oracle stdout 分别与 72 键 fixture 一致且无重复键；MSVC 2019 x64 `runSurrogateDifferentialTests()` 定向 runner 在 Debug/Release 均退出码 0，Release 断言保持启用。`cargo fmt --check` 通过；完整 `JaguarCoreTests.exe` 未运行；本轮未修改生产 `Surrogate.cpp` 或公共 API。
+- B3 按固定差分矩阵验收完成，不将结果外推为任意几何/配置的严格等价。Rust 的 1000-pole safety assertion 未运行对拍；到达该处需近 1000 次连续 pole 搜索，该异常路径按源码分别表现为 Rust panic 与 C++ `InvalidInput`，作为极端配置残差登记。
+
 ## 证据位置
 
 - pinned Rust：`geometry/{convex_hull,d_transformation,geo_enums,geo_traits,original_shape,shape_modification,transformation}.rs`、`geometry/fail_fast/{piers,pole,sp_surrogate}.rs`、`geometry/primitives/{circle,edge,point,rect,simple_polygon}.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Geometry/*`、`JaguarCore/Source/Geometry/{ConvexHull,OriginalShape,Primitives,ShapeModification,Transformation}/*`、`JaguarCore/Source/FailFast/Surrogate.cpp`。
-- 运行对拍：`JaguarCore/Tests/Differential/CompareGeometry.cpp`、`JaguarCore/Tests/Fixtures/RustReference/geometry_primitives.txt`、`JaguarCore/tools/RustOracle/src/main.rs`。
+- 运行对拍：`JaguarCore/Tests/Differential/CompareGeometry.cpp`、`JaguarCore/Tests/Differential/CompareSurrogate.cpp`、`JaguarCore/Tests/Fixtures/RustReference/{geometry_primitives,surrogate_b3_debug,surrogate_b3_release}.txt`、`JaguarCore/Tools/RustOracle/src/main.rs`。

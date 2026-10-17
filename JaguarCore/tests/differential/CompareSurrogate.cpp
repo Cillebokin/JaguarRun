@@ -1,13 +1,16 @@
 #include "JaguarCore/Collision/CollisionEngine.h"
+#include "JaguarCore/Geometry/PointOfInaccessibility.h"
 #include "JaguarCore/Geometry/RustF32.h"
 
 #include <cassert>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -160,6 +163,13 @@ void expectRustText(const ReferenceMap& reference,
     assert(expected == actual);
 }
 
+float referenceFloat(const ReferenceMap& reference, const std::string& key)
+{
+    const std::vector<double> values = numericValues(referenceValue(reference, key));
+    assert(values.size() == 1);
+    return static_cast<float>(values.front());
+}
+
 void compareSurrogate(const ReferenceMap& reference,
                       const char* name,
                       const std::vector<jaguar::Point2d>& vertices)
@@ -291,6 +301,111 @@ void compareSurrogateCollision(const ReferenceMap& reference)
     expectRustText(reference, "collision.notch.detect_pier_only",
                    pierDetected.Value() ? "true" : "false");
 }
+
+void compareSurrogateBoundariesAndFailures(const ReferenceMap& reference)
+{
+    const auto square = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    assert(square.HasValue());
+
+    jaguar::SurrogateConfig baselineConfig{};
+    baselineConfig.poleLimits = {{{3, 0.0}, {100, 2.0}, {100, 2.0}}};
+    const auto baseline = jaguar::Surrogate::Create(square.Value(), baselineConfig);
+    assert(baseline.HasValue());
+    assert(baseline.Value().Poles().size() >= 3);
+    expectRustExactNumbers(reference, "b3.boundary.baseline_poles",
+                           {static_cast<double>(baseline.Value().Poles().size())});
+
+    float coverageAfterTwo = 0.0F;
+    for (std::size_t index = 0; index < 2; ++index)
+        coverageAfterTwo += static_cast<float>(
+            baseline.Value().Poles()[index].AreaRustF32());
+    coverageAfterTwo /= static_cast<float>(square.Value().Area());
+    expectRustNumbers(reference, "b3.boundary.coverage_after_two",
+                      {coverageAfterTwo});
+
+    const std::vector<std::pair<const char*, const char*>> poleThresholdCases{
+        {"below", "b3.pole_threshold.below_value"},
+        {"equal", "b3.pole_threshold.equal_value"},
+        {"above", "b3.pole_threshold.above_value"}};
+    for (const auto& [name, valueKey] : poleThresholdCases)
+    {
+        jaguar::SurrogateConfig config{};
+        config.poleLimits = {{{2, referenceFloat(reference, valueKey)},
+                              {100, 2.0}, {100, 2.0}}};
+        const auto surrogate = jaguar::Surrogate::Create(square.Value(), config);
+        assert(surrogate.HasValue());
+        expectRustExactNumbers(
+            reference, std::string("b3.pole_threshold.") + name + "_poles",
+            {static_cast<double>(surrogate.Value().Poles().size())});
+    }
+
+    const std::vector<std::pair<const char*, const char*>> failFastRatioCases{
+        {"below", "b3.fail_fast_ratio.below_value"},
+        {"equal", "b3.fail_fast_ratio.equal_value"},
+        {"above", "b3.fail_fast_ratio.above_value"}};
+    for (const auto& [name, valueKey] : failFastRatioCases)
+    {
+        jaguar::SurrogateConfig config = baselineConfig;
+        config.failFastPoleAreaRatio = referenceFloat(reference, valueKey);
+        const auto surrogate = jaguar::Surrogate::Create(square.Value(), config);
+        assert(surrogate.HasValue());
+        expectRustExactNumbers(
+            reference, std::string("b3.fail_fast_ratio.") + name + "_poles",
+            {static_cast<double>(surrogate.Value().FailFastPoleCount())});
+    }
+
+    const float nextAfterOne = std::nextafter(1.0F, 2.0F);
+    const float smallestPositive = std::numeric_limits<float>::denorm_min();
+    const std::vector<std::pair<const char*, float>> invalidRatios{
+        {"negative", -smallestPositive}, {"above_one", nextAfterOne},
+        {"nan", std::numeric_limits<float>::quiet_NaN()},
+        {"positive_inf", std::numeric_limits<float>::infinity()},
+        {"negative_inf", -std::numeric_limits<float>::infinity()}};
+    for (const auto& [name, ratio] : invalidRatios)
+    {
+        jaguar::SurrogateConfig config = baselineConfig;
+        config.failFastPoleAreaRatio = static_cast<double>(ratio);
+        const auto surrogate = jaguar::Surrogate::Create(square.Value(), config);
+        expectRustText(reference, std::string("b3.ratio.") + name,
+                       surrogate.HasValue() ? "ok" : "err");
+        assert(!surrogate.HasValue());
+        assert(surrogate.GetError().code == jaguar::ErrorCode::InvalidInput);
+    }
+
+    for (const auto& [name, ratio] :
+         {std::pair<const char*, float>{"zero", 0.0F}, {"one", 1.0F}})
+    {
+        jaguar::SurrogateConfig config = baselineConfig;
+        config.failFastPoleAreaRatio = ratio;
+        const auto surrogate = jaguar::Surrogate::Create(square.Value(), config);
+        assert(surrogate.HasValue());
+        std::ostringstream outcome;
+        outcome << "ok:" << surrogate.Value().FailFastPoleCount();
+        expectRustText(reference, std::string("b3.ratio.") + name,
+                       outcome.str());
+    }
+
+    const auto offsetSquare = jaguar::SimplePolygon::Create({
+        {100.0, 100.0}, {101.0, 100.0}, {101.0, 101.0}, {100.0, 101.0}});
+    assert(offsetSquare.HasValue());
+    jaguar::SurrogateConfig pierFailureConfig{};
+    pierFailureConfig.poleLimits = {{{1, 0.0}, {0, 0.0}, {0, 0.0}}};
+    pierFailureConfig.failFastPiers = 1;
+    const auto pierFailure = jaguar::Surrogate::Create(
+        offsetSquare.Value(), pierFailureConfig);
+    expectRustText(reference, "b3.pier_generation_failure", "err:no ray found");
+    assert(!pierFailure.HasValue());
+    assert(pierFailure.GetError().code == jaguar::ErrorCode::Infeasible);
+
+    const auto coveringPole = jaguar::Circle2d::Create({0.5, 0.5}, 100.0);
+    assert(coveringPole.HasValue());
+    const auto poleFailure = jaguar::ComputePointOfInaccessibility(
+        square.Value(), {coveringPole.Value()});
+    expectRustText(reference, "b3.pole_generation_failure", "err:no pole found");
+    assert(!poleFailure.HasValue());
+    assert(poleFailure.GetError().code == jaguar::ErrorCode::InvalidPolygon);
+}
 }
 
 void runSurrogateDifferentialTests()
@@ -306,4 +421,5 @@ void runSurrogateDifferentialTests()
         {0.0, 0.0}, {10.0, 0.0}, {10.0, 2.0}, {3.0, 2.0},
         {3.0, 8.0}, {10.0, 8.0}, {10.0, 10.0}, {0.0, 10.0}});
     compareSurrogateCollision(reference);
+    compareSurrogateBoundariesAndFailures(reference);
 }

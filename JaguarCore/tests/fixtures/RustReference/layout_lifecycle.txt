@@ -1,0 +1,19 @@
+# jagua-rs revision f5e2b5ffd14931f17a20ce283a2122e877953ceb / Rust 1.98.1
+container.clone_same_base=true
+container.recreated_same_base=false
+roundtrip.restore_succeeded=true
+roundtrip.placement_count=1
+roundtrip.dynamic_hazard_count=1
+roundtrip.saved_key_present=true
+roundtrip.mutated_key_stale=true
+roundtrip.restored_item=0:1.0:1.0
+restore.shared_base_succeeded=true
+restore.shared_base_placement_count=1
+restore.different_base_rejected=true
+restore.different_base_state_unchanged=true
+swap.placement_count=2
+swap.dynamic_hazard_count=2
+swap.old_snapshot_rejected=true
+swap.old_snapshot_state_unchanged=true
+items.before_removal=5:1005,6:1006
+items.after_removal=6:1006,5:1505

@@ -26,6 +26,7 @@ void runProblemDifferentialTests();
 void runCollisionDifferentialTests();
 void runEdgeMatrixDifferentialTests();
 void runContainmentMatrixDifferentialTests();
+void runLayoutLifecycleDifferentialTests();
 void runTrajectoryDifferentialTests();
 void runOptimizerDifferentialTests();
 void runSppTests();
@@ -150,6 +151,7 @@ int main()
     runCollisionDifferentialTests();
     runEdgeMatrixDifferentialTests();
     runContainmentMatrixDifferentialTests();
+    runLayoutLifecycleDifferentialTests();
     runTrajectoryDifferentialTests();
     runOptimizerDifferentialTests();
     runSppTests();

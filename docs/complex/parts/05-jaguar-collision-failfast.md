@@ -32,7 +32,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 查询入口 `Query`（611-650）支持矩形、线段三种形态，并在节点的活动边数超过 `m_CdThreshold` 时退化为直接对边列表逐一检测，而不是继续下降到子节点。这个阈值（`CDEConfig::cdThreshold` 默认 32，见 `CollisionEngine.h` 35-36）是一个性能折中：边数很少时直接检测比递归更便宜。`PresenceAt`（663-689）计算某句柄在给定节点矩形上的覆盖状态，`VirtualRootFor`（701-721）则为查询矩形选择最小的覆盖节点作为虚拟根，从而缩小遍历范围。
 
-静态实现显示，仅使用包围盒注册的 RegisterHazard 重载（Quadtree.cpp 579-598）创建 Partial hazard，以一条对角 Edge 近似包围盒且不保存完整形状。RegisterIntoNode 只有在存在完整形状时才会把 hazard constrict 到子节点，因此该重载不会把条目分发到子节点。具体查询是否因此漏检或误报仍需直接调用的最小用例验证；仓库内未发现此重载的调用者（B5），Rust 也没有对应路径。当前应将其记录为未使用扩展路径的潜在风险，而不是已复现缺陷；未来接入前需明确契约并补查询用例。
+bounds-only RegisterHazard 重载（Quadtree.h:46–47、Quadtree.cpp:579–598）创建 Partial hazard，以边界左下到右上的对角 Edge 作为唯一代理，不保存完整形状，也不向子节点登记。Query 会先由 VirtualRootFor 下钻到完整包含查询范围的子节点，再只遍历该子树；因此完全落入子节点的查询可能漏掉仅保存在根节点的 bounds-only hazard。这是源码路径推导，未运行专用用例。重载带 `JAGUARCORE_API`，但仓内无调用且 Rust 无对应入口；按 B5 保留并登记为 C++ 专有扩展，不计 Rust parity，未来接入前需定义并验证覆盖契约。
 
 ## 五、SoA 布局与 AVX2 的选择
 
@@ -84,6 +84,6 @@ Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `
 
 ## 十一、主要陷阱与建议
 
-综合上述分析，当前仍需按证据核查以下事项：RegisterHazard(bounds) 在 C++ 中没有调用者，属于未使用路径；若保留，应记录其限制，若未来接入再验证覆盖充分性。线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
+综合上述分析，当前仍需按证据核查以下事项：线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。bounds-only RegisterHazard 的去留已按 B5 登记，但查询漏项限制仍未用专用运行用例复核。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
 
-在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括 C++ 对 constrict 的宽容处理，以及形状修改部分的回退与容差策略。包围盒注册是无调用者的扩展路径，当前仅记为潜在风险，不作为已观察到的 parity 差异。阅读时需同时标明 Rust 参考的源码基线。
+在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括 C++ 对 constrict 的宽容处理，以及形状修改部分的回退与容差策略。bounds-only RegisterHazard 是带 `JAGUARCORE_API` 的 C++ 专有扩展，仓内无调用且 Rust 无对应入口；源码显示子节点范围查询可能漏掉该项，因此它不属于当前 parity 覆盖。阅读时需同时标明 Rust 参考的源码基线。

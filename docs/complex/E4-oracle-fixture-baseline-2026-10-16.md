@@ -37,7 +37,7 @@ Cargo 文件 SHA-256：
 | SparrowCore/Tests/RustReference/src | 7 | A730A4AEE96895C2A64242B54AC1DE298E2CF76361A3C065DF30346DB4DDE7F9 |
 | SparrowCore/Tests/RustReference/tests | 56 | BA0EF8FF7D2E2DEAC2CA4D6E66A357A6B1AFD6F3C22BD47E342C93ED9A0F2846 |
 | SparrowCore/Tests/Fixtures（更新后） | 142 | 0EED773EDA2AAB3E3A8E5C263EFBF73446A53389F1CDDB94EED1C0E78F1E8B7B |
-| JaguarCore/tools/RustOracle/src | 1 | CAB095E7E7EC40EB10654FBCB75B8D9C76C821AE6A14580EC586B0934C605ECD |
+| JaguarCore/tools/RustOracle/src | 1 | D1CF225DC2AC5A5C7E1F6FE0EE06A040F607DE8EC7E2696CF49A73D0214B9A78 |
 
 Sparrow fixture 生成器读取的输入 SHA-256：
 
@@ -98,6 +98,7 @@ Sparrow fixture 生成器读取的输入 SHA-256：
 | zero-separation-parity-only | 6 | 5BFCA78E7E7D79FFF6905731B7AB83EF3771CB7560CC88B9BF99451E9D2E5C45 | 5BFCA78E7E7D79FFF6905731B7AB83EF3771CB7560CC88B9BF99451E9D2E5C45 |
 | shape-modification-b2-parity-only（2026-10-17） | 3 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 | DD237C8CE327A252A384CF41FEA9F70B12E38634F9B8062466D3ED9D490BBD71 |
 | collision-entire-b4a-parity-only（2026-10-17） | 3 | DD6BC8B5C0F4A986FB16A61335121306B52119F15F0852042E540A84B8D5FDFF | DD6BC8B5C0F4A986FB16A61335121306B52119F15F0852042E540A84B8D5FDFF |
+| layout-lifecycle-parity-only（2026-10-17） | 18 | F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36 | F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36 |
 
 ### B2 形状修改重算（2026-10-17）
 
@@ -127,6 +128,18 @@ RustOracle 确认 query virtual root 中有被过滤的 Hole/`Entire`；不加�
 
 C++ `CompareGeometry.cpp` 中的 B4a runner 用相同 bounds、Exterior、Hole、查询多边形和按 handle 过滤的 HazardFilter；MSVC 2019 x64 Debug/Release 均通过，Release 断言启用。未过滤查询返回 `true`，忽略 Hole 后返回 `false`。因此 `CollisionEngine.cpp:255` 的 `Entire → true` 只对应 Rust 边查询的 relevant-hazard 早退；运行差异在 Rust 后续 containment pass 无条件 `unreachable!()` 与 C++ 仅处理 `Partial`。本次处置为保留 C++ 的过滤器语义，不传播 Rust panic；这是固定合法输入上的已确认 pinned 行为差异，B4 整体仍部分。详细记录见 [B4a 碰撞记录](../logic-comparison-jagua/records/30-collision-detection.md#b4a虚拟根中的-filtered-entire-hazard)。
 
+### B6 生命周期矩阵（2026-10-17）
+
+执行命令，Debug 与 Release 分别运行：
+
+~~~powershell
+rustup run 1.98.1 cargo run --quiet --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --layout-lifecycle-parity-only
+rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCore/Tools/RustOracle/Cargo.toml -- --layout-lifecycle-parity-only
+~~~
+
+两条 Rust 命令均使用 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。每个 profile 输出 18 行，Debug/Release 原始 stdout 的 SHA-256 均为 `F1C7267D87FBB547FA06B8F0C6D15DE3066D6D353757B1A6C0666C7CB8155A36`，与 `layout_lifecycle.txt` 的非注释行逐行一致；fixture 文件 SHA-256 为 `867825C4F32C6F442CB083ACB72A8BD6AFA30F7CDCB72D1E8F5B2CCD3F31EAED`。
+
+矩阵覆盖容器复制和同值重建的基础身份、同源快照恢复、恢复前后句柄有效性、动态 hazard 数量、换容器后旧快照拒绝及失败状态，以及 `Items()` 首次出现/去重次序。C++ `CompareLayoutLifecycle.cpp` 已加入 `JaguarCoreTests.pro` 和 `TestSupport`；MSVC 2019 x64 Debug/Release 均重建通过，B6 定向 runner 双 profile 退出码为 0，Release 测试断言启用。完整 `JaguarCoreTests.exe` 未运行。B6 固定矩阵及对象地址身份差异详见[实体记录](../logic-comparison-jagua/records/20-entities.md#b6-固定生命周期差分矩阵2026-10-17)。
 ## 当前可见的 profile 差异与后续项
 
 - 默认输出的 7 行在 Debug/Release 不同：pier_lattice_case 一行，以及 U/L/C 三个形状的 6 组 pier 坐标。现有四个 surrogate_l_c/surrogate_u_shape fixture 的对应数值与 pinned oracle 输出相符，但其注释头仍写 Rust 1.90；目前在 JaguarCore 源码中未找到这些文件的读取者，来源清理与是否保留列入 E7。

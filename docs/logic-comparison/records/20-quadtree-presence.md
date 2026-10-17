@@ -81,13 +81,13 @@ presence 三态与 Exterior 反转语义（容器内 None、容器外 Entire、�
 
 重写后 Quadtree.cpp 的 `Constrict`/`AddHazard`/`RemoveHazard`/`MakeRootHazard` 即本记录三份 Rust 文件的逐行移植，正文描述的"Classify/BuildNode/无载荷 Entry/edgeCount=VertexCount"均过时。逐行复核补充：
 
-### 补-1【遗漏·疑似 bug（同记录 19 补-1）】`Constrict` 的形状来源错误
+### 补-1【2026-10-17 复核】`Constrict` 的形状由调用方按 hazard 自身句柄传入
 - Rust `constrict`（qt_hazard.rs:64）：`let haz_shape = &haz_map[self.hkey].shape` —— **每个 QTHazard 用自己的 hkey 取自己的形状**，Enclosed 判定（:67-70）与 centroid 判定（:144）都用这个形状。
-- C++ `Constrict(hazard, quadrants, shape)`（Quadtree.cpp:300-467）：形状由调用方 `RegisterIntoNode` 传入（Quadtree.cpp:496、513），而 `RegisterIntoNode` 传入的是 `*shapeIt->shape`，其中 `shapeIt` 按**新注册 hazard 的句柄**查找（Quadtree.cpp:473-477）。懒扩展时对已有 hazard 的 constrict（Quadtree.cpp:491-496）传错形状（详见记录 19 补-1）。直接后果落在本记录的这些分支：
-  - Partial 分支的 Enclosed 快捷（Quadtree.cpp:325-334 `shape.BoundingBox()` ↔ qt_hazard.rs:66-70 `haz_shape.bbox`）用错形状的 bbox；
-  - 无相交边象限的 centroid 回退（Quadtree.cpp:446 `shape.ContainsRustF32(quadrants[i].CentroidRustF32())` ↔ qt_hazard.rs:144 `haz_shape.collides_with(&quadrant.centroid())`）用错形状做点包含。
-- 附带核对：`ContainsRustF32`（SimplePolygon.cpp:430-470+）为 jagua-rs `SPolygon::collides_with(&Point)`（simple_polygon.rs:279-306）的 ray-casting 移植——bbox 预筛（439 ↔ :281）、`point_outside = bbox.x_max + bbox.width()`（442 ↔ :284-285）、顶点 y 对齐且 x 在右的 half-crossing 处理（455-462 ↔ :295-301）、其余边 ray 交（464-470 ↔ :303+）。判定：一致。
-- 判定：差异（bug；形状来源），影响同记录 19 补-1。
+- C++ `Constrict(hazard, quadrants, shape)`（Quadtree.cpp:300-467）：形状由 `RegisterIntoNode` 传入。懒扩展已有条目时，当前代码按 `existing.handle` 查找 `existingShape`（Quadtree.cpp:494-502）；新注册条目单独按 `hazard.handle` 查 `shapeIt`（Quadtree.cpp:473-477、506-519）。新旧条目各自使用对应形状，当前源码没有记录 19 旧版疑点所述的错配。
+  - Partial 分支的 Enclosed 快捷（Quadtree.cpp:325-334 `shape.BoundingBox()` ↔ qt_hazard.rs:66-70 `haz_shape.bbox`）在当前源码中接收相应 hazard 的 shape；原先的错配推断不成立；
+  - 无相交边象限的 centroid 回退（Quadtree.cpp:446 `shape.ContainsRustF32(quadrants[i].CentroidRustF32())` ↔ qt_hazard.rs:144 `haz_shape.collides_with(&quadrant.centroid())`）同样接收相应 hazard 的 shape。
+- 附带核对：`ContainsRustF32`（SimplePolygon.cpp:430-470+）为 jagua-rs `SPolygon::collides_with(&Point)`（simple_polygon.rs:279-306）的 ray-casting 移植——bbox 预筛（439 ↔ :281）、`point_outside = bbox.x_max + bbox.width()`（442 ↔ :284-285）、顶点 y 对齐且 x 在右的 half-crossing 处理（455-462 ↔ :295-301）、其余边 ray 交（464-470 ↔ :303+）。判定：一致。以上是静态源码比对，未运行新的差分用例。
+- 判定：原疑似错配在当前 workspace 源码中不成立（静态复核，未运行差分用例；详见记录 19 补-1）。
 
 ### 补-2【浅覆盖→已验证】`QTHazardVec` 移植逐条核对（正文"差异 #5 QTHazardVec C++ 缺失"已过时）
 - `add`（qt_hazard_vec.rs:24-43）↔ `Node::AddHazard`（Quadtree.cpp:226-249）：`activeEdges += EdgeCount()`（229 ↔ :39）、presence 降序 sortKey（Entire=2/Partial=1/None=0，230-241 ↔ :90-101）、`find_if(sortKey(existing) <= key)` 线性插入（243-248 ↔ binary_search_by :34-42——线性 find 与二分查找在"插入首个 ≤key 位置"上等价，元素为按序排列）。判定：一致。**缺失**：Rust `add` 的两条 debug_assert（presence 非 None :25、同 entity/hkey 唯一性 :26-33）C++ 无对应（Release 下 Rust 也不查，属调试不变式，无行为差异）。
@@ -120,5 +120,5 @@ presence 三态与 Exterior 反转语义（容器内 None、容器外 Entire、�
 - centroid + scope 回退（:143-152）↔ Quadtree.cpp:443-452（`interiorScope == colliding ? Entire : None`，interiorScope = `kind != Exterior`）。判定：一致（`entity.scope()` 的 C++ 内联位置从 Classify 移到 Constrict，记录 16 差异 #2 的证据行号已迁移：现 Quadtree.cpp:447-451、CollisionEngine.cpp:69-70）。
 
 ### 补-6【遗漏】重写后仍保留的 C++ 额外 API（正文差异 #6 记录的是旧 hasGeometry fallback，现已变形）
-- `RegisterHazard(handle, Rect2d)` bounds-only 注册（Quadtree.cpp:573-592）与 `MakeRootHazard` 的空 shape 分支（289-296）：对角线假形状（记录 19 补-3）。Rust 无对应。当前无生产调用方。
+- `RegisterHazard(handle, Rect2d)` bounds-only 重载（Quadtree.h:46–47、Quadtree.cpp:579–598）：C++ 公开导出扩展，仓内无调用；以边界对角 Edge 只登记根 Partial，不向子节点传播。由 `VirtualRootFor` 下钻可推导出完全落入子节点的 `Query` 可能漏项；未运行专用用例。Rust 无对应入口，按 B5 不计 parity。
 - `PresenceAt`/`NodeCount`/`VirtualRootBounds`/`QueryVirtualRoot`/`Query`：测试与兼容层 API（记录 19 补-7）。

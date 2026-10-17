@@ -56,6 +56,7 @@ SOURCES += \
     $$PWD/Differential/CompareTrajectory.cpp \
     $$PWD/Differential/CompareOptimizer.cpp \
     $$PWD/Differential/CompareBoundary.cpp \
+    $$PWD/Differential/CompareLayoutLifecycle.cpp \
     $$PWD/TestSpp.cpp \
     $$PWD/TestBpp.cpp \
     $$PWD/TestMspp.cpp \

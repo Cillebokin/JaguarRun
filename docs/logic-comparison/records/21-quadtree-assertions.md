@@ -62,7 +62,7 @@ Rust 的 4 项 quadtree 专项自检（保守性 oracle、无悬挂 hazard、树
 - 判定：C++ 缺失（豁免理由失效，真实测试缺口）。
 
 ### 补-2【浅覆盖→判定变化】`qt_contains_no_dangling_hazards` 的"架构豁免"已失效
-- 正文差异 #2 称"C++ 全量重建无悬挂引用可能"。重写后 C++ 树为增量维护（RegisterIntoNode/DeregisterFromNode，Quadtree.cpp:469-541），与 Rust 相同的悬挂引用风险重新出现——尤其是记录 19 补-1 发现的 shapeIt 传错形状 bug 正属于这类增量维护错误的范畴，若有此断言体系（或对应测试）更易暴露。C++ 仍无对应自检。
+- 正文差异 #2 称"C++ 全量重建无悬挂引用可能"。重写后 C++ 树为增量维护（RegisterIntoNode/DeregisterFromNode，Quadtree.cpp:469-541），与 Rust 一样需要维护并核对节点内容；记录 19 补-1 曾报告 shapeIt 传错形状，但 2026-10-17 静态复核确认当前源码对既有条目按 existing.handle 查 existingShape，原疑点不再作为当前缺陷证据。C++ 仍无对应自检。
 - 判定：C++ 缺失（豁免理由失效；与补-4 的测试缺口叠加）。
 
 ### 补-3【验证】`collision_hazards_sorted_correctly` / `quadrants_have_valid_layout` 缺失现状

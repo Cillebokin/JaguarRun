@@ -41,8 +41,8 @@ public:
     JAGUARCORE_API void RegisterHazard(
         HazardHandle handle, const HazardEntity& entity,
         std::shared_ptr<const SimplePolygon> shape, bool dynamic);
-    // 仅使用保守包围盒注册障碍物
-    // 没有多边形几何时统一标记为部分覆盖
+    // C++ 扩展（Rust 无对应）：以边界左下到右上的对角线作为唯一边代理。
+    // 不保存完整几何且不向子节点传播；落入子节点的查询可能漏掉该障碍物。
     JAGUARCORE_API void RegisterHazard(HazardHandle handle,
                                        const Rect2d& hazardBounds);
     // 注销障碍物（子节点递归移除，无 Partial hazard 时折叠子节点）

@@ -128,7 +128,7 @@
 
 ## B4/B5 结论边界
 
-- 本记录已覆盖 10 个原先待记的 Rust 源文件；B4 的运行 parity、B5 的 C++ bounds-only 扩展路径审查、B11 差分矩阵均未因此完成。
+- 本记录已覆盖 10 个原先待记的 Rust 源文件；B4 运行 parity 与 B11 差分矩阵仍未完成。B5 的 bounds-only 扩展审计已完成处置：保留公开导出项并记录查询漏项限制，不计 parity 覆盖，详见 B5/G10。
 - C++ API 相比 Rust 增加 `Result` 错误出口、显式双重 filter、batch/parallel 查询及排序后的 vector 收集结果；Rust 主 quadtree 以 `HazKey/SlotMap` 与 trait 组合表达，C++ 以 generation handle、私有节点向量和 callback 表达。
 - Rust 多处不变量在 Release 会失去 Debug 断言保护；调用者输入错误可能表现为不变量失守、缺项或后续 panic。C++ 多数入口改成可恢复错误，但 quadtree 的内部逻辑仍需要相同几何边界 fixture 证明。
 - 碰撞顺序在 Rust API 注释中明确为 unspecified；C++ vector collector 的返回重载执行了排序。只有碰撞集合相同的证据时才可宣称集合 parity，不能要求逐项迭代顺序一致。

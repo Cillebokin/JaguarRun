@@ -36,9 +36,9 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 其四是大小写目录副本。C++ include 引用使用大写路径，当前仓库同时存在 Include/include 与 Tests/Differential/differential 副本，且 .pro 所引用的大写路径存在；因此不能仅凭大小写差异断言 Linux、macOS 或大小写敏感 CI 必然构建失败。应比较副本内容、核对 qmake/CMake 的 include root，并明确单一权威目录；副本漂移才是已确认的维护风险。
 
-待核实的问题较多，以下条目仍需按目标 revision 与最小用例验证。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一问题；平行/共线边与自相交检测的关系；piers.rs:57 的 forfeit_distance 量纲；debug_assertions 对 piers 参数的影响；同心圆 bounding_circle 的 NaN 边界；BPP 未放置物品的处理；Layout 与 MSPProblem 的失败原子性；无布局 Density 的 NaN；JSON、SVG、MSPP 边界。bounds-only RegisterHazard 以对角 Edge 近似包围盒且不向子节点分发，但全仓库无调用者，直接查询影响未验证，应记录为未使用扩展路径风险。除明确标注为源码事实的项目外，这些均不应仅凭静态阅读写成已复现缺陷。
+待核实的问题较多，以下条目仍需按目标 revision 与最小用例验证。窄凹陷闭合 close_narrow_concavities（shape_modification.rs:446-449）的面积条件与注释、vertices[i..j] 与删除 i..=j 是否有差一问题；平行/共线边与自相交检测的关系；piers.rs:57 的 forfeit_distance 量纲；debug_assertions 对 piers 参数的影响；同心圆 bounding_circle 的 NaN 边界；BPP 未放置物品的处理；Layout 与 MSPProblem 的失败原子性；无布局 Density 的 NaN；JSON、SVG、MSPP 边界。另有 C++ 导出的 bounds-only RegisterHazard 扩展：仓内无此重载调用；它用对角 Edge 只在根节点登记，完全落入子节点的 Query 可能漏项。该路径已按 B5 登记为非 parity 扩展，未做运行用例。除明确标注为源码事实或源码推导的项目外，这些均不应仅凭静态阅读写成已复现缺陷。
 
-本文结论按静态源码事实、源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；10 月 17 日已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a，并完成 B4b 质量方向静态核对。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过；完整 `JaguarCoreTests.exe` 未运行。B4b 已按 D5 保持 pinned `f5e2b5f` 的实际过滤谓词，SparrowCore callback 与现有阈值断言一致；维护版 `quality >= min_quality` 方向作为 R8 语义残差记录，不改变锁定基线行为。10 月 16 日 SparrowCore 与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 全量验证。
+本文结论按静态源码事实、源码推导的风险和已复现行为区分。10 月 16 日的初始文档修订没有运行构建或测试；10 月 17 日已按 Rust 1.98.1 / pinned `f5e2b5f` 复核 B2、B4a，并完成 B4b 质量方向静态核对。B4a 的 Rust Debug/Release oracle 与 C++ MSVC 2019 x64 定向碰撞 runner 均通过；完整 `JaguarCoreTests.exe` 未运行。B4b 已按 D5 保持 pinned `f5e2b5f` 的实际过滤谓词，SparrowCore callback 与现有阈值断言一致；维护版 `quality >= min_quality` 方向作为 R8 语义残差记录，不改变锁定基线行为。B5 已静态核实并登记 bounds-only C++ 导出扩展；其子节点查询漏项为源码推导，未运行专用用例。10 月 16 日 SparrowCore 与 SparrowCli 的 MSVC 执行记录由用户提供，不覆盖 JaguarCore 全量验证。
 
 
 ---
@@ -443,7 +443,7 @@ Rust 版的 `detect_poly_collision`（`cd_engine.rs` 161-200）与此流程同�
 
 查询入口 `Query`（611-650）支持矩形、线段三种形态，并在节点的活动边数超过 `m_CdThreshold` 时退化为直接对边列表逐一检测，而不是继续下降到子节点。这个阈值（`CDEConfig::cdThreshold` 默认 32，见 `CollisionEngine.h` 35-36）是一个性能折中：边数很少时直接检测比递归更便宜。`PresenceAt`（663-689）计算某句柄在给定节点矩形上的覆盖状态，`VirtualRootFor`（701-721）则为查询矩形选择最小的覆盖节点作为虚拟根，从而缩小遍历范围。
 
-bounds-only RegisterHazard 重载（Quadtree.cpp 579-598）创建 Partial hazard，以一条对角 Edge 近似包围盒，且不保存完整形状。RegisterIntoNode 只有在存在完整形状时才会把 hazard constrict 到子节点，因此该重载留下的条目不会分发到子节点。具体查询是否因此漏检或误报仍需直接调用的最小用例验证；全仓库未发现此重载调用者（B5），当前应记录为未使用扩展路径的潜在风险，而不是已复现缺陷。
+bounds-only RegisterHazard 重载（Quadtree.h:46–47、Quadtree.cpp:579–598）创建 Partial hazard，以边界左下到右上的对角 Edge 作为唯一代理，不保存完整形状，也不向子节点登记。Query 会先由 VirtualRootFor 下钻到完整包含查询范围的子节点，再只遍历该子树；因此完全落入子节点的查询可能漏掉仅保存在根节点的 bounds-only hazard。这是源码路径推导，未运行专用用例。重载带 `JAGUARCORE_API`，但仓内无调用；按 B5 保留并登记为 C++ 专有扩展，不计 Rust parity，未来接入前需要专门定义并验证覆盖契约。
 
 ## 五、SoA 布局与 AVX2 的选择
 
@@ -495,9 +495,9 @@ Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `
 
 ## 十一、主要陷阱与建议
 
-综合上述分析，当前仍需按证据核查以下事项：RegisterHazard(bounds) 在 C++ 中没有调用者，属于未使用路径；若保留，应记录其限制，若未来接入再验证覆盖充分性。线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
+综合上述分析，当前仍需按证据核查以下事项：线性去重、Contains 和 SetRegistered 扫描的规模成本、GetThreadPool 首次调用决定线程数、线程池工作线程异常边界、AVX2 编译/运行期开关、形状修改回退路径、未使用的 ShapeModifyConfig 与 OffsetShape 语义，以及 Quadtree.cpp 的格式问题，分别需要性能测量、调用约定检查或实现验证。bounds-only RegisterHazard 的去留已按 B5 登记，但其查询漏项限制仍未用专用运行用例复核。include 大小写风险应按 Include/include 双目录漂移处理，不应写成已确认的 Linux 构建失败。
 
-在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括本地镜像与 pinned revision 的 constrict 分支语义，以及形状修改部分的回退与容差策略。bounds-only RegisterHazard 是无调用者的扩展路径，查询影响尚未验证，不作为当前已观察到的 parity 差异。阅读时需标明 Rust 参考源码基线。
+在与 Rust 参考的对照中，碰撞检测主流程、包含真值表、象限约束、半相交分类以及代理的 poles 使用基本一致；主要待核对点包括本地镜像与 pinned revision 的 constrict 分支语义，以及形状修改部分的回退与容差策略。bounds-only RegisterHazard 是带 `JAGUARCORE_API` 的 C++ 专有扩展，仓内无调用且 Rust 无对应入口；源码显示子节点范围查询可能漏掉该项，因此它不属于当前 parity 覆盖。阅读时需标明 Rust 参考源码基线。
 
 # 附录 F：JaguarCore 问题模型、IO 与公开 API
 

@@ -684,6 +684,211 @@ fn run_restore_boundary_parity_oracle() {
     );
 }
 
+fn run_layout_lifecycle_parity_oracle() {
+    let cde_config = CDEConfig {
+        quadtree_depth: 4,
+        cd_threshold: 8,
+        item_surrogate_config: SPSurrogateConfig::none(),
+    };
+    let make_container = |width: f32, height: f32| {
+        Container::new(
+            OriginalShape {
+                shape: polygon(&[(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Deflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            vec![],
+            cde_config,
+        )
+        .unwrap()
+    };
+
+    let container = make_container(20.0, 10.0);
+    let cloned_container = container.clone();
+    let recreated_container = make_container(20.0, 10.0);
+    println!(
+        "container.clone_same_base={}",
+        Arc::ptr_eq(&container.base_cde, &cloned_container.base_cde)
+    );
+    println!(
+        "container.recreated_same_base={}",
+        Arc::ptr_eq(&container.base_cde, &recreated_container.base_cde)
+    );
+
+    let item = square_item(0, 1.0);
+    let mut roundtrip_layout = Layout::new(container.clone());
+    let saved_key = roundtrip_layout.place_item(&item, DTransformation::new(0.0, (1.0, 1.0)));
+    let snapshot = roundtrip_layout.save();
+    roundtrip_layout.remove_item(saved_key);
+    let mutated_key =
+        roundtrip_layout.place_item(&square_item(1, 1.0), DTransformation::new(0.0, (5.0, 1.0)));
+    let restored = roundtrip_layout.restore(&snapshot).is_ok();
+    let restored_placement = roundtrip_layout.placed_items.get(saved_key);
+    println!("roundtrip.restore_succeeded={restored}");
+    println!(
+        "roundtrip.placement_count={}",
+        roundtrip_layout.placed_items.len()
+    );
+    println!(
+        "roundtrip.dynamic_hazard_count={}",
+        roundtrip_layout.cde().save().dynamic_hazards.len()
+    );
+    println!(
+        "roundtrip.saved_key_present={}",
+        roundtrip_layout.placed_items.contains_key(saved_key)
+    );
+    println!(
+        "roundtrip.mutated_key_stale={}",
+        !roundtrip_layout.placed_items.contains_key(mutated_key)
+    );
+    println!(
+        "roundtrip.restored_item={}",
+        restored_placement.map_or_else(
+            || "missing".to_owned(),
+            |placed| {
+                let (x, y) = placed.d_transf.translation();
+                format!("{}:{x:.1}:{y:.1}", placed.item.idx)
+            }
+        )
+    );
+
+    let mut shared_base_target = Layout::new(cloned_container);
+    let shared_base_restore = shared_base_target.restore(&snapshot).is_ok();
+    println!("restore.shared_base_succeeded={shared_base_restore}");
+    println!(
+        "restore.shared_base_placement_count={}",
+        shared_base_target.placed_items.len()
+    );
+
+    let mut mismatch_target = Layout::new(recreated_container);
+    let first_mismatch_item = square_item(7, 1.0);
+    let second_mismatch_item = square_item(8, 1.0);
+    let first_mismatch_key =
+        mismatch_target.place_item(&first_mismatch_item, DTransformation::new(0.0, (2.0, 2.0)));
+    let second_mismatch_key =
+        mismatch_target.place_item(&second_mismatch_item, DTransformation::new(0.0, (8.0, 2.0)));
+    let before_mismatch = mismatch_target.save();
+    let mismatch_rejected = mismatch_target.restore(&snapshot).is_err();
+    let after_mismatch = mismatch_target.save();
+    let mismatch_placements_unchanged = [(first_mismatch_key, 7), (second_mismatch_key, 8)]
+        .into_iter()
+        .all(|(key, expected_index)| {
+            let (Some(before), Some(after)) = (
+                before_mismatch.placed_items.get(key),
+                after_mismatch.placed_items.get(key),
+            ) else {
+                return false;
+            };
+            before.item.idx == expected_index
+                && after.item.idx == expected_index
+                && before.d_transf == after.d_transf
+                && Arc::ptr_eq(&before.item, &after.item)
+                && Arc::ptr_eq(&before.shape, &after.shape)
+        });
+    let mismatch_hazards_unchanged = before_mismatch
+        .cde_snapshot
+        .dynamic_hazards
+        .iter()
+        .zip(&after_mismatch.cde_snapshot.dynamic_hazards)
+        .all(|(before, after)| {
+            before.entity == after.entity
+                && before.dynamic == after.dynamic
+                && Arc::ptr_eq(&before.shape, &after.shape)
+        });
+    let mismatch_state_unchanged = mismatch_rejected
+        && before_mismatch.placed_items.len() == after_mismatch.placed_items.len()
+        && before_mismatch.cde_snapshot.dynamic_hazards.len()
+            == after_mismatch.cde_snapshot.dynamic_hazards.len()
+        && mismatch_placements_unchanged
+        && mismatch_hazards_unchanged
+        && Arc::ptr_eq(
+            &before_mismatch.container.base_cde,
+            &after_mismatch.container.base_cde,
+        );
+    println!("restore.different_base_rejected={mismatch_rejected}");
+    println!("restore.different_base_state_unchanged={mismatch_state_unchanged}");
+
+    let mut swap_layout = Layout::new(container.clone());
+    let swap_first_item = square_item(12, 1.0);
+    let swap_second_item = square_item(13, 1.0);
+    let swap_first_key =
+        swap_layout.place_item(&swap_first_item, DTransformation::new(0.0, (1.0, 1.0)));
+    let swap_second_key =
+        swap_layout.place_item(&swap_second_item, DTransformation::new(0.0, (5.0, 1.0)));
+    let old_container_snapshot = swap_layout.save();
+    swap_layout.swap_container(make_container(21.0, 10.0));
+    let after_swap = swap_layout.save();
+    println!("swap.placement_count={}", after_swap.placed_items.len());
+    println!(
+        "swap.dynamic_hazard_count={}",
+        after_swap.cde_snapshot.dynamic_hazards.len()
+    );
+    let old_snapshot_rejected = swap_layout.restore(&old_container_snapshot).is_err();
+    let after_old_snapshot = swap_layout.save();
+    let swap_placements_unchanged = [(swap_first_key, 12), (swap_second_key, 13)]
+        .into_iter()
+        .all(|(key, expected_index)| {
+            let (Some(before), Some(after)) = (
+                after_swap.placed_items.get(key),
+                after_old_snapshot.placed_items.get(key),
+            ) else {
+                return false;
+            };
+            before.item.idx == expected_index
+                && after.item.idx == expected_index
+                && before.d_transf == after.d_transf
+                && Arc::ptr_eq(&before.item, &after.item)
+                && Arc::ptr_eq(&before.shape, &after.shape)
+        });
+    let swap_hazards_unchanged = after_swap
+        .cde_snapshot
+        .dynamic_hazards
+        .iter()
+        .zip(&after_old_snapshot.cde_snapshot.dynamic_hazards)
+        .all(|(before, after)| {
+            before.entity == after.entity
+                && before.dynamic == after.dynamic
+                && Arc::ptr_eq(&before.shape, &after.shape)
+        });
+    let old_snapshot_state_unchanged = old_snapshot_rejected
+        && after_swap.placed_items.len() == after_old_snapshot.placed_items.len()
+        && after_swap.cde_snapshot.dynamic_hazards.len()
+            == after_old_snapshot.cde_snapshot.dynamic_hazards.len()
+        && swap_placements_unchanged
+        && swap_hazards_unchanged
+        && Arc::ptr_eq(
+            &after_swap.container.base_cde,
+            &after_old_snapshot.container.base_cde,
+        );
+    println!("swap.old_snapshot_rejected={old_snapshot_rejected}");
+    println!("swap.old_snapshot_state_unchanged={old_snapshot_state_unchanged}");
+
+    let first_item = square_item(5, 1.0);
+    let second_item = square_item(6, 1.0);
+    let mut duplicate_item = (*first_item).clone();
+    duplicate_item.external_id = 1505;
+    let duplicate_item = Arc::new(duplicate_item);
+    let mut items_layout = Layout::new(make_container(30.0, 10.0));
+    let first_item_key =
+        items_layout.place_item(&first_item, DTransformation::new(0.0, (1.0, 1.0)));
+    items_layout.place_item(&second_item, DTransformation::new(0.0, (8.0, 1.0)));
+    items_layout.place_item(&duplicate_item, DTransformation::new(0.0, (15.0, 1.0)));
+    let items_before_removal = items_layout
+        .items()
+        .map(|item| format!("{}:{}", item.idx, item.external_id))
+        .collect::<Vec<_>>()
+        .join(",");
+    items_layout.remove_item(first_item_key);
+    let items_after_removal = items_layout
+        .items()
+        .map(|item| format!("{}:{}", item.idx, item.external_id))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!("items.before_removal={items_before_removal}");
+    println!("items.after_removal={items_after_removal}");
+}
+
 fn run_zero_min_item_separation_oracle() {
     let spp = ExtSPInstance {
         name: "zero-spp".to_owned(),
@@ -1953,6 +2158,10 @@ fn run_b1_geometry_oracle() {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--layout-lifecycle-parity-only") {
+        run_layout_lifecycle_parity_oracle();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--fail-fast-parity-only") {
         run_b3_surrogate_parity_oracle();
         return;

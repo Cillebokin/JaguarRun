@@ -3,7 +3,7 @@
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对照**：`JaguarCore/Include/JaguarCore/Entities/*`、`JaguarCore/Source/Entities/*`  
 **关联工作项**：B6、B13  
-**证据类型**：pinned Rust 与当前 C++ 源码静态核对；本记录不构成运行对拍结论
+**证据类型**：pinned Rust 源码核对；2026-10-17 Rust Debug/Release oracle 与 MSVC 2019 x64 C++ Debug/Release 定向对拍
 
 ## `jagua-rs/src/entities/container.rs`
 
@@ -46,21 +46,30 @@
 | `place_item` (93–105) | 先将新 `PlacedItem` 插入 SlotMap，借 key 构造 dynamic hazard 并注册；debug 下检查 quadtree；返回 key。API 无 `Result`，shape 转换/注册没有显式错误分支 | `Layout::PlaceItem`（`Layout.cpp:108–137`）可因 CDE 缺失、PlacedItem 构造或 hazard 注册失败返回错误；注册失败会撤销 slot 并推进 generation、放回 free list（125–132）。C++ 对失败与回滚显式化 |
 | `remove_item` (108–120) | slotmap remove 返回 `None` 时 `expect` panic（112）；有效时按 entity 注销 hazard，Debug 检查 quadtree 后返回被移除对象 | `Layout::RemoveItem`（`Layout.cpp:139–158`）无效句柄返回 `InvalidInput`；注销失败先返回错误且不清 slot；成功后清 slot、推进 generation 并回收 index |
 | `is_empty`、`placed_item_area`、`density` (124–142) | 空性来自 SlotMap；面积按放置项原始 area 累加，density 为放置面积除以容器毛面积，类型均为 `f32` | C++ 对应 `PlacedItemCount/PlacedItemArea/Density`（`Layout.cpp:226–241,450–456`）；面积也以 `float` 累加、容器面积先转 `float` 后相除再转 `double` |
-| `items` (145–150) | 按 SlotMap 遍历顺序映射 Item 引用，并按 `item.idx` 去重 | `Layout::Items`（`Layout.cpp:458–478`）按槽位索引扫描并按 `ItemIndex` 去重；两者都是首次出现顺序，但存储枚举次序由不同容器实现，仍需 B6 fixture 确认跨实现顺序 |
+| `items` (145–150) | 按 SlotMap 遍历顺序映射 Item 引用，并按 `item.idx` 去重 | `Layout::Items`（`Layout.cpp:458–478`）按槽位索引扫描并按 `ItemIndex` 去重；两者都是首次出现顺序；2026-10-17 固定 fixture 确认放置、删除后的次序分别为 `5:1005,6:1006` 与 `6:1006,5:1505` |
 | `cde` (154–156) | 只读暴露布局碰撞引擎引用 | C++ 没有 Layout 的公开 CDE getter；可从其它接口操作或另行创建容器 CDE |
 | `is_feasible` (160–168) | 遍历每个放置项，用 `haz_key_from_pi_key` 查自身 hazard；若缺映射则 `expect` panic；否则排除自身后执行多边形碰撞查询，任一碰撞返回 false | `Layout::IsFeasible`（`Layout.cpp:203–224`）CDE 为空时返回 false；用 `cdeHandle` 过滤自身，碰撞即 false。Rust 缺 map 属 panic，C++ 对 null engine 属普通 false |
 | `ContainerMismatch` (171–174) | 零字段错误类型，用于不同 static base 的 restore 失败 | C++ 映射到 `ErrorCode::SnapshotMismatch`（`Layout.cpp:264–269`），错误载荷还包含消息 |
 | `LayoutSnapshot` 与查询 (179–203) | 快照包含 container、完整 `SlotMap` 与 `CDESnapshot`；`density`/`placed_item_area` 重用 Layout 的原始面积逻辑 | C++ `LayoutSnapshot`（`Entities/Layout.h:17–34`）以 placements、CDE snapshot、slot generations、free-slot 顺序表达；`PlacedItemArea`（`Layout.cpp:35–53`）先按 handle `(index,generation)` 排序后以 float 累加。Rust 按 SlotMap `values()` 顺序累加，浮点求和次序的跨实现等价尚未由本记录证明 |
 
-## B6 结论与未覆盖验证
+## B6 固定生命周期差分矩阵（2026-10-17）
 
-- 四个 Rust 文件均已逐项登记；这只是 pinned-source 静态对照，不代表生命周期与 restore 已完成验收。
-- Rust `Arc::ptr_eq(base_cde)` 与 C++ `Container::SameBase` 都以共享静态容器数据身份判同源；两者的实例创建/复制路径与快照可达路径仍需由 B6 用例证明相同。
-- 已确认的接口级差异包括 Rust 无错误返回的 place/remove/swap 路径中存在 `expect` 或隐式假设，C++ 多数改为 `Result`；C++ snapshot 还保存 slot generation/free-list 元数据。
-- 后续 B6 应重点覆盖跨同源/异源容器 restore、无效/过期 handle、hazard 注册失败回滚、snapshot 往返后 handle 复用顺序、`Items()` 去重顺序与不可行布局检查。当前记录未运行测试。
+- Rust `Arc::ptr_eq(base_cde)` 与 C++ `Container::SameBase` 的同一性语义经运行对拍确认：复制容器保留同一基础身份；以相同参数独立重建容器得到不同身份。
+- 对同源快照，Rust `Layout::restore` 与 C++ `Layout::Restore` 都恢复原 placement、句柄、变换与动态 hazard；中途替换产生的旧代际句柄在恢复后失效。
+- `swap_container` / `SwapContainer` 保留现有 placement 并重建动态 hazard；旧容器快照在切换后分别以 `ContainerMismatch` / `SnapshotMismatch` 被拒绝，状态不变。
+- `Items()` 的首次出现与按 item index 去重次序在 fixture 覆盖的两种状态中一致。
+- 对拍命令使用 Rust 1.98.1、Cargo.lock 与 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`。Rust Debug/Release 各 18 行 stdout 与 fixture 完全一致；MSVC 2019 x64 C++ Debug/Release 定向 runner 均通过，Release 断言启用。完整 `JaguarCoreTests.exe` 未运行。
+- 因清单验收条件已覆盖，B6 在固定生命周期矩阵范围内完成；这不等于所有损坏快照和错误注入路径均等价。
+
+### 已登记差异与边界
+
+- Rust `PlacedItem` 通过 `Arc::clone` 共享传入的 `Item`；C++ `PlacedItem::Create` 复制 `Item` 到内部 `shared_ptr`。值查询与本矩阵中的快照内容一致，但对象地址身份不等价，调用方若比较地址可观察到差别。
+- Rust `place_item`、`remove_item`、`swap_container` 的失效路径含 `expect` 或无返回错误出口，C++ 多数使用 `Result`；C++ 快照额外保存 slot generation/free-list 元数据。
+- 损坏 CDE 快照导致的注册失败回滚，以及动态 hazard 与 placements 不一致时 Debug/Release 的失败通道，未纳入本轮固定有效状态矩阵。原有静态核对结论仍适用，不据本轮结果外推。
 
 ## 证据位置
 
 - pinned Rust：`entities/container.rs:13–132`、`entities/item.rs:10–59`、`entities/placed_item.rs:11–39`、`entities/layout.rs:12–203`。
 - C++：`JaguarCore/Source/Entities/Container.cpp:11–151`、`Item.cpp:9–110`、`PlacedItem.cpp:16–56`、`Layout.cpp:35–490`；公开声明见 `JaguarCore/Include/JaguarCore/Entities/{Container,Item,PlacedItem,Layout}.h`。
-- 现有测试入口：`JaguarCore/Tests/TestLayout.cpp`、`JaguarCore/Tests/TestBoundary.cpp`；列出测试位置仅表示代码存在，不代表本轮执行或已满足 B6 验收。
+- B6 对拍：`JaguarCore/Tools/RustOracle/src/main.rs::run_layout_lifecycle_parity_oracle`、`JaguarCore/Tests/Fixtures/RustReference/layout_lifecycle.txt`、`JaguarCore/Tests/Differential/CompareLayoutLifecycle.cpp`；比较器已挂入 `JaguarCoreTests.pro`。定向 MSVC 2019 x64 Debug/Release runner 均通过；完整测试套件未运行。
+- 其余生命周期测试入口：`JaguarCore/Tests/TestLayout.cpp`、`JaguarCore/Tests/TestBoundary.cpp`；源码有测试不代表本轮运行过。

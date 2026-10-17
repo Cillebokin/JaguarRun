@@ -23,7 +23,7 @@
 - 证据与说明：
   - Rust：**增量**。把 hazard 转成根 QTHazard（Partial，全边），向下 `constrict`：只有当节点收到 `Partial` presence 且 `level > 0` 时才**懒生成** children（qt_node.rs:61-76），已有 hazard 一并 constrict 下放；Entire/None 递归终止（qt_node.rs:51-57）。
   - C++：**全量重建**。`SetRegistered` 更新 `m_Hazards`（去重按 handle）后无条件 `Rebuild()` → `BuildNode(m_Root, m_Hazards, ...)`（Quadtree.cpp:333-338），从根开始对**所有**已注册 hazard 重新 `Classify` 递归建树。
-  - 结果等价性：两侧树中某节点上某 hazard 的 presence 判定一致（见记录 20 的 constrict vs Classify 比对），故查询结果集合一致；差异在每次注册 O(全量) vs O(路径)。C++ 另有 `RegisterHazard(handle, const Rect2d&)` 只用包围盒注册的变体（Quadtree.cpp:62-70，`hasGeometry=false` 统一标 Partial）——Rust 无此形态（Rust hazard 必有 shape）。
+  - 结果等价性：两侧树中某节点上某 hazard 的 presence 判定一致（见记录 20 的 constrict vs Classify 比对），故查询结果集合一致；差异在每次注册 O(全量) vs O(路径)。C++ 另有公开导出的 `RegisterHazard(handle, const Rect2d&)` bounds-only 扩展（Quadtree.h:46–47、Quadtree.cpp:579–598）：以边界对角线作为唯一 Edge 代理，不保存完整几何；Rust 无对应入口，且该扩展不计入上述 parity 结论（B5）。
   - Rust 注册前 `debug_assert` 同实体不重复（cd_engine.rs:60-63）；C++ 同样在 CollisionEngine 层查重（CollisionEngine.cpp:86-96，见记录 22）。
 
 ### `QTNode::deregister_hazard`（qt_node.rs:84-95）vs `QuadTree::DeregisterHazard`（Quadtree.cpp:72-81）
@@ -76,7 +76,7 @@
 | 5 | `quadrant_order` 启发式（Circle 优先象限） | C++ 缺失 | 仅影响 collides 短路速度，不影响结果 | qt_traits.rs:18-48 vs Quadtree.cpp:295-299 |
 | 6 | Edge 专用象限分类（half_intersect + 共享边分摊） | C++ 缺失（退化为包围盒查询） | 结果由调用方 EdgeCollidesWithHazard 兜底保证 | qt_traits.rs:53-129 vs Quadtree.cpp:91-94 |
 | 7 | virtual root | 一致 | — | cd_engine.rs:370-383 vs Quadtree.cpp:124-143 |
-| 8 | `RegisterHazard(handle, Rect2d)` 纯包围盒注册变体 | C++ 额外 | Rust 无此形态 | Quadtree.cpp:62-70 |
+| 8 | `RegisterHazard(handle, Rect2d)` bounds-only 扩展 | C++ 公开导出、仓内无调用；对角 Edge 仅保存在根节点，子节点范围查询可能漏项 | Rust 无对应入口，不计 parity 覆盖 | Quadtree.h:46-47；Quadtree.cpp:579-598；B5 |
 | 9 | 子节点懒生成+收缩（无 Partial 即丢 children）vs 重建时截断 | 结果等价/实现不同 | 同差异 #1 的树形态收敛 | qt_node.rs:61-76、88-90 vs Quadtree.cpp:264 |
 
 ## 结论
@@ -84,15 +84,15 @@
 
 ## 补充审计（2026-09-29，逐行复核 2026-09-29 重写基线：Quadtree.cpp 当前 750 行）
 
-重写后的 C++ 已与本记录"判定"列中标注的旧架构条目全面脱钩：现版本 Quadtree.cpp 是 qt_node/qt_hazard/qt_partial_hazard/qt_hazard_vec 的结构级移植（Node 持 NodeHazard 向量按 presence 降序、PartialHazard 边子集 + ffBbox、activeEdges 缓存、懒扩展、增量 constrict/deregister、VirtualRootFor）。上表差异 #1/#2/#3/#9 描述的"全量重建/不存边子集/建树期阈值"均不再成立。逐行复核发现以下**新遗漏/偏差**（均为记录未覆盖）：
+重写后的 C++ 已与本记录"判定"列中标注的旧架构条目全面脱钩：现版本 Quadtree.cpp 是 qt_node/qt_hazard/qt_partial_hazard/qt_hazard_vec 的结构级移植（Node 持 NodeHazard 向量按 presence 降序、PartialHazard 边子集 + ffBbox、activeEdges 缓存、懒扩展、增量 constrict/deregister、VirtualRootFor）。上表差异 #1/#2/#3/#9 描述的"全量重建/不存边子集/建树期阈值"均不再成立。逐行复核发现以下**遗漏/偏差**，并对一条此前疑点作了当前源码复核：
 
-### 补-1【遗漏·疑似 bug】`RegisterIntoNode` 的 constrict 形状查找按"新 hazard 句柄"而非"当前被 constrict 的 hazard 句柄"
+### 补-1【2026-10-17 复核】`RegisterIntoNode` 按各 hazard 自身句柄查找形状
 - Rust（qt_node.rs:39-82）：`register_hazard` 收到 `new_qt_haz` 后，懒扩展时对**每个已有 hazard** 调 `constrict_and_register_to_children`，其中 `qt_hazard.constrict(child_bboxes, haz_map)`（qt_node.rs:44）按**该 hazard 自身的 hkey** 从 `haz_map` 取形状（qt_hazard.rs:64 `haz_map[self.hkey].shape`）——每个 hazard 用自己的形状。
-- C++（Quadtree.cpp:469-521）：`RegisterIntoNode` 开头算出的 `shapeIt`（按 `hazard.handle` 查 `shapes`，Quadtree.cpp:473-477）在两处被复用：
-  - 懒扩展分支对已有 hazard 的 constrict（Quadtree.cpp:491-496）：`Constrict(existing, quadrants, *shapeIt->shape)` —— **用新 hazard 的形状 constrict 旧 hazard**！
-  - 新 hazard 下放分支（Quadtree.cpp:506-519）：`Constrict(hazard, ...)` 用 `shapeIt` —— 此处正确（新 hazard 用自己的形状）。
-- 后果：懒扩展时旧 hazard 的 constrict 走 `Partial` 分支时，`Constrict` 内部 `shape.BoundingBox()`（Quadtree.cpp:325）、`shape.ContainsRustF32(centroid)`（Quadtree.cpp:446）全部拿**错误的形状**（新注册 hazard 的形状）计算，导致旧 hazard 在子节点的 presence/Entire/None 判定失真。这与 Rust 语义直接分叉，属**行为 bug**而非表示法差异。触发条件：同一节点上已有非 None 的 hazard 且节点因新 Partial hazard 首次懒扩展（首次注册即扩展的常见单 hazard 树不触发，多 hazard 场景触发）。注意 `bounds-only` 注册（`RegisterHazard(handle, Rect2d)`）的 `shapeIt->shape` 为空时 C++ 直接 `continue`（Quadtree.cpp:493-494）跳过旧 hazard 的下放——旧 hazard 从父节点消失于子节点（查询仍可从父级命中，但 cd_threshold 语义破坏），也是 Rust 无对应的行为（Rust hazards 必有 shape，qt_node.rs:44 恒可取形状）。
-- 判定：差异（bug）。
+- C++（当前 workspace，Quadtree.cpp:469-521）：新条目的 `shapeIt` 按 `hazard.handle` 查表；懒扩展已有条目时另以 `existing.handle` 查 `existingShape`。新旧 hazard 分别使用自己的形状，当前源码与 Rust 的逐条查形状路径一致。
+  - 懒扩展分支对已有 hazard 的 constrict（Quadtree.cpp:490-504）：先按 `existing.handle` 查找 `existingShape`，再将该形状传给 `Constrict(existing, ...)`。
+  - 新 hazard 下放分支（Quadtree.cpp:506-519）：只有 `shapeIt` 存在且 shape 非空时才将新 hazard constrict 到子节点；bounds-only 重载没有完整 shape，因此不会分发。
+- 复核结论：当前 workspace 源码没有使用新条目形状 constrict 旧条目的行为；原疑似差异不成立（静态核对，未运行差分用例）。bounds-only 条目本身没有 shape，因此在后续懒扩展时不会复制到新子节点，但仍保存在原节点；这与其只在根节点登记、虚拟根可能下钻而漏项的限制相同，详见补-3/B5。
+- 判定：原疑似实现差异在当前源码中不成立（静态核对；未运行差分用例）。
 
 ### 补-2【遗漏】`collect_collisions_until` 的子节点遍历顺序：Rust 固定 0..3，C++ 圆路径按 `quadrantOrder` 启发式
 - Rust（qt_node.rs:183-190）：`colliding_quadrants.iter().enumerate().filter(...)` 固定按象限下标 0..3 顺序递归，`quadrant_order` 只用于 `collides`（qt_node.rs:118-124），collect 路径**无**启发式排序（记录正文差异 #5 已正确指出这一点）。
@@ -100,10 +100,10 @@
 - 影响：仅早停时收集到的 hazard **集合顺序**（以及 stop 回调触发点）不同——`stop_after_collision` 为 true 时 collector 内残留的 hazard 选取可能与 Rust 不同（树中按序先到者留）。全量收集（回调恒 false）时结果集合一致。注意 C++ 的 `CircleCollides`/`NodeCollidesWithCircle`（detect 路径）用 quadrantOrder 与 Rust collides 一致，属移植者把启发式误用于 collect 路径。
 - 判定：差异（早停语义下的顺序分叉；非全量收集的行为差异）。
 
-### 补-3【遗漏】`MakeRootHazard`/`RegisterHazard(handle, Rect2d)` 的 bounds-only 对角线假形状
+### 补-3【B5 复核】bounds-only 对角线代理仅驻留根节点
 - Rust（qt_hazard.rs:37-44）：`from_root` 恒以**整形状边集**构造根 Partial；Rust 无"无形状 hazard"（Hazard.shape 为 Arc<SPolygon> 必有值）。
-- C++（Quadtree.cpp:273-298）：`hazard.shape` 为空时用根节点对角线 `Edge2d{(xMin,yMin),(xMax,yMax)}` 充当"整形状"（ffBbox=rootBounds）；`RegisterHazard(handle, Rect2d)`（Quadtree.cpp:573-592）同样以 hazardBounds 对角线注册。此形状参与后续 constrict 的边-象限相交（rectCollidesWithEdge）与 centroid ContainsRustF32 判定，产生与真实几何无关的 presence。记录正文差异 #8 已记该变体为"C++ 额外"，但未指出其**假形状会流入 constrict 语义**（父节点 Partial 下放时按对角线裁边、按对角线 bbox 判 Enclosed）。当前 jagua-rs 侧无调用方产生该形态，JaguarCore 侧亦无生产调用（测试无），风险待定。
-- 判定：C++ 额外（语义外溢未记录）。
+- C++ bounds-only 重载（Quadtree.cpp:579-598）把 hazardBounds 保存为登记边界，并以其左下到右上的对角 Edge 建立根 Partial；该 RegisteredShape 的 shape 为空。RegisterIntoNode 只在有完整 shape 时才向子节点分发，所以 bounds-only hazard 留在根节点，不会在子节点中产生 Presence。Query 先调用 VirtualRootFor；当 queryBounds 完全落入一个子节点时会从该子节点开始遍历，不再访问根节点，因此这类查询可能漏掉该 hazard。此为源码路径推导，本轮未运行最小用例。该方法在头文件中带 `JAGUARCORE_API`，但仓内没有此重载调用；按 B5 保留并登记为 C++ 专有公开扩展，Rust 无对应入口，不计 parity 覆盖。
+- 判定：C++ 公开扩展；仓内无调用；存在可由当前源码推导的子节点查询漏项，未作运行验证。
 
 ### 补-4【浅覆盖→已验证】qt_traits 逐行核验结果（记录正文按旧架构写的"Edge 查询用包围盒/无象限分类"已过时）
 重写后 qt_traits.rs 的每个函数在 C++ 中都有逐行移植，记录未逐条登记，现补齐：

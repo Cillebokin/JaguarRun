@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "baselineId": "sparrow-parity-2026-10-18-s07",
-  "frozenAtUtc": "2026-10-18T05:25:54.2865682Z",
+  "frozenAtUtc": "2026-10-18T05:42:56.5791118Z",
   "workspace": "D:\\MyWorks\\ProQt\\JaguarRun",
   "method": "Per-file SHA-256 and deterministic sorted-tree digest; no VCS metadata used.",
   "rust": {
@@ -58,27 +58,27 @@
     },
     {
       "path": "repo://SparrowCore/build/tests-rust-equivalence-debug/debug/SparrowCoreTests.exe",
-      "bytes": 3824128,
-      "lastWriteTimeUtc": "2026-10-18T05:17:08.3545717Z",
-      "sha256": "81a900c172f86e7565765e3ae530cc010bd2e295eac4adc6b53512ee3087bceb"
+      "bytes": 3485696,
+      "lastWriteTimeUtc": "2026-10-18T05:36:05.1378296Z",
+      "sha256": "534bc7ab2b738945548dd719866e3a37bf911f330e2d1ee1f4df54eb9184c906"
     },
     {
       "path": "repo://SparrowCore/build/tests-rust-equivalence-release/release/SparrowCoreTests.exe",
-      "bytes": 1347072,
-      "lastWriteTimeUtc": "2026-10-18T05:18:24.1818432Z",
-      "sha256": "81043c4e73762de99ce9e61216f8e32cfc9053b975e820d60fb3aedbe5410d4f"
+      "bytes": 1310208,
+      "lastWriteTimeUtc": "2026-10-18T05:39:52.7268490Z",
+      "sha256": "f943f51c8a5134797a4877aac2b16fa58491eccf0d59292c721782f449ebfe38"
     },
     {
       "path": "repo://SparrowCore/build/build_Kit_MSVC_2019_x64-Debug/bin/SparrowCore.lib",
-      "bytes": 18589164,
-      "lastWriteTimeUtc": "2026-10-18T05:17:04.1624747Z",
-      "sha256": "7cf54647e913fa4cf9bf3545a189ab2ae443c79f6fe28c80043573af11e446a0"
+      "bytes": 18138136,
+      "lastWriteTimeUtc": "2026-10-18T05:36:01.5685862Z",
+      "sha256": "6ceefb7b7e1bb741cb0a4f23fc25cbe2f82e7e135edca881327e26e7e6a928e9"
     },
     {
       "path": "repo://SparrowCore/build/build_Kit_MSVC_2019_x64-Release/bin/SparrowCore.lib",
-      "bytes": 2669966,
-      "lastWriteTimeUtc": "2026-10-18T05:18:19.6635173Z",
-      "sha256": "dcdc2b850d24b86ec6e10f2b64328a81ea87ff7f525081ed9a10a2dc899a9e8f"
+      "bytes": 2500644,
+      "lastWriteTimeUtc": "2026-10-18T05:39:31.7254468Z",
+      "sha256": "6670b89252123f85cf389e1fafad46cf26e523bdb99bbbdd2cdc921fb501732c"
     },
     {
       "path": "repo://JaguarCore/build/build_Kit_MSVC_2019_x64-Debug/Bin/JaguarCored.lib",
@@ -95,14 +95,14 @@
     {
       "path": "repo://JaguarCore/build/build_Kit_MSVC_2019_x64-Debug/Bin/JaguarCored.dll",
       "bytes": 1900544,
-      "lastWriteTimeUtc": "2026-10-17T08:12:06.4172794Z",
-      "sha256": "dc1be5f65bf6d4c8ecba468d456ba7e3633ac85eb2b578c0017d79587db217b1"
+      "lastWriteTimeUtc": "2026-10-18T05:33:23.0271701Z",
+      "sha256": "8685dd9bd823ca7dec254b7687a78de65d40814d707e3704d2da76d88374fea2"
     },
     {
       "path": "repo://JaguarCore/build/build_Kit_MSVC_2019_x64-Release/bin/JaguarCore.dll",
       "bytes": 641536,
-      "lastWriteTimeUtc": "2026-10-17T08:11:15.4041785Z",
-      "sha256": "b13a0266ecd4fd5b47f4ff1b157009a25295bac0ab8c1e8429f022e06d96f1b5"
+      "lastWriteTimeUtc": "2026-10-18T05:39:14.7135702Z",
+      "sha256": "54b68cab8d68ed6b7e3318d247cf7aae94945862fca438607c074c5b076410fd"
     }
   ],
   "sourceRoots": [
@@ -3165,9 +3165,9 @@
     {
       "name": "SparrowCore C++ source, tests, and tools",
       "root": "D:\\MyWorks\\ProQt\\JaguarRun\\SparrowCore",
-      "fileCount": 321,
-      "totalBytes": 2590634,
-      "sha256": "3d8b6680b46ef7e2d71dcba9b4f75ac287ef4ed7c03b2f32e55550cb38329710",
+      "fileCount": 324,
+      "totalBytes": 2606209,
+      "sha256": "029e5cf461a14bd7a08e2b65e1342201aea0a87baa0dc9f47be10cf2ace870d7",
       "files": [
         {
           "path": "repo://SparrowCore/Bench/BenchMain.cpp",
@@ -3391,8 +3391,8 @@
         },
         {
           "path": "repo://SparrowCore/Source/Optimizer/Compression.cpp",
-          "bytes": 14036,
-          "sha256": "b89859b24566250a1374bf4a3d1bcc68942ebb8121a14b3a3bf2e720fda5540b"
+          "bytes": 14679,
+          "sha256": "e7bac7f5844104938dfcd7a2c0fdca80a81c3e6d446b6f85babc62ee4c8fc23e"
         },
         {
           "path": "repo://SparrowCore/Source/Optimizer/CompressionTrace.h",
@@ -3583,6 +3583,11 @@
           "path": "repo://SparrowCore/Tests/Fixtures/CollisionTrackerWeightRust.json",
           "bytes": 816,
           "sha256": "745fef60a03e011bdf8607f28a025b95125c5046034ca6f157f0c12140be7e07"
+        },
+        {
+          "path": "repo://SparrowCore/Tests/Fixtures/CompressionFailureDecayThresholdRustReference.tsv",
+          "bytes": 357,
+          "sha256": "545f48b8dee79e7bca4516cffec5e420d657609be87be3861a12a87c21e80780"
         },
         {
           "path": "repo://SparrowCore/Tests/Fixtures/CompressionMinimumWidthRustReference.tsv",
@@ -4340,6 +4345,11 @@
           "sha256": "c4ecca935ce816ff3dd750f0cbd1f0742ce3268bb2851345d33bd06cbf7e9e99"
         },
         {
+          "path": "repo://SparrowCore/Tests/RustReference/src/compression_failure_decay_trace.rs",
+          "bytes": 3894,
+          "sha256": "5cf7e01fadbbe4541707f78e6e68119f1266f1474ef95a48bfc3baecaf581a79"
+        },
+        {
           "path": "repo://SparrowCore/Tests/RustReference/src/compression_minimum_width_trace.rs",
           "bytes": 8279,
           "sha256": "b5ae6608120ab86b51dc8bf9fb5ecfaea8afa340aebdfe9ded105aa547fea27b"
@@ -4393,6 +4403,11 @@
           "path": "repo://SparrowCore/Tests/RustReference/tests/collision_loss_unsupported_hazard_reference.rs",
           "bytes": 10743,
           "sha256": "ce28249fd12875235d819b16c1a25565d97b97b5d1ee4d113cf873708e6dcb6e"
+        },
+        {
+          "path": "repo://SparrowCore/Tests/RustReference/tests/compression_failure_decay_reference.rs",
+          "bytes": 595,
+          "sha256": "437674a7d6fc10547e07cb31c6514a84176b56b6108d3b6d9e3ac5c5204296c6"
         },
         {
           "path": "repo://SparrowCore/Tests/RustReference/tests/compression_minimum_width_reference.rs",
@@ -4686,8 +4701,8 @@
         },
         {
           "path": "repo://SparrowCore/Tests/TestExploration.cpp",
-          "bytes": 432150,
-          "sha256": "4fef4bbffadb993e9aec73e785bc00baa33ae84c5dd3f6bd18ba3c4a90404e99"
+          "bytes": 442236,
+          "sha256": "5086d13c844b4ebd2f733b0a42d67d966f322e93ee43ef3af6f503fcf595007c"
         },
         {
           "path": "repo://SparrowCore/Tests/TestLbfLoss.cpp",
@@ -4780,8 +4795,8 @@
       "name": "Sparrow comparison records",
       "root": "D:\\MyWorks\\ProQt\\JaguarRun\\docs\\logic-comparison-sparrow",
       "fileCount": 30,
-      "totalBytes": 876494,
-      "sha256": "277fc3ed0003d584b87a68585ce3832aec84e440be5c0bb67b6fa2e70809da7d",
+      "totalBytes": 878709,
+      "sha256": "b6c8dc6b6bdc2934ddd6256e6d26faf55453cc1740331009551bca289777a48f",
       "files": [
         {
           "path": "repo://docs/logic-comparison-sparrow/baseline-2026-10-09.md",
@@ -4795,13 +4810,13 @@
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/migration-decision-matrix.md",
-          "bytes": 32093,
-          "sha256": "07fcb5b2af1b94c12094e6df44db7368f34ea1f54511e0766372ccb147d3b68f"
+          "bytes": 32163,
+          "sha256": "30a660440b9fbb03a0bea9f6a8df42b6f64a2f1e887c2b8127f73ed29dfe829d"
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/README.md",
-          "bytes": 110939,
-          "sha256": "8b39f91e19565453b77b726d393b67350d91b63e87f9707d98bd6062e67badad"
+          "bytes": 111152,
+          "sha256": "7d5cd5b1e57c3e63cdc50c50dda01c202dc6ef01de407ba2aaf87438a8391018"
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/records/S01-config.md",
@@ -4835,8 +4850,8 @@
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/records/S07-compress.md",
-          "bytes": 20926,
-          "sha256": "fe21a5710aa8bece6f92f3c98f320cb41462ac49eae532e74e09dfe4f1346435"
+          "bytes": 22843,
+          "sha256": "ed32f636ac5e0ba31dacd1a82699d04c677add1f081ff17d84aca2b55131daa3"
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/records/S08-optimizer-mod.md",
@@ -4925,8 +4940,8 @@
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/replication-roadmap.md",
-          "bytes": 38223,
-          "sha256": "cb882a0994b46640ff8fa482c07ebaf51543a7d6a3fb2c050a846f3551bfd2ad"
+          "bytes": 38238,
+          "sha256": "403f70c8b4b6f46b12e330c590bce5b9c9e9efae723180fe1d1d8379ecaf2d12"
         },
         {
           "path": "repo://docs/logic-comparison-sparrow/tools/freeze-baseline.ps1",

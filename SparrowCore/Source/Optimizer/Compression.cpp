@@ -247,6 +247,7 @@ Result<CompressionResult> Compress(
                || iteration < config.maxIterations))
     {
         double step = config.shrinkMax;
+        double minimumStep = config.shrinkMin;
         if (config.decayStrategy
             == ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED)
         {
@@ -267,10 +268,19 @@ Result<CompressionResult> Compress(
         }
         else
         {
-            step = config.shrinkMax * std::pow(
-                config.failureDecay, static_cast<double>(failures));
+            // Rust stores shrink_range and FailureBased's factor as f32, so
+            // both the step and its minimum comparison must round in f32.
+            const float shrinkMax = static_cast<float>(config.shrinkMax);
+            const float shrinkMin = static_cast<float>(config.shrinkMin);
+            const float failureDecay =
+                static_cast<float>(config.failureDecay);
+            const float failureFactor = static_cast<float>(std::pow(
+                static_cast<double>(failureDecay),
+                static_cast<double>(static_cast<int>(failures))));
+            step = static_cast<double>(shrinkMax * failureFactor);
+            minimumStep = static_cast<double>(shrinkMin);
         }
-        if (!std::isfinite(step) || step < config.shrinkMin)
+        if (!std::isfinite(step) || step < minimumStep)
         {
             break;
         }

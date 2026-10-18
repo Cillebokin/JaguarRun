@@ -3184,6 +3184,250 @@ bool TestCompressionWorkerMoveRetryMatchesRustReference(
                   "compression failed-retry worker trace must match Rust reference");
 }
 
+bool TestCompressionFailureDecayThresholdMatchesRustReference(
+    std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CompressionFailureDecayThresholdRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/CompressionFailureDecayThresholdRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CompressionFailureDecayThresholdRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\CompressionFailureDecayThresholdRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+            break;
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(), output,
+                "Rust FailureBased shrink-min reference must be readable"))
+    {
+        return false;
+    }
+
+    const auto parseHex = [](const std::string& text, std::uint32_t& value) {
+        std::istringstream parser(text);
+        parser >> std::hex >> value;
+        return static_cast<bool>(parser) && parser.eof();
+    };
+    const auto floatBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const auto floatFromBits = [](std::uint32_t bits) {
+        float value = 0.0F;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    std::uint32_t shrinkMaxBits = 0U;
+    std::uint32_t shrinkMinBits = 0U;
+    std::uint32_t failureDecayBits = 0U;
+    std::uint32_t initialWidthBits = 0U;
+    std::uint32_t finalWidthBits = 0U;
+    std::vector<std::uint32_t> expectedSteps;
+    std::vector<bool> expectedSuccesses;
+    bool foundCase = false;
+    bool foundConfig = false;
+    bool foundWidth = false;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+            continue;
+        std::istringstream row(line);
+        std::string kind;
+        row >> kind;
+        if (kind == "case")
+        {
+            std::string name;
+            if (!static_cast<bool>(row >> name)
+                || name != "failure_decay_threshold")
+            {
+                return Expect(false, output,
+                              "Rust FailureBased case row is malformed");
+            }
+            foundCase = true;
+        }
+        else if (kind == "config")
+        {
+            std::string maxBits;
+            std::string minBits;
+            std::string decayBits;
+            if (!static_cast<bool>(row >> maxBits >> minBits >> decayBits)
+                || !parseHex(maxBits, shrinkMaxBits)
+                || !parseHex(minBits, shrinkMinBits)
+                || !parseHex(decayBits, failureDecayBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased config row is malformed");
+            }
+            foundConfig = true;
+        }
+        else if (kind == "step")
+        {
+            std::size_t index = 0U;
+            std::string bits;
+            std::uint32_t stepBits = 0U;
+            if (!static_cast<bool>(row >> index >> bits)
+                || index != expectedSteps.size()
+                || !parseHex(bits, stepBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased step row is malformed");
+            }
+            expectedSteps.push_back(stepBits);
+        }
+        else if (kind == "result")
+        {
+            std::size_t index = 0U;
+            unsigned int success = 0U;
+            if (!static_cast<bool>(row >> index >> success)
+                || index != expectedSuccesses.size() || success > 1U)
+            {
+                return Expect(false, output,
+                              "Rust FailureBased result row is malformed");
+            }
+            expectedSuccesses.push_back(success != 0U);
+        }
+        else if (kind == "width")
+        {
+            std::string initialBits;
+            std::string finalBits;
+            if (!static_cast<bool>(row >> initialBits >> finalBits)
+                || !parseHex(initialBits, initialWidthBits)
+                || !parseHex(finalBits, finalWidthBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased width row is malformed");
+            }
+            foundWidth = true;
+        }
+        else
+        {
+            return Expect(false, output,
+                          "unknown Rust FailureBased reference row");
+        }
+    }
+    if (!Expect(foundCase && foundConfig && foundWidth
+                    && expectedSteps.size() == 2U
+                    && expectedSuccesses.size() == 2U
+                    && expectedSuccesses[0] == false
+                    && expectedSuccesses[1] == false,
+                output,
+                "Rust FailureBased reference must contain two failed attempts"))
+    {
+        return false;
+    }
+
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(), output,
+                "Rust FailureBased input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "Rust FailureBased input must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "Rust FailureBased problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto widthSet = problem.ChangeStripWidth(4.2);
+    const auto firstPlaced = problem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
+    const auto secondPlaced = problem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {3.15, 0.55})});
+    if (!Expect(widthSet.HasValue() && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "Rust FailureBased warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initialSolution = problem.Save();
+    sparrow::CompressionConfig config;
+    config.shrinkMax = static_cast<double>(floatFromBits(shrinkMaxBits));
+    config.shrinkMin = static_cast<double>(floatFromBits(shrinkMinBits));
+    config.failureDecay = static_cast<double>(floatFromBits(failureDecayBits));
+    config.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.timeLimit = std::chrono::seconds{30};
+    config.separator.noImprovementLimit = 1U;
+    config.separator.strikeLimit = 1U;
+    config.separator.nWorkers = 1U;
+    config.separator.nContainerSamples = 8U;
+    config.separator.nFocussedSamples = 0U;
+    config.separator.nCoordinateDescents = 1U;
+    sparrow::OptimizationTerminator terminator({
+        0U, std::chrono::seconds{30}});
+    terminator.StartPhase(std::chrono::seconds{30});
+    CompressionWorkerMoveListener listener;
+    const auto actual = sparrow::Compress(
+        instance.Value(), initialSolution, config, 42U,
+        terminator, &listener);
+    if (!Expect(actual.HasValue(), output,
+                "SparrowCore FailureBased threshold compression must complete"))
+    {
+        return false;
+    }
+
+    const auto& finalSolution = actual.Value().solution;
+    std::vector<std::uint32_t> actualSteps;
+    actualSteps.reserve(listener.compressionSteps.size());
+    for (double step : listener.compressionSteps)
+        actualSteps.push_back(floatBits(static_cast<float>(step)));
+    std::vector<bool> actualSuccesses;
+    actualSuccesses.reserve(listener.separationResults.size());
+    for (const auto& result : listener.separationResults)
+        actualSuccesses.push_back(result.success);
+    const std::uint32_t actualInitialWidthBits =
+        floatBits(static_cast<float>(initialSolution.StripWidth()));
+    const std::uint32_t actualFinalWidthBits =
+        floatBits(static_cast<float>(finalSolution.StripWidth()));
+    const bool matches = actualSteps == expectedSteps
+        && actualSuccesses == expectedSuccesses
+        && actualInitialWidthBits == initialWidthBits
+        && actualFinalWidthBits == finalWidthBits
+        && SameSolution(finalSolution, initialSolution);
+    if (!matches)
+    {
+        output << "Rust FailureBased steps=";
+        for (const auto bits : expectedSteps)
+            output << "0x" << std::hex << bits << ',';
+        output << " C++ steps=";
+        for (const auto bits : actualSteps)
+            output << "0x" << std::hex << bits << ',';
+        output << std::dec << " results=" << actualSuccesses.size()
+               << " Rust results=" << expectedSuccesses.size()
+               << " final width=0x" << std::hex << actualFinalWidthBits
+               << " Rust width=0x" << finalWidthBits << std::dec << '\n';
+    }
+    return Expect(matches, output,
+                  "FailureBased shrink-min stop round must match Rust f32 reference");
+}
+
 bool TestTerminationHandoffMatchesRustReference(std::ostream& output)
 {
     std::ifstream referenceFile;
@@ -9749,6 +9993,10 @@ bool RunExplorationTests(std::ostream& output)
             "CompressionMultiWorkerMoveRustReference.tsv",
             "compression_multi_worker_move",
             2U))
+    {
+        return false;
+    }
+    if (!TestCompressionFailureDecayThresholdMatchesRustReference(output))
     {
         return false;
     }

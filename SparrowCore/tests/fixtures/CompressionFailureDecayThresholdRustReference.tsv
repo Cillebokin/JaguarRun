@@ -1,0 +1,10 @@
+# generator=Rust sparrow::optimizer::compress::compression_phase
+# input=RustSppCompressWorkerMove.json seed=42 warm_start=true workers=1
+# config=failure_based shrink_max=3e4ccccd shrink_min=3e23d70b decay=3f4ccccd
+case failure_decay_threshold
+config 3e4ccccd 3e23d70b 3f4ccccd
+step 0 3e4ccccd
+step 1 3e23d70b
+result 0 0
+result 1 0
+width 40866666 40866666

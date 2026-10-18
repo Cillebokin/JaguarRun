@@ -3554,11 +3554,14 @@ bool TestCompressionFailureDecayExponentBoundariesMatchRustReference(
         }
     }
 
-    const std::array<const char*, 4> expectedNames{
+    const std::array<const char*, 7> expectedNames{
         "failure_decay_squared_below",
         "failure_decay_squared_equal",
         "failure_decay_squared_above",
-        "failure_decay_cubic_equal"};
+        "failure_decay_cubic_equal",
+        "failure_decay_quartic_below",
+        "failure_decay_quartic_equal",
+        "failure_decay_quartic_above"};
     if (!Expect(references.size() == expectedNames.size(), output,
                 "Rust FailureBased exponent reference case count changed"))
     {

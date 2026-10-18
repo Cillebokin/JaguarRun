@@ -274,9 +274,11 @@ Result<CompressionResult> Compress(
             const float shrinkMin = static_cast<float>(config.shrinkMin);
             const float failureDecay =
                 static_cast<float>(config.failureDecay);
-            const float failureFactor = static_cast<float>(std::pow(
-                static_cast<double>(failureDecay),
-                static_cast<double>(static_cast<int>(failures))));
+            // Keep the float overload: the pinned Rust f32::powi path lowers
+            // to powf(float, float) on the Windows reference target.
+            const float failureFactor = std::pow(
+                failureDecay,
+                static_cast<float>(static_cast<int>(failures)));
             step = static_cast<double>(shrinkMax * failureFactor);
             minimumStep = static_cast<double>(shrinkMin);
         }

@@ -76,6 +76,24 @@ pub fn failure_decay_exponent_boundary_trace_tsv() -> Result<String, Box<dyn Err
             0x3dc9_d0f6,
             0x3f45_ee39,
         ),
+        (
+            "failure_decay_quartic_below",
+            0x3e80_0000,
+            0x3e28_c421,
+            0x3f66_ace8,
+        ),
+        (
+            "failure_decay_quartic_equal",
+            0x3e80_0000,
+            0x3e28_c422,
+            0x3f66_ace8,
+        ),
+        (
+            "failure_decay_quartic_above",
+            0x3e80_0000,
+            0x3e28_c423,
+            0x3f66_ace8,
+        ),
     ] {
         output.push_str(&failure_decay_trace_tsv(
             case_name,

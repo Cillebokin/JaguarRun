@@ -37,3 +37,40 @@ result 1 0
 result 2 0
 result 3 0
 width 40866666 40866666
+case failure_decay_quartic_below
+config 3e800000 3e28c421 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_quartic_equal
+config 3e800000 3e28c422 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_quartic_above
+config 3e800000 3e28c423 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+width 40866666 40866666

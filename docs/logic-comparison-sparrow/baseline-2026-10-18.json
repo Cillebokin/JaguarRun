@@ -1,7 +1,7 @@
 {
     "schemaVersion":  1,
     "baselineId":  "sparrow-parity-2026-10-18-s07",
-    "frozenAtUtc":  "2026-10-18T06:05:19.3211933Z",
+    "frozenAtUtc":  "2026-10-18T06:26:00.6769577Z",
     "workspace":  "D:\\MyWorks\\ProQt\\JaguarRun",
     "method":  "Per-file SHA-256 and deterministic sorted-tree digest; no VCS metadata used.",
     "rust":  {
@@ -3166,8 +3166,8 @@
                             "name":  "SparrowCore C++ source, tests, and tools",
                             "root":  "D:\\MyWorks\\ProQt\\JaguarRun\\SparrowCore",
                             "fileCount":  325,
-                            "totalBytes":  2620918,
-                            "sha256":  "65210e7fb0caac5b675d6e619c52a23f3294a3f7f0e2096fa626c9a0c82397b9",
+                            "totalBytes":  2622214,
+                            "sha256":  "454243618f265c209b328c7253914b48c6c7fe64e3e607470688c583cdf8f3f2",
                             "files":  [
                                           {
                                               "path":  "repo://SparrowCore/Bench/BenchMain.cpp",
@@ -3391,8 +3391,8 @@
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Source/Optimizer/Compression.cpp",
-                                              "bytes":  14679,
-                                              "sha256":  "e7bac7f5844104938dfcd7a2c0fdca80a81c3e6d446b6f85babc62ee4c8fc23e"
+                                              "bytes":  14787,
+                                              "sha256":  "fa3e2b773387ccfe5477023aaa04d0f2551d756c545ef7cdfec6eaa812b31ecb"
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Source/Optimizer/CompressionTrace.h",
@@ -3586,8 +3586,8 @@
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/Fixtures/CompressionFailureDecayExponentBoundaryRustReference.tsv",
-                                              "bytes":  875,
-                                              "sha256":  "1a57db3bf8e1262a3a7c7d05c5aad7f82b5f15b4243e90c85e98856f0624c5d5"
+                                              "bytes":  1526,
+                                              "sha256":  "beeed758842d6362ba4df44693e8cff39bf487456a5d5c4fd08c422c0fe51b0c"
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/Fixtures/CompressionFailureDecayThresholdRustReference.tsv",
@@ -4351,8 +4351,8 @@
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/RustReference/src/compression_failure_decay_trace.rs",
-                                              "bytes":  5593,
-                                              "sha256":  "1c1431bc03dd198851ae391821d7a55c4527181e0d3391b47292d6e9b8b0a4e9"
+                                              "bytes":  6010,
+                                              "sha256":  "4973f0e23b38acffd3c58dbf6750ec5623c41acb02c73ff10f9497f2bb16317d"
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/RustReference/src/compression_minimum_width_trace.rs",
@@ -4706,8 +4706,8 @@
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/TestExploration.cpp",
-                                              "bytes":  453819,
-                                              "sha256":  "ba05acca7b55be244558cbeb58cda68e48833153d103445cc2da8debf76b2335"
+                                              "bytes":  453939,
+                                              "sha256":  "b81dee33997b44e5a4e7a85641d2772fa876ccef2f21a44f6b0a2d102252cbf5"
                                           },
                                           {
                                               "path":  "repo://SparrowCore/Tests/TestLbfLoss.cpp",
@@ -4800,8 +4800,8 @@
                             "name":  "Sparrow comparison records",
                             "root":  "D:\\MyWorks\\ProQt\\JaguarRun\\docs\\logic-comparison-sparrow",
                             "fileCount":  30,
-                            "totalBytes":  880439,
-                            "sha256":  "c132d10070cd7c72ff4f6e6e61e0d14c70aa73f37bdac93182d594854d71e5bc",
+                            "totalBytes":  884735,
+                            "sha256":  "75397cd4da0984ef9bfa12f958a2990c7f01fca3d5481487be38125b8f8509f0",
                             "files":  [
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/baseline-2026-10-09.md",
@@ -4815,13 +4815,13 @@
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/migration-decision-matrix.md",
-                                              "bytes":  32262,
-                                              "sha256":  "cdb18e79f109112000bf549cdf4702b37180b7f1dc93b784e0b77ad4aa00c913"
+                                              "bytes":  32468,
+                                              "sha256":  "c5cf3735d377ed52d056502378c20cb48078aeaf7706b96cbbdf6e7343b09ba2"
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/README.md",
-                                              "bytes":  111561,
-                                              "sha256":  "364fd43fd155cc0af3f0cf4fdc8ef002fc21ac3a2483a8e3fd681e8fb73c80a2"
+                                              "bytes":  111977,
+                                              "sha256":  "dd3c37e0d0d5ed3bf1cb3030f129ce9a99c103e56ae0a83b2d1b455585d242c2"
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/records/S01-config.md",
@@ -4855,13 +4855,13 @@
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/records/S07-compress.md",
-                                              "bytes":  24065,
-                                              "sha256":  "352afdc90056e8b393fb19b24872035d5f94b5aea8c96b4dcc3ec868f57c8f4e"
+                                              "bytes":  26018,
+                                              "sha256":  "b4ca14cd5b4cf463232f50aa5705de223343395ccd5f09a29c353d3c7b2bc11d"
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/records/S08-optimizer-mod.md",
-                                              "bytes":  33953,
-                                              "sha256":  "d0a2dc77cac70fdf75c638375c442b43da91eb9c872a87270d36236cdef8bcf9"
+                                              "bytes":  35580,
+                                              "sha256":  "f0f79dc82620b9147556f5b9b1b4a8204aecc67be1a5355307656115ba1a4a04"
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/records/S09-lbf-evaluator.md",
@@ -4945,8 +4945,8 @@
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/replication-roadmap.md",
-                                              "bytes":  38238,
-                                              "sha256":  "403f70c8b4b6f46b12e330c590bce5b9c9e9efae723180fe1d1d8379ecaf2d12"
+                                              "bytes":  38332,
+                                              "sha256":  "f29fc40883e5ccaebf1dde666be029324cf5d82c69338dc76a6225f2c12e29f2"
                                           },
                                           {
                                               "path":  "repo://docs/logic-comparison-sparrow/tools/freeze-baseline.ps1",

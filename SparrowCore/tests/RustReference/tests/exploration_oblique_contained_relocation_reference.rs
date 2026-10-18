@@ -22,6 +22,8 @@ use std::time::Duration;
 
 const REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationObliqueContainedRelocationRustTrace.tsv");
+const POOL_STDDEV_REFERENCE: &str =
+    include_str!("../../Fixtures/ExplorationObliqueContainedRelocationPoolStddevRustTrace.tsv");
 
 #[derive(Default)]
 struct TraceListener {
@@ -84,7 +86,7 @@ impl Terminator for StopAfterIterations {
     }
 }
 
-fn trace() -> Result<String, Box<dyn Error>> {
+fn trace(pool_stddev: f32, case_name: &str) -> Result<String, Box<dyn Error>> {
     let (external, _) = sparrow::util::io::read_spp_input(Path::new(
         "../Fixtures/ExplorationObliqueContainedRelocation.json",
     ))?;
@@ -125,7 +127,6 @@ fn trace() -> Result<String, Box<dyn Error>> {
     let seed = 43_u64;
     let shrink_step = 0.1_f32;
     let iteration_limit = 3_usize;
-    let pool_stddev = 0.25_f32;
     let mut config = defaults.expl_cfg;
     config.shrink_step = shrink_step;
     config.solution_pool_distribution_stddev = pool_stddev;
@@ -207,7 +208,7 @@ fn trace() -> Result<String, Box<dyn Error>> {
     );
     writeln!(
         &mut output,
-        "case oblique_contained {seed} {initial_width:.9} {shrink_step:.9} {iteration_limit} {pool_stddev:.9} {} {}",
+        "case {case_name} {seed} {initial_width:.9} {shrink_step:.9} {iteration_limit} {pool_stddev:.9} {} {}",
         listener.failures.len(),
         instance.items.len(),
     )?;
@@ -307,8 +308,19 @@ fn trace() -> Result<String, Box<dyn Error>> {
 fn oblique_rotation_disruption_and_contained_relocation_match_rust_trace() {
     let expected = REFERENCE.replace("\r\n", "\n");
     assert_eq!(
-        trace().expect("generate oblique relocation trace"),
+        trace(0.25, "oblique_contained").expect("generate oblique relocation trace"),
         expected,
         "actual Rust Explore oblique disruption/contained-relocation trace changed"
+    );
+}
+
+#[test]
+fn contained_relocation_with_nondefault_pool_stddev_matches_rust_trace() {
+    let expected = POOL_STDDEV_REFERENCE.replace("\r\n", "\n");
+    assert_eq!(
+        trace(1.0, "oblique_contained_pool_stddev_1")
+            .expect("generate nondefault pool-standard-deviation relocation trace"),
+        expected,
+        "actual Rust Explore contained-relocation trace with pool stddev 1.0 changed"
     );
 }

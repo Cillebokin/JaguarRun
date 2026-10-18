@@ -41,6 +41,8 @@ const NINE_CANDIDATE_REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationDistinctPoolNineCandidatesRustTrace.tsv");
 const TEN_CANDIDATE_REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationDistinctPoolTenCandidatesRustTrace.tsv");
+const TWELVE_CANDIDATE_REFERENCE: &str =
+    include_str!("../../Fixtures/ExplorationDistinctPoolTwelveCandidatesRustTrace.tsv");
 const FOUR_CANDIDATE_NONE_ROTATION_REFERENCE: &str =
     include_str!("../../Fixtures/ExplorationDistinctPoolFourCandidatesNoneRotationRustTrace.tsv");
 
@@ -266,6 +268,9 @@ fn trace(
         }
         "ExplorationDistinctPoolTenCandidates.json" => {
             "eleven distinct square sizes provide ten distinct alternatives for each first choice"
+        }
+        "ExplorationDistinctPoolTwelveCandidates.json" => {
+            "thirteen distinct square sizes provide twelve distinct alternatives for each first choice"
         }
         "ExplorationDistinctPoolFourCandidatesNoneRotation.json" => {
             "five squares use stepped 360-degree input, which imports as RotationRange::None"
@@ -641,6 +646,43 @@ fn nonempty_distinct_pool_with_ten_candidates_matches_rust_trace() {
         &actual,
         TEN_CANDIDATE_REFERENCE,
         "actual Rust Explore ten-candidate distinct-pool trace changed",
+    );
+}
+
+#[test]
+fn nonempty_distinct_pool_with_twelve_candidates_matches_rust_trace() {
+    let actual = trace(
+        "distinct_pool_twelve",
+        "ExplorationDistinctPoolTwelveCandidates.json",
+        0,
+        (3, 1),
+        12,
+        95.0,
+        &[
+            (1.0, 8.0),
+            (2.75, 8.0),
+            (5.5, 8.0),
+            (9.25, 8.0),
+            (14.0, 8.0),
+            (19.75, 8.0),
+            (26.5, 8.0),
+            (34.25, 8.0),
+            (43.0, 8.0),
+            (52.75, 8.0),
+            (63.5, 8.0),
+            (75.25, 8.0),
+            (88.0, 8.0),
+        ],
+        &[
+            169.0, 144.0, 121.0, 100.0, 81.0, 64.0, 49.0, 36.0, 25.0, 16.0, 9.0, 4.0, 1.0,
+        ],
+        &[12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+    )
+    .expect("generate actual Explore twelve-candidate distinct-pool trace");
+    assert_trace_matches_reference(
+        &actual,
+        TWELVE_CANDIDATE_REFERENCE,
+        "actual Rust Explore twelve-candidate distinct-pool trace changed",
     );
 }
 

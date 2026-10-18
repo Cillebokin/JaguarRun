@@ -193,7 +193,7 @@ consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 
 |---|---|---|
 | `worker.rs:43` `SliceRandom::shuffle` | `Separator.cpp:88-145` `Shuffle` | 新增 `SparrowSliceShuffleRustReference.tsv`：seed `0/1/42/u64::MAX` × 长度 `0..=32` 共 132 组；逐项比排列并比对 shuffle 后 4 个 `u64`。包含空/单项零消耗、常规混洗及长度 13 起的 `IncreasingUniform` 随机块补取 |
 | `uniform_sampler.rs:81` `SliceRandom::choose` | `UniformRectSampler.cpp` 的旋转项 `UniformIndex` | S16 singleton、窄区间和离散 reference 覆盖既有路径；连续 sampler 的 16 个角 fixture 现逐项比较实际 `sample()` 后 4 个 `u64`，锁定多项 `choose` 与后续坐标采样共同消耗的 RNG 序 |
-| `explore.rs:386/397/401` `IteratorRandom::choose` | `Exploration.cpp:236-320, 323-337` `RustCoinFlipper` | 锁定 rand 0.10.3 `Filter` iterator 的 reservoir/CoinFlipper 路径；S06 的 actual Explore trace 覆盖第二选择池 1–10 个候选、空 distinct-pool fallback 与空 large-pool 失败出口，并比较 swap 结果及后续 RNG trace |
+| `explore.rs:386/397/401` `IteratorRandom::choose` | `Exploration.cpp:236-320, 323-337` `RustCoinFlipper` | 锁定 rand 0.10.3 `Filter` iterator 的 reservoir/CoinFlipper 路径；S06 的 actual Explore trace 覆盖第二选择池 1–10 个候选及固定 12 候选样本、空 distinct-pool fallback 与空 large-pool 失败出口，并比较 swap 结果及后续 RNG trace |
 
 新增 Rust 测试 `slice_shuffle_reference.rs` 校验 fixture 由锁定的 Rust RNG 实际生成；C++ `TestRng.cpp::TestSliceShuffleRustReference` 调用生产 shuffle 算法的测试入口，逐组比较排列及后续 RNG 输出。S16 连续 sampler fixture 同时由 Rust/C++ 比较 16 个实际旋转结果及每次采样后的 4 个 `u64`，其中采样器的 `SliceRandom::choose` 处理多项旋转候选。Debug/Release RustReference 全量套件和 SparrowCoreTests 全量程序均通过。
 

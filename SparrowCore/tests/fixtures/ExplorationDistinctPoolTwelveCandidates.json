@@ -1,0 +1,435 @@
+{
+  "name": "sparrow-rust-cpp-exploration-distinct-pool-twelve-candidates",
+  "items": [
+    {
+      "id": 1000,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1001,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1002,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            0,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1003,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            4,
+            4
+          ],
+          [
+            0,
+            4
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1004,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            0,
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1005,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            6,
+            0
+          ],
+          [
+            6,
+            6
+          ],
+          [
+            0,
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1006,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            7,
+            0
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            0,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1007,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            0,
+            8
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1008,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            9,
+            0
+          ],
+          [
+            9,
+            9
+          ],
+          [
+            0,
+            9
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1009,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1010,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            11,
+            11
+          ],
+          [
+            0,
+            11
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1011,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            12,
+            0
+          ],
+          [
+            12,
+            12
+          ],
+          [
+            0,
+            12
+          ]
+        ]
+      }
+    },
+    {
+      "id": 1012,
+      "demand": 1,
+      "orientation": {
+        "rotation": {
+          "mode": "discrete",
+          "angles": [
+            0
+          ]
+        }
+      },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [
+            0,
+            0
+          ],
+          [
+            13,
+            0
+          ],
+          [
+            13,
+            13
+          ],
+          [
+            0,
+            13
+          ]
+        ]
+      }
+    }
+  ],
+  "strip_height": 16.0
+}

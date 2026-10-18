@@ -4097,6 +4097,156 @@ bool TestRustF32ShrinkRoundingBoundary(std::ostream& output)
             "Rust unit shrink step must stop below positive minimum width");
 }
 
+bool TestLongF32ShrinkChainMatchesRust(std::ostream& output)
+{
+    std::ifstream reference;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationLongShrinkChainRust.tsv",
+             "../SparrowCore/Tests/Fixtures/ExplorationLongShrinkChainRust.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationLongShrinkChainRust.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationLongShrinkChainRust.tsv"})
+    {
+        reference.open(path);
+        if (reference.is_open())
+        {
+            break;
+        }
+        reference.clear();
+    }
+    if (!Expect(reference.is_open(),
+                output,
+                "Rust long shrink-chain reference cannot be opened"))
+    {
+        return false;
+    }
+
+    std::vector<std::uint32_t> expectedWidthBits;
+    std::string line;
+    while (std::getline(reference, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string record;
+        std::size_t index = 0U;
+        std::uint32_t bits = 0U;
+        if (!Expect(static_cast<bool>(row >> record >> index >> std::hex >> bits)
+                        && record == "width" && index == expectedWidthBits.size(),
+                    output,
+                    "malformed Rust long shrink-chain reference"))
+        {
+            return false;
+        }
+        expectedWidthBits.push_back(bits);
+    }
+    if (!Expect(expectedWidthBits.size() == 33U,
+                output,
+                "Rust long shrink-chain reference must contain 33 feasible widths"))
+    {
+        return false;
+    }
+
+    std::ifstream fixture;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppSingleItem.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppSingleItem.json"})
+    {
+        fixture.open(path);
+        if (fixture.is_open())
+        {
+            break;
+        }
+        fixture.clear();
+    }
+    if (!Expect(fixture.is_open(),
+                output,
+                "Rust single-item long shrink-chain fixture cannot be opened"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(fixture),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust single-item long shrink-chain fixture must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "long shrink-chain problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem& problem = problemResult.Value();
+    if (!Expect(problem.ChangeStripWidth(64.0).HasValue()
+                    && problem.PlaceItem({0U, {0.0, {1.1, 2.0}}}).HasValue(),
+                output,
+                "long shrink-chain initial placement must be valid"))
+    {
+        return false;
+    }
+
+    sparrow::ExplorationConfig config;
+    config.shrinkStep = 0.1;
+    config.maxIterations = 64U;
+    config.separator.strikeLimit = 0U;
+    config.separator.nWorkers = 1U;
+    config.separator.nContainerSamples = 0U;
+    config.separator.nFocussedSamples = 0U;
+    config.separator.nCoordinateDescents = 0U;
+    sparrow::OptimizationTerminator terminator({
+        0U,
+        std::chrono::seconds{10}});
+    terminator.Start();
+    terminator.StartPhase(std::chrono::seconds{10});
+    const auto result = sparrow::Explore(
+        instance.Value(), problem.Save(), config, 42U, terminator);
+    if (!Expect(result.HasValue(),
+                output,
+                "C++ long shrink-chain Explore must complete"))
+    {
+        return false;
+    }
+
+    const auto toBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    std::vector<std::uint32_t> actualWidthBits;
+    for (const auto& report : result.Value().history)
+    {
+        if (report.phase
+                == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION
+            && report.type
+                   == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE)
+        {
+            actualWidthBits.push_back(toBits(static_cast<float>(report.stripWidth)));
+        }
+    }
+    if (actualWidthBits != expectedWidthBits)
+    {
+        output << "long shrink-chain widths differ from Rust: actual="
+               << actualWidthBits.size() << " expected=" << expectedWidthBits.size()
+               << '\n';
+        return false;
+    }
+    return Expect(toBits(static_cast<float>(result.Value().separatorState.StripWidth()))
+                          == expectedWidthBits.back()
+                      && result.Value().separatorState.StripWidth() > 2.0,
+                  output,
+                  "C++ must stop at the same width above the Rust minimum-width threshold");
+}
+
 bool TestRustF32AreaCutoffBoundary(std::ostream& output)
 {
     std::ifstream fixture;
@@ -4878,6 +5028,13 @@ bool TestDisruptionTraceMatchesRust(
             failure.poses.push_back(pose);
         }
         expectedFailures.push_back(std::move(failure));
+        while (recordIndex < records.size()
+               && records[recordIndex].rfind("failure ", 0U) != 0U
+               && records[recordIndex].rfind("report ", 0U) != 0U
+               && records[recordIndex].rfind("final ", 0U) != 0U)
+        {
+            expectedEvents.push_back(records[recordIndex++]);
+        }
     }
     while (recordIndex < records.size())
     {
@@ -7446,7 +7603,7 @@ bool TestContinuousRotationDisruptionAndContainedRelocationMatchesRust(
         2U,
         {},
         output,
-        true,
+        false,
         3U,
         {0.0, static_cast<double>(obliqueRotation), 0.0},
         {},
@@ -7622,6 +7779,61 @@ bool TestDisruptionDistinctPoolTenCandidatesMatchesRust(std::ostream& output)
          16.0,
          4.0,
          1.0});
+}
+
+bool TestDisruptionDistinctPoolTwelveCandidatesMatchesRust(std::ostream& output)
+{
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationDistinctPoolTwelveCandidatesRustTrace.tsv",
+        "ExplorationDistinctPoolTwelveCandidates.json",
+        "distinct_pool_twelve",
+        0U,
+        1.0,
+        {{1.0, 8.0},
+         {2.75, 8.0},
+         {5.5, 8.0},
+         {9.25, 8.0},
+         {14.0, 8.0},
+         {19.75, 8.0},
+         {26.5, 8.0},
+         {34.25, 8.0},
+         {43.0, 8.0},
+         {52.75, 8.0},
+         {63.5, 8.0},
+         {75.25, 8.0},
+         {88.0, 8.0}},
+        {12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U, 12U},
+        12U,
+        {},
+        output,
+        false,
+        4U,
+        {},
+        {169.0, 144.0, 121.0, 100.0, 81.0, 64.0, 49.0, 36.0, 25.0, 16.0, 9.0, 4.0, 1.0});
+}
+
+bool TestObliqueContainedRelocationWithPoolStddevOneMatchesRust(
+    std::ostream& output)
+{
+    constexpr float obliqueRotation = 0.645771801F;
+    const float sinOblique = std::sin(obliqueRotation);
+    const float cosOblique = std::cos(obliqueRotation);
+    const float childX = 7.6F + (2.3F * cosOblique - 0.2F * sinOblique);
+    const float childY = 2.75F + (2.3F * sinOblique + 0.2F * cosOblique);
+    return TestDisruptionTraceMatchesRust(
+        "ExplorationObliqueContainedRelocationPoolStddevRustTrace.tsv",
+        "ExplorationObliqueContainedRelocation.json",
+        "oblique_contained_pool_stddev_1",
+        43U,
+        0.75,
+        {{2.8, 2.75}, {7.6, 2.75}, {childX, childY}},
+        {2U, 2U, 2U},
+        2U,
+        {},
+        output,
+        false,
+        3U,
+        {0.0, static_cast<double>(obliqueRotation), 0.0});
 }
 
 bool TestMultipleContainedRelocationsMatchRust(std::ostream& output)
@@ -9184,9 +9396,12 @@ bool RunExplorationTests(std::ostream& output)
 
     const bool explorationShrinkBoundaries =
         TestRustF32ShrinkRoundingBoundary(output);
+    const bool explorationLongShrinkChain =
+        TestLongF32ShrinkChainMatchesRust(output);
     const bool compressionDecayBoundaries =
         TestCompressionMinimumWidthMatchesRustBoundary(output);
-    if (!explorationShrinkBoundaries || !compressionDecayBoundaries)
+    if (!explorationShrinkBoundaries || !explorationLongShrinkChain
+        || !compressionDecayBoundaries)
     {
         return false;
     }
@@ -9251,6 +9466,11 @@ bool RunExplorationTests(std::ostream& output)
     {
         return false;
     }
+    if (!TestObliqueContainedRelocationWithPoolStddevOneMatchesRust(output))
+    {
+        output << "S06 nondefault pool-standard-deviation contained trace failed\n";
+        return false;
+    }
     if (!TestDisruptionDistinctPoolFiveCandidatesMatchesRust(output))
     {
         return false;
@@ -9273,6 +9493,11 @@ bool RunExplorationTests(std::ostream& output)
     }
     if (!TestDisruptionDistinctPoolTenCandidatesMatchesRust(output))
     {
+        return false;
+    }
+    if (!TestDisruptionDistinctPoolTwelveCandidatesMatchesRust(output))
+    {
+        output << "S06 twelve-candidate distinct-pool trace failed\n";
         return false;
     }
     if (!TestMultipleContainedRelocationsMatchRust(output))

@@ -16,6 +16,9 @@ use std::cell::Cell;
 use std::path::Path;
 use std::time::Duration;
 
+const LONG_SHRINK_CHAIN_REFERENCE: &str =
+    include_str!("../../Fixtures/ExplorationLongShrinkChainRust.tsv");
+
 struct StopAfterOneExploreRound {
     checks: Cell<usize>,
 }
@@ -34,15 +37,91 @@ impl Terminator for StopAfterOneExploreRound {
     }
 }
 
+struct StopAfterIterations {
+    checks: Cell<usize>,
+    limit: usize,
+}
+
+impl Terminator for StopAfterIterations {
+    fn kill(&self) -> bool {
+        let checks = self.checks.get();
+        self.checks.set(checks + 1);
+        checks >= self.limit
+    }
+
+    fn new_timeout(&mut self, _timeout: Duration) {}
+
+    fn timeout_at(&self) -> Option<jagua_rs::Instant> {
+        None
+    }
+}
+
 #[derive(Default)]
 struct RecordingListener {
     reports: Vec<ReportType>,
+    widths: Vec<f32>,
 }
 
 impl SolutionListener for RecordingListener {
-    fn report(&mut self, report: ReportType, _solution: &SPSolution) {
+    fn report(&mut self, report: ReportType, solution: &SPSolution) {
         self.reports.push(report);
+        self.widths.push(solution.strip_width());
     }
+}
+
+#[test]
+fn successful_exploration_matches_long_f32_shrink_chain_reference() {
+    let instance = load_single_item_instance();
+    let mut problem = SPProblem::new(instance).expect("create long-shrink problem");
+    problem
+        .change_strip_width(64.0)
+        .expect("set long-shrink initial width");
+    problem.place_item(SPPlacement {
+        item_idx: 0,
+        d_transf: DTransformation::new(0.0, (1.1, 2.0)),
+    });
+    assert!(Layout::from_snapshot(&problem.save().layout_snapshot).is_feasible());
+
+    let mut config = DEFAULT_SPARROW_CONFIG.expl_cfg;
+    config.shrink_step = 0.1;
+    config.max_conseq_failed_attempts = None;
+    config.separator_config.strike_limit = 0;
+    config.separator_config.n_workers = 1;
+    config.separator_config.sample_config = SampleConfig {
+        n_container_samples: 0,
+        n_focussed_samples: 0,
+        n_coord_descents: 0,
+    };
+    let mut separator = Separator::new(
+        problem,
+        Xoshiro256PlusPlus::seed_from_u64(42),
+        config.separator_config,
+    );
+    let mut listener = RecordingListener::default();
+    let solutions = exploration_phase(
+        &mut separator,
+        &mut listener,
+        &StopAfterIterations {
+            checks: Cell::new(0),
+            limit: 128,
+        },
+        &config,
+    );
+
+    assert_eq!(listener.widths.len(), 33);
+    assert_eq!(solutions.len(), 33);
+    assert!(listener.widths.last().is_some_and(|width| *width >= 2.0));
+    assert_eq!(listener.widths.first(), Some(&64.0));
+    let actual = listener
+        .widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| format!("width {index} {:08x}", width.to_bits()))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let expected = LONG_SHRINK_CHAIN_REFERENCE.replace("\r\n", "\n");
+    assert_eq!(actual, expected, "Rust long shrink-chain reference changed");
 }
 
 fn load_single_item_instance() -> jagua_rs::probs::spp::entities::SPInstance {

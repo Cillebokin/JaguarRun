@@ -1,0 +1,21 @@
+   Compiling sparrow-rust-reference v0.1.0 (D:\MyWorks\ProQt\JaguarRun\SparrowCore\Tests\RustReference)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.20s
+     Running tests\exploration_oblique_contained_relocation_reference.rs (target\x86_64-pc-windows-msvc\debug\deps\exploration_oblique_contained_relocation_reference-234f411ed5ee69c9.exe)
+
+running 1 test
+
+thread 'contained_relocation_with_nondefault_pool_stddev_matches_rust_trace' (37120) panicked at tests\exploration_oblique_contained_relocation_reference.rs:320:5:
+assertion `left == right` failed: actual Rust Explore contained-relocation trace with pool stddev 1.0 changed
+test contained_relocation_with_nondefault_pool_stddev_matches_rust_trace ... FAILED
+
+failures:
+
+failures:
+    contained_relocation_with_nondefault_pool_stddev_matches_rust_trace
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.10s
+
+  left: "# generator=actual Sparrow Rust exploration_phase with pool observer\n# input=ExplorationObliqueContainedRelocation.json; valid initial layout; 37-degree host swap and contained-child relocation\n# case seed initial_width shrink_step iteration_limit pool_stddev failure_count item_count\n# failure ordinal total_loss item_count\n# pose item_index rotation_rad x y bbox_x_min bbox_y_min bbox_x_max bbox_y_max\n# move failure_id kind item_index related_item_index from_rotation from_x from_y to_rotation to_x to_y\n# insert failure_id insertion_index pool_size candidate_failure_ids...\n# sample failure_id raw_normal_bits mapped_sample_bits selected_index consumed_u64_words first_layer next_u64_after_sample[0..3]\ncase oblique_contained_pool_stddev_1 43 9.899999619 0.100000001 3 1.000000000 2 3\nfailure 0 1.949251175 3\npose 0 0.000000000 2.799999952 2.750000000 0.299999952 1.750000000 5.300000191 3.750000000\npose 1 0.645771801 6.610000134 2.750000000 4.810231686 1.048641920 8.409768105 4.451357841\npose 2 0.000000000 8.326498985 4.293901443 7.826498985 3.793901443 8.826498985 4.793901443\ninsert 0 0 1 0\nsample 0 3f345da0 3f345da0 0 1 d4 f1ecac3df8025e0f 7970d83eaa9b503c 5682aa8fdce02bb1 03e47536fd1f6125\nmove 0 swap 0 1 0.000000000 2.799999952 2.750000000 0.645771801 6.610000134 2.750000000\nmove 0 swap 1 0 0.645771801 6.610000134 2.750000000 0.000000000 2.799999952 2.750000000\nmove 0 contained 2 0 0.000000000 8.326498985 4.293901443 0.645771801 5.100000381 2.949999571\nfailure 1 10.502197266 3\npose 0 0.645771801 6.610000134 2.750000000 4.011596203 0.446826935 9.208404541 5.053173065\npose 1 0.000000000 2.799999952 2.750000000 1.299999952 1.750000000 4.300000191 3.750000000\npose 2 0.645771801 5.100000381 2.949999571 4.399775028 2.249774456 5.800225735 3.650224686\ninsert 1 1 2 0 1\nsample 1 bdd8962e 3dd8962e 0 1 3c 5682aa8fdce02bb1 03e47536fd1f6125 344c42c715846e50 f9922ae540d58823\nmove 1 swap 1 0 0.645771801 6.610000134 2.750000000 0.000000000 2.799999952 2.750000000\nmove 1 swap 0 1 0.000000000 2.799999952 2.750000000 0.645771801 6.610000134 2.750000000\nmove 1 contained 2 0 0.000000000 8.326498985 4.293901443 0.645771801 5.100000381 2.949999571\n"
+ right: ""
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `--test exploration_oblique_contained_relocation_reference`

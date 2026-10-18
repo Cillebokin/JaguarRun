@@ -3428,6 +3428,282 @@ bool TestCompressionFailureDecayThresholdMatchesRustReference(
                   "FailureBased shrink-min stop round must match Rust f32 reference");
 }
 
+struct FailureDecayExponentReferenceCase
+{
+    std::string name;
+    std::uint32_t shrinkMaxBits = 0U;
+    std::uint32_t shrinkMinBits = 0U;
+    std::uint32_t failureDecayBits = 0U;
+    std::uint32_t initialWidthBits = 0U;
+    std::uint32_t finalWidthBits = 0U;
+    std::vector<std::uint32_t> steps;
+    std::vector<bool> successes;
+    bool foundConfig = false;
+    bool foundWidth = false;
+};
+
+bool TestCompressionFailureDecayExponentBoundariesMatchRustReference(
+    std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CompressionFailureDecayExponentBoundaryRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/CompressionFailureDecayExponentBoundaryRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CompressionFailureDecayExponentBoundaryRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\CompressionFailureDecayExponentBoundaryRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+            break;
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(), output,
+                "Rust FailureBased exponent reference must be readable"))
+    {
+        return false;
+    }
+
+    const auto parseHex = [](const std::string& text, std::uint32_t& value) {
+        std::istringstream parser(text);
+        parser >> std::hex >> value;
+        return static_cast<bool>(parser) && parser.eof();
+    };
+    std::vector<FailureDecayExponentReferenceCase> references;
+    FailureDecayExponentReferenceCase* current = nullptr;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+            continue;
+        std::istringstream row(line);
+        std::string kind;
+        row >> kind;
+        if (kind == "case")
+        {
+            references.emplace_back();
+            current = &references.back();
+            if (!static_cast<bool>(row >> current->name))
+                return Expect(false, output,
+                              "Rust FailureBased exponent case row is malformed");
+        }
+        else if (current == nullptr)
+        {
+            return Expect(false, output,
+                          "Rust FailureBased exponent data precedes its case row");
+        }
+        else if (kind == "config")
+        {
+            std::string maxBits;
+            std::string minBits;
+            std::string decayBits;
+            if (current->foundConfig
+                || !static_cast<bool>(row >> maxBits >> minBits >> decayBits)
+                || !parseHex(maxBits, current->shrinkMaxBits)
+                || !parseHex(minBits, current->shrinkMinBits)
+                || !parseHex(decayBits, current->failureDecayBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased exponent config row is malformed");
+            }
+            current->foundConfig = true;
+        }
+        else if (kind == "step")
+        {
+            std::size_t index = 0U;
+            std::string bits;
+            std::uint32_t stepBits = 0U;
+            if (!static_cast<bool>(row >> index >> bits)
+                || index != current->steps.size()
+                || !parseHex(bits, stepBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased exponent step row is malformed");
+            }
+            current->steps.push_back(stepBits);
+        }
+        else if (kind == "result")
+        {
+            std::size_t index = 0U;
+            unsigned int success = 0U;
+            if (!static_cast<bool>(row >> index >> success)
+                || index != current->successes.size() || success > 1U)
+            {
+                return Expect(false, output,
+                              "Rust FailureBased exponent result row is malformed");
+            }
+            current->successes.push_back(success != 0U);
+        }
+        else if (kind == "width")
+        {
+            std::string initialBits;
+            std::string finalBits;
+            if (current->foundWidth
+                || !static_cast<bool>(row >> initialBits >> finalBits)
+                || !parseHex(initialBits, current->initialWidthBits)
+                || !parseHex(finalBits, current->finalWidthBits))
+            {
+                return Expect(false, output,
+                              "Rust FailureBased exponent width row is malformed");
+            }
+            current->foundWidth = true;
+        }
+        else
+        {
+            return Expect(false, output,
+                          "unknown Rust FailureBased exponent reference row");
+        }
+    }
+
+    const std::array<const char*, 4> expectedNames{
+        "failure_decay_squared_below",
+        "failure_decay_squared_equal",
+        "failure_decay_squared_above",
+        "failure_decay_cubic_equal"};
+    if (!Expect(references.size() == expectedNames.size(), output,
+                "Rust FailureBased exponent reference case count changed"))
+    {
+        return false;
+    }
+    for (std::size_t index = 0U; index < references.size(); ++index)
+    {
+        const auto& reference = references[index];
+        if (!Expect(reference.name == expectedNames[index]
+                        && reference.foundConfig && reference.foundWidth
+                        && !reference.steps.empty()
+                        && reference.steps.size() == reference.successes.size()
+                        && std::none_of(reference.successes.begin(),
+                                        reference.successes.end(),
+                                        [](bool success) { return success; }),
+                    output,
+                    "Rust FailureBased exponent case must be a complete all-failure trace"))
+        {
+            return false;
+        }
+    }
+
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(), output,
+                "Rust FailureBased exponent input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "Rust FailureBased exponent input must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "Rust FailureBased exponent problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto widthSet = problem.ChangeStripWidth(4.2);
+    const auto firstPlaced = problem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
+    const auto secondPlaced = problem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {3.15, 0.55})});
+    if (!Expect(widthSet.HasValue() && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "Rust FailureBased exponent warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initialSolution = problem.Save();
+    const auto floatFromBits = [](std::uint32_t bits) {
+        float value = 0.0F;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    const auto floatBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+
+    for (const auto& reference : references)
+    {
+        sparrow::CompressionConfig config;
+        config.shrinkMax = static_cast<double>(floatFromBits(reference.shrinkMaxBits));
+        config.shrinkMin = static_cast<double>(floatFromBits(reference.shrinkMinBits));
+        config.failureDecay =
+            static_cast<double>(floatFromBits(reference.failureDecayBits));
+        config.decayStrategy =
+            sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+        config.timeLimit = std::chrono::seconds{30};
+        config.separator.noImprovementLimit = 1U;
+        config.separator.strikeLimit = 1U;
+        config.separator.nWorkers = 1U;
+        config.separator.nContainerSamples = 8U;
+        config.separator.nFocussedSamples = 0U;
+        config.separator.nCoordinateDescents = 1U;
+        sparrow::OptimizationTerminator terminator({
+            0U, std::chrono::seconds{30}});
+        terminator.StartPhase(std::chrono::seconds{30});
+        CompressionWorkerMoveListener listener;
+        const auto actual = sparrow::Compress(
+            instance.Value(), initialSolution, config, 42U,
+            terminator, &listener);
+        if (!Expect(actual.HasValue(), output,
+                    "SparrowCore FailureBased exponent compression must complete"))
+        {
+            return false;
+        }
+
+        std::vector<std::uint32_t> actualSteps;
+        actualSteps.reserve(listener.compressionSteps.size());
+        for (double step : listener.compressionSteps)
+            actualSteps.push_back(floatBits(static_cast<float>(step)));
+        std::vector<bool> actualSuccesses;
+        actualSuccesses.reserve(listener.separationResults.size());
+        for (const auto& result : listener.separationResults)
+            actualSuccesses.push_back(result.success);
+        const auto& finalSolution = actual.Value().solution;
+        const bool matches = actualSteps == reference.steps
+            && actualSuccesses == reference.successes
+            && floatBits(static_cast<float>(initialSolution.StripWidth()))
+                == reference.initialWidthBits
+            && floatBits(static_cast<float>(finalSolution.StripWidth()))
+                == reference.finalWidthBits
+            && SameSolution(finalSolution, initialSolution);
+        if (!matches)
+        {
+            output << "FailureBased case " << reference.name << " Rust steps=";
+            for (const auto bits : reference.steps)
+                output << "0x" << std::hex << bits << ',';
+            output << " C++ steps=";
+            for (const auto bits : actualSteps)
+                output << "0x" << std::hex << bits << ',';
+            output << std::dec << " Rust results=" << reference.successes.size()
+                   << " C++ results=" << actualSuccesses.size() << '\n';
+        }
+        if (!Expect(matches, output,
+                    "FailureBased exponent threshold trace must match Rust"))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TestTerminationHandoffMatchesRustReference(std::ostream& output)
 {
     std::ifstream referenceFile;
@@ -9997,6 +10273,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestCompressionFailureDecayThresholdMatchesRustReference(output))
+    {
+        return false;
+    }
+    if (!TestCompressionFailureDecayExponentBoundariesMatchRustReference(output))
     {
         return false;
     }

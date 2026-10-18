@@ -1,0 +1,39 @@
+# generator=Rust sparrow::optimizer::compress::compression_phase
+# input=RustSppCompressWorkerMove.json seed=42 warm_start=true workers=1
+# step and shrink_min are compared as raw f32 bits
+case failure_decay_squared_below
+config 3e4ccccd 3e03126e 3f4ccccd
+step 0 3e4ccccd
+step 1 3e23d70b
+step 2 3e03126f
+result 0 0
+result 1 0
+result 2 0
+width 40866666 40866666
+case failure_decay_squared_equal
+config 3e4ccccd 3e03126f 3f4ccccd
+step 0 3e4ccccd
+step 1 3e23d70b
+step 2 3e03126f
+result 0 0
+result 1 0
+result 2 0
+width 40866666 40866666
+case failure_decay_squared_above
+config 3e4ccccd 3e031270 3f4ccccd
+step 0 3e4ccccd
+step 1 3e23d70b
+result 0 0
+result 1 0
+width 40866666 40866666
+case failure_decay_cubic_equal
+config 3e5a53b8 3dc9d0f6 3f45ee39
+step 0 3e5a53b8
+step 1 3e28cd97
+step 2 3e02834a
+step 3 3dc9d0f6
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+width 40866666 40866666

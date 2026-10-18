@@ -35,6 +35,72 @@ impl SolutionListener for TraceListener {
 }
 
 pub fn failure_decay_threshold_trace_tsv() -> Result<String, Box<dyn Error>> {
+    let mut output = String::from(
+        "# generator=Rust sparrow::optimizer::compress::compression_phase\n\
+         # input=RustSppCompressWorkerMove.json seed=42 warm_start=true workers=1\n\
+         # config=failure_based shrink_max=3e4ccccd shrink_min=3e23d70b decay=3f4ccccd\n",
+    );
+    output.push_str(&failure_decay_trace_tsv(
+        "failure_decay_threshold",
+        0x3e4c_cccd,
+        0x3e23_d70b,
+        0x3f4c_cccd,
+    )?);
+    Ok(output)
+}
+
+pub fn failure_decay_exponent_boundary_trace_tsv() -> Result<String, Box<dyn Error>> {
+    let mut output = fixture_header();
+    for (case_name, shrink_max, shrink_min, failure_decay) in [
+        (
+            "failure_decay_squared_below",
+            0x3e4c_cccd,
+            0x3e03_126e,
+            0x3f4c_cccd,
+        ),
+        (
+            "failure_decay_squared_equal",
+            0x3e4c_cccd,
+            0x3e03_126f,
+            0x3f4c_cccd,
+        ),
+        (
+            "failure_decay_squared_above",
+            0x3e4c_cccd,
+            0x3e03_1270,
+            0x3f4c_cccd,
+        ),
+        (
+            "failure_decay_cubic_equal",
+            0x3e5a_53b8,
+            0x3dc9_d0f6,
+            0x3f45_ee39,
+        ),
+    ] {
+        output.push_str(&failure_decay_trace_tsv(
+            case_name,
+            shrink_max,
+            shrink_min,
+            failure_decay,
+        )?);
+    }
+    Ok(output)
+}
+
+fn fixture_header() -> String {
+    String::from(
+        "# generator=Rust sparrow::optimizer::compress::compression_phase\n\
+         # input=RustSppCompressWorkerMove.json seed=42 warm_start=true workers=1\n\
+         # step and shrink_min are compared as raw f32 bits\n",
+    )
+}
+
+fn failure_decay_trace_tsv(
+    case_name: &str,
+    shrink_max_bits: u32,
+    shrink_min_bits: u32,
+    failure_decay_bits: u32,
+) -> Result<String, Box<dyn Error>> {
     let (external_instance, _) =
         sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppCompressWorkerMove.json"))?;
     let mut config = DEFAULT_SPARROW_CONFIG;
@@ -56,8 +122,12 @@ pub fn failure_decay_threshold_trace_tsv() -> Result<String, Box<dyn Error>> {
     });
     let initial_solution = problem.save();
 
-    config.cmpr_cfg.shrink_range = (0.2, f32::from_bits(0x3e23_d70b));
-    config.cmpr_cfg.shrink_decay = ShrinkDecayStrategy::FailureBased(f32::from_bits(0x3f4c_cccd));
+    config.cmpr_cfg.shrink_range = (
+        f32::from_bits(shrink_max_bits),
+        f32::from_bits(shrink_min_bits),
+    );
+    config.cmpr_cfg.shrink_decay =
+        ShrinkDecayStrategy::FailureBased(f32::from_bits(failure_decay_bits));
     config.cmpr_cfg.time_limit = Duration::from_secs(30);
     config.cmpr_cfg.separator_config.iter_no_imprv_limit = 1;
     config.cmpr_cfg.separator_config.strike_limit = 1;
@@ -83,12 +153,9 @@ pub fn failure_decay_threshold_trace_tsv() -> Result<String, Box<dyn Error>> {
         &config.cmpr_cfg,
     );
 
-    let mut output = String::from(
-        "# generator=Rust sparrow::optimizer::compress::compression_phase\n\
-         # input=RustSppCompressWorkerMove.json seed=42 warm_start=true workers=1\n\
-         # config=failure_based shrink_max=3e4ccccd shrink_min=3e23d70b decay=3f4ccccd\n\
-         case failure_decay_threshold\n\
-         config 3e4ccccd 3e23d70b 3f4ccccd\n",
+    let mut output = format!(
+        "case {case_name}\n\
+         config {shrink_max_bits:08x} {shrink_min_bits:08x} {failure_decay_bits:08x}\n",
     );
     for (index, step) in listener.steps.iter().enumerate() {
         output.push_str(&format!("step {index} {:08x}\n", step.to_bits()));

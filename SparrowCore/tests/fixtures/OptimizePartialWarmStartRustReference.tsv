@@ -1,0 +1,33 @@
+# Rust Debug/Release optimize reference for partial warm-start states
+# generator=optimizer_partial_warm_start_reference.rs, RustReference Cargo.lock, rustc 1.98.1
+# scenario=ExplorationEmptyLarge.json seed=42 placed item indices 1,2 at width 8; phase deadlines 0; stop after initial ExplFeas report
+# comparison=discrete state/events exact; width/density and transforms compared by C++ using E5 field tolerances
+# case state placed remaining width density solution_feasible layout_feasible placed_indices remaining_indices
+config	partial_disjoint	42	ExplorationEmptyLarge.json	workers=1	phase_ms=0,0	stop=after_initial_expl_feas
+state	partial_disjoint	initial	2	1	8.000000000	0.050000001	0	1	1,2	0
+placement	partial_disjoint	initial	1	0.000000000	1.500000000	2.500000000
+placement	partial_disjoint	initial	2	0.000000000	6.500000000	2.500000000
+phase	partial_disjoint	exploration
+report	partial_disjoint	expl_feas	2
+phase	partial_disjoint	compression
+report	partial_disjoint	final	2
+state	partial_disjoint	final	2	1	8.000000000	0.050000001	0	1	1,2	0
+placement	partial_disjoint	final	1	0.000000000	1.500000000	2.500000000
+placement	partial_disjoint	final	2	0.000000000	6.500000000	2.500000000
+termination	partial_disjoint	listener_cancel_after_expl_feas	zero_compression_deadline
+loss	partial_disjoint	none_no_separator_attempt
+counts	partial_disjoint	separation_progress=0	separation_results=0	compression_steps=0
+config	partial_overlapping	42	ExplorationEmptyLarge.json	workers=1	phase_ms=0,0	stop=after_initial_expl_feas
+state	partial_overlapping	initial	2	1	8.000000000	0.050000001	0	0	1,2	0
+placement	partial_overlapping	initial	1	0.000000000	1.500000000	2.500000000
+placement	partial_overlapping	initial	2	0.000000000	1.500000000	2.500000000
+phase	partial_overlapping	exploration
+report	partial_overlapping	expl_feas	2
+phase	partial_overlapping	compression
+report	partial_overlapping	final	2
+state	partial_overlapping	final	2	1	8.000000000	0.050000001	0	0	1,2	0
+placement	partial_overlapping	final	1	0.000000000	1.500000000	2.500000000
+placement	partial_overlapping	final	2	0.000000000	1.500000000	2.500000000
+termination	partial_overlapping	listener_cancel_after_expl_feas	zero_compression_deadline
+loss	partial_overlapping	none_no_separator_attempt
+counts	partial_overlapping	separation_progress=0	separation_results=0	compression_steps=0

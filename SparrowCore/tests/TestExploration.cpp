@@ -2512,6 +2512,412 @@ bool TestPositiveTimeBasedCompressionCurveMatchesRustReference(
                   "positive-time TimeBased shrink curve must match the Rust linear rate over measured elapsed time");
 }
 
+bool TestE5PartialWarmStartMatchesRust(std::ostream& output)
+{
+    const std::array<std::string, 4U> instancePaths{
+        "SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+        "../SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+        "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+        "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyLarge.json"};
+    std::ifstream instanceFile;
+    for (const auto& path : instancePaths)
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "E5 partial warm-start input must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(imported.HasValue(),
+                output,
+                "E5 partial warm-start input must import"))
+    {
+        return false;
+    }
+    const jaguar::SPInstance& instance = imported.Value();
+
+    const std::array<std::string, 4U> fixturePaths{
+        "SparrowCore/Tests/Fixtures/OptimizePartialWarmStartRustReference.tsv",
+        "../SparrowCore/Tests/Fixtures/OptimizePartialWarmStartRustReference.tsv",
+        "../JaguarRun/SparrowCore/Tests/Fixtures/OptimizePartialWarmStartRustReference.tsv",
+        "..\\SparrowCore\\Tests\\Fixtures\\OptimizePartialWarmStartRustReference.tsv"};
+    std::ifstream fixtureFile;
+    for (const auto& path : fixturePaths)
+    {
+        fixtureFile.open(path);
+        if (fixtureFile.is_open())
+            break;
+        fixtureFile.clear();
+    }
+    if (!Expect(fixtureFile.is_open(),
+                output,
+                "E5 partial warm-start Rust fixture must be readable"))
+    {
+        return false;
+    }
+    std::vector<std::string> expected;
+    std::string line;
+    while (std::getline(fixtureFile, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (!line.empty() && line.front() != '#')
+            expected.push_back(line);
+    }
+
+    const auto joinIds = [](const std::vector<std::size_t>& ids) {
+        if (ids.empty())
+            return std::string{"-"};
+        std::ostringstream result;
+        for (std::size_t index = 0U; index < ids.size(); ++index)
+        {
+            if (index != 0U)
+                result << ',';
+            result << ids[index];
+        }
+        return result.str();
+    };
+    const auto appendState = [&](std::vector<std::string>& trace,
+                                 const std::string& caseName,
+                                 const char* stage,
+                                 const jaguar::SPSolution& solution) {
+        auto stateProblemResult = jaguar::SPProblem::Create(instance);
+        if (!Expect(stateProblemResult.HasValue(),
+                    output,
+                    "E5 solution state problem must be created"))
+        {
+            return false;
+        }
+        jaguar::SPProblem stateProblem =
+            std::move(stateProblemResult.Value());
+        if (!Expect(stateProblem.Restore(solution).HasValue(),
+                    output,
+                    "E5 solution snapshot must restore for state comparison"))
+        {
+            return false;
+        }
+
+        std::vector<std::size_t> placedIds;
+        for (const auto& placement : solution.layoutSnapshot.placements)
+            placedIds.push_back(placement.placedItem.GetItemIndex());
+        std::sort(placedIds.begin(), placedIds.end());
+
+        std::vector<std::size_t> remainingIds;
+        for (std::size_t itemIndex = 0U;
+             itemIndex < instance.ItemCount();
+             ++itemIndex)
+        {
+            for (std::size_t remaining =
+                     stateProblem.RemainingDemand(itemIndex);
+                 remaining > 0U;
+                 --remaining)
+            {
+                remainingIds.push_back(itemIndex);
+            }
+        }
+
+        jaguar::Layout layout(solution.layoutSnapshot.container);
+        if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                    output,
+                    "E5 solution layout must restore for feasibility comparison"))
+        {
+            return false;
+        }
+        const bool layoutFeasible = layout.IsFeasible();
+        const bool solutionFeasible = remainingIds.empty()
+            && jaguar::ValidateSPSolution(stateProblem, solution).HasValue()
+            && layoutFeasible;
+        std::ostringstream stateRow;
+        stateRow << std::setprecision(17)
+                 << "state\t" << caseName << '\t' << stage << '\t'
+                 << placedIds.size() << '\t' << remainingIds.size() << '\t'
+                 << solution.StripWidth() << '\t' << solution.Density() << '\t'
+                 << (solutionFeasible ? 1 : 0) << '\t'
+                 << (layoutFeasible ? 1 : 0) << '\t'
+                 << joinIds(placedIds) << '\t' << joinIds(remainingIds);
+        trace.push_back(stateRow.str());
+
+        for (const std::size_t itemIndex : placedIds)
+        {
+            const auto placement = std::find_if(
+                solution.layoutSnapshot.placements.begin(),
+                solution.layoutSnapshot.placements.end(),
+                [itemIndex](const auto& candidate) {
+                    return candidate.placedItem.GetItemIndex() == itemIndex;
+                });
+            if (placement == solution.layoutSnapshot.placements.end())
+                return false;
+            const auto& transform = placement->placedItem.Transform();
+            std::ostringstream placementRow;
+            placementRow << std::setprecision(17)
+                         << "placement\t" << caseName << '\t' << stage << '\t'
+                         << itemIndex << '\t' << transform.rotationRad << '\t'
+                         << transform.translation.x << '\t'
+                         << transform.translation.y;
+            trace.push_back(placementRow.str());
+        }
+        return true;
+    };
+
+    struct Case
+    {
+        const char* name;
+        bool overlapping;
+    };
+    const std::array<Case, 2U> cases{{
+        {"partial_disjoint", false},
+        {"partial_overlapping", true},
+    }};
+    std::vector<std::string> actual;
+    for (const Case& testCase : cases)
+    {
+        auto problemResult = jaguar::SPProblem::Create(instance);
+        if (!Expect(problemResult.HasValue(),
+                    output,
+                    "E5 partial warm-start problem must be created"))
+        {
+            return false;
+        }
+        jaguar::SPProblem problem = std::move(problemResult.Value());
+        const double secondX = testCase.overlapping ? 1.5 : 6.5;
+        if (!Expect(problem.ChangeStripWidth(8.0).HasValue()
+                        && problem.PlaceItem({1U, {0.0, {1.5, 2.5}}}).HasValue()
+                        && problem.PlaceItem({2U, {0.0, {secondX, 2.5}}}).HasValue(),
+                    output,
+                    "E5 partial warm-start placements must be constructible"))
+        {
+            return false;
+        }
+        const jaguar::SPSolution initial = problem.Save();
+        const std::string caseName{testCase.name};
+        std::ostringstream configRow;
+        configRow << "config\t" << caseName
+                  << "\t42\tExplorationEmptyLarge.json\tworkers=1\tphase_ms=0,0"
+                     "\tstop=after_initial_expl_feas";
+        actual.push_back(configRow.str());
+        if (!appendState(actual, caseName, "initial", initial))
+            return false;
+
+        sparrow::SparrowConfig config;
+        config.seed = 42U;
+        config.warmStart = initial;
+        config.exploration.timeLimit = std::chrono::nanoseconds{0};
+        config.compression.timeLimit = std::chrono::nanoseconds{0};
+        config.exploration.separator.nWorkers = 1U;
+        config.compression.separator.nWorkers = 1U;
+        sparrow::OptimizationTerminator terminator;
+        class E5Listener final : public sparrow::OptimizationListener
+        {
+        public:
+            E5Listener(const std::string& caseName,
+                       sparrow::OptimizationTerminator& terminator,
+                       std::vector<std::string>& events)
+                : m_CaseName(caseName),
+                  m_Terminator(terminator),
+                  m_Events(events)
+            {
+            }
+
+            void OnPhase(sparrow::OptimizationPhase phase) override
+            {
+                const char* label =
+                    phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION
+                    ? "exploration"
+                    : "compression";
+                m_Events.push_back(
+                    std::string{"phase\t"} + m_CaseName + '\t' + label);
+            }
+
+            void OnSolution(
+                const sparrow::OptimizationSolutionReport& report) override
+            {
+                const char* label = nullptr;
+                switch (report.type)
+                {
+                case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE:
+                    label = "expl_feas";
+                    break;
+                case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE:
+                    label = "expl_infeas";
+                    break;
+                case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_IMPROVING:
+                    label = "expl_improving";
+                    break;
+                case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_COMPRESSION_FEASIBLE:
+                    label = "cmpr_feas";
+                    break;
+                case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL:
+                    label = "final";
+                    break;
+                }
+                m_Events.push_back(
+                    std::string{"report\t"} + m_CaseName + '\t' + label + '\t'
+                    + std::to_string(report.solution.layoutSnapshot.placements.size()));
+                if (report.type
+                        == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+                    && !stoppedAfterInitialExplFeas)
+                {
+                    m_Terminator.RequestPhaseStop();
+                    stoppedAfterInitialExplFeas = true;
+                }
+            }
+
+            void OnSeparationProgress(
+                const sparrow::SeparationProgress&) override
+            {
+                ++separationProgressCount;
+            }
+
+            void OnSeparationResult(
+                const sparrow::SeparationResult&) override
+            {
+                ++separationResultCount;
+            }
+
+            void OnCompressionProgress(double) override
+            {
+                ++compressionStepCount;
+            }
+
+            bool stoppedAfterInitialExplFeas = false;
+            std::size_t separationProgressCount = 0U;
+            std::size_t separationResultCount = 0U;
+            std::size_t compressionStepCount = 0U;
+
+        private:
+            const std::string& m_CaseName;
+            sparrow::OptimizationTerminator& m_Terminator;
+            std::vector<std::string>& m_Events;
+        } listener{caseName, terminator, actual};
+
+        const auto result = sparrow::Optimize(
+            instance, config, terminator, &listener);
+        if (!Expect(result.HasValue(),
+                    output,
+                    "E5 partial warm-start Optimize must return a final solution"))
+        {
+            if (!result.HasValue())
+                output << "  error=" << result.GetError().message << '\n';
+            return false;
+        }
+        if (!Expect(listener.stoppedAfterInitialExplFeas
+                        && listener.separationProgressCount == 0U
+                        && listener.separationResultCount == 0U
+                        && listener.compressionStepCount == 0U,
+                    output,
+                    "E5 callback cancel and zero compression deadline must stop before worker work"))
+        {
+            return false;
+        }
+        if (!appendState(actual,
+                         caseName,
+                         "final",
+                         result.Value().solution))
+        {
+            return false;
+        }
+        actual.push_back(
+            "termination\t" + caseName
+            + "\tlistener_cancel_after_expl_feas\tzero_compression_deadline");
+        actual.push_back("loss\t" + caseName + "\tnone_no_separator_attempt");
+        actual.push_back(
+            "counts\t" + caseName
+            + "\tseparation_progress=0\tseparation_results=0\tcompression_steps=0");
+    }
+
+    const auto splitFields = [](const std::string& row) {
+        std::istringstream stream(row);
+        std::vector<std::string> fields;
+        std::string field;
+        while (stream >> field)
+            fields.push_back(std::move(field));
+        return fields;
+    };
+    if (!Expect(actual.size() == expected.size(),
+                output,
+                "E5 partial warm-start trace row count differs from Rust"))
+    {
+        output << "C++ rows=" << actual.size() << " Rust rows="
+               << expected.size() << '\n';
+        return false;
+    }
+    for (std::size_t rowIndex = 0U; rowIndex < actual.size(); ++rowIndex)
+    {
+        const auto expectedFields = splitFields(expected[rowIndex]);
+        const auto actualFields = splitFields(actual[rowIndex]);
+        bool rowMatches = expectedFields.size() == actualFields.size()
+            && !expectedFields.empty()
+            && expectedFields[0] == actualFields[0];
+        if (rowMatches && expectedFields[0] == "state")
+        {
+            for (std::size_t field = 1U; field < expectedFields.size(); ++field)
+            {
+                if (field == 5U || field == 6U)
+                {
+                    rowMatches = rowMatches
+                        && std::abs(std::stod(expectedFields[field])
+                                    - std::stod(actualFields[field]))
+                            < 5.0e-7;
+                }
+                else
+                {
+                    rowMatches = rowMatches
+                        && expectedFields[field] == actualFields[field];
+                }
+            }
+        }
+        else if (rowMatches && expectedFields[0] == "placement")
+        {
+            for (std::size_t field = 1U; field < expectedFields.size(); ++field)
+            {
+                if (field == 4U)
+                {
+                    rowMatches = rowMatches
+                        && std::abs(std::stod(expectedFields[field])
+                                    - std::stod(actualFields[field]))
+                            < 1.0e-6;
+                }
+                else if (field == 5U || field == 6U)
+                {
+                    rowMatches = rowMatches
+                        && std::abs(std::stod(expectedFields[field])
+                                    - std::stod(actualFields[field]))
+                            < 5.0e-6;
+                }
+                else
+                {
+                    rowMatches = rowMatches
+                        && expectedFields[field] == actualFields[field];
+                }
+            }
+        }
+        else if (rowMatches)
+        {
+            rowMatches = expectedFields == actualFields;
+        }
+        if (!Expect(rowMatches,
+                    output,
+                    "E5 partial warm-start trace differs from Rust"))
+        {
+            output << "row " << rowIndex << " Rust: " << expected[rowIndex]
+                   << "\nrow " << rowIndex << " C++: " << actual[rowIndex]
+                   << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TestOptimizeCompressionMatchesRustReference(std::ostream& output)
 {
     std::ifstream instanceFile;
@@ -10252,6 +10658,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestDefaultColdStartOptimizeMatchesRustReference(output))
+    {
+        return false;
+    }
+    if (!TestE5PartialWarmStartMatchesRust(output))
     {
         return false;
     }

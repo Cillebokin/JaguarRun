@@ -103,6 +103,8 @@
 - 单独做自然时限运行，验证 Rust 9 分钟 Explore、60 秒 Compression 默认预算能正确进入、停止和收尾。自然计时受机器负载与实现速度影响，只比较阶段/停止语义、合法状态和资源边界，不要求迭代数、布局或逐事件 trace 相同；若要比较 time-based 决策轨迹，给两侧注入相同的单调时钟序列。
 - **验收：**受支持输入集中所有确定性端到端 fixtures 在 Rust Debug/Release 与 C++ Debug/Release 通过；每个确定性 fixture 的最终结果可从相同输入、有效 seed 和工作预算重放；自然时限运行按独立口径验收，不要求相同最终布局或迭代数；任何 parity 不一致已转成定向回归。
 
+**执行记录（2026-10-18，部分完成）：**新增 `OptimizePartialWarmStartRustReference.tsv` 和 Rust/C++ 对照，固定 `ExplorationEmptyLarge.json`、seed=42、两个不同几何状态的 partial warm-start；在初始 `ExplFeas` 回调请求停止并令压缩时限为零，比较初态/终态身份、可行性、变换、width/density、阶段/报告、停止原因及计数。fixture SHA-256 为 `7BAEC4EA2A689A200A6C942899E3876D3E078BDA1905BAF91E5408CCF491DCD3`；RustReference 与 SparrowCore Debug/Release 全量 runner 均通过。该矩阵没有进入 separator/compression work，因此不提供 loss 样本或实际压缩步证据。结合 S08 已有的 bounded cold/warm-start、压缩成功/失败、worker move、phase handoff 和受控 deadline crossing 对照，确定性端到端证据已有基础但字段/输入矩阵尚未统一；自然时限运行和同一单调时钟序列注入仍未完成，E5 保持部分状态。
+
 ### 阶段 4：公共入口、文件和产品层完整性
 
 - S20：SparrowCli SIGINT phase-stop、原生宿主跨线程全局取消、Windows `CTRL_C_EVENT` 子进程轨迹及一次真实键盘 Release 冒烟已完成；剩余为 WASM 同步 ABI 中途取消入口；S12 的固定双 worker错误传播已闭合。

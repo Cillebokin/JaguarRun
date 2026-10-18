@@ -27,3 +27,10 @@ fn shrink_range_zero_and_one_endpoints_follow_compression_width_guards() {
         .expect("run compression shrink-range endpoint oracle");
     assert_eq!(actual, vec![(0.0, 0.0, 0), (0.01, 0.0, 1), (1.0, 1.0, 0)]);
 }
+
+#[test]
+fn direct_time_based_zero_duration_skips_compression_attempts() {
+    let actual = compression_minimum_width_trace::zero_duration_time_based_state()
+        .expect("run direct zero-duration TimeBased compression oracle");
+    assert_eq!(actual, (0x4080_0000, 0x4080_0000, 0));
+}

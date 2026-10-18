@@ -5,3 +5,4 @@
 case square 3fffffe8
 probe below 3f00000d 3fffffe6 0 0
 probe at_or_above 3f00000c 3fffffe8 1 1
+zero_time_time_based 40800000 40800000 0

@@ -250,15 +250,18 @@ Result<CompressionResult> Compress(
         if (config.decayStrategy
             == ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED)
         {
-            double ratio = 0.0;
-            if (config.timeLimit.count() > 0)
+            if (config.timeLimit.count() == 0)
             {
-                const auto elapsed = std::chrono::duration_cast<
-                    std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - start);
-                ratio = static_cast<double>(elapsed.count())
-                    / static_cast<double>(config.timeLimit.count());
+                // Rust's elapsed / zero time limit produces a non-finite
+                // step, so the compression loop exits before reporting an attempt.
+                break;
             }
+            double ratio = 0.0;
+            const auto elapsed = std::chrono::duration_cast<
+                std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start);
+            ratio = static_cast<double>(elapsed.count())
+                / static_cast<double>(config.timeLimit.count());
             step = config.shrinkMax
                 + ratio * (config.shrinkMin - config.shrinkMax);
         }

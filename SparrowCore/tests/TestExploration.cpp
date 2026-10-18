@@ -9108,7 +9108,11 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
         return static_cast<bool>(parser) && parser.eof();
     };
     std::uint32_t expectedMinimumWidthBits = 0U;
+    std::uint32_t zeroTimeInitialWidthBits = 0U;
+    std::uint32_t zeroTimeFinalWidthBits = 0U;
+    std::size_t zeroTimeProgressCount = 0U;
     bool foundMinimumWidth = false;
+    bool foundZeroTimeBased = false;
     std::vector<Probe> probes;
     std::string line;
     while (std::getline(traceInput, line))
@@ -9154,6 +9158,24 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
             probe.shouldEnter = shouldEnter != 0U;
             probes.push_back(std::move(probe));
         }
+        else if (record == "zero_time_time_based")
+        {
+            std::string initialWidthBits;
+            std::string finalWidthBits;
+            if (!Expect(static_cast<bool>(row >> initialWidthBits
+                                          >> finalWidthBits
+                                          >> zeroTimeProgressCount)
+                            && parseHex(initialWidthBits,
+                                        zeroTimeInitialWidthBits)
+                            && parseHex(finalWidthBits,
+                                        zeroTimeFinalWidthBits),
+                        output,
+                        "malformed Rust zero-time compression reference"))
+            {
+                return false;
+            }
+            foundZeroTimeBased = true;
+        }
         else
         {
             return Expect(false,
@@ -9161,9 +9183,10 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
                           "unknown Rust compression minimum-width record");
         }
     }
-    if (!Expect(foundMinimumWidth && probes.size() == 2U,
+    if (!Expect(foundMinimumWidth && probes.size() == 2U
+                    && foundZeroTimeBased,
                 output,
-                "Rust compression minimum-width trace must contain both probes"))
+                "Rust compression trace must contain width probes and zero-time case"))
     {
         return false;
     }
@@ -9314,12 +9337,12 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
                       output,
                       caseName);
     };
-    return verifyCompressionBoundary(
-               0.01,
-               0.01,
-               0.0,
-               1U,
-               "Rust zero failure-decay ratio must permit one bounded attempt")
+    const bool endpointBoundariesMatch = verifyCompressionBoundary(
+        0.01,
+        0.01,
+        0.0,
+        1U,
+        "Rust zero failure-decay ratio must permit one bounded attempt")
         && verifyCompressionBoundary(
             0.01,
             0.01,
@@ -9344,6 +9367,59 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
             0.9,
             0U,
             "Rust unit shrink ratio must stop before zero-width attempt");
+    if (!endpointBoundariesMatch)
+    {
+        return false;
+    }
+
+    sparrow::CompressionConfig zeroTimeConfig;
+    zeroTimeConfig.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED;
+    zeroTimeConfig.timeLimit = std::chrono::nanoseconds{0};
+    zeroTimeConfig.shrinkMin = 0.01;
+    zeroTimeConfig.shrinkMax = 0.1;
+    zeroTimeConfig.maxIterations = 1U;
+    zeroTimeConfig.separator.strikeLimit = 0U;
+    zeroTimeConfig.separator.nWorkers = 1U;
+    zeroTimeConfig.separator.nContainerSamples = 0U;
+    zeroTimeConfig.separator.nFocussedSamples = 0U;
+    zeroTimeConfig.separator.nCoordinateDescents = 0U;
+    sparrow::OptimizationTerminator zeroTimeTerminator({
+        1U, std::chrono::seconds{2}});
+    zeroTimeTerminator.Start();
+    Progress zeroTimeProgress;
+    const auto zeroTimeResult = sparrow::Compress(
+        instance.Value(),
+        initial,
+        zeroTimeConfig,
+        0U,
+        zeroTimeTerminator,
+        &zeroTimeProgress);
+    if (!Expect(zeroTimeResult.HasValue(),
+                output,
+                "direct zero-time TimeBased compression must return a solution"))
+    {
+        return false;
+    }
+    const auto& zeroTimeSolution = zeroTimeResult.Value().solution;
+    const std::uint32_t actualInitialWidthBits =
+        floatBits(static_cast<float>(initial.StripWidth()));
+    const std::uint32_t actualFinalWidthBits =
+        floatBits(static_cast<float>(zeroTimeSolution.StripWidth()));
+    if (!Expect(actualInitialWidthBits == zeroTimeInitialWidthBits
+                    && actualFinalWidthBits == zeroTimeFinalWidthBits
+                    && zeroTimeProgress.count == zeroTimeProgressCount
+                    && SameSolution(zeroTimeSolution, initial),
+                output,
+                "direct zero-time TimeBased compression must match the Rust no-attempt state"))
+    {
+        output << "initial=0x" << std::hex << actualInitialWidthBits
+               << " final=0x" << actualFinalWidthBits << std::dec
+               << " progress=" << zeroTimeProgress.count
+               << " Rust progress=" << zeroTimeProgressCount << '\n';
+        return false;
+    }
+    return true;
 }
 }
 

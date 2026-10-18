@@ -117,6 +117,44 @@ fn compression_attempt_count_for_range(
     Ok(listener.0)
 }
 
+pub fn zero_duration_time_based_state() -> Result<(u32, u32, usize), Box<dyn Error>> {
+    let problem = make_problem()?;
+    let initial = problem.save();
+    let defaults = DEFAULT_SPARROW_CONFIG;
+    let mut config = defaults.cmpr_cfg;
+    config.shrink_range = (0.1, 0.01);
+    config.time_limit = Duration::ZERO;
+    config.shrink_decay = ShrinkDecayStrategy::TimeBased;
+    config.separator_config.strike_limit = 0;
+    config.separator_config.n_workers = 1;
+    config.separator_config.sample_config = SampleConfig {
+        n_container_samples: 0,
+        n_focussed_samples: 0,
+        n_coord_descents: 0,
+    };
+    let mut separator = Separator::new(
+        problem,
+        Xoshiro256PlusPlus::seed_from_u64(0),
+        config.separator_config,
+    );
+    let mut listener = CompressionProgress::default();
+    let terminator = StopAfterOneAttempt {
+        calls: Cell::new(0),
+    };
+    let final_solution = compression_phase(
+        &mut separator,
+        &initial,
+        &mut listener,
+        &terminator,
+        &config,
+    );
+    Ok((
+        initial.strip_width().to_bits(),
+        final_solution.strip_width().to_bits(),
+        listener.0,
+    ))
+}
+
 #[cfg(test)]
 #[allow(dead_code)]
 pub fn failure_decay_endpoint_attempt_counts() -> Result<Vec<(f32, usize)>, Box<dyn Error>> {
@@ -189,6 +227,10 @@ pub fn compression_minimum_width_trace_tsv() -> Result<String, Box<dyn Error>> {
             u8::from(should_enter),
         ));
     }
+    let (initial_width_bits, final_width_bits, progress_count) = zero_duration_time_based_state()?;
+    output.push_str(&format!(
+        "zero_time_time_based {initial_width_bits:08x} {final_width_bits:08x} {progress_count}\n"
+    ));
     Ok(output)
 }
 

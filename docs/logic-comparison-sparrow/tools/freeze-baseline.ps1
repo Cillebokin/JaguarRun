@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputPath,
+    [string]$BaselineId,
     [switch]$Force
 )
 
@@ -12,6 +13,13 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = $defaultOutput
 }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
+if ([string]::IsNullOrWhiteSpace($BaselineId)) {
+    $BaselineId = if ($OutputPath -ieq [IO.Path]::GetFullPath($defaultOutput)) {
+        "sparrow-parity-2026-10-09-pre-p0"
+    } else {
+        [IO.Path]::GetFileNameWithoutExtension($OutputPath)
+    }
+}
 if ((Test-Path -LiteralPath $OutputPath) -and -not $Force) {
     throw "Refusing to replace frozen baseline '$OutputPath'. Use -Force only for an intentional re-freeze."
 }
@@ -175,7 +183,7 @@ foreach ($relativePath in $artifactCandidates) {
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    baselineId = "sparrow-parity-2026-10-09-pre-p0"
+    baselineId = $BaselineId
     frozenAtUtc = [DateTime]::UtcNow.ToString("o")
     workspace = $repoRoot
     method = "Per-file SHA-256 and deterministic sorted-tree digest; no VCS metadata used."

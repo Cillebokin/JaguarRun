@@ -1257,6 +1257,120 @@ bool TestSeparatorZeroLimitsAndFourWorkerInvariant(std::ostream& output)
         && run(1U, 1U, 4U, true);
 }
 
+bool TestActiveFourWorkerInvariant(std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const char* path :
+         {"SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+          "../SparrowCore/Tests/Fixtures/SeparatorRoundRustTrace.json",
+          "../JaguarRun/SparrowCore/Tests/Fixtures/"
+          "SeparatorRoundRustTrace.json",
+          "..\\SparrowCore\\Tests\\Fixtures\\SeparatorRoundRustTrace.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(), output,
+                "active four-worker separator input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{std::istreambuf_iterator<char>(inputFile),
+                           std::istreambuf_iterator<char>()};
+    const auto instance =
+        MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output,
+                "active four-worker separator import failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "active four-worker separator problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(9.0).HasValue(), output,
+                "active four-worker strip resize failed"))
+    {
+        return false;
+    }
+    const auto initial =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.0, 1.0});
+    for (std::size_t index = 0U; index < 2U; ++index)
+    {
+        if (!Expect(problem.PlaceItem({0U, initial}).HasValue(), output,
+                    "active four-worker overlapping placement failed"))
+        {
+            return false;
+        }
+    }
+
+    auto created = sparrow::Separator::Create(std::move(problem), 42U);
+    if (!Expect(created.HasValue(), output,
+                "active four-worker separator creation failed"))
+    {
+        return false;
+    }
+    sparrow::Separator separator = std::move(created.Value());
+    if (!Expect(separator.Tracker().TotalLoss() > 0.0F, output,
+                "active four-worker input must begin with a collision"))
+    {
+        return false;
+    }
+
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 1U;
+    config.noImprovementLimit = 1U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 4U;
+    sparrow::OptimizationTerminator terminator;
+    SeparatorRoundRecordingListener listener;
+    const auto result = separator.Run(config, terminator, &listener);
+    if (!Expect(result.HasValue(), output,
+                "active four-worker separator run failed"))
+    {
+        return false;
+    }
+
+    const auto& value = result.Value();
+    jaguar::Layout finalLayout(value.solution.layoutSnapshot.container);
+    if (!Expect(finalLayout.Restore(value.solution.layoutSnapshot).HasValue(),
+                output, "active four-worker final layout restore failed"))
+    {
+        return false;
+    }
+    const float finalLoss = separator.Tracker().TotalLoss();
+    return Expect(
+        value.solution.layoutSnapshot.placements.size() == 2U &&
+            listener.progress.size() >= 2U &&
+            listener.progress.front().iteration == 0U &&
+            std::all_of(listener.progress.begin(), listener.progress.end(),
+                        [](const sparrow::SeparationProgress& progress)
+                        {
+                            return std::isfinite(progress.minimumLoss) &&
+                                   progress.minimumLoss >= 0.0F;
+                        }) &&
+            listener.result.has_value() && value.totalEvaluationCount > 0U &&
+            value.totalMoveCount > 0U && std::isfinite(finalLoss) &&
+            finalLoss >= 0.0F &&
+            listener.result->success == separator.Tracker().IsSeparated() &&
+            listener.result->success == finalLayout.IsFeasible() &&
+            listener.result->iterations == value.iterations &&
+            listener.result->totalEvaluations == value.totalEvaluationCount &&
+            listener.result->totalMoves == value.totalMoveCount,
+        output,
+        "active four-worker run must do worker work and return consistent "
+        "state, tracker, and result invariants");
+}
+
 bool SameSeparatorSample(
     const jaguar::Transform2d& actualTransform,
     const sparrow::SampleEval& actualEvaluation,
@@ -1264,7 +1378,8 @@ bool SameSeparatorSample(
     const sparrow::SampleEval& expectedEvaluation) noexcept
 {
     return actualEvaluation.kind == expectedEvaluation.kind
-        && std::abs(actualTransform.rotationRad - expectedTransform.rotationRad)
+        && std::abs(actualTransform.rotationRad
+                    - expectedTransform.rotationRad)
                <= 2.0e-5
         && std::abs(actualTransform.translation.x
                     - expectedTransform.translation.x)
@@ -2357,6 +2472,10 @@ bool RunSeparatorTests(std::ostream& output)
         return false;
     }
     if (!TestSeparatorZeroLimitsAndFourWorkerInvariant(output))
+    {
+        return false;
+    }
+    if (!TestActiveFourWorkerInvariant(output))
     {
         return false;
     }

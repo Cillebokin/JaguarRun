@@ -77,3 +77,12 @@ Algorithm 5 的候选筛选、仍碰撞项重查、单项五相搜索和移动�
 2. **【浅覆盖补全：SepStats 的 Sum 聚合与 rayon 的结合】** 主文 SepStats 条目记了 rayon `.sum()`；补记：`Sum for SepStats`（worker.rs:99-111）是 rayon 并行归约的 folds+reduce 载体——**f32 无关**（纯 usize 累加，无浮点结合序问题），C++ 标量累加（Separator.cpp:566-569）等价无舍入差。判定维持。
 3. **【浅覆盖补全：候选过滤的 loss>0 vs ItemLoss 语义】** Rust `ct.get_loss(*pk) > 0.0`（worker.rs:37/47）与 C++ `tracker.ItemLoss(index) > 0.0F`（Separator.cpp:209-217/226-229）——注意两侧 ItemLoss/get_loss 均为 container+pair 行和（S18 已比），且 C++ SafeLoss 过滤非有限值（S18 差异 #7）在此处叠加：若行和含 NaN（正常不可能），C++ 判不碰撞跳过、Rust 比较 false 同跳过——等价。判定维持【一致】。
 4. **【核对确认：move_items 中 evaluator 的生命周期】** Rust 每个候选项新建 SeparationEvaluator（worker.rs:51，含 CDE hazard 预注册），C++ FindBestSeparatorMove 内部同样逐项新建（SeparatorWorker.cpp:154-155）——两侧"每项一 evaluator"粒度一致（主文条目 4 隐含但未明说，此处显式化）。
+
+### Worker 收口复核（2026-10-17）
+
+1. **固定调度轨迹**：现有 Rust/C++ round trace 覆盖 1 worker/seed 42、2 worker/seed 42、3 worker/seed 43，并按固定输入比较整轮 progress、报告、汇总计数和最终布局、Tracker/pair 状态；单项 `search_placement(ref_pk=Some)` 另有五相 trace。它们只证明各自列明的 seed、候选集与配置，不记录每轮中间布局或自然并行 worker 身份。
+2. **空候选与合法候选**：初始已分离用例验证空 worker round 返回原布局并保留零计数；合法正碰撞路径仍由参考位形先行评估并 report 支持 `best_sample` 必存在的不变量，当前没有合法缺样本反例。新增 Rust `SparrowCore/Tests/RustReference/tests/separator_active_multiworker_invariants_reference.rs` 与 C++ `SparrowCore/Tests/TestSeparator.cpp` 的 `TestActiveFourWorkerInvariant`，以 2 个重叠 placement、4 workers、seed 42、1/0/1 sample config 实际运行搜索；双侧断言 evaluations/moves 非零、progress/loss 有限非负、快照可恢复、Tracker loss 合法且 separation success 与最终 layout feasibility 一致。该自然并行用例只验收状态不变量，不对 worker 选择或 RNG 次序作跨语言断言。
+3. **失败和恢复**：unsupported Hole/QZone 的 worker 失败传播及 listener/phase 截止见 S12；双 worker retry 用例还核对 master 布局/Tracker 未被部分 worker 改写，并验证失败消耗过的 worker RNG 状态在 retry 时保留。证据限于该固定双 worker hazard fixture，不推广至其他 worker 数或错误源。C++ 非法 handle/snapshot 的 `Result` 错误出口仍是 Rust 安全调用路径不可表达的额外防御。
+4. **验证结果**：RustReference 锁定工具链 Debug/Release 全量脚本退出码 0，`cargo fmt --check` 通过；SparrowCore Debug/Release 全量 runner 均退出码 0，新增活动四 worker 用例包含在两侧运行中。未改生产算法实现。
+
+**收口结论（D4 声明范围）**：S05 的源码映射、固定 1/2/3 worker 对照、空候选与合法候选处理、已列双 worker 失败/重试路径及 >3 worker 活动负载不变量均有证据，可标为完成。自然多 worker 的选中结果和 RNG 次序不作为等价目标；任意候选数/seed 的 shuffle 消耗序、其他 worker 数或错误源、一般 geometry 均仍是未认证域。

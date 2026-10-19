@@ -296,6 +296,14 @@ Rust 1.98.1 Release、Rust Debug、C++ MSVC 14.44 Debug/Release四种运行都�
 
 阶段探针已撤回。干净源码上Rust Release顶层reference测试1/1通过，Rust Debug预期断言测试1/1通过，`rustfmt --check`通过；C++ SparrowCore Debug/Release核心库与定向测试程序重建，顶层定向runner均退出码0。无永久埋点或生产行为改动。结论限于该seed、几何与单worker配置；E5仍部分。
 
+### E5 第二十二轮：让顶层Compression实际命中PlacedItem `+Inf`（2026-10-19）
+
+沿用seed=4、width=3.0、两个重叠2×1 warm-start物品及单worker、样本`1/0/1`的顶层用例，只把Compression的`iter_no_imprv_limit`从1提高到219，其余配置保持一致。以临时阶段探针观察共享evaluator，命中条件同时要求hazard为`PlacedItem`、加权loss为`+Inf`、剩余上界为`+Inf`。Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release均确认该条件在Compression阶段发生；218未命中，219命中，较低值仅做了分段抽样，未穷举全部边界。
+
+更新Rust/C++共用完整trace fixture `SparrowCore/Tests/Fixtures/OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv`（SHA-256=`225D98B484830936093D3C116E50657239B5DA6A5200FB617AC070E9D6E87137`，2341行）。Explore仍为910轮/44290次评估/1020次移动；Compression实际执行447轮/25928次评估/545次移动后由listener停止。Rust Release与C++ Debug/Release的全部阶段、进度、分离计数、报告、最终状态trace匹配。终态仍是可恢复但不可行的2个已放置物品、0剩余需求、width=3.0、density=0.888888896、loss=2.362450600；命中分支不等价于压缩成功。
+
+临时阶段探针已移除，生产evaluator无新增埋点。干净源码上的Rust Release trace测试、Rust Debug已知`∞ > NaN`断言测试、`rustfmt --check`及C++ Debug/Release顶层定向runner均通过；Rust Debug在Explore阶段即触发既有断言，因此不声称Rust Debug进入Compression。该轮仅证明指定固定输入下Compression的`PlacedItem +Inf`路径可达且Release差分轨迹与C++ Debug/Release对齐；多worker、其他seed/几何及自然时限仍未由本例覆盖，E5保持部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

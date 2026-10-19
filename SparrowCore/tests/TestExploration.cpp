@@ -3880,7 +3880,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     config.compression.maxIterations = 1U;
     config.compression.separator.nWorkers = 1U;
     config.compression.separator.strikeLimit = 1U;
-    config.compression.separator.noImprovementLimit = 1U;
+    config.compression.separator.noImprovementLimit = 219U;
     config.compression.separator.nContainerSamples = 1U;
     config.compression.separator.nFocussedSamples = 0U;
     config.compression.separator.nCoordinateDescents = 1U;
@@ -3911,7 +3911,6 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
         output << "Optimize error: " << actual.GetError().message << '\n';
         return false;
     }
-
     const jaguar::SPSolution& finalSolution = actual.Value().solution;
     auto finalProblemResult = jaguar::SPProblem::Create(instance);
     if (!Expect(finalProblemResult.HasValue(),
@@ -4005,6 +4004,14 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
                        : listener.separationResults[0U].iterations)
                << " compression_results=" << listener.separationResults.size()
                << '\n';
+        return false;
+    }
+    if (!Expect(listener.separationResults[1U].iterations == 447U
+                    && listener.separationResults[1U].totalEvaluations == 25928U
+                    && listener.separationResults[1U].totalMoves == 545U,
+                output,
+                "seed4 top-level E5 Compression trace must reach its locked 447-round boundary"))
+    {
         return false;
     }
     if (std::getenv("SPARROW_PRINT_E5_SEED4_TOP_LEVEL_CPP_REFERENCE")

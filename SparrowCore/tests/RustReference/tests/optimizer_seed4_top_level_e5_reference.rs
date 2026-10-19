@@ -22,6 +22,7 @@ use std::time::Duration;
 const REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv");
 const EXPLORE_NO_IMPROVEMENT_LIMIT: usize = 451;
+const COMPRESSION_NO_IMPROVEMENT_LIMIT: usize = 219;
 
 #[derive(Clone)]
 struct PhaseTerminator {
@@ -253,7 +254,7 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
     config.cmpr_cfg.time_limit = Duration::from_secs(3600);
     config.cmpr_cfg.separator_config.n_workers = 1;
     config.cmpr_cfg.separator_config.strike_limit = 1;
-    config.cmpr_cfg.separator_config.iter_no_imprv_limit = 1;
+    config.cmpr_cfg.separator_config.iter_no_imprv_limit = COMPRESSION_NO_IMPROVEMENT_LIMIT;
     config.cmpr_cfg.separator_config.sample_config = sparrow::sample::search::SampleConfig {
         n_container_samples: 1,
         n_focussed_samples: 0,
@@ -269,7 +270,7 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
         ..RecordingListener::default()
     };
     listener.trace.push(format!(
-        "config\tparameters\t4\t{:.9}\t1\t1\t0\t1\t{EXPLORE_NO_IMPROVEMENT_LIMIT}\t1\t1",
+        "config\tparameters\t4\t{:.9}\t1\t1\t0\t1\t{EXPLORE_NO_IMPROVEMENT_LIMIT}\t1\t{COMPRESSION_NO_IMPROVEMENT_LIMIT}",
         warm_start.strip_width(),
     ));
     append_solution_rows(&mut listener.trace, "initial", &warm_start);
@@ -320,6 +321,15 @@ fn seed4_top_level_optimize_compress_matches_reference() {
     );
     assert!(stopped_at_fixed_boundaries);
     assert_eq!(listener.phase, Some("compression"));
+    assert_eq!(
+        (
+            listener.separation_results[1].iterations,
+            listener.separation_results[1].total_evals,
+            listener.separation_results[1].total_moves,
+        ),
+        (447, 25_928, 545),
+        "seed4 Compression must reach its locked PlacedItem +Inf search boundary"
+    );
 }
 
 #[cfg(debug_assertions)]

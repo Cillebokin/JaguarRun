@@ -33,6 +33,38 @@
 #include <utility>
 #include <vector>
 
+namespace sparrow::detail
+{
+struct E5Round26SeparatorTestAccess
+{
+    static void AppendWorkerFromRoot(Separator& separator)
+    {
+        separator.m_WorkerRngs.emplace_back(separator.m_Rng.NextU64());
+    }
+
+    static SparrowRng WorkerRng(const Separator& separator,
+                                std::size_t workerIndex)
+    {
+        return separator.m_WorkerRngs.at(workerIndex);
+    }
+
+    static SparrowRng NextWorkerRng(const Separator& separator)
+    {
+        SparrowRng root = separator.m_Rng;
+        return SparrowRng(root.NextU64());
+    }
+
+    static void SetWorkerState(Separator& separator,
+                               const CollisionTracker& tracker,
+                               SparrowRng rng)
+    {
+        separator.m_Tracker = tracker;
+        separator.m_WorkerRngs.clear();
+        separator.m_WorkerRngs.push_back(std::move(rng));
+    }
+};
+}
+
 namespace
 {
 bool Expect(bool condition, std::ostream& output, const char* message)
@@ -472,6 +504,387 @@ bool TestRound24CapturedWorkerResultSelection(std::ostream& output)
                       && std::isnan(restoredTracker.TotalWeightedLoss()),
                   output,
                   "Round24 post-selection master must restore worker zero's geometry and tracker");
+}
+
+struct E5Round26CapturedWorkerState
+{
+    std::optional<jaguar::SPSolution> masterSolution;
+    std::optional<sparrow::CollisionTracker> masterTracker;
+    std::optional<sparrow::SparrowRng> worker0Rng;
+    std::optional<sparrow::SparrowRng> worker1Rng;
+    std::optional<jaguar::SPSolution> selectedSolution;
+    std::optional<sparrow::CollisionTracker> selectedTracker;
+};
+
+class E5Round26WorkerSearchListener final : public sparrow::OptimizationListener
+{
+public:
+    E5Round26WorkerSearchListener(sparrow::Separator& separator,
+                                  std::optional<std::size_t> appendAfter,
+                                  std::size_t captureAt)
+        : m_Separator(separator),
+          m_AppendAfter(appendAfter),
+          m_CaptureAt(captureAt)
+    {
+    }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport&) override
+    {
+    }
+
+    void OnSeparationProgress(
+        const sparrow::SeparationProgress& progress) override
+    {
+        if (m_AppendAfter.has_value()
+            && progress.iteration == *m_AppendAfter
+            && !m_SecondWorkerAdded)
+        {
+            captured.masterSolution = m_Separator.SaveSolution();
+            captured.masterTracker = m_Separator.Tracker();
+            captured.worker0Rng =
+                sparrow::detail::E5Round26SeparatorTestAccess::WorkerRng(
+                    m_Separator, 0U);
+            captured.worker1Rng =
+                sparrow::detail::E5Round26SeparatorTestAccess::NextWorkerRng(
+                    m_Separator);
+            sparrow::detail::E5Round26SeparatorTestAccess::AppendWorkerFromRoot(
+                m_Separator);
+            m_SecondWorkerAdded = true;
+        }
+        if (progress.iteration == m_CaptureAt)
+        {
+            captured.selectedSolution = m_Separator.SaveSolution();
+            captured.selectedTracker = m_Separator.Tracker();
+        }
+    }
+
+    E5Round26CapturedWorkerState captured;
+
+private:
+    sparrow::Separator& m_Separator;
+    std::optional<std::size_t> m_AppendAfter;
+    std::size_t m_CaptureAt;
+    bool m_SecondWorkerAdded = false;
+};
+
+struct E5Round26WorkerOutcome
+{
+    E5Round26CapturedWorkerState captured;
+    std::size_t moves = 0U;
+    std::size_t evaluations = 0U;
+};
+
+std::vector<std::pair<double, double>> E5Round26Positions(
+    const jaguar::SPSolution& solution)
+{
+    std::vector<std::pair<double, double>> positions;
+    for (const jaguar::LayoutPlacementSnapshot& placement
+         : solution.layoutSnapshot.placements)
+    {
+        const auto& translation = placement.placedItem.Transform().translation;
+        positions.emplace_back(translation.x, translation.y);
+    }
+    std::sort(positions.begin(), positions.end());
+    return positions;
+}
+
+std::optional<sparrow::Separator> MakeE5Round26CompressionSeparator(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& initialSolution,
+    std::uint64_t compressionSeed,
+    std::ostream& output)
+{
+    auto problemResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "Round26 compression problem creation failed"))
+    {
+        return std::nullopt;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!problem.ChangeStripWidth(3.0).HasValue()
+        || !problem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(
+                    0.0, {1.05, 0.55})})
+                .HasValue()
+        || !problem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(
+                    0.0, {1.55, 0.55})})
+                .HasValue())
+    {
+        Expect(false, output,
+               "Round26 compression initial placements failed");
+        return std::nullopt;
+    }
+
+    auto separatorResult = sparrow::Separator::Create(
+        std::move(problem), compressionSeed);
+    if (!Expect(separatorResult.HasValue(),
+                output,
+                "Round26 compression separator creation failed"))
+    {
+        return std::nullopt;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    separator.ResetWorkerRngs(1U);
+    if (!separator.ChangeStripWidth(3.0).HasValue()
+        || !separator.Rollback(initialSolution).HasValue())
+    {
+        Expect(false, output, "Round26 compression reset failed");
+        return std::nullopt;
+    }
+    const float split =
+        separator.Random().Uniform01F32() * static_cast<float>(3.0);
+    const double step = static_cast<double>(0.03F);
+    const double shrunkenWidth = 3.0 * (1.0 - step);
+    if (!separator.ChangeStripWidth(shrunkenWidth, split).HasValue())
+    {
+        Expect(false, output, "Round26 compression shrink failed");
+        return std::nullopt;
+    }
+    return std::optional<sparrow::Separator>{std::move(separator)};
+}
+
+std::optional<E5Round26WorkerOutcome> RunE5Round26SingleWorker(
+    const jaguar::SPInstance& instance,
+    const jaguar::SPSolution& masterSolution,
+    const sparrow::CollisionTracker& masterTracker,
+    const sparrow::SparrowRng& workerRng,
+    const sparrow::SeparatorConfig& config,
+    std::ostream& output)
+{
+    auto problemResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "Round26 isolated worker problem creation failed"))
+    {
+        return std::nullopt;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!problem.ChangeStripWidth(masterSolution.StripWidth()).HasValue()
+        || !problem.Restore(masterSolution).HasValue())
+    {
+        Expect(false, output, "Round26 isolated worker restore failed");
+        return std::nullopt;
+    }
+    auto separatorResult = sparrow::Separator::Create(std::move(problem), 0U);
+    if (!Expect(separatorResult.HasValue(),
+                output,
+                "Round26 isolated worker separator creation failed"))
+    {
+        return std::nullopt;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    sparrow::detail::E5Round26SeparatorTestAccess::SetWorkerState(
+        separator, masterTracker, workerRng);
+
+    sparrow::OptimizationTerminator terminator({1U});
+    E5Round26WorkerSearchListener listener(separator, std::nullopt, 1U);
+    const auto result = separator.Run(config, terminator, &listener);
+    if (!Expect(result.HasValue(),
+                output,
+                "Round26 isolated real worker search failed"))
+    {
+        return std::nullopt;
+    }
+    return E5Round26WorkerOutcome{
+        std::move(listener.captured),
+        result.Value().totalMoveCount,
+        result.Value().totalEvaluationCount};
+}
+
+bool TestRound26PairedWorkerSearchReplay(std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json")})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+            break;
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "Round26 worker search fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const auto instance = MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Round26 worker search fixture must import"))
+    {
+        return false;
+    }
+
+    auto initialProblemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(initialProblemResult.HasValue(),
+                output,
+                "Round26 initial problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem initialProblem = std::move(initialProblemResult.Value());
+    if (!initialProblem.ChangeStripWidth(3.0).HasValue()
+        || !initialProblem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(
+                    0.0, {1.05, 0.55})})
+                .HasValue()
+        || !initialProblem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(
+                    0.0, {1.55, 0.55})})
+                .HasValue())
+    {
+        return Expect(false, output,
+                      "Round26 initial warm-start placements failed");
+    }
+    const jaguar::SPSolution initialSolution = initialProblem.Save();
+
+    sparrow::SparrowRng topLevelRng(4U);
+    (void)topLevelRng.NextU64();
+    const std::uint64_t compressionSeed = topLevelRng.NextU64();
+
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 1U;
+    config.noImprovementLimit = 219U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 1U;
+
+    auto baselineSeparator = MakeE5Round26CompressionSeparator(
+        instance.Value(), initialSolution, compressionSeed, output);
+    auto pairedSeparator = MakeE5Round26CompressionSeparator(
+        instance.Value(), initialSolution, compressionSeed, output);
+    if (!Expect(baselineSeparator.has_value()
+                    && pairedSeparator.has_value(),
+                output,
+                "Round26 compression separator replay setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator baselineTerminator({446U});
+    const auto baseline = baselineSeparator->Run(config, baselineTerminator);
+    if (!Expect(baseline.HasValue()
+                    && baseline.Value().iterations == 446U
+                    && baseline.Value().totalMoveCount == 543U
+                    && baseline.Value().totalEvaluationCount == 25798U,
+                output,
+                "Round26 446-round single-worker prelude must match the reference"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator pairedTerminator({447U});
+    E5Round26WorkerSearchListener listener(
+        *pairedSeparator, 446U, 447U);
+    const auto paired = pairedSeparator->Run(
+        config, pairedTerminator, &listener);
+    if (!Expect(paired.HasValue()
+                    && paired.Value().iterations == 447U
+                    && paired.Value().totalMoveCount == 546U
+                    && paired.Value().totalEvaluationCount == 26000U,
+                output,
+                "Round26 pair must add the two real worker results at index 446"))
+    {
+        return false;
+    }
+    if (!Expect(listener.captured.masterSolution.has_value()
+                    && listener.captured.masterTracker.has_value()
+                    && listener.captured.worker0Rng.has_value()
+                    && listener.captured.worker1Rng.has_value()
+                    && listener.captured.selectedSolution.has_value()
+                    && listener.captured.selectedTracker.has_value(),
+                output,
+                "Round26 listener must capture the pre-pair state and selected result"))
+    {
+        return false;
+    }
+
+    auto worker0 = RunE5Round26SingleWorker(
+        instance.Value(),
+        *listener.captured.masterSolution,
+        *listener.captured.masterTracker,
+        *listener.captured.worker0Rng,
+        config,
+        output);
+    auto worker1 = RunE5Round26SingleWorker(
+        instance.Value(),
+        *listener.captured.masterSolution,
+        *listener.captured.masterTracker,
+        *listener.captured.worker1Rng,
+        config,
+        output);
+    if (!Expect(worker0.has_value() && worker1.has_value(),
+                output,
+                "Round26 independent real worker replays failed"))
+    {
+        return false;
+    }
+
+    const auto worker0Positions =
+        E5Round26Positions(*worker0->captured.selectedSolution);
+    const auto worker1Positions =
+        E5Round26Positions(*worker1->captured.selectedSolution);
+    const auto selectedPositions =
+        E5Round26Positions(*listener.captured.selectedSolution);
+    const bool worker0Selected = selectedPositions.size() == 2U
+        && std::abs(selectedPositions[0U].first - 1.0169114) <= 5.0e-7
+        && std::abs(selectedPositions[0U].second - 0.52927935) <= 5.0e-7
+        && std::abs(selectedPositions[1U].first - 1.8374491) <= 5.0e-7
+        && std::abs(selectedPositions[1U].second - 1.5295486) <= 5.0e-7;
+    const bool workerResultsMatch = worker0Positions.size() == 2U
+        && worker1Positions.size() == 2U
+        && std::abs(worker1Positions[0U].first - 1.0013936) <= 5.0e-7
+        && std::abs(worker1Positions[0U].second - 0.50548494) <= 5.0e-7
+        && std::abs(worker1Positions[1U].first - 1.8697289) <= 5.0e-7
+        && std::abs(worker1Positions[1U].second - 1.5056324) <= 5.0e-7;
+    const bool selectedMatchesWorker0 = worker0Positions.size() == 2U
+        && selectedPositions.size() == 2U
+        && std::abs(worker0Positions[0U].first - selectedPositions[0U].first)
+               <= 5.0e-7
+        && std::abs(worker0Positions[0U].second - selectedPositions[0U].second)
+               <= 5.0e-7
+        && std::abs(worker0Positions[1U].first - selectedPositions[1U].first)
+               <= 5.0e-7
+        && std::abs(worker0Positions[1U].second - selectedPositions[1U].second)
+               <= 5.0e-7;
+    return Expect(worker0Selected
+                      && workerResultsMatch
+                      && selectedMatchesWorker0
+                      && std::abs(worker0->captured.selectedTracker->TotalLoss()
+                                  - FloatFromBits(0x403A4F1CU)) <= 5.0e-6F
+                      && std::abs(worker1->captured.selectedTracker->TotalLoss()
+                                  - FloatFromBits(0x40360DD7U)) <= 5.0e-6F
+                      && std::isnan(worker0->captured.selectedTracker
+                                        ->TotalWeightedLoss())
+                      && std::isnan(worker1->captured.selectedTracker
+                                        ->TotalWeightedLoss())
+                      && worker1->captured.selectedTracker->TotalLoss()
+                             < worker0->captured.selectedTracker->TotalLoss()
+                      && worker0->moves == 2U
+                      && worker0->evaluations == 130U
+                      && worker1->moves == 1U
+                      && worker1->evaluations == 72U
+                      && std::abs(listener.captured.selectedTracker->TotalLoss()
+                                  - worker0->captured.selectedTracker->TotalLoss())
+                             <= 1.0e-6F
+                      && std::isnan(listener.captured.selectedTracker
+                                        ->TotalWeightedLoss()),
+                  output,
+                  "Round26 production pair search must select and restore worker zero across two NaN keys");
 }
 
 bool TestFixedRealWorkerRoundsReachNonFiniteTerminalState(std::ostream& output)
@@ -3257,12 +3670,18 @@ bool RunWorkerLossSelectorTests(std::ostream& output)
 {
     return TestWorkerLossSelectorNonFiniteOrdering(output)
         && TestMixedNonFiniteWorkerResultCollection(output)
-        && TestRound24CapturedWorkerResultSelection(output);
+        && TestRound24CapturedWorkerResultSelection(output)
+        && TestRound26PairedWorkerSearchReplay(output);
 }
 
 bool RunE5Round24PairedWorkerSelection(std::ostream& output)
 {
     return TestRound24CapturedWorkerResultSelection(output);
+}
+
+bool RunE5Round26PairedWorkerSearch(std::ostream& output)
+{
+    return TestRound26PairedWorkerSearchReplay(output);
 }
 
 bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output)

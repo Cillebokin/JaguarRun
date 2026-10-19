@@ -249,6 +249,12 @@ impl Separator {
         sep_report
     }
 
+    #[cfg(feature = "oracle-trace")]
+    pub fn move_items_multi_for_trace(&mut self) -> (usize, usize) {
+        let stats = self.move_items_multi();
+        (stats.total_moves, stats.total_evals)
+    }
+
     pub fn rollback(&mut self, sol: &SPSolution, ots: Option<&CTSnapshot>) {
         debug_assert!(sol.strip_width() == self.prob.strip_width());
         self.prob.restore(sol);

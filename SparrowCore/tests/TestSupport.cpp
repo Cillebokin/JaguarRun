@@ -18,6 +18,7 @@ bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output);
 bool RunE5Seed4TopLevelOptimizeCompress(std::ostream& output);
 bool RunE5PlacedItemWeightOverflowWithInfiniteBound(std::ostream& output);
 bool RunE5Round24PairedWorkerSelection(std::ostream& output);
+bool RunE5Round26PairedWorkerSearch(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
 bool RunE5NaturalTimeAcceptance(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
@@ -58,6 +59,11 @@ int main(int argc, char** argv)
         && std::string_view{argv[1]} == "--e5-round24-paired-worker-selection")
     {
         return RunE5Round24PairedWorkerSelection(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2
+        && std::string_view{argv[1]} == "--e5-round26-paired-worker-search")
+    {
+        return RunE5Round26PairedWorkerSearch(std::cerr) ? 0 : 1;
     }
     if (argc > 1)
     {

@@ -330,6 +330,14 @@ Rust Release定向trace测试`1 passed`，C++ Release定向runner退出码0。�
 
 这是固定捕获结果的收集/选优/恢复回放，不重新运行Round446内部的worker搜索；为重建NaN key，测试在零loss对角tracker项上设置`+Inf` weight，因而不声称重建了Round24当时的完整tracker权重快照。实际搜索和双worker结果仍以第二十四轮的Release诊断为证据。Rust 1.98.1 Debug/Release定向测试及MSVC 14.44 C++ Debug/Release定向runner通过；对Rust生产同源选择函数改为取最大值、C++选择器改为让后续NaN替换首个NaN时，新测试分别按预期失败。E5仍部分。
 
+### E5 第二十六轮：将Round24双worker回放升级为真实搜索回归（2026-10-19）
+
+新增Rust定向用例`e5_round26_paired_worker_search_reference.rs::round26_two_worker_search_replays_compression_round_446`、C++ `TestRound26PairedWorkerSearchReplay`及runner参数`--e5-round26-paired-worker-search`。测试从锁定的seed=4压缩起始状态重放Compression的446个前置轮次；这里的round 446是从0计数，因此目标双worker搜索是该阶段第447次调用。Rust通过`Separator::move_items_multi`的测试trace入口执行真实worker轮次并重放外围改进/权重更新/strike回滚状态，C++则通过生产`Separator::Run`运行446轮单worker前奏，并在目标轮前从根RNG构造第二worker，随后执行真实双worker搜索。两侧还从目标轮捕获的同一master solution、tracker和worker RNG分别单独重跑worker，核对搜索结果而非预制结果payload。
+
+目标轮前两侧累计543次移动、25798次评估；目标双worker轮再产生3次移动、202次评估。worker 0为2次移动/130次评估，raw loss bits=`0x403a4f1c`，placement约为`(1.0169114,0.52927935)`与`(1.8374491,1.5295486)`；worker 1为1次移动/72次评估，raw loss bits=`0x40360dd7`，placement约为`(1.0013936,0.50548494)`与`(1.8697289,1.5056324)`。两个weighted key均为NaN；虽然worker 1 raw loss较低，Rust与C++生产选优均保留首项worker 0，并将worker 0的placement与tracker恢复为master。总计447轮、546次移动、26000次评估。
+
+Rust 1.98.1 Release定向用例通过，Rust Debug因锁定轨迹会触发既有`∞ > NaN`断言而标记为ignored；C++ MSVC 14.44 Debug/Release定向runner均退出码0。该用例把Round24的固定结果payload选择测试升级为确定起始状态上的真实搜索结果回归，但仍只覆盖seed=4、该fixture、固定轮数和此worker配置；不代表自然时限或一般输入的多worker等价，E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

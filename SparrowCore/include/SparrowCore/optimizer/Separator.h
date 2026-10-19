@@ -13,6 +13,11 @@
 
 namespace sparrow
 {
+namespace detail
+{
+struct E5Round26SeparatorTestAccess;
+}
+
 struct SeparatorResult
 {
     jaguar::SPSolution solution;
@@ -52,6 +57,8 @@ public:
     const jaguar::SPProblem& Problem() const noexcept;
 
 private:
+    friend struct detail::E5Round26SeparatorTestAccess;
+
     Separator(jaguar::SPProblem problem,
               CollisionTracker tracker,
               std::uint64_t seed);

@@ -1263,16 +1263,28 @@ bool TestPlacedItemWeightOverflowWithInfiniteBound(std::ostream& output)
         sparrow::SampleKind::SAMPLE_KIND_COLLISION,
         std::numeric_limits<float>::infinity()};
     const sparrow::SampleEval evaluation = evaluator.Evaluate(placement, upperBound);
+    const sparrow::SampleEval finiteUpperBound{
+        sparrow::SampleKind::SAMPLE_KIND_COLLISION,
+        std::numeric_limits<float>::max()};
+    const sparrow::SampleEval finiteBoundEvaluation =
+        evaluator.Evaluate(placement, finiteUpperBound);
     output << "E5 placed-item overflow: raw_loss_bits=0x" << std::hex
            << FloatBits(rawLoss) << " pair_weight_bits=0x"
            << FloatBits(tracker.PairWeight(0U, 1U))
            << " upper_bound_bits=0x7f800000 result_kind="
            << static_cast<int>(evaluation.kind) << " result_loss_bits=0x"
-           << FloatBits(evaluation.loss) << std::dec << '\n';
-    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID
-                      && evaluation.loss == 0.0F,
+           << FloatBits(evaluation.loss) << " finite_upper_bound_bits=0x"
+           << FloatBits(finiteUpperBound.loss) << " finite_result_kind="
+           << static_cast<int>(finiteBoundEvaluation.kind)
+           << " finite_result_loss_bits=0x"
+           << FloatBits(finiteBoundEvaluation.loss) << std::dec << '\n';
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_COLLISION
+                      && evaluation.loss == std::numeric_limits<float>::infinity()
+                      && finiteBoundEvaluation.kind
+                          == sparrow::SampleKind::SAMPLE_KIND_INVALID
+                      && finiteBoundEvaluation.loss == 0.0F,
                   output,
-                  "C++ must characterize the current non-finite PlacedItem loss as Invalid");
+                  "PlacedItem positive infinity must follow the Rust loss-bound comparison");
 }
 
 bool TestPairMatrixTrackerRustReference(std::ostream& output)

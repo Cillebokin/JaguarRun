@@ -461,10 +461,6 @@ bool TestSameSeedFixedProductionWorkerTrajectory(
     std::uint64_t seed,
     const std::string& referenceFixture,
     const char* printEnvironment,
-    std::optional<std::size_t> expectedMismatchIndex,
-    const std::string& expectedMismatchState,
-    const std::string& expectedFinalState,
-    const std::string& expectedCppTerminal,
     std::ostream& output)
 {
     std::ifstream inputFile;
@@ -619,48 +615,26 @@ bool TestSameSeedFixedProductionWorkerTrajectory(
         ++firstMismatch;
     }
 
-    if (!expectedMismatchIndex.has_value())
+    if (listener.states != expectedStates)
     {
-        if (listener.states != expectedStates)
-        {
-            if (firstMismatch < limit)
-            {
-                output << "first trajectory mismatch at state index "
-                       << firstMismatch << "\nRust: "
-                       << expectedStates[firstMismatch] << "\nC++:  "
-                       << listener.states[firstMismatch] << '\n';
-            }
-            return Expect(false,
-                          output,
-                          "C++ production trajectory must match the Rust fixed-step state trace");
-        }
-        return Expect(terminal.str() == expectedTerminal,
-                      output,
-                      "C++ terminal worker trajectory must match the Rust fixed-step reference");
-    }
-
-    const std::size_t mismatchIndex = *expectedMismatchIndex;
-    const bool expectedDivergenceMatches =
-        listener.states.size() == expectedStates.size()
-        && firstMismatch == mismatchIndex
-        && mismatchIndex < listener.states.size()
-        && listener.states[mismatchIndex] == expectedMismatchState
-        && listener.states.back() == expectedFinalState
-        && terminal.str() == expectedCppTerminal;
-    if (!expectedDivergenceMatches)
-    {
-        output << "expected seed=4 first mismatch at state index "
-               << mismatchIndex << ", observed index " << firstMismatch;
         if (firstMismatch < limit)
         {
-            output << "\nRust: " << expectedStates[firstMismatch]
-                   << "\nC++:  " << listener.states[firstMismatch];
+            output << "first trajectory mismatch at state index "
+                   << firstMismatch << "\nRust: "
+                   << expectedStates[firstMismatch] << "\nC++:  "
+                   << listener.states[firstMismatch] << '\n';
         }
-        output << '\n';
+        else
+        {
+            output << "trajectory state count mismatch: Rust="
+                   << expectedStates.size() << " C++="
+                   << listener.states.size() << '\n';
+        }
     }
-    return Expect(expectedDivergenceMatches,
+    return Expect(listener.states == expectedStates
+                      && terminal.str() == expectedTerminal,
                   output,
-                  "seed=4 production trajectory must retain the recorded divergence from Rust");
+                  "C++ production trajectory and terminal state must match the Rust fixed-step reference");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -3087,10 +3061,6 @@ bool RunE5SameSeedWorkerTrajectory(std::ostream& output)
         5U,
         "OptimizeSameSeedWorkerTrajectoryE5Reference.tsv",
         "SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY",
-        std::nullopt,
-        {},
-        {},
-        {},
         output);
 }
 
@@ -3100,10 +3070,6 @@ bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output)
         4U,
         "OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv",
         "SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY_SEED4",
-        449U,
-        "state\t449\t3fad763f\t407f985c\t7f800000\t0:00000000:3fb8fedf:3f88d5e8\t0:00000000:3fff4417:3dbae967",
-        "state\t450\t3fad763f\t407f985c\t7f800000\t0:00000000:3fb8fedf:3f88d5e8\t0:00000000:3fff4417:3dbae967",
-        "terminal\tsteps\t450\tmoves\t1637\tevals\t76562\tloss\t3fad763f\tweighted\tffc00000",
         output);
 }
 

@@ -262,7 +262,15 @@ C++ seed=4回归入口现在验证state 0–448与Rust相同，并锁定state 44
 
 新增Rust定向用例 `SparrowCore/Tests/RustReference/tests/e5_placed_item_weight_overflow_infinite_bound_reference.rs::placed_item_weight_overflow_with_infinite_bound_is_collision_in_rust`，以及C++ `TestQuantify.cpp::TestPlacedItemWeightOverflowWithInfiniteBound` / runner参数 `--e5-placed-item-weight-overflow-infinite-bound`。Rust 1.98.1 Debug/Release均为`1 passed`，两侧输出`Collision(+Inf)`；MSVC 14.44 C++ Debug/Release定向runner均退出码0，均输出`Invalid`、loss bits=`0x00000000`。同一结果在Release SparrowCore全量runner中通过；Rust文件`rustfmt --check`通过。C++ Debug全量runner已运行到本用例并打印相同结果，但整套运行超过65秒仍未结束，随后中止；定向Debug runner单独通过。
 
-该最小例确认seed=4第449轮的差异来自候选Evaluator对PlacedItem加权损失溢出的处理，不依赖worker、RNG或并行调度。此轮只加入测试与固定输入，没有修改生产算法。E5仍部分；下一步需裁决C++是否接受无上界下的`+Inf` PlacedItem损失并按pinned Rust分类，或把这种数值状态登记为语义残差。
+该最小例确认seed=4第449轮的差异来自候选Evaluator对PlacedItem加权损失溢出的处理，不依赖worker、RNG或并行调度。此轮只加入测试与固定输入，没有修改生产算法；裁决与后续实现见第十八轮。
+
+### E5 第十八轮：按锁定Rust参考收敛PlacedItem正无穷差异（2026-10-19）
+
+按 `SparrowCore/Tests/RustReference/Cargo.lock` 锁定的jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`及RustReference使用的仓库内Sparrow实现复核。Rust `collision_loss.rs::calc_weighted_loss_bounded` 非SIMD `PlacedItem`分支先计算加权loss，再以`loss <= max_loss`裁决；C++ `CollisionTracker::EvaluateCandidateHazardLoss`现在保留正无穷结果，交给现有`SeparationEvaluator`按剩余上界比较。相同候选在`+Inf`上界下得到`Collision(+Inf)`，在最大有限`f32`上界下仍得到`Invalid`；NaN和负无穷仍走非有限错误出口。
+
+Rust定向测试扩展为同时检查无穷和有限上界，Debug/Release均为`1 passed`，`rustfmt --check`通过。C++ `TestQuantify.cpp`同步覆盖这两个上界；MSVC 14.44 Debug/Release定向runner均退出码0，Release全量runner退出码0。Debug定向输出`result_kind=1`、loss bits=`0x7f800000`，有限上界输出`Invalid`、loss bits=`0x00000000`。
+
+同一生产改动使seed=4固定450步轨迹恢复对齐：C++ Release `Separator::Run`产出的451个状态行和终态行，共452行，与Rust fixture逐行一致；seed=4永久检查现改为要求完整轨迹一致。原Round 15/16 C++ worker快照保留为修复前诊断材料，不表示当前实现状态。E5仍部分；本轮只收敛已定位的evaluator边界，不能外推为全量输入域或自然时限端到端等价。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

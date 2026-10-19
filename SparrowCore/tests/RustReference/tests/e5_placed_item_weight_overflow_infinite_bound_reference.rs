@@ -56,8 +56,11 @@ fn placed_item_weight_overflow_with_infinite_bound_is_collision_in_rust() {
             loss: f32::INFINITY,
         }
     );
+    let finite_bound_evaluation =
+        evaluator.evaluate_sample(placement, Some(SampleEval::Collision { loss: f32::MAX }));
+    assert_eq!(finite_bound_evaluation, SampleEval::Invalid);
     println!(
-        "E5 placed-item overflow: raw_loss_bits={:08x} pair_weight_bits={:08x} upper_bound_bits=7f800000 result=Collision(+Inf)",
+        "E5 placed-item overflow: raw_loss_bits={:08x} pair_weight_bits={:08x} upper_bound_bits=7f800000 result=Collision(+Inf), finite_upper_bound_result=Invalid",
         raw_loss.to_bits(),
         f32::MAX.to_bits(),
     );

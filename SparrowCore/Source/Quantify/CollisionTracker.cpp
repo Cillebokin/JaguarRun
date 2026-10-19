@@ -521,12 +521,10 @@ Result<float> CollisionTracker::EvaluateCandidateHazardLoss(
         throw std::logic_error("unsupported hazard entity");
     }
 
-    if (hazard.kind == jaguar::HazardKind::Exterior
-        && result == std::numeric_limits<float>::infinity())
+    if (result == std::numeric_limits<float>::infinity())
     {
-        // CalculateContainerPenalty raises the Debug assertion only when the
-        // overlap itself is non-normal. An infinite result reaching here came
-        // from the later final-loss or weight multiplication stage.
+        // Let the evaluator apply its loss bound: +Inf is accepted under a
+        // +Inf bound, while a finite remaining bound rejects it.
         return Result<float>::FromValue(result);
     }
 

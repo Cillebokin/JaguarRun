@@ -278,4 +278,5 @@ std::size_t SeparationEvaluator::ExactCollisionCount() const noexcept
 {
     return m_ExactCollisionCount;
 }
+
 }

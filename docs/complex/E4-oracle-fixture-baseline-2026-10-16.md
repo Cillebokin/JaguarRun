@@ -304,6 +304,16 @@ Rust 1.98.1 Release、Rust Debug、C++ MSVC 14.44 Debug/Release四种运行都�
 
 临时阶段探针已移除，生产evaluator无新增埋点。干净源码上的Rust Release trace测试、Rust Debug已知`∞ > NaN`断言测试、`rustfmt --check`及C++ Debug/Release顶层定向runner均通过；Rust Debug在Explore阶段即触发既有断言，因此不声称Rust Debug进入Compression。该轮仅证明指定固定输入下Compression的`PlacedItem +Inf`路径可达且Release差分轨迹与C++ Debug/Release对齐；多worker、其他seed/几何及自然时限仍未由本例覆盖，E5保持部分。
 
+### E5 第二十三轮：追踪命中候选经过worker选优后的状态（2026-10-19）
+
+沿用第二十二轮seed=4、width=3.0、两个重叠2×1 warm-start物品、单worker、样本`1/0/1`及Compression `iter_no_imprv_limit=219`。Round23专用临时诊断在真实worker搜索中把`PlacedItem`加权loss与剩余上界同时为`+Inf`的Evaluation，与同一transform的`Report/Result`、实际移动、worker结果收集和主tracker恢复关联；采样后撤回这些专用探针，保留现有Rust/C++逐候选差分测试使用的搜索trace接口。
+
+Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release均在Compression第446轮（Rust全局worker轮号1356；之前Explore共910轮）观测到55次条件命中、5条相关Report、2个搜索结果和2次移动。第一个物品搜索的reference transform`(0,1.00139356,0.50548494)`为`Collision(+Inf)`且被接受并保留；FinalRefine又命中`(0,1.01691139,0.52927935)`，该transform成为搜索最终结果并实际移动。移动后该项raw loss为`1.4966526`、weighted loss为`+Inf`。第二个物品的reference transform`(0,1.90985906,0.99991030)`同样命中、接受并保留，但该搜索最终选择有限损失`1.62462801e38`的`(0,1.83744907,1.52954865)`，不是命中候选；移动后该项raw loss为`2.91107845`、weighted loss为NaN。
+
+本轮唯一worker 0完成2次移动、130次评估后，worker raw总loss为`2.91107845`、weighted总loss为NaN（Rust与C++ raw bits均为`0xffc00000`）；选优索引为0。恢复到master后的raw/weighted loss及两个placement transform与该worker结果一致。此处只有一个worker，能证明命中候选所在worker的结果实际被收集并恢复，不能证明多worker之间的竞争选优。该轮命中候选移动也没有让Compression成功；顶层最后仍回到fixture锁定的较优可恢复但不可行状态，raw loss为`2.362450600`。
+
+Rust Release定向reference测试`1 passed`；C++ MSVC 14.44 Debug/Release定向runner均退出码0，两个profile的Compression候选trace逐行一致。Rust Debug在既有`∞ > NaN`断言下不能进入Compression，本轮不将其列作压缩路径证据。C++ Release全量runner退出码0；额外C++ Debug全量runner运行超过90秒后手动中止，故本轮Debug证据采用定向runner。E5仍部分，结论只适用于该固定输入、单worker及Compression第446轮。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

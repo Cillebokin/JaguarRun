@@ -314,6 +314,16 @@ Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release均在Compression第446轮（R
 
 Rust Release定向reference测试`1 passed`；C++ MSVC 14.44 Debug/Release定向runner均退出码0，两个profile的Compression候选trace逐行一致。Rust Debug在既有`∞ > NaN`断言下不能进入Compression，本轮不将其列作压缩路径证据。C++ Release全量runner退出码0；额外C++ Debug全量runner运行超过90秒后手动中止，故本轮Debug证据采用定向runner。E5仍部分，结论只适用于该固定输入、单worker及Compression第446轮。
 
+### E5 第二十四轮：双worker竞争选优（2026-10-19）
+
+先将seed=4顶层fixture的Compression从起始处配置为`n_workers=2`进行Rust Release探测：Compression执行445轮/50550次评估/1077次移动，但没有观测到目标`PlacedItem +Inf/+Inf`命中，因此这条自然双worker轨迹不能覆盖Round23命中候选所在状态。
+
+为隔离真实竞争点，使用Round23同一单worker基线运行至首次命中；在命中轮从相同master solution与tracker snapshot执行第二个真实worker，其seed取separator根RNG的下一段值（等同双worker顺序初始化第二worker），之后两worker继续参与后续轮次。两份结果进入Rust生产`min_by_key(OrderedFloat(weighted_loss))`及C++生产`WorkerRoundCollector/WorkerLossSelector`，并实际恢复胜出worker的solution与tracker。该pair replay只作本轮诊断，不改变算法或配置接口，全部临时探针已撤回。
+
+Rust 1.98.1 Release与C++ MSVC 14.44 Release在Compression第446轮得到一致结果：worker 0命中55次、2次移动、130次评估，Rust raw loss bits=`0x403a4f1c`、weighted bits=`0xffc00000`（NaN），最终placement包含Round23命中并移动的`(0,1.0169114,0.52927935)`；worker 1命中13次、1次移动、72次评估，Rust raw bits=`0x40360dd7`、weighted loss同为NaN，placement为`(0,1.0013936,0.50548494)`及`(0,1.8697289,1.5056324)`。C++诊断观察到对应raw loss约为`2.91108`与`2.84459`、weighted均为`-nan(ind)`。两侧生产选择器均选中worker 0并恢复其两个placement；虽然worker 1的raw loss较低，两边weighted key都是NaN，稳定的首项保留规则决定选中索引0。压缩阶段累计26000次评估、546次移动、447轮，Rust/C++一致；顶层仍回滚到原有可恢复但不可行终态，raw loss=`2.362450600`，故命中候选所在worker被选中不等于压缩成功。
+
+Rust Release定向trace测试`1 passed`，C++ Release定向runner退出码0。双worker从阶段起点自然运行的探测仅在Rust Release执行；paired replay在Rust/C++ Release两侧均复现。该结论限于seed=4固定fixture与Compression第446轮，不外推至其他seed、几何、profile或自然时限；E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

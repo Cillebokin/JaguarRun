@@ -1,6 +1,7 @@
 #include "SparrowCore/Optimizer/Separator.h"
 #include "SparrowCore/Random/SparrowRng.h"
 #include "SeparatorRandom.h"
+#include "WorkerLossSelector.h"
 
 #ifndef NDEBUG
 #include <cassert>
@@ -553,7 +554,7 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
         {
             const jaguar::SPSolution masterSolution = m_Problem.Save();
             const CollisionTrackerSnapshot masterTracker = m_Tracker.Save();
-            bool haveBestWorker = false;
+            detail::WorkerLossSelector bestWorkerSelector;
             std::optional<WorkerRoundResult> bestWorker;
 
             const jaguar::SPInstance& workerInstance = m_Problem.Instance();
@@ -617,12 +618,10 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                 exactCollisionCount += worker.exactCollisionCount;
                 totalEvaluationCount += worker.evaluationCount;
                 totalMoveCount += worker.moveCount;
-                if (!haveBestWorker
-                    || worker.weightedLoss
-                           < bestWorker->weightedLoss)
+                if (bestWorkerSelector.Consider(
+                        task.index, worker.weightedLoss))
                 {
                     bestWorker = std::move(worker);
-                    haveBestWorker = true;
                 }
             }
 
@@ -633,7 +632,7 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                 return Result<SeparatorResult>::FromError(*workerError);
             }
 
-            if (!haveBestWorker)
+            if (!bestWorkerSelector.HasBest())
             {
                 return Result<SeparatorResult>::FromError(
                     {jaguar::ErrorCode::InvalidInput,

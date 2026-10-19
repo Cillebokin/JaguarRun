@@ -955,6 +955,7 @@ version = "0.1.0"
 dependencies = [
  "itertools",
  "jagua-rs",
+ "ordered-float",
  "rand",
  "rand_distr",
  "sparrow",

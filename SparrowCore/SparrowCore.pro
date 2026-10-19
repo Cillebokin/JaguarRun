@@ -29,6 +29,7 @@ HEADERS += \
     $$PWD/Source/Optimizer/ExplorationTrace.h \
     $$PWD/Source/Optimizer/CompressionTrace.h \
     $$PWD/Source/Optimizer/CompressionClock.h \
+    $$PWD/Source/Optimizer/WorkerLossSelector.h \
     $$PWD/Include/SparrowCore/Optimizer/Compression.h \
     $$PWD/Include/SparrowCore/Optimizer/SeparatorWorker.h \
     $$PWD/Include/SparrowCore/Optimizer/Separator.h \

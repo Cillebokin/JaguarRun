@@ -11,3 +11,6 @@ jagua-rs = { default-features = false, features = ["spp"], version = "0.9.0", gi
 rand = "0.10"
 rand_distr = "0.6"
 sparrow = { default-features = false, path = "../../../CodeResource/sparrow", features = ["oracle-trace"] }
+
+[dev-dependencies]
+ordered-float = "5.5"

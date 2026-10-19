@@ -12,7 +12,8 @@ INCLUDEPATH += $$PWD/../Tools/SparrowCli
 HEADERS += \
     $$PWD/../Source/Optimizer/ExplorationNormalSampler.h \
     $$PWD/../Source/Optimizer/ExplorationTrace.h \
-    $$PWD/../Source/Optimizer/CompressionTrace.h
+    $$PWD/../Source/Optimizer/CompressionTrace.h \
+    $$PWD/../Source/Optimizer/WorkerLossSelector.h
 
 isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$PWD/../../build-SparrowCore-MSVC2019x64-Debug
 

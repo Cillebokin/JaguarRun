@@ -170,7 +170,7 @@ rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCor
 
 Release 聚合点记录的首 12 个含 NaN 的轮次中，三个 worker 的 weighted-loss 总值均为 NaN。Rust `OrderedFloat` 将 NaN 排在有限数之后、多个 NaN 互相相等；该轮三者皆 NaN 时 `min_by_key` 保留索引 0。比如轮次 0 的 unweighted total collision loss 为 `[0.2639946, 0.2639217, 0.26390663]`，轮次 1 为 `[0.16895582, 0.10878802, 0.110008456]`，但两轮均选择索引 0。因此 Release 中断言消失并未消除 NaN；NaN 键会遮蔽 worker 间的加权排序，并在本输入上使较低原始 collision loss 的候选被丢弃。
 
-C++ `Separator.cpp` 的 worker 选择器使用普通 `<`。当同一轮所有键均为 NaN 时，比较结果同样不会替换首 worker；但若首个键为 NaN、后续有有限键，普通 `<` 仍会保留首 worker，而 Rust `OrderedFloat` 会选有限键。此混合集合差异目前仅由源码语义确认，未在实际运行中观测。裁决为将 Debug panic 记录为 pinned Rust 算法在支持输入上的数值缺陷，Release NaN 记录为会影响候选选择的搜索质量问题；本轮不修改锁定 oracle，也不单独给 C++ 加饱和上限。该短时诊断不是 E5 的永久测试入口；E5 仍部分，完整确定性输入矩阵及 Rust Debug 自然时限完成证据尚缺。
+C++ `Separator.cpp` 的 worker 聚合现通过内部 `WorkerLossSelector` 实现 Rust `OrderedFloat` 的 NaN 排序：有限键小于 NaN，多个 NaN 相等并保留先到者。新增 RustReference 测试 `worker_loss_nan_order_reference.rs` 与 C++ `TestWorkerLossSelectorNaNOrdering`，对 `[NaN,4,2,NaN]`、`[4,NaN]`、`[NaN,NaN]` 都选择索引 `2/0/0`；旧 C++ 普通 `<` 的首个混合用例先失败，修正后通过。Rust 1.98.1 Debug/Release oracle 与 MSVC 2019 C++ Release 定向测试、全量 runner 均通过。此受控序列证明比较规则对齐，不证明自然运行中已观测到混合 worker 键。裁决为保留 pinned Rust 行为并把 C++ 选择器同步到其排序语义；不改 Rust oracle，也不对任一侧增加权重饱和，因此 Debug `∞ > NaN` 断言缺陷和 Release 全 NaN 候选选择退化仍按 pinned 现状记录。该短时诊断及合成选择器用例都不替代完整 E5 验收；E5 仍部分，完整确定性输入矩阵及 Rust Debug 自然时限完成证据尚缺。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

@@ -11,6 +11,7 @@ bool RunSppLbfTests(std::ostream& output);
 bool RunBppLbfTests(std::ostream& output);
 bool RunQuantifyTests(std::ostream& output);
 bool RunSeparatorTests(std::ostream& output);
+bool RunWorkerLossSelectorTests(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
 bool RunE5NaturalTimeAcceptance(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
@@ -21,6 +22,10 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view{argv[1]} == "--e5-natural-time")
     {
         return RunE5NaturalTimeAcceptance(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--worker-loss-selector")
+    {
+        return RunWorkerLossSelectorTests(std::cerr) ? 0 : 1;
     }
     if (argc > 1)
     {

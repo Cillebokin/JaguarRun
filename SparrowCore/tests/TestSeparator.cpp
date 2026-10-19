@@ -5,6 +5,7 @@
 #include "SparrowCore/Optimizer/SparrowOptimizer.h"
 #include "SparrowCore/Sampling/UniformRectSampler.h"
 #include "../Source/Optimizer/SeparatorWorkerTrace.h"
+#include "../Source/Optimizer/WorkerLossSelector.h"
 
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/IO/Importer.h"
@@ -18,6 +19,8 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <ostream>
 #include <sstream>
@@ -37,6 +40,31 @@ bool Expect(bool condition, std::ostream& output, const char* message)
     }
     output << "SEPARATOR TEST FAILURE: " << message << '\n';
     return false;
+}
+
+bool TestWorkerLossSelectorNaNOrdering(std::ostream& output)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const auto select = [](std::initializer_list<float> losses) {
+        sparrow::detail::WorkerLossSelector selector;
+        std::size_t workerIndex = 0U;
+        for (const float loss : losses)
+        {
+            selector.Consider(workerIndex, loss);
+            ++workerIndex;
+        }
+        return selector.BestWorkerIndex();
+    };
+
+    return Expect(select({nan, 4.0F, 2.0F, nan}) == 2U,
+                  output,
+                  "finite worker must beat earlier NaN keys; lowest finite loss wins")
+        && Expect(select({4.0F, nan}) == 0U,
+                  output,
+                  "later NaN worker must not replace an earlier finite worker")
+        && Expect(select({nan, nan}) == 0U,
+                  output,
+                  "equal NaN worker keys must retain the first worker");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -2446,8 +2474,17 @@ bool TestMultiworkerHazardStopsOptimizePhaseCallbacks(
 }
 }
 
+bool RunWorkerLossSelectorTests(std::ostream& output)
+{
+    return TestWorkerLossSelectorNaNOrdering(output);
+}
+
 bool RunSeparatorTests(std::ostream& output)
 {
+    if (!TestWorkerLossSelectorNaNOrdering(output))
+    {
+        return false;
+    }
     if (!TestInitiallySeparatedRunCompletesEmptyWorkerRound(output))
     {
         return false;

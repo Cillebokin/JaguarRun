@@ -240,6 +240,14 @@ C++ 侧通过真实生产 `Separator::Run`、`maxIterations=450` 执行同一输
 
 C++ seed=4回归入口现在验证state 0–448与Rust相同，并锁定state 449、450及终态为上述已观察结果；这是一条差异保持检查，不代表两侧通过了seed=4对拍。Rust seed=4/5两个Release fixture测试、C++ seed=4差异检查、seed=5逐轮对拍和SparrowCore完整Release runner均通过，Rust文件 `rustfmt --check` 通过。当前证据只证明seed=5在所测设置下逐轮一致；seed=4于第449轮分歧，差异根因尚未完全裁定，E5及更广seed/调度矩阵仍未收口。
 
+### E5 第十五轮：采集seed=4第449轮C++ worker结果并隔离调度变量（2026-10-19）
+
+临时在C++生产 `Separator::Run` 聚合点记录worker结果，采集每轮worker的raw loss、weighted key、move/evaluation计数、surrogate reject/exact collision计数及胜出索引；诊断埋点已从源码撤回。新增快照 `SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectorySeed4CppRound449E5.tsv`（SHA-256=`52DC1CD4B107195773F620F56962535268A36F0720868E0C52AB61CFE8C9DC62`）。
+
+将C++全450轮分别按生产async方式和逐worker deferred串行方式重跑，再与Rust seed=4逐轮fixture核对。两种C++模式的1800条worker/胜出记录完全一致，且均通过既有C++状态差异检查；逐worker raw/key/move与每轮胜出索引相对Rust的首个差异均在第449轮，胜出索引在全部450轮仍一致。第449轮C++三个worker完全相同：raw loss=`0x407f985c`、key=`+Inf`、0 moves、4 evaluations、4 surrogate rejects、0 exact collisions，胜出worker 0。Rust该轮三个key均为NaN，raw losses为 `[0x4075dc7a,0x4077d060,0x40761831]`，三个worker各移动2次、总计262 evaluations，也选worker 0。
+
+因此这次分歧不是C++并发完成顺序或worker聚合选优导致：同一C++输入全程串行后结果和async逐worker记录相同，Rust/C++的胜出worker也相同。首个差异发生在worker搜索产物：C++三个worker都被surrogate检查拒绝候选且没有移动，Rust三个worker都完成移动。当前证据将范围缩到worker搜索/数值路径；还不能区分此前worker RNG流状态差异与第449轮surrogate/evaluator数值判定差异。清理临时埋点后，Rust seed=4/5定向测试、C++ seed=4已知差异检查、seed=5严格对拍和C++ Release全量runner均重新通过。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

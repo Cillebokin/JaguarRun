@@ -1,0 +1,8 @@
+# Captured from MSVC 14.44 Release production Separator::Run, seed=4
+# Full 450-round C++ async and deferred-serial worker traces have identical worker/winner rows
+# Rust round 449 reference is in OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv
+# kind round worker raw_loss_bits weighted_key_bits moves evaluations surrogate_rejects exact_collisions
+worker 449 0 407f985c 7f800000 0 4 4 0
+worker 449 1 407f985c 7f800000 0 4 4 0
+worker 449 2 407f985c 7f800000 0 4 4 0
+winner 449 0

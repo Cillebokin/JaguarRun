@@ -233,16 +233,18 @@ impl Separator {
         );
 
         // Check what run yielded the best solution (lowest collision quantification)
-        let (best_sol, best_ct) = self
-            .workers
-            .iter_mut()
-            .min_by_key(|opt| OrderedFloat(opt.ct.get_total_weighted_loss()))
-            .map(|opt| (opt.prob.save(), &opt.ct))
-            .unwrap();
+        let best_index = select_worker_index(
+            self.workers
+                .iter()
+                .map(|worker| worker.ct.get_total_weighted_loss()),
+        )
+        .expect("separator worker pool is non-empty");
+        let best_sol = self.workers[best_index].prob.save();
+        let best_ct = self.workers[best_index].ct.clone();
 
         // Load this 'best' solution into the master, effectively throwing away all other work.
         self.prob.restore(&best_sol);
-        self.ct = best_ct.clone();
+        self.ct = best_ct;
 
         sep_report
     }
@@ -335,4 +337,16 @@ impl Separator {
         });
         debug!("[SEP] changed strip width to {:.3}", new_width);
     }
+}
+
+fn select_worker_index(losses: impl Iterator<Item = f32>) -> Option<usize> {
+    losses
+        .enumerate()
+        .min_by_key(|(_, loss)| OrderedFloat(*loss))
+        .map(|(index, _)| index)
+}
+
+#[cfg(feature = "oracle-trace")]
+pub fn select_worker_index_for_trace(losses: &[f32]) -> Option<usize> {
+    select_worker_index(losses.iter().copied())
 }

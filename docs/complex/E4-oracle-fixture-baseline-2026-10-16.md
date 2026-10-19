@@ -324,6 +324,12 @@ Rust 1.98.1 Release与C++ MSVC 14.44 Release在Compression第446轮得到一致�
 
 Rust Release定向trace测试`1 passed`，C++ Release定向runner退出码0。双worker从阶段起点自然运行的探测仅在Rust Release执行；paired replay在Rust/C++ Release两侧均复现。该结论限于seed=4固定fixture与Compression第446轮，不外推至其他seed、几何、profile或自然时限；E5仍部分。
 
+### E5 第二十五轮：固化Round24双worker结果选择回归（2026-10-19）
+
+新增Rust测试`e5_round24_paired_worker_selection_reference.rs::round24_captured_worker_results_select_and_restore_worker_zero`，并在C++新增`TestRound24CapturedWorkerResultSelection`及runner参数`--e5-round24-paired-worker-selection`。两侧从Round24记录的worker最终placement重建结果payload，核对raw loss分别接近`0x403a4f1c`与`0x40360dd7`（按文档中舍入后的transform容差`5e-6`），并保留worker 0的2次移动/130次评估和worker 1的1次移动/72次评估。测试把结果送入Rust生产选优同源函数及C++生产`WorkerRoundCollector`，检查两个NaN key下worker 1 raw loss较低仍由首项规则选中worker 0；Rust核对捕获计数总和，C++ collector累计3次移动/202次评估；两侧均确认恢复了worker 0的placement与tracker状态。
+
+这是固定捕获结果的收集/选优/恢复回放，不重新运行Round446内部的worker搜索；为重建NaN key，测试在零loss对角tracker项上设置`+Inf` weight，因而不声称重建了Round24当时的完整tracker权重快照。实际搜索和双worker结果仍以第二十四轮的Release诊断为证据。Rust 1.98.1 Debug/Release定向测试及MSVC 14.44 C++ Debug/Release定向runner通过；对Rust生产同源选择函数改为取最大值、C++选择器改为让后续NaN替换首个NaN时，新测试分别按预期失败。E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

@@ -265,6 +265,215 @@ bool TestMixedNonFiniteWorkerResultCollection(std::ostream& output)
                   "post-selection tracker must contain the selected -Inf worker state");
 }
 
+bool TestRound24CapturedWorkerResultSelection(std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json")})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "Round24 paired worker fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const auto imported = MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+    if (!Expect(imported.HasValue(),
+                output,
+                "Round24 paired worker fixture must import"))
+    {
+        return false;
+    }
+    const jaguar::SPInstance instance = imported.Value();
+
+    struct CapturedWorkerResult
+    {
+        jaguar::SPSolution solution;
+        sparrow::CollisionTrackerSnapshot trackerSnapshot;
+        float rawLoss = 0.0F;
+        float weightedLoss = 0.0F;
+        std::size_t surrogateRejectCount = 0U;
+        std::size_t exactCollisionCount = 0U;
+        std::size_t evaluationCount = 0U;
+        std::size_t moveCount = 0U;
+    };
+    const auto makeResult = [&](const std::array<std::pair<double, double>, 2U>& positions,
+                                std::size_t moves,
+                                std::size_t evaluations)
+        -> std::optional<CapturedWorkerResult> {
+        auto problemResult = jaguar::SPProblem::Create(instance);
+        if (!problemResult.HasValue())
+        {
+            Expect(false, output, "Round24 worker result problem creation failed");
+            return std::nullopt;
+        }
+        jaguar::SPProblem problem = std::move(problemResult.Value());
+        if (!problem.ChangeStripWidth(3.0).HasValue())
+        {
+            Expect(false, output, "Round24 worker result strip resize failed");
+            return std::nullopt;
+        }
+        for (const auto& [x, y] : positions)
+        {
+            if (!problem.PlaceItem({
+                    0U,
+                    jaguar::Transform2d::FromRotationTranslation(0.0, {x, y})})
+                     .HasValue())
+            {
+                Expect(false, output, "Round24 worker result placement failed");
+                return std::nullopt;
+            }
+        }
+
+        const jaguar::SPSolution solution = problem.Save();
+        jaguar::Layout layout(solution.layoutSnapshot.container);
+        if (!layout.Restore(solution.layoutSnapshot).HasValue())
+        {
+            Expect(false, output, "Round24 worker result layout restore failed");
+            return std::nullopt;
+        }
+        auto trackerResult = sparrow::CollisionTracker::Create(layout);
+        if (!trackerResult.HasValue())
+        {
+            Expect(false, output, "Round24 worker result tracker creation failed");
+            return std::nullopt;
+        }
+        sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+        sparrow::CollisionTrackerSnapshot trackerSnapshot = tracker.Save();
+        // The captured results both have a NaN aggregate key. A zero-loss
+        // diagonal entry with an infinite weight reproduces that selector key
+        // while keeping the recorded worker geometry and loss payload real.
+        trackerSnapshot.pairMatrix.At(0U, 0U).weight =
+            std::numeric_limits<float>::infinity();
+        if (!tracker.Restore(trackerSnapshot, layout).HasValue())
+        {
+            Expect(false, output, "Round24 worker tracker snapshot restore failed");
+            return std::nullopt;
+        }
+        return CapturedWorkerResult{
+            solution,
+            tracker.Save(),
+            tracker.TotalLoss(),
+            tracker.TotalWeightedLoss(),
+            0U,
+            0U,
+            evaluations,
+            moves};
+    };
+
+    const auto worker0 = makeResult(
+        {{{1.0169114, 0.52927935}, {1.8374491, 1.5295486}}}, 2U, 130U);
+    const auto worker1 = makeResult(
+        {{{1.0013936, 0.50548494}, {1.8697289, 1.5056324}}}, 1U, 72U);
+    if (!worker0.has_value() || !worker1.has_value())
+    {
+        return false;
+    }
+    if (!Expect(std::isnan(worker0->weightedLoss)
+                    && std::isnan(worker1->weightedLoss)
+                    && std::abs(worker0->rawLoss - FloatFromBits(0x403A4F1CU))
+                           <= 5.0e-6F
+                    && std::abs(worker1->rawLoss - FloatFromBits(0x40360DD7U))
+                           <= 5.0e-6F
+                    && worker1->rawLoss < worker0->rawLoss,
+                output,
+                "Round24 fixture must retain two NaN keys and the lower raw-loss competitor"))
+    {
+        output << "worker0 raw=" << worker0->rawLoss
+               << " worker1 raw=" << worker1->rawLoss << '\n';
+        return false;
+    }
+
+    sparrow::detail::WorkerRoundCollector<CapturedWorkerResult> collector;
+    collector.Add(0U, *worker0);
+    collector.Add(1U, *worker1);
+    if (!Expect(collector.HasBest()
+                    && collector.BestWorkerIndex() == 0U
+                    && collector.EvaluationCount() == 202U
+                    && collector.MoveCount() == 3U,
+                output,
+                "Round24 production collector must select first NaN worker and aggregate both workers"))
+    {
+        return false;
+    }
+    const auto selected = collector.TakeBest();
+    if (!Expect(selected.has_value()
+                    && std::isnan(selected->weightedLoss)
+                    && selected->moveCount == 2U
+                    && selected->evaluationCount == 130U,
+                output,
+                "Round24 collector must retain worker zero's result payload"))
+    {
+        return false;
+    }
+
+    auto masterResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(masterResult.HasValue(),
+                output,
+                "Round24 master problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem master = std::move(masterResult.Value());
+    if (!master.ChangeStripWidth(3.0).HasValue()
+        || !master.Restore(selected->solution).HasValue())
+    {
+        return Expect(false, output, "Round24 selected solution restore failed");
+    }
+    const jaguar::SPSolution restored = master.Save();
+    std::vector<std::pair<double, double>> restoredPositions;
+    for (const jaguar::LayoutPlacementSnapshot& placement
+         : restored.layoutSnapshot.placements)
+    {
+        const auto& translation = placement.placedItem.Transform().translation;
+        restoredPositions.emplace_back(translation.x, translation.y);
+    }
+    std::sort(restoredPositions.begin(), restoredPositions.end());
+    jaguar::Layout restoredLayout(restored.layoutSnapshot.container);
+    if (!restoredLayout.Restore(restored.layoutSnapshot).HasValue())
+    {
+        return Expect(false, output, "Round24 selected layout restore failed");
+    }
+    auto restoredTrackerResult = sparrow::CollisionTracker::Create(restoredLayout);
+    if (!Expect(restoredTrackerResult.HasValue(),
+                output,
+                "Round24 selected tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker restoredTracker =
+        std::move(restoredTrackerResult.Value());
+    if (!restoredTracker.Restore(selected->trackerSnapshot, restoredLayout).HasValue())
+    {
+        return Expect(false, output, "Round24 selected tracker snapshot restore failed");
+    }
+
+    const bool workerZeroRestored = restoredPositions.size() == 2U
+        && std::abs(restoredPositions[0U].first - 1.0169114) <= 5.0e-7
+        && std::abs(restoredPositions[0U].second - 0.52927935) <= 5.0e-7
+        && std::abs(restoredPositions[1U].first - 1.8374491) <= 5.0e-7
+        && std::abs(restoredPositions[1U].second - 1.5295486) <= 5.0e-7;
+    return Expect(workerZeroRestored
+                      && std::abs(restoredTracker.TotalLoss() - worker0->rawLoss)
+                             <= 1.0e-6F
+                      && std::isnan(restoredTracker.TotalWeightedLoss()),
+                  output,
+                  "Round24 post-selection master must restore worker zero's geometry and tracker");
+}
+
 bool TestFixedRealWorkerRoundsReachNonFiniteTerminalState(std::ostream& output)
 {
     std::array<std::uint32_t, 4U> firstOutcome{};
@@ -3047,7 +3256,13 @@ bool TestMultiworkerHazardStopsOptimizePhaseCallbacks(
 bool RunWorkerLossSelectorTests(std::ostream& output)
 {
     return TestWorkerLossSelectorNonFiniteOrdering(output)
-        && TestMixedNonFiniteWorkerResultCollection(output);
+        && TestMixedNonFiniteWorkerResultCollection(output)
+        && TestRound24CapturedWorkerResultSelection(output);
+}
+
+bool RunE5Round24PairedWorkerSelection(std::ostream& output)
+{
+    return TestRound24CapturedWorkerResultSelection(output);
 }
 
 bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output)

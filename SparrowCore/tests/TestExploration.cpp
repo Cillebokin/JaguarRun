@@ -6,7 +6,7 @@
 #include "SparrowCore/Optimizer/SparrowOptimizer.h"
 #include "SparrowCore/Quantify/CollisionTracker.h"
 #include "SparrowCore/Random/SparrowRng.h"
-#include "OptimizationSignalHandler.h"
+#include "../Tools/SparrowCli/OptimizationSignalHandler.h"
 #include "../Source/Optimizer/ExplorationNumeric.h"
 #include "../Source/Optimizer/ExplorationNormalSampler.h"
 #include "../Source/Optimizer/ExplorationTrace.h"
@@ -3799,6 +3799,232 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
         fixtureName.c_str(),
         output,
         "top-level optimize worker-move compression trace must match Rust");
+}
+
+bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
+    std::ostream& output)
+{
+    const std::array<std::string, 4U> instancePaths{
+        "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+        "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+        "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+        "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"};
+    std::ifstream instanceFile;
+    for (const std::string& path : instancePaths)
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "seed4 top-level E5 input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(json);
+    if (!Expect(imported.HasValue(),
+                output,
+                "seed4 top-level E5 input must import"))
+    {
+        return false;
+    }
+    const jaguar::SPInstance& instance = imported.Value();
+
+    auto warmProblemResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(warmProblemResult.HasValue(),
+                output,
+                "seed4 top-level E5 warm-start problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem warmProblem = std::move(warmProblemResult.Value());
+    const auto widthSet = warmProblem.ChangeStripWidth(3.0);
+    const auto firstPlaced = warmProblem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
+    const auto secondPlaced = warmProblem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(0.0, {1.55, 0.55})});
+    if (!Expect(widthSet.HasValue()
+                    && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "seed4 top-level E5 warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initialSolution = warmProblem.Save();
+
+    sparrow::SparrowConfig config;
+    config.seed = 4U;
+    config.warmStart = initialSolution;
+    config.exploration.timeLimit = std::chrono::hours{1};
+    config.exploration.separator.nWorkers = 1U;
+    config.exploration.separator.strikeLimit = 1U;
+    config.exploration.separator.noImprovementLimit = 451U;
+    config.exploration.separator.nContainerSamples = 1U;
+    config.exploration.separator.nFocussedSamples = 0U;
+    config.exploration.separator.nCoordinateDescents = 1U;
+    config.compression.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.compression.shrinkMin = 0.01;
+    config.compression.shrinkMax = 0.03;
+    config.compression.failureDecay = 0.5;
+    config.compression.timeLimit = std::chrono::hours{1};
+    config.compression.maxIterations = 1U;
+    config.compression.separator.nWorkers = 1U;
+    config.compression.separator.strikeLimit = 1U;
+    config.compression.separator.noImprovementLimit = 1U;
+    config.compression.separator.nContainerSamples = 1U;
+    config.compression.separator.nFocussedSamples = 0U;
+    config.compression.separator.nCoordinateDescents = 1U;
+    config.terminator.maxDuration = std::chrono::nanoseconds{0};
+
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    WorkerMoveCompressionReferenceListener listener(terminator, 1U, false);
+    listener.events.push_back({
+        "config",
+        "parameters",
+        {4.0,
+         initialSolution.StripWidth(),
+         static_cast<double>(config.exploration.separator.nWorkers),
+         static_cast<double>(config.exploration.separator.nContainerSamples),
+         static_cast<double>(config.exploration.separator.nFocussedSamples),
+         static_cast<double>(config.exploration.separator.nCoordinateDescents),
+         static_cast<double>(config.exploration.separator.noImprovementLimit),
+         static_cast<double>(config.compression.separator.nWorkers),
+         static_cast<double>(config.compression.separator.noImprovementLimit)}});
+    listener.RecordSolution("initial", initialSolution);
+
+    const auto actual = sparrow::Optimize(instance, config, terminator, &listener);
+    if (!Expect(actual.HasValue(),
+                output,
+                "seed4 top-level E5 Optimize must complete through Compression"))
+    {
+        output << "Optimize error: " << actual.GetError().message << '\n';
+        return false;
+    }
+
+    const jaguar::SPSolution& finalSolution = actual.Value().solution;
+    auto finalProblemResult = jaguar::SPProblem::Create(instance);
+    if (!Expect(finalProblemResult.HasValue(),
+                output,
+                "seed4 top-level E5 final problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem finalProblem = std::move(finalProblemResult.Value());
+    if (!Expect(finalProblem.Restore(finalSolution).HasValue(),
+                output,
+                "seed4 top-level E5 final solution must restore"))
+    {
+        return false;
+    }
+    std::size_t remainingDemand = 0U;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < instance.ItemCount();
+         ++itemIndex)
+    {
+        remainingDemand += finalProblem.RemainingDemand(itemIndex);
+    }
+    jaguar::Layout finalLayout(finalSolution.layoutSnapshot.container);
+    if (!Expect(finalLayout.Restore(finalSolution.layoutSnapshot).HasValue(),
+                output,
+                "seed4 top-level E5 final layout must restore"))
+    {
+        return false;
+    }
+    const bool layoutFeasible = finalLayout.IsFeasible();
+    const auto finalTracker = sparrow::CollisionTracker::Create(finalLayout);
+    if (!Expect(finalTracker.HasValue(),
+                output,
+                "seed4 top-level E5 terminal tracker must be created"))
+    {
+        return false;
+    }
+    listener.events.push_back({
+        "terminal",
+        "state",
+        {4.0,
+         static_cast<double>(finalProblem.PlacedItemCount()),
+         static_cast<double>(remainingDemand),
+         finalSolution.StripWidth(),
+         finalSolution.Density(),
+         remainingDemand == 0U && layoutFeasible ? 1.0 : 0.0,
+         layoutFeasible ? 1.0 : 0.0,
+         finalTracker.Value().TotalLoss()}});
+    std::vector<std::size_t> placedIds;
+    for (const auto& placement : finalSolution.layoutSnapshot.placements)
+        placedIds.push_back(placement.placedItem.GetItemIndex());
+    std::sort(placedIds.begin(), placedIds.end());
+    ColdStartTraceEvent placedIdsEvent{"placed_ids", "list", {}};
+    for (const std::size_t itemIndex : placedIds)
+        placedIdsEvent.values.push_back(static_cast<double>(itemIndex));
+    listener.events.push_back(std::move(placedIdsEvent));
+    if (remainingDemand == 0U)
+    {
+        listener.events.push_back({"remaining_item", "none", {}});
+    }
+    else
+    {
+        for (std::size_t itemIndex = 0U;
+             itemIndex < instance.ItemCount();
+             ++itemIndex)
+        {
+            const std::size_t remaining = finalProblem.RemainingDemand(itemIndex);
+            if (remaining > 0U)
+            {
+                listener.events.push_back({
+                    "remaining_item",
+                    std::to_string(itemIndex),
+                    {static_cast<double>(remaining)}});
+            }
+        }
+    }
+
+    const bool reachedFixedBoundaries = listener.stoppedExploration
+        && listener.stoppedCompression
+        && listener.separationResults.size() == 2U
+        && listener.separationResults[0U].iterations > 0U
+        && listener.postSelectionLosses.size()
+            == listener.separationResults[0U].iterations;
+    if (!Expect(reachedFixedBoundaries,
+                output,
+                "seed4 top-level E5 must complete one bounded Explore and Compression result"))
+    {
+        output << "explore_iterations="
+               << (listener.separationResults.empty()
+                       ? 0U
+                       : listener.separationResults[0U].iterations)
+               << " compression_results=" << listener.separationResults.size()
+               << '\n';
+        return false;
+    }
+    if (std::getenv("SPARROW_PRINT_E5_SEED4_TOP_LEVEL_CPP_REFERENCE")
+        != nullptr)
+    {
+        for (const ColdStartTraceEvent& event : listener.events)
+        {
+            output << event.type << '\t' << event.label;
+            for (const double value : event.values)
+            {
+                output << '\t' << std::fixed << std::setprecision(9) << value;
+            }
+            output << '\n';
+        }
+    }
+    return MatchesRustPhaseTrace(
+        listener.events,
+        "OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv",
+        output,
+        "seed4 top-level optimize -> compress trace must match Rust Release reference");
 }
 
 bool TestCompressionWorkerMoveRetryMatchesRustReference(
@@ -11009,6 +11235,11 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
 }
 }
 
+bool RunE5Seed4TopLevelOptimizeCompress(std::ostream& output)
+{
+    return TestTopLevelSeed4OptimizeCompressMatchesRustReference(output);
+}
+
 bool RunImmediateStopOptimizeConsoleProbe(
     std::ostream& output,
     const std::function<bool(sparrow::OptimizationTerminator&)>& signalTrigger)
@@ -11018,6 +11249,10 @@ bool RunImmediateStopOptimizeConsoleProbe(
 
 bool RunExplorationTests(std::ostream& output)
 {
+    if (!TestTopLevelSeed4OptimizeCompressMatchesRustReference(output))
+    {
+        return false;
+    }
     const sparrow::SparrowConfig defaultSparrowConfig;
     if (!Expect(!defaultSparrowConfig.seed.has_value(),
                 output,

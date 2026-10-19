@@ -272,6 +272,14 @@ Rust定向测试扩展为同时检查无穷和有限上界，Debug/Release均为
 
 同一生产改动使seed=4固定450步轨迹恢复对齐：C++ Release `Separator::Run`产出的451个状态行和终态行，共452行，与Rust fixture逐行一致；seed=4永久检查现改为要求完整轨迹一致。原Round 15/16 C++ worker快照保留为修复前诊断材料，不表示当前实现状态。E5仍部分；本轮只收敛已定位的evaluator边界，不能外推为全量输入域或自然时限端到端等价。
 
+### E5 第十九轮：将PlacedItem `+Inf`修复带入顶层`Optimize → Compress`（2026-10-19）
+
+新增Rust参考测试 `SparrowCore/Tests/RustReference/tests/optimizer_seed4_top_level_e5_reference.rs`、C++顶层runner `TestExploration.cpp::TestTopLevelSeed4OptimizeCompressMatchesRustReference` 与fixture `SparrowCore/Tests/Fixtures/OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv`（SHA-256=`1329FCB93F70D4CF8E7D72F05A3EE9650DFF95193A36580EC86F36F4B68AE2B1`）。两侧均调用真实顶层`optimize`，使用锁定的Rust 1.98.1 / jagua-rs `f5e2b5ffd14931f17a20ce283a2122e877953ceb`参考、seed=4、width=3.0及两个重叠的2×1 warm-start物品；为固定调度，Explore与Compression均使用一个worker，样本为`1/0/1`。Explore以首个分离结果停止，实际运行910轮（44290次评估、1020次移动）；FailureBased Compression（ratio=0.5，shrink range `0.03/0.01`）以首个分离结果停止，运行3轮（274次评估、6次移动）。
+
+全量1873条trace行在Rust Release fixture与C++ MSVC 14.44 Debug/Release顶层runner之间逐行一致，覆盖阶段/报告顺序、910条选后loss进度、placement身份与transform、两个阶段的停止统计及最终状态。Compression失败后顶层仍返回可恢复结果：2件均已放置、remaining=0、width=3.0、density=`0.888888896`、layout/solution不可行、final raw collision loss=`2.362450600`。Rust Release定向测试1/1通过，C++ Debug/Release定向runner退出码0，C++ Release全量runner退出码0，Rust `rustfmt --check`通过。
+
+Rust Debug按pinned行为在worker中触发已知`weighted loss should never increase: ∞ > NaN`断言；专项测试捕获并确认该断言，故本轮完整跨语言trace采用Rust Release对照。该顶层trace证明第十八轮生产修改进入Optimize→Compress之后，固定输入的阶段轨迹和终态仍与Rust Release一致；trace本身未记录每次candidate evaluator的上界，因此不单独宣称这次顶层运行确实命中了`PlacedItem +Inf`分支，该分支仍由第十七/十八轮成对evaluator用例直接锁定。E5仍部分，结论限于此seed、单worker与固定配置，不代表一般多worker或自然时限等价。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

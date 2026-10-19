@@ -3,8 +3,8 @@ use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::{SPPlacement, SPProblem, SPSolution};
 use jagua_rs::probs::spp::io::import_instance;
 use ordered_float::OrderedFloat;
-use rand::rngs::Xoshiro256PlusPlus;
 use rand::SeedableRng;
+use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::optimizer::separator::Separator;
 use sparrow::sample::search::SampleConfig;
@@ -111,7 +111,6 @@ fn run_fixed_production_rounds(seed: u64) -> Vec<String> {
             worker.load(&master_solution, &master_tracker);
             worker_stats.push(worker.move_items());
         }
-
         let keys = separator
             .workers
             .iter()

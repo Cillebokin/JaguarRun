@@ -246,7 +246,15 @@ C++ seed=4回归入口现在验证state 0–448与Rust相同，并锁定state 44
 
 将C++全450轮分别按生产async方式和逐worker deferred串行方式重跑，再与Rust seed=4逐轮fixture核对。两种C++模式的1800条worker/胜出记录完全一致，且均通过既有C++状态差异检查；逐worker raw/key/move与每轮胜出索引相对Rust的首个差异均在第449轮，胜出索引在全部450轮仍一致。第449轮C++三个worker完全相同：raw loss=`0x407f985c`、key=`+Inf`、0 moves、4 evaluations、4 surrogate rejects、0 exact collisions，胜出worker 0。Rust该轮三个key均为NaN，raw losses为 `[0x4075dc7a,0x4077d060,0x40761831]`，三个worker各移动2次、总计262 evaluations，也选worker 0。
 
-因此这次分歧不是C++并发完成顺序或worker聚合选优导致：同一C++输入全程串行后结果和async逐worker记录相同，Rust/C++的胜出worker也相同。首个差异发生在worker搜索产物：C++三个worker都被surrogate检查拒绝候选且没有移动，Rust三个worker都完成移动。当前证据将范围缩到worker搜索/数值路径；还不能区分此前worker RNG流状态差异与第449轮surrogate/evaluator数值判定差异。清理临时埋点后，Rust seed=4/5定向测试、C++ seed=4已知差异检查、seed=5严格对拍和C++ Release全量runner均重新通过。
+因此这次分歧不是C++并发完成顺序或worker聚合选优导致：同一C++输入全程串行后结果和async逐worker记录相同，Rust/C++的胜出worker也相同。首个差异发生在worker搜索产物：C++三个worker都被surrogate检查拒绝候选且没有移动，Rust三个worker都完成移动。第十六轮将首个差异进一步定位到第449轮同一候选的 evaluator 分类，详见下节。清理临时埋点后，Rust seed=4/5定向测试、C++ seed=4已知差异检查、seed=5严格对拍和C++ Release全量runner均重新通过。
+
+### E5 第十六轮：定位seed=4第449轮首个worker内部差异（2026-10-19）
+
+沿用seed=4、3 workers、样本 `1/0/1`、Release和450固定步。新增两份仅供诊断的逐worker内部轨迹：`SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectorySeed4CppRound449InternalE5.tsv`（61行，SHA-256=`29EB5E4530FB34E63310889491D9834D124EC305CEFE547F973F9A81141D1722`）及 `SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectorySeed4RustRound449InternalE5.tsv`（312行，SHA-256=`1DEB012324A9807329BFA002020DAE29243ABEC49677C25F7D2547792CF8863A`）。C++通过临时 `Separator.cpp`/`SeparationEvaluator.cpp` 埋点捕获；Rust在最后一轮临时调用 `search_placement_with_trace`。临时源码改动均已撤回；这两份文件是诊断快照，不由自动测试读取。
+
+三名worker的前8个 RNG 预览值、shuffle 后候选顺序及候选transform位模式逐项相同。首个评估事件没有消耗新的随机采样：Rust对候选 `PItemKey(2v561)`、transform `(rot=00000000,x=3fff4417,y=3dbae967)` 返回 `Collision`、loss `+Inf`（`0x7f800000`）；C++对应候选/变换返回 `Invalid`、loss `0`（`0x00000000`）。该差异在三个worker中一致，随后Rust每worker移动2次，而C++没有移动。
+
+源代码路径与观测相符：Rust `collision_loss.rs::calc_weighted_loss_bounded` 的非SIMD `PlacedItem` 分支以 `loss <= max_loss` 接受有界结果；未设置有限上界时 `max_loss=+Inf`，所以 `+Inf <= +Inf` 成立并保留该碰撞损失。C++ `CollisionTracker::EvaluateCandidateHazardLoss` 对 `PlacedItem` 的非有限结果返回 `candidate hazard loss is not finite`；只有 `Exterior` 的正无穷有特殊放行。`SeparationEvaluator` 收到该错误后将候选分类为 `Invalid`。因此第449轮的首个内部差异已定位到同候选的非有限碰撞损失处理，不是 RNG、C++线程调度或worker聚合选择。此轮只记录差异，没有修改生产行为；E5仍部分，下一步应以最小成对 evaluator 用例裁决应保持 pinned Rust 行为还是同步修正。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

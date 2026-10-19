@@ -1,0 +1,61 @@
+# Diagnostic trace: E5 seed=4, round 449, C++ worker-internal search.
+# Same fixture/configuration as OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv; Release capture with three workers.
+# Captured with temporary hooks in Separator.cpp and SeparationEvaluator.cpp; hooks were removed after capture.
+# Diagnostic snapshot only; no automated test consumes these rows.
+worker	449	0	begin
+rng	before	8302282590500c6c	ab2c7b30d36b3d43	d37984487f40a203	80544d2c0c239da6	c14b75e946b372ba	717ccda5211dbedb	9034944bef98987c	8ce5d5e92fcf3ae1
+candidates_before_shuffle	0:0:00000000	3fb8fedf	3f88d5e8	1:0:00000000	3fff4417	3dbae967	
+candidate_order	1:0:00000000	3fff4417	3dbae967	0:0:00000000	3fb8fedf	3f88d5e8	
+search	item	1	0	00000000	3fff4417	3dbae967
+event	1	reference	evaluation	00000000	3fff4417	3dbae967	invalid	00000000
+event	1	reference	report	00000000	3fff4417	3dbae967	invalid	00000000	0	0
+event	1	container	evaluation	00000000	3fe9bcc2	3f402a26	invalid	00000000
+event	1	container	report	00000000	3fe9bcc2	3f402a26	invalid	00000000	0	0
+event	1	final_refine	result	0	-	-	-	-	2
+move_result	1	0	2
+search	item	0	0	00000000	3fb8fedf	3f88d5e8
+event	0	reference	evaluation	00000000	3fb8fedf	3f88d5e8	invalid	00000000
+event	0	reference	report	00000000	3fb8fedf	3f88d5e8	invalid	00000000	0	0
+event	0	container	evaluation	00000000	3fb8be66	3f481a4a	invalid	00000000
+event	0	container	report	00000000	3fb8be66	3f481a4a	invalid	00000000	0	0
+event	0	final_refine	result	0	-	-	-	-	2
+move_result	0	0	2
+rng	after	8ce5d5e92fcf3ae1	ec310cb112d99b5c	74675cea7b12e319	1cad5021bf16ed6c	f3fa8aafbea987c1	be645dccc3ea3fe9	e1629f3cc5c2620d	6458314a708515b4
+worker	449	1	begin
+rng	before	d2de03dd5b625078	8a8bb2b9eba95470	1aaf55f391eeb41b	2bb2e694a4abaa88	370ec30a17a42a53	638e95ccfab645a3	af29de3d96cf6967	f526d1dae817abbf
+candidates_before_shuffle	0:0:00000000	3fb8fedf	3f88d5e8	1:0:00000000	3fff4417	3dbae967	
+candidate_order	1:0:00000000	3fff4417	3dbae967	0:0:00000000	3fb8fedf	3f88d5e8	
+search	item	1	0	00000000	3fff4417	3dbae967
+event	1	reference	evaluation	00000000	3fff4417	3dbae967	invalid	00000000
+event	1	reference	report	00000000	3fff4417	3dbae967	invalid	00000000	0	0
+event	1	container	evaluation	00000000	3f8d57aa	3f15d973	invalid	00000000
+event	1	container	report	00000000	3f8d57aa	3f15d973	invalid	00000000	0	0
+event	1	final_refine	result	0	-	-	-	-	2
+move_result	1	0	2
+search	item	0	0	00000000	3fb8fedf	3f88d5e8
+event	0	reference	evaluation	00000000	3fb8fedf	3f88d5e8	invalid	00000000
+event	0	reference	report	00000000	3fb8fedf	3f88d5e8	invalid	00000000	0	0
+event	0	container	evaluation	00000000	3fb1c74a	3f5794ef	invalid	00000000
+event	0	container	report	00000000	3fb1c74a	3f5794ef	invalid	00000000	0	0
+event	0	final_refine	result	0	-	-	-	-	2
+move_result	0	0	2
+rng	after	f526d1dae817abbf	29ed46836258543f	f8f52865625b6dcd	514f2fa3cd673389	2a2dbb2a61421719	dee12f2239475441	909db111d2e54ead	a775eaf22570abed
+worker	449	2	begin
+rng	before	a709528572414c99	0ceec287cec8d0fa	4a9dcba302712be5	13d360ae3e466619	5a59f305275eeded	aae41f17af6dd146	294c1cf4603f3c93	10d01ab91dac4c51
+candidates_before_shuffle	0:0:00000000	3fb8fedf	3f88d5e8	1:0:00000000	3fff4417	3dbae967	
+candidate_order	1:0:00000000	3fff4417	3dbae967	0:0:00000000	3fb8fedf	3f88d5e8	
+search	item	1	0	00000000	3fff4417	3dbae967
+event	1	reference	evaluation	00000000	3fff4417	3dbae967	invalid	00000000
+event	1	reference	report	00000000	3fff4417	3dbae967	invalid	00000000	0	0
+event	1	container	evaluation	00000000	3fa54ee5	3f09e9b0	invalid	00000000
+event	1	container	report	00000000	3fa54ee5	3f09e9b0	invalid	00000000	0	0
+event	1	final_refine	result	0	-	-	-	-	2
+move_result	1	0	2
+search	item	0	0	00000000	3fb8fedf	3f88d5e8
+event	0	reference	evaluation	00000000	3fb8fedf	3f88d5e8	invalid	00000000
+event	0	reference	report	00000000	3fb8fedf	3f88d5e8	invalid	00000000	0	0
+event	0	container	evaluation	00000000	3fd5720f	3f14a60e	invalid	00000000
+event	0	container	report	00000000	3fd5720f	3f14a60e	invalid	00000000	0	0
+event	0	final_refine	result	0	-	-	-	-	2
+move_result	0	0	2
+rng	after	10d01ab91dac4c51	e46fbf2b6d00d54e	d2a209bef13eb11c	664b95f42d5ed812	c6cde2d4b7dceebb	e1d06b985dae2a63	562efc79278b3f87	688c0c889f996c82

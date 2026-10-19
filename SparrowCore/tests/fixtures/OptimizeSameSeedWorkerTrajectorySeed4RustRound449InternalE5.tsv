@@ -1,0 +1,312 @@
+# Diagnostic trace: E5 seed=4, round 449, Rust worker-internal search.
+# Same fixture/configuration as OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv; Rust 1.98.1 Release capture with three workers.
+# Captured with a temporary search_placement_with_trace call inside the final fixed-step worker round; probe was removed after capture.
+# Diagnostic snapshot only; no automated test consumes these rows.
+worker	449	0	begin
+rng	before	8302282590500c6c	ab2c7b30d36b3d43	d37984487f40a203	80544d2c0c239da6	c14b75e946b372ba	717ccda5211dbedb	9034944bef98987c	8ce5d5e92fcf3ae1
+candidates_before_shuffle	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000
+candidate_order	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000
+search	PItemKey(2v561)	0	00000000:3fff4417:3dbae967
+event	PItemKey(2v561)	0	reference	evaluation	00000000:3fff4417:3dbae967	collision	7f800000
+event	PItemKey(2v561)	1	reference	report	00000000:3fff4417:3dbae967	collision	7f800000	1	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	2	container	evaluation	00000000:3fe9bcc2:3f402a26	collision	7f800000
+event	PItemKey(2v561)	3	container	report	00000000:3fe9bcc2:3f402a26	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	4	pre_refine	evaluation	00000000:3fdf4417:3eaeba5a	collision	7f800000
+event	PItemKey(2v561)	5	pre_refine	evaluation	00000000:400fa20c:be228b4c	collision	7f800000
+event	PItemKey(2v561)	6	pre_refine	evaluation	00000000:3fdf4417:3f049e6a	collision	7f800000
+event	PItemKey(2v561)	7	pre_refine	evaluation	00000000:3fdf4417:3e286fc1	collision	7f800000
+event	PItemKey(2v561)	8	pre_refine	evaluation	00000000:3ff5e4b5:3f1b3f08	collision	7f800000
+event	PItemKey(2v561)	9	pre_refine	evaluation	00000000:3fc8a379:3edbfb97	collision	7f800000
+event	PItemKey(2v561)	10	pre_refine	evaluation	00000000:4002f25a:3f2b3f08	collision	7f800000
+event	PItemKey(2v561)	11	pre_refine	evaluation	00000000:3fe5e4b5:3f0b3f08	collision	7f800000
+event	PItemKey(2v561)	12	pre_refine	evaluation	00000000:3ffa9465:3f368f57	collision	7f800000
+event	PItemKey(2v561)	13	pre_refine	evaluation	00000000:40089a82:3f1feeb9	collision	7f800000
+event	PItemKey(2v561)	14	pre_refine	evaluation	00000000:3ffa9465:3f3e8f57	collision	7f800000
+event	PItemKey(2v561)	15	pre_refine	evaluation	00000000:3ffa9465:3f2e8f57	collision	7f800000
+event	PItemKey(2v561)	16	pre_refine	evaluation	00000000:40014a32:3f3e8f57	collision	7f800000
+event	PItemKey(2v561)	17	pre_refine	evaluation	00000000:3ff29465:3f3e8f57	collision	7f800000
+event	PItemKey(2v561)	18	pre_refine	evaluation	00000000:3ffe9464:3f428f57	collision	7f800000
+event	PItemKey(2v561)	19	pre_refine	evaluation	00000000:40034a32:3f3a8f57	collision	7f800000
+event	PItemKey(2v561)	20	pre_refine	evaluation	00000000:4000b43c:3f45636b	collision	7f800000
+event	PItemKey(2v561)	21	pre_refine	evaluation	00000000:3ffbc050:3f3fbb43	collision	7f800000
+event	PItemKey(2v561)	22	pre_refine	report	00000000:4000b43c:3f45636b	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	23	final_refine	evaluation	00000000:3fff4417:3dcf6448	collision	7f800000
+event	PItemKey(2v561)	24	final_refine	evaluation	00000000:3fff4417:3da66e86	collision	7f800000
+event	PItemKey(2v561)	25	final_refine	evaluation	00000000:400045e3:3dcf6448	collision	7f800000
+event	PItemKey(2v561)	26	final_refine	evaluation	00000000:3ffdfc69:3dcf6448	collision	7f800000
+event	PItemKey(2v561)	27	final_refine	evaluation	00000000:3fffe7ef:3dd9a1b9	collision	7f800000
+event	PItemKey(2v561)	28	final_refine	evaluation	00000000:400097cf:3dc526d7	collision	7f800000
+event	PItemKey(2v561)	29	final_refine	evaluation	00000000:3fffe7ef:3de0df5c	collision	7f800000
+event	PItemKey(2v561)	30	final_refine	evaluation	00000000:3fffe7ef:3dd26416	collision	7f800000
+event	PItemKey(2v561)	31	final_refine	evaluation	00000000:40002de5:3de47e2e	collision	7f800000
+event	PItemKey(2v561)	32	final_refine	evaluation	00000000:3fff7415:3ddd408a	collision	7f800000
+event	PItemKey(2v561)	33	final_refine	evaluation	00000000:400056db:3de70d8a	collision	7f800000
+event	PItemKey(2v561)	34	final_refine	evaluation	00000000:400004ef:3de1eed2	collision	7f800000
+event	PItemKey(2v561)	35	final_refine	evaluation	00000000:400073d2:3de70d8a	collision	7f800000
+event	PItemKey(2v561)	36	final_refine	evaluation	00000000:400039e4:3de70d8a	collision	7f800000
+move_result	PItemKey(2v561)	00000000:400073d2:3de70d8a	collision	7f800000
+search	PItemKey(1v539)	0	00000000:3fb8fedf:3f88d5e8
+event	PItemKey(1v539)	0	reference	evaluation	00000000:3fb8fedf:3f88d5e8	collision	7f800000
+event	PItemKey(1v539)	1	reference	report	00000000:3fb8fedf:3f88d5e8	collision	7f800000	1	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	2	container	evaluation	00000000:3fd6c20b:3f0f1f2b	collision	7f800000
+event	PItemKey(1v539)	3	container	report	00000000:3fd6c20b:3f0f1f2b	collision	7f800000	0	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	4	pre_refine	evaluation	00000000:3f98fedf:3fa8d5e8	collision	7f167dc2
+event	PItemKey(1v539)	5	pre_refine	evaluation	00000000:3fd8fedf:3f51abd0	collision	7f800000
+event	PItemKey(1v539)	6	pre_refine	evaluation	00000000:3f6ede0f:3fca65c0	invalid	00000000
+event	PItemKey(1v539)	7	pre_refine	evaluation	00000000:3fba8eb6:3f874610	invalid	00000000
+event	PItemKey(1v539)	8	pre_refine	evaluation	00000000:3f814386:3fc09142	invalid	00000000
+event	PItemKey(1v539)	9	pre_refine	evaluation	00000000:3fb0ba38:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	10	pre_refine	evaluation	00000000:3f97d657:3fa9fe6f	invalid	00000000
+event	PItemKey(1v539)	11	pre_refine	evaluation	00000000:3fc99e19:3f706d59	invalid	00000000
+event	PItemKey(1v539)	12	pre_refine	evaluation	00000000:3fc253d2:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	13	pre_refine	evaluation	00000000:3f9f209e:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	14	pre_refine	evaluation	00000000:3fc253d2:3fa2b428	invalid	00000000
+event	PItemKey(1v539)	15	pre_refine	evaluation	00000000:3fc253d2:3f7f01e9	invalid	00000000
+event	PItemKey(1v539)	16	pre_refine	evaluation	00000000:3fcb209f:3f99e75b	invalid	00000000
+event	PItemKey(1v539)	17	pre_refine	evaluation	00000000:3fb98705:3f884dc1	invalid	00000000
+event	PItemKey(1v539)	18	pre_refine	evaluation	00000000:3fc88cca:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	19	pre_refine	evaluation	00000000:3fbc1ada:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	20	pre_refine	evaluation	00000000:3fc88cca:3f975386	invalid	00000000
+event	PItemKey(1v539)	21	pre_refine	evaluation	00000000:3fc88cca:3f8ae196	invalid	00000000
+event	PItemKey(1v539)	22	pre_refine	evaluation	00000000:3fc88cca:3f94370a	invalid	00000000
+event	PItemKey(1v539)	23	pre_refine	evaluation	00000000:3fc88cca:3f8dfe12	invalid	00000000
+event	PItemKey(1v539)	24	pre_refine	evaluation	00000000:3fc5704e:3f92a8cc	invalid	00000000
+event	PItemKey(1v539)	25	pre_refine	evaluation	00000000:3fcba946:3f8f8c50	collision	7eb9c4a2
+event	PItemKey(1v539)	26	pre_refine	evaluation	00000000:3fc865ea:3f912dfe	invalid	00000000
+event	PItemKey(1v539)	27	pre_refine	evaluation	00000000:3fceeca2:3f8deaa2	invalid	00000000
+event	PItemKey(1v539)	28	pre_refine	report	00000000:3fcba946:3f8f8c50	collision	7eb9c4a2	1	1	00000000:3fcba946:3f8f8c50:collision:7eb9c4a2
+event	PItemKey(1v539)	29	final_refine	evaluation	00000000:3fccf0f4:3f8f8c50	collision	7eb9c4a2
+event	PItemKey(1v539)	30	final_refine	evaluation	00000000:3fca6198:3f8f8c50	collision	7eb9c4a2
+event	PItemKey(1v539)	31	final_refine	evaluation	00000000:3fcd94cb:3f90d3fe	invalid	00000000
+event	PItemKey(1v539)	32	final_refine	evaluation	00000000:3fcc4d1d:3f8e44a2	invalid	00000000
+event	PItemKey(1v539)	33	final_refine	evaluation	00000000:3fccf0f4:3f907404	invalid	00000000
+event	PItemKey(1v539)	34	final_refine	evaluation	00000000:3fccf0f4:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	35	final_refine	evaluation	00000000:3fccf0f4:3f8fa37c	invalid	00000000
+event	PItemKey(1v539)	36	final_refine	evaluation	00000000:3fccf0f4:3f8da5bc	invalid	00000000
+event	PItemKey(1v539)	37	final_refine	evaluation	00000000:3fcd64ce:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	38	final_refine	evaluation	00000000:3fcc7d1a:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	39	final_refine	evaluation	00000000:3fcd9ebb:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	40	final_refine	evaluation	00000000:3fcd2ae1:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	41	final_refine	evaluation	00000000:3fcd81c4:3f8f240c	invalid	00000000
+event	PItemKey(1v539)	42	final_refine	evaluation	00000000:3fcdbbb2:3f8e252c	invalid	00000000
+event	PItemKey(1v539)	43	final_refine	evaluation	00000000:3fcdb336:3f8efeb9	invalid	00000000
+event	PItemKey(1v539)	44	final_refine	evaluation	00000000:3fcd8a40:3f8e4a7f	invalid	00000000
+event	PItemKey(1v539)	45	final_refine	evaluation	00000000:3fcd9040:3f8ee454	invalid	00000000
+event	PItemKey(1v539)	46	final_refine	evaluation	00000000:3fcdad36:3f8e64e4	invalid	00000000
+event	PItemKey(1v539)	47	final_refine	evaluation	00000000:3fcda8f8:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	48	final_refine	evaluation	00000000:3fcd947e:3f8ea49c	collision	7eb448de
+event	PItemKey(1v539)	49	final_refine	evaluation	00000000:3fcdae17:3f8ed1aa	invalid	00000000
+event	PItemKey(1v539)	50	final_refine	evaluation	00000000:3fcda3d9:3f8e778e	collision	7eb332ea
+event	PItemKey(1v539)	51	final_refine	evaluation	00000000:3fcda938:3f8ea6cf	invalid	00000000
+event	PItemKey(1v539)	52	final_refine	evaluation	00000000:3fcd9e7a:3f8e484d	invalid	00000000
+event	PItemKey(1v539)	53	final_refine	evaluation	00000000:3fcda7a5:3f8e778e	collision	7eb332ea
+event	PItemKey(1v539)	54	final_refine	evaluation	00000000:3fcda00d:3f8e778e	collision	7eb332ea
+event	PItemKey(1v539)	55	final_refine	evaluation	00000000:3fcda98b:3f8e778e	collision	7eb332ea
+event	PItemKey(1v539)	56	final_refine	evaluation	00000000:3fcda5bf:3f8e778e	collision	7eb332ea
+event	PItemKey(1v539)	57	final_refine	evaluation	00000000:3fcda98b:3f8e98f8	invalid	00000000
+event	PItemKey(1v539)	58	final_refine	evaluation	00000000:3fcda98b:3f8e5624	invalid	00000000
+move_result	PItemKey(1v539)	00000000:3fcda98b:3f8e778e	collision	7eb332ea
+rng	after	3021e8acbb47eaf4	40ed79ae7942fd08	80cc4d18edac5f6b	c9d2f7d0126a54c5	ba3c3a1aa16cd0de	a32e05e3157626a0	734d186389c50ce1	4fdfd0ff62a77682
+worker	449	1	begin
+rng	before	d2de03dd5b625078	8a8bb2b9eba95470	1aaf55f391eeb41b	2bb2e694a4abaa88	370ec30a17a42a53	638e95ccfab645a3	af29de3d96cf6967	f526d1dae817abbf
+candidates_before_shuffle	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000
+candidate_order	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000
+search	PItemKey(2v561)	0	00000000:3fff4417:3dbae967
+event	PItemKey(2v561)	0	reference	evaluation	00000000:3fff4417:3dbae967	collision	7f800000
+event	PItemKey(2v561)	1	reference	report	00000000:3fff4417:3dbae967	collision	7f800000	1	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	2	container	evaluation	00000000:3f8d57aa:3f15d973	collision	7f800000
+event	PItemKey(2v561)	3	container	report	00000000:3f8d57aa:3f15d973	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	4	pre_refine	evaluation	00000000:400fa20c:3dbae967	collision	7f800000
+event	PItemKey(2v561)	5	pre_refine	evaluation	00000000:3fdf4417:3dbae967	collision	7f800000
+event	PItemKey(2v561)	6	pre_refine	evaluation	00000000:400fa20c:3eaeba5a	collision	7f800000
+event	PItemKey(2v561)	7	pre_refine	evaluation	00000000:400fa20c:be228b4c	collision	7f800000
+event	PItemKey(2v561)	8	pre_refine	evaluation	00000000:4017a20c:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	9	pre_refine	evaluation	00000000:4007a20c:3e5d74b4	collision	7f800000
+event	PItemKey(2v561)	10	pre_refine	evaluation	00000000:4011f9e4:3f0dfdcb	collision	7f800000
+event	PItemKey(2v561)	11	pre_refine	evaluation	00000000:401d4a34:3ec1791d	collision	7f800000
+event	PItemKey(2v561)	12	pre_refine	evaluation	00000000:4015f9e4:3f0dfdcb	collision	7f800000
+event	PItemKey(2v561)	13	pre_refine	evaluation	00000000:400df9e4:3f0dfdcb	collision	7f800000
+event	PItemKey(2v561)	14	pre_refine	evaluation	00000000:4013f9e4:3f1dfdcb	collision	7f800000
+event	PItemKey(2v561)	15	pre_refine	evaluation	00000000:4017f9e4:3efbfb96	collision	7f800000
+event	PItemKey(2v561)	16	pre_refine	evaluation	00000000:4013f9e4:3f294e1a	collision	7f800000
+event	PItemKey(2v561)	17	pre_refine	evaluation	00000000:4013f9e4:3f12ad7c	collision	7f800000
+event	PItemKey(2v561)	18	pre_refine	evaluation	00000000:401563ee:3f294e1a	collision	7f800000
+event	PItemKey(2v561)	19	pre_refine	evaluation	00000000:40128fda:3f294e1a	collision	7f800000
+event	PItemKey(2v561)	20	pre_refine	evaluation	00000000:4014aee9:3f2ef642	collision	7f800000
+event	PItemKey(2v561)	21	pre_refine	evaluation	00000000:401618f3:3f23a5f2	collision	7f800000
+event	PItemKey(2v561)	22	pre_refine	report	00000000:4014aee9:3f2ef642	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	23	final_refine	evaluation	00000000:400045e3:3dcf6448	collision	7f800000
+event	PItemKey(2v561)	24	final_refine	evaluation	00000000:3ffdfc69:3da66e86	collision	7f800000
+event	PItemKey(2v561)	25	final_refine	evaluation	00000000:3fffa412:3ddddf8f	collision	7f800000
+event	PItemKey(2v561)	26	final_refine	evaluation	00000000:4000b9bd:3dc0e901	collision	7f800000
+event	PItemKey(2v561)	27	final_refine	evaluation	00000000:400023f5:3de81d00	collision	7f800000
+event	PItemKey(2v561)	28	final_refine	evaluation	00000000:3fff003b:3dd3a21e	collision	7f800000
+event	PItemKey(2v561)	29	final_refine	evaluation	00000000:40005de2:3def5aa3	collision	7f800000
+event	PItemKey(2v561)	30	final_refine	evaluation	00000000:3fffd410:3de0df5d	collision	7f800000
+event	PItemKey(2v561)	31	final_refine	evaluation	00000000:400086d8:3def5aa3	collision	7f800000
+event	PItemKey(2v561)	32	final_refine	evaluation	00000000:400034ec:3def5aa3	collision	7f800000
+event	PItemKey(2v561)	33	final_refine	evaluation	00000000:4000725d:3df4795b	collision	7f800000
+event	PItemKey(2v561)	34	final_refine	evaluation	00000000:40009b53:3dea3beb	collision	7f800000
+event	PItemKey(2v561)	35	final_refine	evaluation	00000000:400063e2:3df8182d	collision	7f800000
+event	PItemKey(2v561)	36	final_refine	evaluation	00000000:400080d8:3df0da89	collision	7f800000
+event	PItemKey(2v561)	37	final_refine	evaluation	00000000:40006e1f:3dfaa789	collision	7f800000
+event	PItemKey(2v561)	38	final_refine	evaluation	00000000:400059a5:3df588d1	collision	7f800000
+move_result	PItemKey(2v561)	00000000:40006e1f:3dfaa789	collision	7f800000
+search	PItemKey(1v539)	0	00000000:3fb8fedf:3f88d5e8
+event	PItemKey(1v539)	0	reference	evaluation	00000000:3fb8fedf:3f88d5e8	collision	7f800000
+event	PItemKey(1v539)	1	reference	report	00000000:3fb8fedf:3f88d5e8	collision	7f800000	1	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	2	container	evaluation	00000000:3faf9136:3f6d4123	collision	7f800000
+event	PItemKey(1v539)	3	container	report	00000000:3faf9136:3f6d4123	collision	7f800000	0	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	4	pre_refine	evaluation	00000000:3fd8fedf:3fa8d5e8	collision	7f167dc2
+event	PItemKey(1v539)	5	pre_refine	evaluation	00000000:3f98fedf:3f51abd0	collision	7f800000
+event	PItemKey(1v539)	6	pre_refine	evaluation	00000000:3ffa8eb6:3fca65c0	invalid	00000000
+event	PItemKey(1v539)	7	pre_refine	evaluation	00000000:3fb76f08:3f874610	invalid	00000000
+event	PItemKey(1v539)	8	pre_refine	evaluation	00000000:3fc14386:3fc09142	invalid	00000000
+event	PItemKey(1v539)	9	pre_refine	evaluation	00000000:3ff0ba38:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	10	pre_refine	evaluation	00000000:3fd7d657:3fa9fe6f	invalid	00000000
+event	PItemKey(1v539)	11	pre_refine	evaluation	00000000:4004cf0d:3f706d59	invalid	00000000
+event	PItemKey(1v539)	12	pre_refine	evaluation	00000000:400129e9:3fa2b428	invalid	00000000
+event	PItemKey(1v539)	13	pre_refine	evaluation	00000000:3fdf209e:3f7f01e9	invalid	00000000
+event	PItemKey(1v539)	14	pre_refine	evaluation	00000000:3fe44847:3f9d8c7f	invalid	00000000
+event	PItemKey(1v539)	15	pre_refine	evaluation	00000000:3ffd2c29:3f84a89d	invalid	00000000
+event	PItemKey(1v539)	16	pre_refine	evaluation	00000000:3ff98705:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	17	pre_refine	evaluation	00000000:3fe7ed6b:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	18	pre_refine	evaluation	00000000:3ff98705:3f99e75b	invalid	00000000
+event	PItemKey(1v539)	19	pre_refine	evaluation	00000000:3ff98705:3f884dc1	invalid	00000000
+event	PItemKey(1v539)	20	pre_refine	evaluation	00000000:3ff98705:3f9580f4	invalid	00000000
+event	PItemKey(1v539)	21	pre_refine	evaluation	00000000:3ff98705:3f8cb428	invalid	00000000
+event	PItemKey(1v539)	22	pre_refine	evaluation	00000000:3ffded6b:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	23	pre_refine	evaluation	00000000:3ff5209f:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	24	pre_refine	report	00000000:3ffded6b:3f911a8e	collision	7ec2d527	1	1	00000000:3ffded6b:3f911a8e:collision:7ec2d527
+event	PItemKey(1v539)	25	final_refine	evaluation	00000000:3ffca5bd:3f92623c	invalid	00000000
+event	PItemKey(1v539)	26	final_refine	evaluation	00000000:3fff3519:3f8fd2e0	collision	7ebb67fa
+event	PItemKey(1v539)	27	final_refine	evaluation	00000000:3ffddd6d:3f912a8c	invalid	00000000
+event	PItemKey(1v539)	28	final_refine	evaluation	00000000:40004663:3f8e7b34	invalid	00000000
+event	PItemKey(1v539)	29	final_refine	evaluation	00000000:4000140e:3f8fd2e0	invalid	00000000
+event	PItemKey(1v539)	30	final_refine	evaluation	00000000:3ffe4215:3f8fd2e0	collision	7ebb67fa
+event	PItemKey(1v539)	31	final_refine	evaluation	00000000:3ffebb97:3f8fd2e0	collision	7ebb67fa
+event	PItemKey(1v539)	32	final_refine	evaluation	00000000:3ffdc893:3f8fd2e0	collision	7ebb67fa
+event	PItemKey(1v539)	33	final_refine	evaluation	00000000:3ffef858:3f90c5e4	invalid	00000000
+event	PItemKey(1v539)	34	final_refine	evaluation	00000000:3ffe7ed6:3f8edfdc	invalid	00000000
+event	PItemKey(1v539)	35	final_refine	evaluation	00000000:3ffee68d:3f907eb6	invalid	00000000
+event	PItemKey(1v539)	36	final_refine	evaluation	00000000:3ffe90a1:3f8f270a	invalid	00000000
+event	PItemKey(1v539)	37	final_refine	evaluation	00000000:3ffebb97:3f904c62	invalid	00000000
+event	PItemKey(1v539)	38	final_refine	evaluation	00000000:3ffebb97:3f8f595e	invalid	00000000
+event	PItemKey(1v539)	39	final_refine	evaluation	00000000:3ffe9d37:3f900fa1	invalid	00000000
+event	PItemKey(1v539)	40	final_refine	evaluation	00000000:3ffed9f7:3f8f961f	invalid	00000000
+event	PItemKey(1v539)	41	final_refine	evaluation	00000000:3ffed112:3f8ffdd6	invalid	00000000
+event	PItemKey(1v539)	42	final_refine	evaluation	00000000:3ffea61c:3f8fa7ea	invalid	00000000
+move_result	PItemKey(1v539)	00000000:3ffebb97:3f8fd2e0	collision	7ebb67fa
+rng	after	0c833dc2ed342bdd	072c3ba2e36e23d9	3049eb5408d1d394	826d9e0409c97462	2e6c8c3d038153f4	b704e02551f20efe	680a2994c4a440f7	6534c134d5528ea0
+worker	449	2	begin
+rng	before	a709528572414c99	0ceec287cec8d0fa	4a9dcba302712be5	13d360ae3e466619	5a59f305275eeded	aae41f17af6dd146	294c1cf4603f3c93	10d01ab91dac4c51
+candidates_before_shuffle	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000
+candidate_order	PItemKey(2v561):0:00000000:3fff4417:3dbae967:403c4983:7f800000	PItemKey(1v539):0:00000000:3fb8fedf:3f88d5e8:3fb7d111:7f800000
+search	PItemKey(2v561)	0	00000000:3fff4417:3dbae967
+event	PItemKey(2v561)	0	reference	evaluation	00000000:3fff4417:3dbae967	collision	7f800000
+event	PItemKey(2v561)	1	reference	report	00000000:3fff4417:3dbae967	collision	7f800000	1	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	2	container	evaluation	00000000:3fa54ee5:3f09e9b0	collision	7f800000
+event	PItemKey(2v561)	3	container	report	00000000:3fa54ee5:3f09e9b0	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	4	pre_refine	evaluation	00000000:3fff4417:3eaeba5a	collision	7f800000
+event	PItemKey(2v561)	5	pre_refine	evaluation	00000000:3fff4417:be228b4c	collision	7f800000
+event	PItemKey(2v561)	6	pre_refine	evaluation	00000000:400fa20c:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	7	pre_refine	evaluation	00000000:3fdf4417:3e5d74b4	collision	7f800000
+event	PItemKey(2v561)	8	pre_refine	evaluation	00000000:401af25b:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	9	pre_refine	evaluation	00000000:400451bd:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	10	pre_refine	evaluation	00000000:40209a83:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	11	pre_refine	evaluation	00000000:40154a33:3eeeba5a	collision	7f800000
+event	PItemKey(2v561)	12	pre_refine	evaluation	00000000:401dc66f:3f0dfdcb	collision	7f800000
+event	PItemKey(2v561)	13	pre_refine	evaluation	00000000:40236e97:3ec1791d	collision	7f800000
+event	PItemKey(2v561)	14	pre_refine	evaluation	00000000:401bc66f:3f1dfdcb	collision	7f800000
+event	PItemKey(2v561)	15	pre_refine	evaluation	00000000:401fc66f:3efbfb96	collision	7f800000
+event	PItemKey(2v561)	16	pre_refine	evaluation	00000000:401bc66f:3f294e1a	collision	7f800000
+event	PItemKey(2v561)	17	pre_refine	evaluation	00000000:401bc66f:3f12ad7c	collision	7f800000
+event	PItemKey(2v561)	18	pre_refine	evaluation	00000000:401a5c65:3f2ef642	collision	7f800000
+event	PItemKey(2v561)	19	pre_refine	evaluation	00000000:401d3079:3f23a5f2	collision	7f800000
+event	PItemKey(2v561)	20	pre_refine	report	00000000:401a5c65:3f2ef642	collision	7f800000	0	1	00000000:3fff4417:3dbae967:collision:7f800000
+event	PItemKey(2v561)	21	final_refine	evaluation	00000000:3fff4417:3dcf6448	collision	7f800000
+event	PItemKey(2v561)	22	final_refine	evaluation	00000000:3fff4417:3da66e86	collision	7f800000
+event	PItemKey(2v561)	23	final_refine	evaluation	00000000:3fff4417:3dd9a1b9	collision	7f800000
+event	PItemKey(2v561)	24	final_refine	evaluation	00000000:3fff4417:3dc526d7	collision	7f800000
+event	PItemKey(2v561)	25	final_refine	evaluation	00000000:3fff4417:3ddec071	collision	7f800000
+event	PItemKey(2v561)	26	final_refine	evaluation	00000000:3fff4417:3dd48301	collision	7f800000
+event	PItemKey(2v561)	27	final_refine	evaluation	00000000:400045e3:3de14fcd	collision	7f800000
+event	PItemKey(2v561)	28	final_refine	evaluation	00000000:3ffdfc69:3ddc3115	collision	7f800000
+event	PItemKey(2v561)	29	final_refine	evaluation	00000000:4000b9bd:3de14fcd	collision	7f800000
+event	PItemKey(2v561)	30	final_refine	evaluation	00000000:3fffa412:3de14fcd	collision	7f800000
+event	PItemKey(2v561)	31	final_refine	evaluation	00000000:40007fd0:3de31f36	collision	7f800000
+event	PItemKey(2v561)	32	final_refine	evaluation	00000000:4000f3aa:3ddf8064	collision	7f800000
+event	PItemKey(2v561)	33	final_refine	evaluation	00000000:4000a8c6:3de466e4	collision	7f800000
+event	PItemKey(2v561)	34	final_refine	evaluation	00000000:400056da:3de1d788	collision	7f800000
+event	PItemKey(2v561)	35	final_refine	evaluation	00000000:4000a8c6:3de54e98	collision	7f800000
+event	PItemKey(2v561)	36	final_refine	evaluation	00000000:4000a8c6:3de37f30	collision	7f800000
+event	PItemKey(2v561)	37	final_refine	evaluation	00000000:4000c5bd:3de5c272	collision	7f800000
+event	PItemKey(2v561)	38	final_refine	evaluation	00000000:40008bcf:3de4dabe	collision	7f800000
+event	PItemKey(2v561)	39	final_refine	evaluation	00000000:4000da38:3de6145e	collision	7f800000
+event	PItemKey(2v561)	40	final_refine	evaluation	00000000:4000b142:3de57086	collision	7f800000
+move_result	PItemKey(2v561)	00000000:4000da38:3de6145e	collision	7f800000
+search	PItemKey(1v539)	0	00000000:3fb8fedf:3f88d5e8
+event	PItemKey(1v539)	0	reference	evaluation	00000000:3fb8fedf:3f88d5e8	collision	7f800000
+event	PItemKey(1v539)	1	reference	report	00000000:3fb8fedf:3f88d5e8	collision	7f800000	1	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	2	container	evaluation	00000000:3f8cec56:3f264d5f	collision	7f800000
+event	PItemKey(1v539)	3	container	report	00000000:3f8cec56:3f264d5f	collision	7f800000	0	1	00000000:3fb8fedf:3f88d5e8:collision:7f800000
+event	PItemKey(1v539)	4	pre_refine	evaluation	00000000:3fd8fedf:3fa8d5e8	collision	7f167dc2
+event	PItemKey(1v539)	5	pre_refine	evaluation	00000000:3f98fedf:3f51abd0	collision	7f800000
+event	PItemKey(1v539)	6	pre_refine	evaluation	00000000:3ffa8eb6:3fca65c0	invalid	00000000
+event	PItemKey(1v539)	7	pre_refine	evaluation	00000000:3fb76f08:3f874610	invalid	00000000
+event	PItemKey(1v539)	8	pre_refine	evaluation	00000000:3ff0ba38:3fc09142	invalid	00000000
+event	PItemKey(1v539)	9	pre_refine	evaluation	00000000:3fc14386:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	10	pre_refine	evaluation	00000000:3fda2767:3fa9fe6f	invalid	00000000
+event	PItemKey(1v539)	11	pre_refine	evaluation	00000000:3fa85fa5:3f706d59	invalid	00000000
+event	PItemKey(1v539)	12	pre_refine	evaluation	00000000:3fd2dd20:3fa2b428	invalid	00000000
+event	PItemKey(1v539)	13	pre_refine	evaluation	00000000:3fafa9ec:3f7f01e9	invalid	00000000
+event	PItemKey(1v539)	14	pre_refine	evaluation	00000000:3fcdb577:3f9d8c7f	invalid	00000000
+event	PItemKey(1v539)	15	pre_refine	evaluation	00000000:3fb4d195:3f84a89d	invalid	00000000
+event	PItemKey(1v539)	16	pre_refine	evaluation	00000000:3fca1053:3f99e75b	invalid	00000000
+event	PItemKey(1v539)	17	pre_refine	evaluation	00000000:3fb876b9:3f884dc1	invalid	00000000
+event	PItemKey(1v539)	18	pre_refine	evaluation	00000000:3fc77c7e:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	19	pre_refine	evaluation	00000000:3fbb0a8e:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	20	pre_refine	evaluation	00000000:3fc46002:3f975386	invalid	00000000
+event	PItemKey(1v539)	21	pre_refine	evaluation	00000000:3fca98fa:3f8ae196	invalid	00000000
+event	PItemKey(1v539)	22	pre_refine	evaluation	00000000:3fc9afb1:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	23	pre_refine	evaluation	00000000:3fc5494b:3f911a8e	collision	7ec2d527
+event	PItemKey(1v539)	24	pre_refine	evaluation	00000000:3fc89617:3f9580f4	invalid	00000000
+event	PItemKey(1v539)	25	pre_refine	evaluation	00000000:3fcac94b:3f8cb428	invalid	00000000
+event	PItemKey(1v539)	26	pre_refine	evaluation	00000000:3fc9afb1:3f94370a	invalid	00000000
+event	PItemKey(1v539)	27	pre_refine	evaluation	00000000:3fc9afb1:3f8dfe12	invalid	00000000
+event	PItemKey(1v539)	28	pre_refine	report	00000000:3fc9afb1:3f911a8e	collision	7ec2d527	1	1	00000000:3fc9afb1:3f911a8e:collision:7ec2d527
+event	PItemKey(1v539)	29	final_refine	evaluation	00000000:3fcaf75f:3f92623c	invalid	00000000
+event	PItemKey(1v539)	30	final_refine	evaluation	00000000:3fc86803:3f8fd2e0	collision	7ebb67fa
+event	PItemKey(1v539)	31	final_refine	evaluation	00000000:3fc9bfaf:3f912a8c	invalid	00000000
+event	PItemKey(1v539)	32	final_refine	evaluation	00000000:3fc71057:3f8e7b34	collision	7eb3497b
+event	PItemKey(1v539)	33	final_refine	evaluation	00000000:3fc878ca:3f8fe3a7	invalid	00000000
+event	PItemKey(1v539)	34	final_refine	evaluation	00000000:3fc5a7e4:3f8d12c1	invalid	00000000
+event	PItemKey(1v539)	35	final_refine	evaluation	00000000:3fc71057:3f8f7a14	invalid	00000000
+event	PItemKey(1v539)	36	final_refine	evaluation	00000000:3fc71057:3f8d7c54	invalid	00000000
+event	PItemKey(1v539)	37	final_refine	evaluation	00000000:3fc80f37:3f8efaa4	invalid	00000000
+event	PItemKey(1v539)	38	final_refine	evaluation	00000000:3fc61177:3f8dfbc4	invalid	00000000
+event	PItemKey(1v539)	39	final_refine	evaluation	00000000:3fc71057:3f8ed551	invalid	00000000
+event	PItemKey(1v539)	40	final_refine	evaluation	00000000:3fc71057:3f8e2117	invalid	00000000
+event	PItemKey(1v539)	41	final_refine	evaluation	00000000:3fc7c490:3f8e7b34	collision	7eb3497b
+event	PItemKey(1v539)	42	final_refine	evaluation	00000000:3fc65c1e:3f8e7b34	collision	7eb3497b
+event	PItemKey(1v539)	43	final_refine	evaluation	00000000:3fc7c490:3f8ea842	invalid	00000000
+event	PItemKey(1v539)	44	final_refine	evaluation	00000000:3fc7c490:3f8e4e26	invalid	00000000
+event	PItemKey(1v539)	45	final_refine	evaluation	00000000:3fc7c490:3f8e91bb	invalid	00000000
+event	PItemKey(1v539)	46	final_refine	evaluation	00000000:3fc7c490:3f8e64ad	collision	7eb2bdf1
+event	PItemKey(1v539)	47	final_refine	evaluation	00000000:3fc7c490:3f8e7d75	invalid	00000000
+event	PItemKey(1v539)	48	final_refine	evaluation	00000000:3fc7c490:3f8e4be5	invalid	00000000
+event	PItemKey(1v539)	49	final_refine	evaluation	00000000:3fc81ead:3f8e7111	invalid	00000000
+event	PItemKey(1v539)	50	final_refine	evaluation	00000000:3fc76a73:3f8e5849	invalid	00000000
+event	PItemKey(1v539)	51	final_refine	evaluation	00000000:3fc784d8:3f8e6d70	invalid	00000000
+event	PItemKey(1v539)	52	final_refine	evaluation	00000000:3fc80448:3f8e5bea	invalid	00000000
+event	PItemKey(1v539)	53	final_refine	evaluation	00000000:3fc7c490:3f8e6adf	invalid	00000000
+event	PItemKey(1v539)	54	final_refine	evaluation	00000000:3fc7c490:3f8e5e7b	invalid	00000000
+event	PItemKey(1v539)	55	final_refine	evaluation	00000000:3fc7f19e:3f8e67c6	invalid	00000000
+event	PItemKey(1v539)	56	final_refine	evaluation	00000000:3fc79782:3f8e6194	collision	7eb2aab9
+event	PItemKey(1v539)	57	final_refine	evaluation	00000000:3fc7c6c3:3f8e64d4	invalid	00000000
+event	PItemKey(1v539)	58	final_refine	evaluation	00000000:3fc76841:3f8e5e54	invalid	00000000
+event	PItemKey(1v539)	59	final_refine	evaluation	00000000:3fc7b8ec:3f8e63e0	invalid	00000000
+event	PItemKey(1v539)	60	final_refine	evaluation	00000000:3fc77618:3f8e5f48	invalid	00000000
+move_result	PItemKey(1v539)	00000000:3fc79782:3f8e6194	collision	7eb2aab9
+rng	after	e0bfd6e961d383e0	b15d9cdbfb5ee783	3cb5e760f8d75d48	5799bd7b13692e54	1fc079c6e344358e	c226ab39fa6f2840	e954be51d9c799a8	5fcb30a98a80d3d4
+round_summary	449	2	2	2	76800	workers	449	ffc00000	ffc00000	ffc00000	4075dc7a	4077d060	40761831	0	2	2	2	262

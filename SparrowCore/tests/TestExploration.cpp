@@ -11,6 +11,7 @@
 #include "../Source/Optimizer/ExplorationNormalSampler.h"
 #include "../Source/Optimizer/ExplorationTrace.h"
 #include "../Source/Optimizer/CompressionTrace.h"
+#include "../Source/Optimizer/CompressionClock.h"
 
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/Assertions.h"
@@ -240,7 +241,21 @@ bool MatchesRustPhaseTrace(
                 : expected.type == "placement"
                     ? (valueIndex == 0U ? 0.0
                        : valueIndex == 1U ? 1.0e-6 : 5.0e-5)
-                    : expected.type == "step" ? 1.0e-6 : 0.0;
+                    : (expected.type == "step"
+                       || expected.type == "compression_step")
+                        ? 1.0e-6
+                    : expected.type == "progress"
+                        ? (valueIndex == 0U ? 0.0
+                           : valueIndex == 3U ? 1.0e-4 : 5.0e-5)
+                    : expected.type == "config"
+                        ? ((valueIndex == 1U) ? 1.0e-5
+                           : (valueIndex == 3U || valueIndex == 4U)
+                               ? 1.0e-7 : 0.0)
+                    : expected.type == "terminal"
+                        ? ((valueIndex == 3U || valueIndex == 4U)
+                               ? 1.0e-5
+                           : valueIndex == 7U ? 1.0e-4 : 0.0)
+                    : 0.0;
             if (std::abs(expected.values[valueIndex]
                          - observed.values[valueIndex]) > tolerance)
             {
@@ -269,6 +284,121 @@ const char* ColdStartReportName(sparrow::OptimizationReportType type)
     }
     return "unknown";
 }
+
+class WorkerMoveCompressionReferenceListener final
+    : public sparrow::OptimizationListener
+{
+public:
+    explicit WorkerMoveCompressionReferenceListener(
+        sparrow::OptimizationTerminator& terminator,
+        std::size_t stopAfterCompressionResults = 1U)
+        : m_Terminator(terminator),
+          m_StopAfterCompressionResults(stopAfterCompressionResults)
+    {
+    }
+
+    void RecordSolution(const std::string& label,
+                       const jaguar::SPSolution& solution)
+    {
+        events.push_back({"report",
+                          label,
+                          {static_cast<double>(solution.layoutSnapshot.placements.size()),
+                           solution.StripWidth(),
+                           solution.Density()}});
+        std::vector<const jaguar::LayoutPlacementSnapshot*> placements;
+        placements.reserve(solution.layoutSnapshot.placements.size());
+        for (const auto& placement : solution.layoutSnapshot.placements)
+            placements.push_back(&placement);
+        std::sort(placements.begin(), placements.end(), [](const auto* left,
+                                                           const auto* right) {
+            const auto& leftTransform = left->placedItem.Transform();
+            const auto& rightTransform = right->placedItem.Transform();
+            if (leftTransform.translation.x != rightTransform.translation.x)
+                return leftTransform.translation.x < rightTransform.translation.x;
+            return leftTransform.translation.y < rightTransform.translation.y;
+        });
+        for (const auto* placement : placements)
+        {
+            const auto& transform = placement->placedItem.Transform();
+            events.push_back({"placement",
+                              label,
+                              {static_cast<double>(placement->placedItem.GetItemIndex()),
+                               transform.rotationRad,
+                               transform.translation.x,
+                               transform.translation.y}});
+        }
+    }
+
+    void OnPhase(sparrow::OptimizationPhase phase) override
+    {
+        if (phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION)
+            m_CurrentPhase = "exploration";
+        else if (phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION)
+            m_CurrentPhase = "compression";
+        events.push_back({"phase", m_CurrentPhase, {}});
+    }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport& report) override
+    {
+        RecordSolution(ColdStartReportName(report.type), report.solution);
+        if (m_CurrentPhase == "exploration"
+            && report.type
+                   == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+            && !stoppedExploration)
+        {
+            stoppedExploration = true;
+            m_Terminator.RequestPhaseStop();
+        }
+    }
+
+    void OnSeparationProgress(
+        const sparrow::SeparationProgress& progress) override
+    {
+        events.push_back({"progress",
+                          m_CurrentPhase,
+                          {static_cast<double>(progress.iteration),
+                           progress.stripWidth,
+                           progress.density,
+                           progress.minimumLoss}});
+    }
+
+    void OnSeparationResult(const sparrow::SeparationResult& result) override
+    {
+        events.push_back({"separation",
+                          m_CurrentPhase,
+                          {result.success ? 1.0 : 0.0,
+                           static_cast<double>(result.totalEvaluations),
+                           static_cast<double>(result.totalMoves),
+                           static_cast<double>(result.iterations)}});
+        separationResults.push_back(result);
+        if (m_CurrentPhase == "compression")
+        {
+            ++m_CompressionResultsSeen;
+            if (!stoppedCompression
+                && m_CompressionResultsSeen >= m_StopAfterCompressionResults)
+            {
+                stoppedCompression = true;
+                m_Terminator.RequestPhaseStop();
+            }
+        }
+    }
+
+    void OnCompressionProgress(double step) override
+    {
+        events.push_back({"compression_step", "value", {step}});
+    }
+
+    std::vector<ColdStartTraceEvent> events;
+    std::vector<sparrow::SeparationResult> separationResults;
+    bool stoppedExploration = false;
+    bool stoppedCompression = false;
+
+private:
+    sparrow::OptimizationTerminator& m_Terminator;
+    std::size_t m_StopAfterCompressionResults;
+    std::size_t m_CompressionResultsSeen = 0U;
+    std::string m_CurrentPhase;
+};
 
 class ColdStartReferenceListener final : public sparrow::OptimizationListener
 {
@@ -1500,9 +1630,165 @@ bool TestDefaultColdStartOptimizeMatchesRustReference(std::ostream& output)
             }
         }
     }
-    return Expect(traceMatches,
+    if (!Expect(traceMatches,
+                output,
+                "default cold-start phase, config, report, and placement trace must match Rust"))
+    {
+        return false;
+    }
+
+    jaguar::Layout finalLayout(actual.Value().solution.layoutSnapshot.container);
+    const auto finalLayoutRestored =
+        finalLayout.Restore(actual.Value().solution.layoutSnapshot);
+    if (!Expect(finalLayoutRestored.HasValue(), output,
+                "default cold-start final layout must restore for E5 loss comparison"))
+    {
+        return false;
+    }
+    const auto finalTracker = sparrow::CollisionTracker::Create(finalLayout);
+    if (!Expect(finalTracker.HasValue(), output,
+                "default cold-start final collision tracker must be constructible"))
+    {
+        return false;
+    }
+
+    std::vector<std::size_t> placedCounts(instance.Value().ItemCount(), 0U);
+    std::vector<std::size_t> placedIds;
+    placedIds.reserve(actual.Value().solution.layoutSnapshot.placements.size());
+    for (const auto& placement : actual.Value().solution.layoutSnapshot.placements)
+    {
+        const std::size_t itemIndex = placement.placedItem.GetItemIndex();
+        if (itemIndex < placedCounts.size())
+        {
+            ++placedCounts[itemIndex];
+        }
+        placedIds.push_back(itemIndex);
+    }
+    std::sort(placedIds.begin(), placedIds.end());
+
+    std::vector<ColdStartTraceEvent> actualTerminalEvents;
+    actualTerminalEvents.push_back({
+        "terminal_state",
+        "state",
+        {static_cast<double>(actual.Value().metrics.seed),
+         static_cast<double>(actual.Value().metrics.placedItemCount),
+         static_cast<double>(actual.Value().metrics.remainingDemand),
+         actual.Value().metrics.feasible ? 1.0 : 0.0,
+         finalLayout.IsFeasible() ? 1.0 : 0.0,
+         actual.Value().metrics.stripWidth,
+         actual.Value().metrics.density,
+         static_cast<double>(finalTracker.Value().TotalLoss())}});
+    ColdStartTraceEvent placedIdsEvent{"placed_ids", "list", {}};
+    for (const std::size_t itemIndex : placedIds)
+    {
+        placedIdsEvent.values.push_back(static_cast<double>(itemIndex));
+    }
+    actualTerminalEvents.push_back(std::move(placedIdsEvent));
+    bool hasRemainingItem = false;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < instance.Value().ItemCount();
+         ++itemIndex)
+    {
+        const std::size_t demand = instance.Value().ItemDemand(itemIndex);
+        if (placedCounts[itemIndex] >= demand)
+        {
+            continue;
+        }
+        hasRemainingItem = true;
+        actualTerminalEvents.push_back({
+            "remaining_item",
+            std::to_string(itemIndex),
+            {static_cast<double>(demand - placedCounts[itemIndex])}});
+    }
+    if (!hasRemainingItem)
+    {
+        actualTerminalEvents.push_back({"remaining_item", "none", {}});
+    }
+
+    std::ifstream terminalReferenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/OptimizeColdStartDefaultE5TerminalRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/OptimizeColdStartDefaultE5TerminalRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/OptimizeColdStartDefaultE5TerminalRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\OptimizeColdStartDefaultE5TerminalRustReference.tsv"})
+    {
+        terminalReferenceFile.open(path);
+        if (terminalReferenceFile.is_open())
+        {
+            break;
+        }
+        terminalReferenceFile.clear();
+    }
+    if (!Expect(terminalReferenceFile.is_open(), output,
+                "Rust E5 cold-start terminal reference fixture must be readable"))
+    {
+        return false;
+    }
+
+    std::vector<ColdStartTraceEvent> expectedTerminalEvents;
+    while (std::getline(terminalReferenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        ColdStartTraceEvent event;
+        row >> event.type >> event.label;
+        double value = 0.0;
+        while (row >> value)
+        {
+            event.values.push_back(value);
+        }
+        if (!Expect(event.type == "terminal_state" || event.type == "placed_ids"
+                        || event.type == "remaining_item",
+                    output,
+                    "Rust E5 terminal fixture contains an unknown row"))
+        {
+            return false;
+        }
+        expectedTerminalEvents.push_back(std::move(event));
+    }
+
+    bool terminalMatches =
+        actualTerminalEvents.size() == expectedTerminalEvents.size();
+    for (std::size_t index = 0U;
+         terminalMatches && index < actualTerminalEvents.size();
+         ++index)
+    {
+        const auto& expected = expectedTerminalEvents[index];
+        const auto& observed = actualTerminalEvents[index];
+        if (expected.type != observed.type || expected.label != observed.label
+            || expected.values.size() != observed.values.size())
+        {
+            terminalMatches = false;
+            break;
+        }
+        for (std::size_t valueIndex = 0U;
+             valueIndex < expected.values.size();
+             ++valueIndex)
+        {
+            double tolerance = 0.0;
+            if (expected.type == "terminal_state"
+                && (valueIndex == 5U || valueIndex == 6U))
+            {
+                tolerance = 1.0e-5;
+            }
+            else if (expected.type == "terminal_state" && valueIndex == 7U)
+            {
+                tolerance = 1.0e-6;
+            }
+            if (std::abs(expected.values[valueIndex]
+                         - observed.values[valueIndex]) > tolerance)
+            {
+                terminalMatches = false;
+                break;
+            }
+        }
+    }
+    return Expect(terminalMatches,
                   output,
-                  "default cold-start phase, config, report, and placement trace must match Rust");
+                  "default cold-start Optimize final state, identities, feasibility, loss, and aggregate worker result must match Rust");
 }
 
 bool TestColdStartConstructionFailureMatchesRustReference(std::ostream& output)
@@ -3142,6 +3428,316 @@ bool TestOptimizeCompressionMatchesRustReference(std::ostream& output)
                       && eventsMatch,
                   output,
                   "optimize and compression result/events must match Rust reference");
+}
+
+bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
+    std::ostream& output,
+    const std::string& fixtureName,
+    bool timeBased)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "Rust top-level worker-move input must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Rust top-level worker-move input must import"))
+    {
+        return false;
+    }
+
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "Rust top-level worker-move problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem warmProblem = std::move(problemResult.Value());
+    const auto widthSet = warmProblem.ChangeStripWidth(4.2);
+    const auto firstPlaced = warmProblem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
+    const auto secondPlaced = warmProblem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {3.15, 0.55})});
+    if (!Expect(widthSet.HasValue() && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "Rust top-level worker-move warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initialSolution = warmProblem.Save();
+    jaguar::Layout initialLayout(initialSolution.layoutSnapshot.container);
+    if (!Expect(initialLayout.Restore(initialSolution.layoutSnapshot).HasValue()
+                    && initialLayout.IsFeasible(),
+                output,
+                "Rust top-level worker-move warm start must be feasible"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    config.warmStart = initialSolution;
+    config.exploration.timeLimit = std::chrono::seconds{30};
+    config.exploration.separator.nWorkers = 1U;
+    const std::vector<std::chrono::nanoseconds> clockSamples{
+        std::chrono::nanoseconds{0},
+        std::chrono::nanoseconds{0},
+        std::chrono::seconds{1}};
+    config.compression.shrinkMin = timeBased ? 0.01 : 0.03;
+    config.compression.shrinkMax = 0.03;
+    config.compression.failureDecay = 0.5;
+    config.compression.decayStrategy = timeBased
+        ? sparrow::ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED
+        : sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.compression.timeLimit = timeBased
+        ? std::chrono::seconds{2}
+        : std::chrono::seconds{30};
+    if (timeBased)
+    {
+        config.compression.phaseDeadlineOverride = std::chrono::minutes{10};
+    }
+    config.compression.separator.noImprovementLimit = 1U;
+    config.compression.separator.strikeLimit = 1U;
+    config.compression.separator.nWorkers = 1U;
+    config.compression.separator.nContainerSamples = 8U;
+    config.compression.separator.nFocussedSamples = 0U;
+    config.compression.separator.nCoordinateDescents = 1U;
+    config.terminator.maxDuration = std::chrono::seconds{30};
+
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    WorkerMoveCompressionReferenceListener listener(
+        terminator, timeBased ? 2U : 1U);
+    listener.events.push_back({
+        "config",
+        "parameters",
+        {42.0,
+         initialSolution.StripWidth(),
+         static_cast<double>(config.exploration.timeLimit.count())
+             / 1000000000.0,
+         config.compression.shrinkMax,
+          config.compression.shrinkMin,
+         static_cast<double>(config.compression.separator.nWorkers),
+         static_cast<double>(config.compression.separator.noImprovementLimit),
+         static_cast<double>(config.compression.separator.nContainerSamples),
+         static_cast<double>(config.compression.separator.nFocussedSamples),
+         static_cast<double>(config.compression.separator.nCoordinateDescents)}});
+    if (timeBased)
+    {
+        listener.events.push_back({
+            "config",
+            "compression_time_limit",
+            {static_cast<double>(config.compression.timeLimit.count())
+             / 1000000000.0}});
+        listener.events.push_back({"config", "shrink_decay_time_based", {}});
+        for (const auto sample : clockSamples)
+        {
+            listener.events.push_back({
+                "clock_sample",
+                "monotonic_ns",
+                {static_cast<double>(sample.count())}});
+        }
+    }
+    listener.RecordSolution("initial", initialSolution);
+
+    std::optional<sparrow::testing::ScopedCompressionClockSequence>
+        compressionClock;
+    if (timeBased)
+    {
+        compressionClock.emplace(clockSamples);
+    }
+    const auto actual = sparrow::Optimize(
+        instance.Value(), config, terminator, &listener);
+    if (compressionClock.has_value())
+    {
+        listener.events.push_back({
+            "clock_usage",
+            "compression",
+            {static_cast<double>(compressionClock->SamplesConsumed()),
+             compressionClock->Exhausted() ? 1.0 : 0.0}});
+    }
+    if (!actual.HasValue())
+    {
+        output << "Rust top-level worker-move Optimize error: "
+               << actual.GetError().message << '\n';
+    }
+    if (!Expect(actual.HasValue(),
+                output,
+                "SparrowCore top-level worker-move Optimize must complete"))
+    {
+        return false;
+    }
+
+    const auto& result = actual.Value();
+    const auto& finalSolution = result.solution;
+    auto finalProblemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(finalProblemResult.HasValue(),
+                output,
+                "worker-move final state problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem finalProblem = std::move(finalProblemResult.Value());
+    if (!Expect(finalProblem.Restore(finalSolution).HasValue(),
+                output,
+                "worker-move final solution must restore"))
+    {
+        return false;
+    }
+    std::size_t remainingDemand = 0U;
+    for (std::size_t itemIndex = 0U;
+         itemIndex < instance.Value().ItemCount();
+         ++itemIndex)
+    {
+        remainingDemand += finalProblem.RemainingDemand(itemIndex);
+    }
+    jaguar::Layout finalLayout(finalSolution.layoutSnapshot.container);
+    if (!Expect(finalLayout.Restore(finalSolution.layoutSnapshot).HasValue(),
+                output,
+                "worker-move final layout must restore"))
+    {
+        return false;
+    }
+    const bool layoutFeasible = finalLayout.IsFeasible();
+    const auto finalTracker = sparrow::CollisionTracker::Create(finalLayout);
+    if (!Expect(finalTracker.HasValue(),
+                output,
+                "worker-move final collision tracker must be constructible"))
+    {
+        return false;
+    }
+    listener.events.push_back({
+        "terminal",
+        "state",
+        {42.0,
+         static_cast<double>(finalProblem.PlacedItemCount()),
+         static_cast<double>(remainingDemand),
+         finalSolution.StripWidth(),
+         finalSolution.Density(),
+         remainingDemand == 0U && layoutFeasible ? 1.0 : 0.0,
+         layoutFeasible ? 1.0 : 0.0,
+         finalTracker.Value().TotalLoss()}});
+    std::vector<std::size_t> placedIds;
+    for (const auto& placement : finalSolution.layoutSnapshot.placements)
+        placedIds.push_back(placement.placedItem.GetItemIndex());
+    std::sort(placedIds.begin(), placedIds.end());
+    ColdStartTraceEvent placedIdsEvent{"placed_ids", "list", {}};
+    for (const std::size_t itemIndex : placedIds)
+        placedIdsEvent.values.push_back(static_cast<double>(itemIndex));
+    listener.events.push_back(std::move(placedIdsEvent));
+    if (remainingDemand == 0U)
+    {
+        listener.events.push_back({"remaining_item", "none", {}});
+    }
+    else
+    {
+        for (std::size_t itemIndex = 0U;
+             itemIndex < instance.Value().ItemCount();
+             ++itemIndex)
+        {
+            const std::size_t remaining = finalProblem.RemainingDemand(itemIndex);
+            if (remaining > 0U)
+            {
+                listener.events.push_back({
+                    "remaining_item",
+                    std::to_string(itemIndex),
+                    {static_cast<double>(remaining)}});
+            }
+        }
+    }
+
+    const bool hasMovedSuccessfulCompression = std::any_of(
+        listener.separationResults.begin(),
+        listener.separationResults.end(),
+        [](const sparrow::SeparationResult& separation) {
+            return separation.success && separation.totalMoves > 0U;
+        });
+    const bool compressedFeasibly = result.metrics.feasible
+        && layoutFeasible
+        && remainingDemand == 0U
+        && result.metrics.placedItemCount == 2U
+        && result.metrics.stripWidth < initialSolution.StripWidth();
+    if (!Expect(listener.stoppedExploration
+                    && listener.stoppedCompression
+                    && hasMovedSuccessfulCompression
+                    && listener.separationResults.size()
+                        == (timeBased ? 2U : 1U)
+                    && compressedFeasibly,
+                output,
+                "top-level compression must succeed after a real worker move and return a narrower feasible layout"))
+    {
+        return false;
+    }
+    if (compressionClock.has_value()
+        && !Expect(compressionClock->SamplesConsumed() == clockSamples.size()
+                       && !compressionClock->Exhausted(),
+                   output,
+                   "time-based compression must consume the shared monotonic clock sequence exactly"))
+    {
+        return false;
+    }
+
+    std::vector<std::pair<double, double>> initialPositions;
+    std::vector<std::pair<double, double>> finalPositions;
+    for (const auto& placement : initialSolution.layoutSnapshot.placements)
+    {
+        const auto& translation = placement.placedItem.Transform().translation;
+        initialPositions.emplace_back(translation.x, translation.y);
+    }
+    for (const auto& placement : finalSolution.layoutSnapshot.placements)
+    {
+        const auto& translation = placement.placedItem.Transform().translation;
+        finalPositions.emplace_back(translation.x, translation.y);
+    }
+    const auto byX = [](const auto& left, const auto& right) {
+        if (left.first != right.first)
+            return left.first < right.first;
+        return left.second < right.second;
+    };
+    std::sort(initialPositions.begin(), initialPositions.end(), byX);
+    std::sort(finalPositions.begin(), finalPositions.end(), byX);
+    const bool samePlacement = initialPositions.size() == finalPositions.size()
+        && std::equal(initialPositions.begin(),
+                      initialPositions.end(),
+                      finalPositions.begin(),
+                      [](const auto& initial, const auto& final) {
+                          return std::abs(initial.first - final.first) < 1.0e-4
+                              && std::abs(initial.second - final.second) < 1.0e-4;
+                      });
+    const bool workerChangedPlacement = !samePlacement;
+    if (!Expect(workerChangedPlacement,
+                output,
+                "successful compression must include a placement change"))
+    {
+        return false;
+    }
+
+    return MatchesRustPhaseTrace(
+        listener.events,
+        fixtureName.c_str(),
+        output,
+        "top-level optimize worker-move compression trace must match Rust");
 }
 
 bool TestCompressionWorkerMoveRetryMatchesRustReference(
@@ -10666,6 +11262,20 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestOptimizeCompressionMatchesRustReference(output))
+    {
+        return false;
+    }
+    if (!TestTopLevelWorkerMoveCompressionMatchesRustReference(
+            output,
+            "OptimizeWorkerMoveCompressionRustReference.tsv",
+            false))
+    {
+        return false;
+    }
+    if (!TestTopLevelWorkerMoveCompressionMatchesRustReference(
+            output,
+            "OptimizeTimeBasedClockWorkerMoveRustReference.tsv",
+            true))
     {
         return false;
     }

@@ -1,5 +1,6 @@
 #include "SparrowCore/Optimizer/Compression.h"
 #include "SparrowCore/Optimizer/OptimizationObserver.h"
+#include "CompressionClock.h"
 
 #include "SparrowCore/Optimizer/Separator.h"
 
@@ -9,8 +10,68 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
+
+thread_local sparrow::testing::CompressionClockSequenceState*
+    sparrow::testing::ScopedCompressionClockSequence::s_Current = nullptr;
+
+sparrow::testing::ScopedCompressionClockSequence::ScopedCompressionClockSequence(
+    std::vector<std::chrono::nanoseconds> samples)
+    : m_State{std::move(samples)}
+{
+    if (m_State.samples.empty())
+    {
+        throw std::invalid_argument("compression clock sequence is empty");
+    }
+    if (m_State.samples.front().count() < 0
+        || !std::is_sorted(m_State.samples.begin(), m_State.samples.end()))
+    {
+        throw std::invalid_argument(
+            "compression clock sequence must be nonnegative and monotonic");
+    }
+    m_Previous = s_Current;
+    s_Current = &m_State;
+}
+
+sparrow::testing::ScopedCompressionClockSequence::~ScopedCompressionClockSequence()
+{
+    s_Current = m_Previous;
+}
+
+std::size_t
+sparrow::testing::ScopedCompressionClockSequence::SamplesConsumed() const noexcept
+{
+    return m_State.nextSample;
+}
+
+bool sparrow::testing::ScopedCompressionClockSequence::Exhausted() const noexcept
+{
+    return m_State.exhausted;
+}
+
+std::chrono::steady_clock::time_point sparrow::CompressionClockNow() noexcept
+{
+    auto* sequence = sparrow::testing::ScopedCompressionClockSequence::s_Current;
+    if (sequence == nullptr)
+    {
+        return std::chrono::steady_clock::now();
+    }
+
+    std::chrono::nanoseconds sample;
+    if (sequence->nextSample < sequence->samples.size())
+    {
+        sample = sequence->samples[sequence->nextSample++];
+    }
+    else
+    {
+        sequence->exhausted = true;
+        sample = sequence->samples.back();
+    }
+    return std::chrono::steady_clock::time_point{
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(sample)};
+}
 
 namespace
 {
@@ -236,7 +297,7 @@ Result<CompressionResult> Compress(
         instance, separatorState);
     std::size_t failures = 0U;
     std::size_t iteration = 0U;
-    const auto start = std::chrono::steady_clock::now();
+    const auto start = CompressionClockNow();
     std::size_t totalSurrogateRejectCount =
         bestMetrics.surrogateRejectCount;
     std::size_t totalExactCollisionCount = bestMetrics.exactCollisionCount;
@@ -260,7 +321,7 @@ Result<CompressionResult> Compress(
             double ratio = 0.0;
             const auto elapsed = std::chrono::duration_cast<
                 std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - start);
+                CompressionClockNow() - start);
             ratio = static_cast<double>(elapsed.count())
                 / static_cast<double>(config.timeLimit.count());
             step = config.shrinkMax

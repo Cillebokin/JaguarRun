@@ -6,6 +6,123 @@ use jagua_rs::Instant;
 use jagua_rs::probs::spp::entities::SPSolution;
 use log::info;
 use rand::{Rng, RngExt};
+use std::time::Duration;
+
+#[cfg(feature = "oracle-trace")]
+use std::cell::RefCell;
+#[cfg(feature = "oracle-trace")]
+use std::marker::PhantomData;
+#[cfg(feature = "oracle-trace")]
+use std::rc::Rc;
+
+#[cfg(feature = "oracle-trace")]
+thread_local! {
+    static COMPRESSION_CLOCK_SEQUENCE: RefCell<Option<ClockSequenceState>> = const { RefCell::new(None) };
+}
+
+#[cfg(feature = "oracle-trace")]
+struct ClockSequenceState {
+    samples: Vec<Duration>,
+    next_sample: usize,
+    exhausted: bool,
+}
+
+/// Installs deterministic compression clock samples for the oracle trace build.
+/// Samples are monotonic absolute times; the first sample is the compression start.
+#[cfg(feature = "oracle-trace")]
+pub struct ScopedCompressionClockSequence {
+    _thread_bound: PhantomData<Rc<()>>,
+}
+
+#[cfg(feature = "oracle-trace")]
+impl ScopedCompressionClockSequence {
+    pub fn new(samples: impl IntoIterator<Item = Duration>) -> Self {
+        let samples = samples.into_iter().collect::<Vec<_>>();
+        assert!(!samples.is_empty(), "compression clock sequence is empty");
+        assert!(
+            samples.windows(2).all(|pair| pair[0] <= pair[1]),
+            "compression clock sequence is not monotonic"
+        );
+        COMPRESSION_CLOCK_SEQUENCE.with(|sequence| {
+            let mut sequence = sequence.borrow_mut();
+            assert!(sequence.is_none(), "compression clock sequence is already active");
+            *sequence = Some(ClockSequenceState {
+                samples,
+                next_sample: 0,
+                exhausted: false,
+            });
+        });
+        Self {
+            _thread_bound: PhantomData,
+        }
+    }
+
+    pub fn samples_consumed(&self) -> usize {
+        COMPRESSION_CLOCK_SEQUENCE.with(|sequence| {
+            sequence
+                .borrow()
+                .as_ref()
+                .map_or(0, |state| state.next_sample)
+        })
+    }
+
+    pub fn exhausted(&self) -> bool {
+        COMPRESSION_CLOCK_SEQUENCE.with(|sequence| {
+            sequence
+                .borrow()
+                .as_ref()
+                .is_some_and(|state| state.exhausted)
+        })
+    }
+}
+
+#[cfg(feature = "oracle-trace")]
+impl Drop for ScopedCompressionClockSequence {
+    fn drop(&mut self) {
+        COMPRESSION_CLOCK_SEQUENCE.with(|sequence| *sequence.borrow_mut() = None);
+    }
+}
+
+#[cfg(feature = "oracle-trace")]
+fn next_compression_clock_sample() -> Option<Duration> {
+    COMPRESSION_CLOCK_SEQUENCE.with(|sequence| {
+        let mut sequence = sequence.borrow_mut();
+        let state = sequence.as_mut()?;
+        if state.next_sample >= state.samples.len() {
+            state.exhausted = true;
+            return state.samples.last().copied();
+        }
+        let sample = state.samples[state.next_sample];
+        state.next_sample += 1;
+        Some(sample)
+    })
+}
+
+enum CompressionClockStart {
+    System(Instant),
+    #[cfg(feature = "oracle-trace")]
+    Sequence(Duration),
+}
+
+impl CompressionClockStart {
+    fn new() -> Self {
+        #[cfg(feature = "oracle-trace")]
+        if let Some(start) = next_compression_clock_sample() {
+            return Self::Sequence(start);
+        }
+        Self::System(Instant::now())
+    }
+
+    fn elapsed(&self) -> Duration {
+        match self {
+            Self::System(start) => start.elapsed(),
+            #[cfg(feature = "oracle-trace")]
+            Self::Sequence(start) => next_compression_clock_sample()
+                .unwrap_or(*start)
+                .saturating_sub(*start),
+        }
+    }
+}
 
 /// Algorithm 13 from https://doi.org/10.48550/arXiv.2509.13329
 pub fn compression_phase(
@@ -17,7 +134,7 @@ pub fn compression_phase(
 ) -> SPSolution {
     let min_width = super::minimum_strip_width(&sep.prob);
     let mut best_sol = init_sol.clone();
-    let start = Instant::now();
+    let start = CompressionClockStart::new();
     let mut n_failed_attempts = 0;
 
     // Create the function to calculate the shrink step size.

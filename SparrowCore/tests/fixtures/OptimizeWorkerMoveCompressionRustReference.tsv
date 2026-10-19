@@ -1,0 +1,24 @@
+# source=RustSppCompressWorkerMove.json seed=42 warm_start=true exploration_time_limit=30s stop_after=initial_expl_feas compression_step=0.03 compression_workers=1
+# A successful separation result with total_moves > 0 proves the compression attempt used an actual worker move.
+config	parameters	42	4.199999809	30	0.029999999	0.029999999	1	1	8	0	1
+report	initial	2	4.199999809	0.634920657
+placement	initial	0	0.000000000	1.049999952	0.550000012
+placement	initial	0	0.000000000	3.150000095	0.550000012
+phase	exploration
+report	expl_feas	2	4.199999809	0.634920657
+placement	expl_feas	0	0.000000000	1.049999952	0.550000012
+placement	expl_feas	0	0.000000000	3.150000095	0.550000012
+phase	compression
+compression_step	value	0.029999999
+progress	compression	0	4.073999882	65.455734253	0.371863484
+progress	compression	1	4.073999882	65.455734253	0.000000000
+separation	compression	1	57	1	0
+report	cmpr_feas	2	4.073999882	0.654557347
+placement	cmpr_feas	0	0.000000000	1.015732169	0.999309242
+placement	cmpr_feas	0	0.000000000	3.024000168	0.550000012
+report	final	2	4.073999882	0.654557347
+placement	final	0	0.000000000	1.015732169	0.999309242
+placement	final	0	0.000000000	3.024000168	0.550000012
+terminal	state	42	2	0	4.073999882	0.654557347	1	1	0.000000000
+placed_ids	list	0	0
+remaining_item	none

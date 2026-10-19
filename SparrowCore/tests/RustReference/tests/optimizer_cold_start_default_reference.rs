@@ -1,13 +1,14 @@
 use jagua_rs::Instant;
 use jagua_rs::entities::Layout;
 use jagua_rs::io::import::Importer;
-use jagua_rs::probs::spp::entities::SPSolution;
+use jagua_rs::probs::spp::entities::{SPInstance, SPProblem, SPSolution};
 use jagua_rs::probs::spp::io::import_instance;
 use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::config::ShrinkDecayStrategy;
 use sparrow::optimizer::optimize;
+use sparrow::quantify::tracker::CollisionTracker;
 use sparrow::util::listener::{
     OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
 };
@@ -18,6 +19,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const REFERENCE: &str = include_str!("../../Fixtures/OptimizeColdStartDefaultRustReference.tsv");
+const E5_TERMINAL_REFERENCE: &str =
+    include_str!("../../Fixtures/OptimizeColdStartDefaultE5TerminalRustReference.tsv");
 
 #[derive(Clone)]
 struct PhaseTerminator {
@@ -106,6 +109,57 @@ fn append_solution_rows(trace: &mut Vec<String>, label: &str, solution: &SPSolut
             y,
         ));
     }
+}
+
+fn terminal_state_rows(seed: u64, instance: &SPInstance, solution: &SPSolution) -> Vec<String> {
+    let mut problem = SPProblem::new(instance.clone()).expect("create terminal SPP problem");
+    problem.restore(solution);
+    let layout = Layout::from_snapshot(&solution.layout_snapshot);
+    let remaining_demand = problem.item_demand_qtys.iter().sum::<usize>();
+    let layout_feasible = layout.is_feasible();
+    let solution_feasible = remaining_demand == 0 && layout_feasible;
+    let final_loss = CollisionTracker::new(&layout).get_total_loss();
+
+    let mut placed_indices = solution
+        .layout_snapshot
+        .placed_items
+        .values()
+        .map(|placement| placement.item.idx)
+        .collect::<Vec<_>>();
+    placed_indices.sort_unstable();
+    let mut placed_row = String::from("placed_ids\tlist");
+    for item_index in placed_indices {
+        placed_row.push_str(&format!("\t{item_index}"));
+    }
+
+    let mut rows = vec![
+        format!(
+            "terminal_state\tstate\t{seed}\t{}\t{remaining_demand}\t{}\t{}\t{:.9}\t{:.9}\t{:.9}",
+            problem.n_placed_items(),
+            u8::from(solution_feasible),
+            u8::from(layout_feasible),
+            problem.strip_width(),
+            problem.density(),
+            final_loss,
+        ),
+        placed_row,
+    ];
+    let remaining_items = problem
+        .item_demand_qtys
+        .iter()
+        .enumerate()
+        .filter(|(_, quantity)| **quantity > 0)
+        .collect::<Vec<_>>();
+    if remaining_items.is_empty() {
+        rows.push("remaining_item\tnone".to_owned());
+    } else {
+        rows.extend(
+            remaining_items
+                .into_iter()
+                .map(|(item_index, quantity)| format!("remaining_item\t{item_index}\t{quantity}")),
+        );
+    }
+    rows
 }
 
 impl SolutionListener for RecordingListener {
@@ -241,7 +295,7 @@ fn optimize_cold_start_with_default_stage_configs_matches_reference() {
         compression_samples.n_coord_descents,
     ));
     let final_solution = optimize(
-        instance,
+        instance.clone(),
         Xoshiro256PlusPlus::seed_from_u64(seed),
         &mut listener,
         &mut terminator,
@@ -256,9 +310,16 @@ fn optimize_cold_start_with_default_stage_configs_matches_reference() {
     assert!(listener.stopped_exploration);
     assert!(listener.stopped_compression);
 
+    let terminal_rows = terminal_state_rows(seed, &instance, &final_solution);
+
     if std::env::var_os("SPARROW_PRINT_COLD_START_DEFAULT_REFERENCE").is_some() {
         for event in &listener.trace {
             println!("{event}");
+        }
+    }
+    if std::env::var_os("SPARROW_PRINT_COLD_START_DEFAULT_E5_TERMINAL_REFERENCE").is_some() {
+        for row in &terminal_rows {
+            println!("{row}");
         }
     }
     let expected = REFERENCE
@@ -271,4 +332,14 @@ fn optimize_cold_start_with_default_stage_configs_matches_reference() {
         .map(String::as_str)
         .collect::<Vec<_>>();
     assert_eq!(actual, expected, "Rust default cold-start trace changed");
+
+    let expected_terminal = E5_TERMINAL_REFERENCE
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    let actual_terminal = terminal_rows.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(
+        actual_terminal, expected_terminal,
+        "Rust default cold-start E5 terminal state changed"
+    );
 }

@@ -224,6 +224,14 @@ Release 测试在同一进程独立运行两条完整 450 轮轨迹并比较 fix
 
 C++ 侧使用相同几何、worker 数和样本预算，由真实生产 `Separator::Run` 执行固定 450 轮。Release 临时聚合点记录在 seed=5 的第448、449轮出现 `[+Inf, NaN, NaN]` 并选 worker 0；第450轮为全 NaN并选 worker 0。该运行完成 450 iterations、1621 moves，终态 raw loss bits=`0x3fad792b`（约 `1.35526025`）、weighted loss 为 NaN。永久 C++ 定向 runner `SparrowCoreTests.exe --e5-fixed-nonfinite-worker-rounds` 两次执行同一 seed，终态和移动数完全一致；临时逐轮打印已撤下，当前 SparrowCore Release 静态库和 runner 均从干净源码重建。C++ seed=4 在相同前450轮内未出现混合键（第445–450轮均为 Inf），所以 Rust/C++ 两条记录是各自找到的确定性复现，不是同 seed 的逐轮差分。证据只覆盖本几何、seed、Release profile 与450轮；默认 Debug 与更广输入矩阵仍待验收，E5 保持部分。
 
+### E5 第十三轮：同seed的Rust/C++固定步数轨迹对拍（2026-10-19）
+
+新增 Rust 用例 `e5_same_seed_worker_trajectory_reference.rs::same_seed_fixed_production_worker_rounds_match_reference` 和 fixture `SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv`（SHA-256=`8D83829CCC16A46F9F1515485B1CEF17C6EB4D71F814E27B290114D88C2855A5`）。输入沿用前轮的两个重叠2×1矩形、条带宽度3.0和放置 `(1.05,0.55)`、`(1.55,0.55)`；Rust/C++ 均使用根seed=5、3 workers、样本 `1/0/1`、Release、固定450步。Rust harness逐轮调用三个公开 `SeparatorWorker::load/move_items`，并复现生产的 `OrderedFloat(total_weighted_loss).min_by_key`、raw-loss best跟踪、GLS权重更新和终态回滚；这样能记录每个worker的key/raw loss/胜出索引，同时不声称覆盖私有 `move_items_multi` 或 Rayon 调度。
+
+C++ 侧通过真实生产 `Separator::Run`、`maxIterations=450` 执行同一输入；监听器在每轮选择后记录主解、raw/weighted tracker loss和两件物品的变换位模式。与Rust fixture的451条状态行（初态加450轮）逐行、逐位完全一致。终态两侧同为450 iterations、1621 moves、76622 evaluations、raw loss bits=`0x3fad792b`、weighted loss bits=`0xffc00000`（NaN）。Rust记录显示第448、449轮worker key为 `[+Inf,NaN,NaN]`、均选择worker 0；第450轮为全NaN、仍选worker 0。此前C++ seed=5生产聚合点的临时记录在相同轮次观察到相同键类别与选择索引；本轮常驻对拍锁定的是每轮生产主状态和终态，不声称C++ fixture包含逐worker key。
+
+验证：Rust 1.98.1 Release定向测试 `1 passed`，新增Rust文件 `rustfmt --check` 通过；MSVC 14.44 Release测试runner重建成功，`--e5-same-seed-worker-trajectory` 定向对拍及SparrowCore完整Release runner均退出码0。该结论限于此几何、seed、worker/sample配置和Release；Rust逐worker harness是顺序调度，Debug与更广输入/调度矩阵仍未验收。E5继续部分，完整 `optimize → compress` 端到端矩阵尚未闭合。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

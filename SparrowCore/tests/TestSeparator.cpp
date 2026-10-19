@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -380,6 +381,248 @@ bool TestFixedRealWorkerRoundsReachNonFiniteTerminalState(std::ostream& output)
         }
     }
     return true;
+}
+
+std::uint32_t FloatBits(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+std::string E5TrajectoryState(
+    std::size_t round,
+    float minimumLoss,
+    const sparrow::Separator& separator)
+{
+    const jaguar::SPSolution solution = separator.SaveSolution();
+    std::vector<std::pair<jaguar::ItemIndex, std::string>> placements;
+    placements.reserve(solution.layoutSnapshot.placements.size());
+    for (const jaguar::LayoutPlacementSnapshot& placement
+         : solution.layoutSnapshot.placements)
+    {
+        const jaguar::Transform2d& transform =
+            placement.placedItem.Transform();
+        std::ostringstream encoded;
+        encoded << placement.placedItem.GetItemIndex() << ':'
+                << std::hex << std::setw(8) << std::setfill('0')
+                << FloatBits(static_cast<float>(transform.rotationRad)) << ':'
+                << std::setw(8)
+                << FloatBits(static_cast<float>(transform.translation.x)) << ':'
+                << std::setw(8)
+                << FloatBits(static_cast<float>(transform.translation.y));
+        placements.emplace_back(placement.placedItem.GetItemIndex(),
+                                encoded.str());
+    }
+    std::sort(placements.begin(), placements.end());
+
+    std::ostringstream row;
+    row << "state\t" << round << '\t' << std::hex << std::setw(8)
+        << std::setfill('0') << FloatBits(minimumLoss) << '\t'
+        << std::setw(8) << FloatBits(separator.Tracker().TotalLoss()) << '\t'
+        << std::setw(8)
+        << FloatBits(separator.Tracker().TotalWeightedLoss());
+    for (const auto& [itemIndex, encoded] : placements)
+    {
+        static_cast<void>(itemIndex);
+        row << '\t' << encoded;
+    }
+    return row.str();
+}
+
+class E5SameSeedTrajectoryListener final : public sparrow::OptimizationListener
+{
+public:
+    explicit E5SameSeedTrajectoryListener(sparrow::Separator& separator)
+        : m_Separator(separator)
+    {
+    }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport&) override
+    {
+    }
+
+    void OnSeparationProgress(
+        const sparrow::SeparationProgress& progress) override
+    {
+        states.push_back(E5TrajectoryState(
+            progress.iteration,
+            progress.minimumLoss,
+            m_Separator));
+    }
+
+    std::vector<std::string> states;
+
+private:
+    sparrow::Separator& m_Separator;
+};
+
+bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json")})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+            break;
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "same-seed worker trajectory fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(inputFile),
+        std::istreambuf_iterator<char>()};
+    const auto instance = MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(),
+                output,
+                "same-seed worker trajectory fixture must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "same-seed worker trajectory problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!problem.ChangeStripWidth(3.0).HasValue())
+    {
+        return Expect(false,
+                      output,
+                      "same-seed worker trajectory strip resize failed");
+    }
+    if (!problem.PlaceItem({
+             0U,
+             jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})})
+             .HasValue()
+        || !problem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(0.0, {1.55, 0.55})})
+                .HasValue())
+    {
+        return Expect(false,
+                      output,
+                      "same-seed worker trajectory placements failed");
+    }
+
+    auto separatorResult = sparrow::Separator::Create(std::move(problem), 5U);
+    if (!Expect(separatorResult.HasValue(),
+                output,
+                "same-seed worker trajectory separator creation failed"))
+    {
+        return false;
+    }
+    sparrow::Separator separator = std::move(separatorResult.Value());
+    sparrow::SeparatorConfig config;
+    config.strikeLimit = 1U;
+    config.noImprovementLimit = 451U;
+    config.nContainerSamples = 1U;
+    config.nFocussedSamples = 0U;
+    config.nCoordinateDescents = 1U;
+    config.nWorkers = 3U;
+    sparrow::OptimizationTerminatorConfig terminatorConfig;
+    terminatorConfig.maxIterations = 450U;
+    sparrow::OptimizationTerminator terminator(terminatorConfig);
+    E5SameSeedTrajectoryListener listener(separator);
+    const auto result = separator.Run(config, terminator, &listener);
+    if (!Expect(result.HasValue(),
+                output,
+                "same-seed production worker trajectory run failed"))
+    {
+        return false;
+    }
+    const sparrow::SeparatorResult& separatorResultValue = result.Value();
+    std::ostringstream terminal;
+    terminal << "terminal\tsteps\t" << separatorResultValue.iterations
+             << "\tmoves\t" << separatorResultValue.totalMoveCount
+             << "\tevals\t" << separatorResultValue.totalEvaluationCount
+             << "\tloss\t" << std::hex << std::setw(8)
+             << std::setfill('0') << FloatBits(separator.Tracker().TotalLoss())
+             << "\tweighted\t" << std::setw(8)
+             << FloatBits(separator.Tracker().TotalWeightedLoss());
+    if (std::getenv("SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY") != nullptr)
+    {
+        for (const std::string& row : listener.states)
+        {
+            output << row << '\n';
+        }
+        output << terminal.str() << '\n';
+        return true;
+    }
+    if (!Expect(separatorResultValue.iterations == 450U
+                    && listener.states.size() == 451U,
+                output,
+                "same-seed production worker trajectory must contain exactly 450 steps"))
+    {
+        return false;
+    }
+
+    std::ifstream traceFile;
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
+             std::string("../SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\OptimizeSameSeedWorkerTrajectoryE5Reference.tsv")})
+    {
+        traceFile.open(path);
+        if (traceFile.is_open())
+            break;
+        traceFile.clear();
+    }
+    if (!Expect(traceFile.is_open(),
+                output,
+                "same-seed worker trajectory reference must be readable"))
+    {
+        return false;
+    }
+    std::vector<std::string> expectedStates;
+    std::string expectedTerminal;
+    for (std::string row; std::getline(traceFile, row);)
+    {
+        if (!row.empty() && row.back() == '\r')
+        {
+            row.pop_back();
+        }
+        if (row.rfind("state\t", 0U) == 0U)
+        {
+            expectedStates.push_back(std::move(row));
+        }
+        else if (row.rfind("terminal\t", 0U) == 0U)
+        {
+            expectedTerminal = std::move(row);
+        }
+    }
+    if (listener.states != expectedStates)
+    {
+        const std::size_t limit =
+            std::min(listener.states.size(), expectedStates.size());
+        for (std::size_t index = 0U; index < limit; ++index)
+        {
+            if (listener.states[index] != expectedStates[index])
+            {
+                output << "first trajectory mismatch at state index " << index
+                       << "\nRust: " << expectedStates[index]
+                       << "\nC++:  " << listener.states[index] << '\n';
+                break;
+            }
+        }
+        return Expect(false,
+                      output,
+                      "C++ production trajectory must match the Rust fixed-step state trace");
+    }
+    return Expect(terminal.str() == expectedTerminal,
+                  output,
+                  "C++ terminal worker trajectory must match the Rust fixed-step reference");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -2800,8 +3043,17 @@ bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output)
     return TestFixedRealWorkerRoundsReachNonFiniteTerminalState(output);
 }
 
+bool RunE5SameSeedWorkerTrajectory(std::ostream& output)
+{
+    return TestSameSeedFixedProductionWorkerTrajectory(output);
+}
+
 bool RunSeparatorTests(std::ostream& output)
 {
+    if (!TestSameSeedFixedProductionWorkerTrajectory(output))
+    {
+        return false;
+    }
     if (!RunWorkerLossSelectorTests(output))
     {
         return false;

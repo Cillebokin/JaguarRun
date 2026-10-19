@@ -203,9 +203,9 @@ C++ 使用 MSVC 2019 Release 在 `SparrowCore/build/e5-round9-selector-release` 
 
 ### E5 第十轮：确定性混合 NaN/Inf worker 聚合边界用例（2026-10-19）
 
-新增 Rust `mixed_nonfinite_tracker_aggregates_select_the_expected_worker` 与 C++ `TestMixedNonFiniteWorkerTrackerAggregation`。两边都从双放置物布局创建真实 `CollisionTracker`，再构造四个固定 worker tracker 状态：pair loss 分量分别为 `(+Inf,-Inf)`、`(+Inf,0)`、`(-Inf,0)`、`(2,0)`。调用 tracker 自己的 `get_total_weighted_loss` / `TotalWeightedLoss` 汇总后得到 `[NaN,+Inf,-Inf,2]`；Rust 在与生产路径相同的 `OrderedFloat::min_by_key` 边界选中索引 2，C++ 将同一聚合键顺序交给生产 `WorkerLossSelector` 也选中索引 2。首个 NaN 来自 tracker 内 `+Inf + -Inf` 的真实 IEEE 求和。
+新增 Rust `mixed_nonfinite_tracker_aggregates_select_the_expected_worker` 与 C++ `TestMixedNonFiniteWorkerResultCollection`。两边都从双放置物布局创建真实 `CollisionTracker`，再构造四个固定 worker tracker 状态：pair loss 分量分别为 `(+Inf,-Inf)`、`(+Inf,0)`、`(-Inf,0)`、`(2,0)`。调用 tracker 自己的 `get_total_weighted_loss` / `TotalWeightedLoss` 汇总后得到 `[NaN,+Inf,-Inf,2]`；Rust 在与 `move_items_multi` 相同的 `OrderedFloat::min_by_key` 选择表达式中选中索引 2，C++ 则把四个固定 worker 结果送进 `Separator::Run` 实际使用的 `WorkerRoundCollector`，后者调用生产 `WorkerLossSelector` 选中索引 2，并累计全部成功结果的计数。
 
-Rust 1.98.1 Debug/Release 定向测试各 `2 passed`；MSVC 2019 Release 在新建 `SparrowCore/build/e5-round10-aggregation-release` 后构建，并运行 `SparrowCoreTests.exe --worker-loss-selector` 退出码 0。用例固定的是生产 tracker 聚合 API 到 worker 选择器之间的确定性边界，worker tracker 状态由测试直接布置；它不执行真实 `RunWorkerRound`/`move_items_multi` 的搜索与并行调度，也不声称给出端到端 worker 移动轨迹。E5 仍部分，短时自然预算统计也仍只适用于各自记录的运行条件。
+随后 C++ 测试按生产顺序恢复胜出 `solution` 与 `trackerSnapshot`，确认所选 payload 的 `moveCount=3`，恢复后的主 tracker 总 loss、总加权 loss 及 pair 项均为 `-Inf`。Rust 1.98.1 Debug/Release 定向测试各 `2 passed`；MSVC 2019 Release 重建 SparrowCore 与定向 runner 后，运行 `SparrowCoreTests.exe --worker-loss-selector` 退出码 0。测试将固定 worker 结果送入真实生产收集器，但结果由测试构造；它不执行 `RunWorkerRound`/`move_items_multi` 的搜索或异步调度，也不声称给出端到端 worker 移动轨迹。E5 仍部分，短时自然预算统计也仍只适用于各自记录的运行条件。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

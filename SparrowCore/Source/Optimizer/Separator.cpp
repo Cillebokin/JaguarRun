@@ -1,7 +1,7 @@
 #include "SparrowCore/Optimizer/Separator.h"
 #include "SparrowCore/Random/SparrowRng.h"
 #include "SeparatorRandom.h"
-#include "WorkerLossSelector.h"
+#include "WorkerRoundCollector.h"
 
 #ifndef NDEBUG
 #include <cassert>
@@ -554,8 +554,7 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
         {
             const jaguar::SPSolution masterSolution = m_Problem.Save();
             const CollisionTrackerSnapshot masterTracker = m_Tracker.Save();
-            detail::WorkerLossSelector bestWorkerSelector;
-            std::optional<WorkerRoundResult> bestWorker;
+            detail::WorkerRoundCollector<WorkerRoundResult> workerCollector;
 
             const jaguar::SPInstance& workerInstance = m_Problem.Instance();
             std::vector<std::future<WorkerTaskResult>> workerTasks;
@@ -614,15 +613,7 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                     continue;
                 }
                 WorkerRoundResult worker = std::move(task.result.Value());
-                surrogateRejectCount += worker.surrogateRejectCount;
-                exactCollisionCount += worker.exactCollisionCount;
-                totalEvaluationCount += worker.evaluationCount;
-                totalMoveCount += worker.moveCount;
-                if (bestWorkerSelector.Consider(
-                        task.index, worker.weightedLoss))
-                {
-                    bestWorker = std::move(worker);
-                }
+                workerCollector.Add(task.index, std::move(worker));
             }
 
             if (workerException != nullptr)
@@ -632,12 +623,19 @@ Result<SeparatorResult> Separator::Run(const SeparatorConfig& config,
                 return Result<SeparatorResult>::FromError(*workerError);
             }
 
-            if (!bestWorkerSelector.HasBest())
+            if (!workerCollector.HasBest())
             {
                 return Result<SeparatorResult>::FromError(
                     {jaguar::ErrorCode::InvalidInput,
                      "separator produced no worker result"});
             }
+
+            surrogateRejectCount += workerCollector.SurrogateRejectCount();
+            exactCollisionCount += workerCollector.ExactCollisionCount();
+            totalEvaluationCount += workerCollector.EvaluationCount();
+            totalMoveCount += workerCollector.MoveCount();
+            std::optional<WorkerRoundResult> bestWorker =
+                workerCollector.TakeBest();
 
             const auto restored = m_Problem.Restore(bestWorker->solution);
             if (!restored.HasValue())

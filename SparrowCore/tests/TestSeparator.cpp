@@ -7,6 +7,7 @@
 #include "SparrowCore/Quantify/CollisionTracker.h"
 #include "../Source/Optimizer/SeparatorWorkerTrace.h"
 #include "../Source/Optimizer/WorkerLossSelector.h"
+#include "../Source/Optimizer/WorkerRoundCollector.h"
 
 #include "JaguarCore/Entities/Item.h"
 #include "JaguarCore/IO/Importer.h"
@@ -84,7 +85,7 @@ bool TestWorkerLossSelectorNonFiniteOrdering(std::ostream& output)
 
 jaguar::Item MakeItem(jaguar::ItemIndex index);
 
-bool TestMixedNonFiniteWorkerTrackerAggregation(std::ostream& output)
+bool TestMixedNonFiniteWorkerResultCollection(std::ostream& output)
 {
     const auto instance = jaguar::SPInstance::Create(
         {MakeItem(0U)},
@@ -143,10 +144,23 @@ bool TestMixedNonFiniteWorkerTrackerAggregation(std::ostream& output)
         {{-positiveInfinity, 0.0F}},
         {{2.0F, 0.0F}},
     }};
-    std::vector<float> aggregateKeys;
-    aggregateKeys.reserve(componentLosses.size());
-    for (const auto& components : componentLosses)
+    struct WorkerRoundFixture
     {
+        jaguar::SPSolution solution;
+        sparrow::CollisionTrackerSnapshot trackerSnapshot;
+        float weightedLoss = 0.0F;
+        std::size_t surrogateRejectCount = 0U;
+        std::size_t exactCollisionCount = 0U;
+        std::size_t evaluationCount = 0U;
+        std::size_t moveCount = 0U;
+    };
+    sparrow::detail::WorkerRoundCollector<WorkerRoundFixture> collector;
+    std::array<float, 4U> aggregateKeys{};
+    for (std::size_t workerIndex = 0U;
+         workerIndex < componentLosses.size();
+         ++workerIndex)
+    {
+        const auto& components = componentLosses[workerIndex];
         sparrow::CollisionTrackerSnapshot workerSnapshot = baseTracker.Save();
         for (sparrow::CollisionEntry& entry : workerSnapshot.containerEntries)
         {
@@ -178,7 +192,18 @@ bool TestMixedNonFiniteWorkerTrackerAggregation(std::ostream& output)
                           output,
                           "worker aggregate tracker fixture restore failed");
         }
-        aggregateKeys.push_back(workerTracker.TotalWeightedLoss());
+        aggregateKeys[workerIndex] = workerTracker.TotalWeightedLoss();
+        const std::size_t ordinal = workerIndex + 1U;
+        collector.Add(
+            workerIndex,
+            WorkerRoundFixture{
+                solution,
+                workerTracker.Save(),
+                aggregateKeys[workerIndex],
+                ordinal * 10U,
+                ordinal,
+                ordinal * 11U,
+                ordinal});
     }
 
     if (!Expect(std::isnan(aggregateKeys[0U])
@@ -190,17 +215,51 @@ bool TestMixedNonFiniteWorkerTrackerAggregation(std::ostream& output)
     {
         return false;
     }
-
-    sparrow::detail::WorkerLossSelector selector;
-    for (std::size_t workerIndex = 0U;
-         workerIndex < aggregateKeys.size();
-         ++workerIndex)
+    if (!Expect(collector.SurrogateRejectCount() == 100U
+                    && collector.ExactCollisionCount() == 10U
+                    && collector.EvaluationCount() == 110U
+                    && collector.MoveCount() == 10U,
+                output,
+                "worker result collection must aggregate counters from every successful worker"))
     {
-        selector.Consider(workerIndex, aggregateKeys[workerIndex]);
+        return false;
     }
-    return Expect(selector.HasBest() && selector.BestWorkerIndex() == 2U,
+    if (!Expect(collector.HasBest() && collector.BestWorkerIndex() == 2U,
+                output,
+                "worker result collection must select the -Inf aggregate"))
+    {
+        return false;
+    }
+    std::optional<WorkerRoundFixture> bestWorker = collector.TakeBest();
+    if (!Expect(bestWorker.has_value()
+                    && bestWorker->weightedLoss == -positiveInfinity
+                    && bestWorker->moveCount == 3U,
+                output,
+                "collector must retain the selected worker result payload"))
+    {
+        return false;
+    }
+
+    if (!problem.Restore(bestWorker->solution).HasValue())
+    {
+        return Expect(false, output, "selected worker solution restore failed");
+    }
+    const jaguar::SPSolution selectedSolution = problem.Save();
+    jaguar::Layout selectedLayout(selectedSolution.layoutSnapshot.container);
+    if (!selectedLayout.Restore(selectedSolution.layoutSnapshot).HasValue())
+    {
+        return Expect(false, output, "selected worker layout rebuild failed");
+    }
+    sparrow::CollisionTracker selectedTracker = baseTracker;
+    if (!selectedTracker.Restore(bestWorker->trackerSnapshot, selectedLayout).HasValue())
+    {
+        return Expect(false, output, "selected worker tracker restore failed");
+    }
+    return Expect(selectedTracker.TotalLoss() == -positiveInfinity
+                      && selectedTracker.TotalWeightedLoss() == -positiveInfinity
+                      && selectedTracker.PairLoss(0U, 0U) == -positiveInfinity,
                   output,
-                  "mixed non-finite tracker aggregates must select the -Inf worker");
+                  "post-selection tracker must contain the selected -Inf worker state");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -2613,7 +2672,7 @@ bool TestMultiworkerHazardStopsOptimizePhaseCallbacks(
 bool RunWorkerLossSelectorTests(std::ostream& output)
 {
     return TestWorkerLossSelectorNonFiniteOrdering(output)
-        && TestMixedNonFiniteWorkerTrackerAggregation(output);
+        && TestMixedNonFiniteWorkerResultCollection(output);
 }
 
 bool RunSeparatorTests(std::ostream& output)

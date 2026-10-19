@@ -164,6 +164,14 @@ rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCor
 - collision 和 zero-separation 两个探针的 Debug/Release stdout 完全相同。
 - 默认 cold-start 的墙钟截断疑点已由下节的 Rust Debug/Release 重跑和 C++ Debug/Release 全套测试复核；B2/B4a 的 pinned Rust 运行仍只证明各自 oracle 与 fixture，不替代相应跨语言差分结果。
 
+## E5 Release NaN 影响复核（2026-10-19）
+
+使用 `SparrowCore/Tests/RustReference/Cargo.lock` 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 与 Rust 1.98.1，在 `RustSppCompressWorkerMove.json`、seed=42、width=4.2 双矩形可行 warm-start、默认 3 workers 上做临时短时诊断；探索预算为 20 秒、压缩预算为 2 秒。Debug 在 3.95 秒于 `worker.rs:122` 重现 `weighted loss should never increase: ∞ > NaN` 并中止。Release 完成 22.02 秒诊断，最终布局可行、width=4.0000105。
+
+Release 聚合点记录的首 12 个含 NaN 的轮次中，三个 worker 的 weighted-loss 总值均为 NaN。Rust `OrderedFloat` 将 NaN 排在有限数之后、多个 NaN 互相相等；该轮三者皆 NaN 时 `min_by_key` 保留索引 0。比如轮次 0 的 unweighted total collision loss 为 `[0.2639946, 0.2639217, 0.26390663]`，轮次 1 为 `[0.16895582, 0.10878802, 0.110008456]`，但两轮均选择索引 0。因此 Release 中断言消失并未消除 NaN；NaN 键会遮蔽 worker 间的加权排序，并在本输入上使较低原始 collision loss 的候选被丢弃。
+
+C++ `Separator.cpp` 的 worker 选择器使用普通 `<`。当同一轮所有键均为 NaN 时，比较结果同样不会替换首 worker；但若首个键为 NaN、后续有有限键，普通 `<` 仍会保留首 worker，而 Rust `OrderedFloat` 会选有限键。此混合集合差异目前仅由源码语义确认，未在实际运行中观测。裁决为将 Debug panic 记录为 pinned Rust 算法在支持输入上的数值缺陷，Release NaN 记录为会影响候选选择的搜索质量问题；本轮不修改锁定 oracle，也不单独给 C++ 加饱和上限。该短时诊断不是 E5 的永久测试入口；E5 仍部分，完整确定性输入矩阵及 Rust Debug 自然时限完成证据尚缺。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

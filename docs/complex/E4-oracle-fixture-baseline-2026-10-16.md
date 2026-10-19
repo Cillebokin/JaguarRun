@@ -280,6 +280,14 @@ Rust定向测试扩展为同时检查无穷和有限上界，Debug/Release均为
 
 Rust Debug按pinned行为在worker中触发已知`weighted loss should never increase: ∞ > NaN`断言；专项测试捕获并确认该断言，故本轮完整跨语言trace采用Rust Release对照。该顶层trace证明第十八轮生产修改进入Optimize→Compress之后，固定输入的阶段轨迹和终态仍与Rust Release一致；trace本身未记录每次candidate evaluator的上界，因此不单独宣称这次顶层运行确实命中了`PlacedItem +Inf`分支，该分支仍由第十七/十八轮成对evaluator用例直接锁定。E5仍部分，结论限于此seed、单worker与固定配置，不代表一般多worker或自然时限等价。
 
+### E5 第二十轮：确认顶层`Optimize → Compress`实际命中`PlacedItem +Inf`分支（2026-10-19）
+
+为直接观察第十九轮同一顶层用例内的candidate evaluator调用，临时加入环境变量门控、进程内去重的诊断标记；命中条件同时要求hazard为`PlacedItem`、计算出的加权loss为`+Inf`且剩余上界为`+Inf`。该诊断只记录观察结果，不改变分支判断或算法行为。
+
+Rust 1.98.1 Release和Debug运行均输出命中标记；Debug标记出现在已知`weighted loss should never increase: ∞ > NaN`断言之前。C++ MSVC 14.44 Debug和Release也各输出命中标记。因此四种运行配置都确认第十九轮实际的顶层`Optimize`调用序列至少一次进入该分支。由于检查点处于Explore与Compression共用的evaluator路径，现有标记不能区分命中发生在哪个阶段；每进程最多输出一个标记，故也不代表总命中次数。
+
+临时诊断代码已完全移除。随后Rust Release顶层trace测试、Debug预期断言测试、`rustfmt --check`以及C++ Debug/Release顶层定向runner均在干净源码上通过；C++ SparrowCore Debug/Release核心库与定向测试程序均重建。没有新增永久埋点或改变第十八轮生产行为。第二十轮仅补齐实际可达性证据，不扩大输入域结论；E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

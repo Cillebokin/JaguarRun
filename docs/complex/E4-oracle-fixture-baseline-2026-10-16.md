@@ -207,6 +207,15 @@ C++ 使用 MSVC 2019 Release 在 `SparrowCore/build/e5-round9-selector-release` 
 
 随后 C++ 测试按生产顺序恢复胜出 `solution` 与 `trackerSnapshot`，确认所选 payload 的 `moveCount=3`，恢复后的主 tracker 总 loss、总加权 loss 及 pair 项均为 `-Inf`。Rust 1.98.1 Debug/Release 定向测试各 `2 passed`；MSVC 2019 Release 重建 SparrowCore 与定向 runner 后，运行 `SparrowCoreTests.exe --worker-loss-selector` 退出码 0。测试将固定 worker 结果送入真实生产收集器，但结果由测试构造；它不执行 `RunWorkerRound`/`move_items_multi` 的搜索或异步调度，也不声称给出端到端 worker 移动轨迹。E5 仍部分，短时自然预算统计也仍只适用于各自记录的运行条件。
 
+### E5 第十一轮：真实双 worker 搜索驱动的确定性端到端对拍（2026-10-19）
+
+
+新增 Rust `optimize_real_exploration_workers_then_compress_matches_reference` 与 C++ `TestTopLevelWorkerMoveCompressionMatchesRustReference` 用例，使用同一 `RustSppCompressWorkerMove.json`、seed=42、width=4.2 和两个重叠放置物作为 warm start。顶层 `optimize` 实际进入双 worker Explore，配置为 `no_improvement_limit=1`、`strike_limit=1`、样本 `1/0/1`，运行到首个 separation result 后停相；Explore 成功并发生 3 次移动，结果收集后的下一次 progress 观测到选后 tracker loss 为 0。随后进入单 worker FailureBased Compression，以 shrink step 0.03 运行真实搜索；首个结果成功并发生 2 次移动，最终两件需求均已放置、布局可行、width `4.073999882`、density `0.654557347`、collision loss 为 0。
+
+Rust Debug/Release 定向目标均为 `3 passed`，新增用例又在两个 profile 各独立重复 3 次，六次均与完整 27 行 trace 一致。Rust 1.98.1 与 Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 未变。Qt 6.5.3 `msvc2019_64` qmake、MSVC 14.44.35228.0 下 SparrowCore Debug/Release 全量 runner 均退出码 0；Release 全量 runner额外复跑一次也为 0。C++ 比较阶段/报告顺序、worker 评估与移动计数、放置身份、终态和 tracker loss；浮点字段使用现有按字段容差。fixture `OptimizeExplorationWorkerCompressionRustReference.tsv` SHA-256 为 `DECAB4C736AD21D28FAC83B004DBAEB62AC088653B91CAD1B68946D7402B94DF`。
+
+这条真实搜索轨迹在固定几何、seed、worker 数和采样配置下重复稳定；它观察到的是有限 tracker loss，没有在真实搜索中产生第十轮的混合 NaN/Inf worker 结果，因此第十轮仍只是非有限键选择与结果收集边界证据。多 worker 任意调度、其他 worker 数和一般实例矩阵不由此推断。E5 继续部分：Rust Debug 默认自然时限仍未完成 Explore，完整确定性输入矩阵仍待验收。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

@@ -291,9 +291,11 @@ class WorkerMoveCompressionReferenceListener final
 public:
     explicit WorkerMoveCompressionReferenceListener(
         sparrow::OptimizationTerminator& terminator,
-        std::size_t stopAfterCompressionResults = 1U)
+        std::size_t stopAfterCompressionResults = 1U,
+        bool stopOnInitialExplorationReport = true)
         : m_Terminator(terminator),
-          m_StopAfterCompressionResults(stopAfterCompressionResults)
+          m_StopAfterCompressionResults(stopAfterCompressionResults),
+          m_StopOnInitialExplorationReport(stopOnInitialExplorationReport)
     {
     }
 
@@ -344,6 +346,7 @@ public:
         if (m_CurrentPhase == "exploration"
             && report.type
                    == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+            && m_StopOnInitialExplorationReport
             && !stoppedExploration)
         {
             stoppedExploration = true;
@@ -360,6 +363,13 @@ public:
                            progress.stripWidth,
                            progress.density,
                            progress.minimumLoss}});
+        if (m_CurrentPhase == "exploration" && progress.iteration > 0U)
+        {
+            postSelectionLosses.push_back(progress.minimumLoss);
+            events.push_back({"post_selection_tracker",
+                              "state",
+                              {progress.minimumLoss}});
+        }
     }
 
     void OnSeparationResult(const sparrow::SeparationResult& result) override
@@ -371,7 +381,12 @@ public:
                            static_cast<double>(result.totalMoves),
                            static_cast<double>(result.iterations)}});
         separationResults.push_back(result);
-        if (m_CurrentPhase == "compression")
+        if (m_CurrentPhase == "exploration" && !stoppedExploration)
+        {
+            stoppedExploration = true;
+            m_Terminator.RequestPhaseStop();
+        }
+        else if (m_CurrentPhase == "compression")
         {
             ++m_CompressionResultsSeen;
             if (!stoppedCompression
@@ -390,12 +405,14 @@ public:
 
     std::vector<ColdStartTraceEvent> events;
     std::vector<sparrow::SeparationResult> separationResults;
+    std::vector<double> postSelectionLosses;
     bool stoppedExploration = false;
     bool stoppedCompression = false;
 
 private:
     sparrow::OptimizationTerminator& m_Terminator;
     std::size_t m_StopAfterCompressionResults;
+    bool m_StopOnInitialExplorationReport;
     std::size_t m_CompressionResultsSeen = 0U;
     std::string m_CurrentPhase;
 };
@@ -3433,14 +3450,18 @@ bool TestOptimizeCompressionMatchesRustReference(std::ostream& output)
 bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     std::ostream& output,
     const std::string& fixtureName,
-    bool timeBased)
+    bool timeBased,
+    bool explorationWorkerSearch = false)
 {
     std::ifstream instanceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
-             "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
-             "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"})
+    const std::string inputFixtureName = "RustSppCompressWorkerMove.json";
+    const std::string fixtureRelativePath =
+        "SparrowCore/Tests/Fixtures/" + inputFixtureName;
+    for (const std::string& path : {
+             fixtureRelativePath,
+             "../" + fixtureRelativePath,
+             "../JaguarRun/" + fixtureRelativePath,
+             "..\\" + fixtureRelativePath})
     {
         instanceFile.open(path);
         if (instanceFile.is_open())
@@ -3477,7 +3498,9 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     const auto firstPlaced = warmProblem.PlaceItem({
         0U, jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
     const auto secondPlaced = warmProblem.PlaceItem({
-        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {3.15, 0.55})});
+        0U, jaguar::Transform2d::FromRotationTranslation(
+                0.0,
+                {explorationWorkerSearch ? 1.55 : 3.15, 0.55})});
     if (!Expect(widthSet.HasValue() && firstPlaced.HasValue()
                     && secondPlaced.HasValue(),
                 output,
@@ -3488,9 +3511,9 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     const jaguar::SPSolution initialSolution = warmProblem.Save();
     jaguar::Layout initialLayout(initialSolution.layoutSnapshot.container);
     if (!Expect(initialLayout.Restore(initialSolution.layoutSnapshot).HasValue()
-                    && initialLayout.IsFeasible(),
+                    && initialLayout.IsFeasible() != explorationWorkerSearch,
                 output,
-                "Rust top-level worker-move warm start must be feasible"))
+                "top-level worker-move warm start feasibility must match the case"))
     {
         return false;
     }
@@ -3499,7 +3522,16 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     config.seed = 42U;
     config.warmStart = initialSolution;
     config.exploration.timeLimit = std::chrono::seconds{30};
-    config.exploration.separator.nWorkers = 1U;
+    config.exploration.separator.nWorkers =
+        explorationWorkerSearch ? 2U : 1U;
+    if (explorationWorkerSearch)
+    {
+        config.exploration.separator.noImprovementLimit = 1U;
+        config.exploration.separator.strikeLimit = 1U;
+        config.exploration.separator.nContainerSamples = 1U;
+        config.exploration.separator.nFocussedSamples = 0U;
+        config.exploration.separator.nCoordinateDescents = 1U;
+    }
     const std::vector<std::chrono::nanoseconds> clockSamples{
         std::chrono::nanoseconds{0},
         std::chrono::nanoseconds{0},
@@ -3528,7 +3560,9 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     sparrow::OptimizationTerminator terminator(config.terminator);
     terminator.Start();
     WorkerMoveCompressionReferenceListener listener(
-        terminator, timeBased ? 2U : 1U);
+        terminator,
+        timeBased ? 2U : 1U,
+        !explorationWorkerSearch);
     listener.events.push_back({
         "config",
         "parameters",
@@ -3543,6 +3577,17 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
          static_cast<double>(config.compression.separator.nContainerSamples),
          static_cast<double>(config.compression.separator.nFocussedSamples),
          static_cast<double>(config.compression.separator.nCoordinateDescents)}});
+    if (explorationWorkerSearch)
+    {
+        listener.events.push_back({
+            "config",
+            "exploration_workers",
+            {static_cast<double>(config.exploration.separator.nWorkers),
+             static_cast<double>(config.exploration.separator.noImprovementLimit),
+             static_cast<double>(config.exploration.separator.nContainerSamples),
+             static_cast<double>(config.exploration.separator.nFocussedSamples),
+             static_cast<double>(config.exploration.separator.nCoordinateDescents)}});
+    }
     if (timeBased)
     {
         listener.events.push_back({
@@ -3682,12 +3727,28 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
                     && listener.stoppedCompression
                     && hasMovedSuccessfulCompression
                     && listener.separationResults.size()
-                        == (timeBased ? 2U : 1U)
+                        == (timeBased || explorationWorkerSearch ? 2U : 1U)
                     && compressedFeasibly,
                 output,
                 "top-level compression must succeed after a real worker move and return a narrower feasible layout"))
     {
         return false;
+    }
+    if (explorationWorkerSearch)
+    {
+        const bool actualWorkersFedCompression =
+            listener.postSelectionLosses.size() == 1U
+            && std::abs(listener.postSelectionLosses.front()) <= 1.0e-6
+            && listener.separationResults[0U].success
+            && listener.separationResults[0U].totalMoves > 0U
+            && listener.separationResults[1U].success
+            && listener.separationResults[1U].totalMoves > 0U;
+        if (!Expect(actualWorkersFedCompression,
+                    output,
+                    "real exploration worker selection must leave a zero-loss tracker state that proceeds through compression"))
+        {
+            return false;
+        }
     }
     if (compressionClock.has_value()
         && !Expect(compressionClock->SamplesConsumed() == clockSamples.size()
@@ -11275,6 +11336,14 @@ bool RunExplorationTests(std::ostream& output)
     if (!TestTopLevelWorkerMoveCompressionMatchesRustReference(
             output,
             "OptimizeTimeBasedClockWorkerMoveRustReference.tsv",
+            true))
+    {
+        return false;
+    }
+    if (!TestTopLevelWorkerMoveCompressionMatchesRustReference(
+            output,
+            "OptimizeExplorationWorkerCompressionRustReference.tsv",
+            false,
             true))
     {
         return false;

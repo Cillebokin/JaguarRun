@@ -23,6 +23,8 @@ const REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeWorkerMoveCompressionRustReference.tsv");
 const TIME_BASED_REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeTimeBasedClockWorkerMoveRustReference.tsv");
+const EXPLORATION_WORKER_REFERENCE: &str =
+    include_str!("../../Fixtures/OptimizeExplorationWorkerCompressionRustReference.tsv");
 
 #[derive(Clone)]
 struct PhaseTerminator {
@@ -51,6 +53,8 @@ struct RecordingListener {
     separation_results: Vec<SeparationResult>,
     stop_after_compression_results: usize,
     compression_results_seen: usize,
+    stop_on_initial_exploration_report: bool,
+    post_selection_losses: Vec<f32>,
     stopped_exploration: bool,
     stopped_compression: bool,
 }
@@ -99,11 +103,13 @@ impl SolutionListener for RecordingListener {
     fn report(&mut self, report: ReportType, solution: &SPSolution) {
         append_solution_rows(&mut self.trace, report_name(&report), solution);
         if self.phase == Some("exploration") && !self.stopped_exploration {
-            self.stopped_exploration = true;
-            self.stop
-                .as_ref()
-                .expect("phase terminator handle")
-                .store(true, Ordering::SeqCst);
+            if self.stop_on_initial_exploration_report {
+                self.stopped_exploration = true;
+                self.stop
+                    .as_ref()
+                    .expect("phase terminator handle")
+                    .store(true, Ordering::SeqCst);
+            }
         }
     }
 
@@ -127,6 +133,13 @@ impl SolutionListener for RecordingListener {
             "progress\t{phase}\t{}\t{:.9}\t{:.9}\t{:.9}",
             progress.iteration, progress.strip_width, progress.density, progress.min_loss,
         ));
+        if phase == "exploration" && progress.iteration > 0 {
+            self.post_selection_losses.push(progress.min_loss);
+            self.trace.push(format!(
+                "post_selection_tracker\tstate\t{:.9}",
+                progress.min_loss,
+            ));
+        }
     }
 
     fn report_separation_result(&mut self, result: SeparationResult) {
@@ -219,6 +232,10 @@ fn append_terminal_rows(
 }
 
 fn run_optimize_compression_worker_move_reference(time_based: bool) {
+    run_optimize_worker_move_reference(time_based, false);
+}
+
+fn run_optimize_worker_move_reference(time_based: bool, exploration_worker_search: bool) {
     let seed = 42;
     let (external_instance, _) =
         sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppCompressWorkerMove.json"))
@@ -241,13 +258,35 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
     });
     warm_problem.place_item(SPPlacement {
         item_idx: 0,
-        d_transf: DTransformation::new(0.0, (3.15, 0.55)),
+        d_transf: DTransformation::new(
+            0.0,
+            (
+                if exploration_worker_search {
+                    1.55
+                } else {
+                    3.15
+                },
+                0.55,
+            ),
+        ),
     });
     let warm_start = warm_problem.save();
-    assert!(Layout::from_snapshot(&warm_start.layout_snapshot).is_feasible());
+    assert_eq!(
+        Layout::from_snapshot(&warm_start.layout_snapshot).is_feasible(),
+        !exploration_worker_search,
+    );
 
     config.expl_cfg.time_limit = Duration::from_secs(30);
-    config.expl_cfg.separator_config.n_workers = 1;
+    config.expl_cfg.separator_config.n_workers = if exploration_worker_search { 2 } else { 1 };
+    if exploration_worker_search {
+        config.expl_cfg.separator_config.iter_no_imprv_limit = 1;
+        config.expl_cfg.separator_config.strike_limit = 1;
+        config.expl_cfg.separator_config.sample_config = SampleConfig {
+            n_container_samples: 1,
+            n_focussed_samples: 0,
+            n_coord_descents: 1,
+        };
+    }
     let clock_sequence = [Duration::ZERO, Duration::ZERO, Duration::from_secs(1)];
     if time_based {
         config.cmpr_cfg.shrink_range = (0.03, 0.01);
@@ -274,6 +313,7 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
     let mut listener = RecordingListener {
         stop: Some(stop),
         stop_after_compression_results: if time_based { 2 } else { 1 },
+        stop_on_initial_exploration_report: !exploration_worker_search,
         ..RecordingListener::default()
     };
     listener.trace.push(format!(
@@ -300,6 +340,28 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
             .sample_config
             .n_coord_descents,
     ));
+    if exploration_worker_search {
+        listener.trace.push(format!(
+            "config\texploration_workers\t{}\t{}\t{}\t{}\t{}",
+            config.expl_cfg.separator_config.n_workers,
+            config.expl_cfg.separator_config.iter_no_imprv_limit,
+            config
+                .expl_cfg
+                .separator_config
+                .sample_config
+                .n_container_samples,
+            config
+                .expl_cfg
+                .separator_config
+                .sample_config
+                .n_focussed_samples,
+            config
+                .expl_cfg
+                .separator_config
+                .sample_config
+                .n_coord_descents,
+        ));
+    }
     if time_based {
         listener.trace.push(format!(
             "config\tcompression_time_limit\t{}",
@@ -338,6 +400,12 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
     }
     append_terminal_rows(&mut listener.trace, seed, &instance, &final_solution);
 
+    if std::env::var_os("SPARROW_PRINT_OPTIMIZE_WORKER_MOVE_REFERENCE").is_some() {
+        for row in &listener.trace {
+            println!("{row}");
+        }
+    }
+
     assert_eq!(listener.phase, Some("compression"));
     assert!(listener.stopped_exploration);
     assert!(listener.stopped_compression);
@@ -347,7 +415,13 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
     );
     assert_eq!(
         listener.separation_results.len(),
-        if time_based { 2 } else { 1 },
+        if time_based {
+            2
+        } else if exploration_worker_search {
+            2
+        } else {
+            1
+        },
     );
     assert!(
         listener
@@ -357,17 +431,21 @@ fn run_optimize_compression_worker_move_reference(time_based: bool) {
     );
     assert!(final_solution.strip_width() < warm_start.strip_width());
     assert!(Layout::from_snapshot(&final_solution.layout_snapshot).is_feasible());
+    if exploration_worker_search {
+        assert_eq!(listener.post_selection_losses, [0.0]);
+        let exploration_result = &listener.separation_results[0];
+        let compression_result = listener.separation_results.last().unwrap();
+        assert!(exploration_result.success && exploration_result.total_moves > 0);
+        assert!(compression_result.success && compression_result.total_moves > 0);
+    }
     if let Some(clock) = &clock {
         assert_eq!(clock.samples_consumed(), 3);
         assert!(!clock.exhausted());
     }
 
-    if std::env::var_os("SPARROW_PRINT_OPTIMIZE_WORKER_MOVE_REFERENCE").is_some() {
-        for row in &listener.trace {
-            println!("{row}");
-        }
-    }
-    let reference = if time_based {
+    let reference = if exploration_worker_search {
+        EXPLORATION_WORKER_REFERENCE
+    } else if time_based {
         TIME_BASED_REFERENCE
     } else {
         REFERENCE
@@ -392,4 +470,9 @@ fn optimize_compression_succeeds_after_a_worker_move_and_matches_reference() {
 #[test]
 fn optimize_time_based_compression_uses_shared_clock_and_matches_reference() {
     run_optimize_compression_worker_move_reference(true);
+}
+
+#[test]
+fn optimize_real_exploration_workers_then_compress_matches_reference() {
+    run_optimize_worker_move_reference(false, true);
 }

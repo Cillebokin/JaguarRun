@@ -84,6 +84,8 @@ bool TestWorkerLossSelectorNonFiniteOrdering(std::ostream& output)
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index);
+jaguar::Importer MakeSeparatorTraceImporter();
+float FloatFromBits(std::uint32_t bits) noexcept;
 
 bool TestMixedNonFiniteWorkerResultCollection(std::ostream& output)
 {
@@ -260,6 +262,124 @@ bool TestMixedNonFiniteWorkerResultCollection(std::ostream& output)
                       && selectedTracker.PairLoss(0U, 0U) == -positiveInfinity,
                   output,
                   "post-selection tracker must contain the selected -Inf worker state");
+}
+
+bool TestFixedRealWorkerRoundsReachNonFiniteTerminalState(std::ostream& output)
+{
+    std::array<std::uint32_t, 4U> firstOutcome{};
+    for (std::size_t attempt = 0U; attempt < 2U; ++attempt)
+    {
+        std::ifstream inputFile;
+        for (const std::string& path : {
+                 std::string("SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+                 std::string("../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+                 std::string("../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json"),
+                 std::string("..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json")})
+        {
+            inputFile.open(path);
+            if (inputFile.is_open())
+                break;
+            inputFile.clear();
+        }
+        if (!Expect(inputFile.is_open(),
+                    output,
+                    "fixed-round non-finite worker fixture must be readable"))
+        {
+            return false;
+        }
+        const std::string json{
+            std::istreambuf_iterator<char>(inputFile),
+            std::istreambuf_iterator<char>()};
+        const auto instance = MakeSeparatorTraceImporter().ImportSPInstanceJson(json);
+        if (!Expect(instance.HasValue(),
+                    output,
+                    "fixed-round non-finite worker fixture must import"))
+        {
+            return false;
+        }
+        auto problemResult = jaguar::SPProblem::Create(instance.Value());
+        if (!Expect(problemResult.HasValue(),
+                    output,
+                    "fixed-round non-finite worker problem creation failed"))
+        {
+            return false;
+        }
+        jaguar::SPProblem problem = std::move(problemResult.Value());
+        if (!problem.ChangeStripWidth(3.0).HasValue())
+        {
+            return Expect(false, output,
+                          "fixed-round non-finite worker strip resize failed");
+        }
+        const auto firstTransform =
+            jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55});
+        const auto secondTransform =
+            jaguar::Transform2d::FromRotationTranslation(0.0, {1.55, 0.55});
+        if (!problem.PlaceItem({0U, firstTransform}).HasValue()
+            || !problem.PlaceItem({0U, secondTransform}).HasValue())
+        {
+            return Expect(false, output,
+                          "fixed-round non-finite worker placements failed");
+        }
+        auto separatorResult = sparrow::Separator::Create(std::move(problem), 5U);
+        if (!Expect(separatorResult.HasValue(),
+                    output,
+                    "fixed-round non-finite separator creation failed"))
+        {
+            return false;
+        }
+        sparrow::Separator separator = std::move(separatorResult.Value());
+        sparrow::SeparatorConfig config;
+        config.strikeLimit = 1U;
+        config.noImprovementLimit = 1000U;
+        config.nContainerSamples = 1U;
+        config.nFocussedSamples = 0U;
+        config.nCoordinateDescents = 1U;
+        config.nWorkers = 3U;
+        sparrow::OptimizationTerminatorConfig terminatorConfig;
+        terminatorConfig.maxIterations = 450U;
+        sparrow::OptimizationTerminator terminator(terminatorConfig);
+        const auto result = separator.Run(config, terminator);
+        if (!Expect(result.HasValue(),
+                    output,
+                    "fixed-round non-finite production worker run failed"))
+        {
+            return false;
+        }
+
+        const float loss = separator.Tracker().TotalLoss();
+        const float weightedLoss = separator.Tracker().TotalWeightedLoss();
+        std::array<std::uint32_t, 4U> outcome{};
+        outcome[0U] = static_cast<std::uint32_t>(result.Value().iterations);
+        outcome[1U] = static_cast<std::uint32_t>(result.Value().totalMoveCount);
+        std::memcpy(&outcome[2U], &loss, sizeof(loss));
+        std::memcpy(&outcome[3U], &weightedLoss, sizeof(weightedLoss));
+        if (!Expect(result.Value().iterations == 450U
+                        && result.Value().totalMoveCount == 1621U
+                        && std::isfinite(loss)
+                        && std::abs(loss - FloatFromBits(0x3fad792bU)) <= 1.0e-5F
+                        && std::isnan(weightedLoss),
+                    output,
+                    "fixed production run must match the observed non-finite terminal state"))
+        {
+            output << std::setprecision(10)
+                   << "iterations=" << result.Value().iterations
+                   << " moves=" << result.Value().totalMoveCount
+                   << " loss=" << loss
+                   << " weighted=" << weightedLoss << '\n';
+            return false;
+        }
+        if (attempt == 0U)
+        {
+            firstOutcome = outcome;
+        }
+        else if (!Expect(outcome == firstOutcome,
+                         output,
+                         "fixed-round production worker outcome must repeat exactly"))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -2673,6 +2793,11 @@ bool RunWorkerLossSelectorTests(std::ostream& output)
 {
     return TestWorkerLossSelectorNonFiniteOrdering(output)
         && TestMixedNonFiniteWorkerResultCollection(output);
+}
+
+bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output)
+{
+    return TestFixedRealWorkerRoundsReachNonFiniteTerminalState(output);
 }
 
 bool RunSeparatorTests(std::ostream& output)

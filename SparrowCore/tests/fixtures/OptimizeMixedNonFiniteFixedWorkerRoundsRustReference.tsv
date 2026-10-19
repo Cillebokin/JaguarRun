@@ -1,0 +1,14 @@
+# generator=Rust Sparrow SeparatorWorker::move_items fixed-round harness using the production OrderedFloat min_by_key worker selection
+# source=RustReference/tests/e5_fixed_nonfinite_worker_round_reference.rs
+# jagua-rs revision=f5e2b5ffd14931f17a20ce283a2122e877953ceb; profile=Release
+# seed=4; strip_width=3.0; 2 overlapping 2x1 rectangles; 3 workers; samples=1/0/1; 450 fixed rounds; no wall-clock cutoff
+# worker rounds execute sequentially from the same master solution/tracker; worker RNGs remain independent, matching the production round data flow
+# fields=round,weighted_key_bits[worker0..2],raw_loss_bits[worker0..2],selected_worker
+round	444	keys	7f6d944f	7f6d944f	7f6d944f	raw	40351328	40351328	40351328	selected	0
+round	445	keys	7f800000	7f800000	7f800000	raw	4046d48a	4046d3d0	40463bae	selected	0
+round	446	keys	7f800000	7f800000	7f800000	raw	4069f6a6	4063cc32	4069c803	selected	0
+round	447	keys	7f800000	7f800000	7f800000	raw	406b6d2d	407c08b1	406c144d	selected	0
+round	448	keys	7f800000	7f800000	7f800000	raw	407f985c	4072a7d4	4072a86e	selected	0
+round	449	keys	ffc00000	ffc00000	ffc00000	raw	4075dc7a	4077d060	40761831	selected	0
+round	450	keys	7f800000	ffc00000	7f800000	raw	4085439a	407a558d	40858d07	selected	0
+terminal	steps	450	loss	4085439a	weighted	7f800000

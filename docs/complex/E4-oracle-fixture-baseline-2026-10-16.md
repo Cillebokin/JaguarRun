@@ -216,6 +216,14 @@ Rust Debug/Release 定向目标均为 `3 passed`，新增用例又在两个 prof
 
 这条真实搜索轨迹在固定几何、seed、worker 数和采样配置下重复稳定；它观察到的是有限 tracker loss，没有在真实搜索中产生第十轮的混合 NaN/Inf worker 结果，因此第十轮仍只是非有限键选择与结果收集边界证据。多 worker 任意调度、其他 worker 数和一般实例矩阵不由此推断。E5 继续部分：Rust Debug 默认自然时限仍未完成 Explore，完整确定性输入矩阵仍待验收。
 
+### E5 第十二轮：固定步数复现真实 worker 的混合 NaN/Inf 聚合（2026-10-19）
+
+新增 Rust `fixed_real_worker_rounds_reproduce_mixed_nonfinite_aggregate` 与 fixture `SparrowCore/Tests/Fixtures/OptimizeMixedNonFiniteFixedWorkerRoundsRustReference.tsv`（SHA-256=`854E7B8493F06774027E39DA7420A666EAE2830538DD9C554DED8A0F91D4022A`）。场景复用 `RustSppCompressWorkerMove.json` 中的 2×1 矩形，设条带宽度 3.0、放置平移 `(1.05,0.55)` 与 `(1.55,0.55)`、3 workers、样本 `1/0/1`、seed=4，执行固定 450 轮。每轮都让三个真实 `SeparatorWorker` 从相同 master solution/tracker 出发执行 `load`/`move_items`，用生产相同的 `OrderedFloat(total_weighted_loss).min_by_key` 顺序选择，再恢复胜者并更新 GLS 权重。为逐轮读取 worker key，测试按顺序驱动彼此独立的 worker RNG；它不调用私有 `move_items_multi` 或 Rayon 调度器，因此结论限于相同 worker 输入和选择规则下的固定轮次轨迹。
+
+Release 测试在同一进程独立运行两条完整 450 轮轨迹并比较 fixture，结果位级一致。第449轮三个键均为 NaN并选 worker 0；第450轮首次出现混合键 `[+Inf, NaN, +Inf]`，实际仍选 worker 0。此轮 worker 1 的 raw loss bits 为 `0x407a558d`，低于胜出的 worker 0 的 `0x4085439a`，但它的加权键是 NaN；轮后 master tracker 的 raw loss 为 `0x4085439a`、加权 loss 为 `+Inf`。Rust 1.98.1 Release 定向测试 `1 passed`，新测试文件的 `rustfmt --check` 通过。
+
+C++ 侧使用相同几何、worker 数和样本预算，由真实生产 `Separator::Run` 执行固定 450 轮。Release 临时聚合点记录在 seed=5 的第448、449轮出现 `[+Inf, NaN, NaN]` 并选 worker 0；第450轮为全 NaN并选 worker 0。该运行完成 450 iterations、1621 moves，终态 raw loss bits=`0x3fad792b`（约 `1.35526025`）、weighted loss 为 NaN。永久 C++ 定向 runner `SparrowCoreTests.exe --e5-fixed-nonfinite-worker-rounds` 两次执行同一 seed，终态和移动数完全一致；临时逐轮打印已撤下，当前 SparrowCore Release 静态库和 runner 均从干净源码重建。C++ seed=4 在相同前450轮内未出现混合键（第445–450轮均为 Inf），所以 Rust/C++ 两条记录是各自找到的确定性复现，不是同 seed 的逐轮差分。证据只覆盖本几何、seed、Release profile 与450轮；默认 Debug 与更广输入矩阵仍待验收，E5 保持部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

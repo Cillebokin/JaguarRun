@@ -15,6 +15,7 @@ bool RunWorkerLossSelectorTests(std::ostream& output);
 bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output);
 bool RunE5SameSeedWorkerTrajectory(std::ostream& output);
 bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output);
+bool RunE5PlacedItemWeightOverflowWithInfiniteBound(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
 bool RunE5NaturalTimeAcceptance(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
@@ -41,6 +42,11 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view{argv[1]} == "--e5-same-seed-worker-trajectory-seed4")
     {
         return RunE5Seed4SameSeedWorkerTrajectory(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2
+        && std::string_view{argv[1]} == "--e5-placed-item-weight-overflow-infinite-bound")
+    {
+        return RunE5PlacedItemWeightOverflowWithInfiniteBound(std::cerr) ? 0 : 1;
     }
     if (argc > 1)
     {

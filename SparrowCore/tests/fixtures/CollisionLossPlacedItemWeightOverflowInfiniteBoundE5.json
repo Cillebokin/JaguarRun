@@ -1,0 +1,24 @@
+{
+  "name": "sparrow-e5-placed-item-weight-overflow-infinite-bound",
+  "items": [
+    {
+      "id": 950,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [4, 0], [4, 4], [0, 4]]
+      }
+    },
+    {
+      "id": 951,
+      "demand": 1,
+      "orientation": {"rotation": {"mode": "discrete", "angles": [0]}},
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [4, 0], [4, 4], [0, 4]]
+      }
+    }
+  ],
+  "strip_height": 8
+}

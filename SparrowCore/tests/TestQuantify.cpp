@@ -1167,6 +1167,114 @@ bool TestCollisionTrackerAndSeparationEvaluator(std::ostream& output)
                   "incremental tracker update must replace the moved handle and clear separated losses");
 }
 
+bool TestPlacedItemWeightOverflowWithInfiniteBound(std::ostream& output)
+{
+    std::ifstream inputFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CollisionLossPlacedItemWeightOverflowInfiniteBoundE5.json",
+             "../SparrowCore/Tests/Fixtures/CollisionLossPlacedItemWeightOverflowInfiniteBoundE5.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CollisionLossPlacedItemWeightOverflowInfiniteBoundE5.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\CollisionLossPlacedItemWeightOverflowInfiniteBoundE5.json"})
+    {
+        inputFile.open(path);
+        if (inputFile.is_open())
+        {
+            break;
+        }
+        inputFile.clear();
+    }
+    if (!Expect(inputFile.is_open(),
+                output,
+                "E5 placed-item overflow fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{std::istreambuf_iterator<char>(inputFile),
+                           std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(json);
+    if (!Expect(instance.HasValue(), output, "E5 fixture import failed"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(), output, "E5 problem creation failed"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue(),
+                output,
+                "E5 strip width setup failed"))
+    {
+        return false;
+    }
+    const jaguar::Transform2d placement =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {2.0, 2.0});
+    const auto firstHandle = problem.PlaceItem({0U, placement});
+    const auto movingHandle = problem.PlaceItem({1U, placement});
+    if (!Expect(firstHandle.HasValue() && movingHandle.HasValue(),
+                output,
+                "E5 overlapping placements must be accepted"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution solution = problem.Save();
+    jaguar::Layout layout(solution.layoutSnapshot.container);
+    if (!Expect(layout.Restore(solution.layoutSnapshot).HasValue(),
+                output,
+                "E5 layout restore failed"))
+    {
+        return false;
+    }
+    auto trackerResult = sparrow::CollisionTracker::Create(layout);
+    if (!Expect(trackerResult.HasValue(), output, "E5 tracker creation failed"))
+    {
+        return false;
+    }
+    sparrow::CollisionTracker tracker = std::move(trackerResult.Value());
+    const float rawLoss = tracker.PairLoss(0U, 1U);
+    if (!Expect(std::isfinite(rawLoss) && rawLoss > 1.0F
+                    && FloatBits(rawLoss) == 0x41ad5b74U,
+                output,
+                "E5 raw placed-item loss must match the fixed finite overflow operand"))
+    {
+        return false;
+    }
+    sparrow::CollisionTrackerSnapshot snapshot = tracker.Save();
+    snapshot.pairMatrix.At(0U, 1U).weight = std::numeric_limits<float>::max();
+    if (!Expect(tracker.Restore(snapshot, layout).HasValue(),
+                output,
+                "E5 maximum finite pair weight must restore"))
+    {
+        return false;
+    }
+    const float weightedLoss = rawLoss * tracker.PairWeight(0U, 1U);
+    if (!Expect(weightedLoss == std::numeric_limits<float>::infinity(),
+                output,
+                "E5 finite raw loss times maximum finite pair weight must overflow"))
+    {
+        return false;
+    }
+
+    sparrow::SeparationEvaluator evaluator(
+        layout, instance.Value().GetItem(1U), movingHandle.Value(), tracker);
+    const sparrow::SampleEval upperBound{
+        sparrow::SampleKind::SAMPLE_KIND_COLLISION,
+        std::numeric_limits<float>::infinity()};
+    const sparrow::SampleEval evaluation = evaluator.Evaluate(placement, upperBound);
+    output << "E5 placed-item overflow: raw_loss_bits=0x" << std::hex
+           << FloatBits(rawLoss) << " pair_weight_bits=0x"
+           << FloatBits(tracker.PairWeight(0U, 1U))
+           << " upper_bound_bits=0x7f800000 result_kind="
+           << static_cast<int>(evaluation.kind) << " result_loss_bits=0x"
+           << FloatBits(evaluation.loss) << std::dec << '\n';
+    return Expect(evaluation.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID
+                      && evaluation.loss == 0.0F,
+                  output,
+                  "C++ must characterize the current non-finite PlacedItem loss as Invalid");
+}
+
 bool TestPairMatrixTrackerRustReference(std::ostream& output)
 {
     std::ifstream referenceFile;
@@ -3572,6 +3680,11 @@ bool TestUnsupportedContainerHazardsMatchRustPanic(std::ostream& output)
 }
 }
 
+bool RunE5PlacedItemWeightOverflowWithInfiniteBound(std::ostream& output)
+{
+    return TestPlacedItemWeightOverflowWithInfiniteBound(output);
+}
+
 bool RunQuantifyTests(std::ostream& output)
 {
     return TestPairMatrix(output)
@@ -3589,6 +3702,7 @@ bool RunQuantifyTests(std::ostream& output)
         && TestSubnormalContainerLossThroughEvaluator(output)
         && TestSubnormalLossThroughSeparationEvaluator(output)
         && TestCollisionTrackerAndSeparationEvaluator(output)
+        && TestPlacedItemWeightOverflowWithInfiniteBound(output)
         && TestPairMatrixTrackerRustReference(output)
         && TestCollisionTrackerMoveRecomputesOnlyOneRow(output)
         && TestExteriorHazardRawLossMatchesRust(output)

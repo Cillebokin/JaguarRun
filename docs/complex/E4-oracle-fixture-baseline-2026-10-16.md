@@ -254,7 +254,15 @@ C++ seed=4回归入口现在验证state 0–448与Rust相同，并锁定state 44
 
 三名worker的前8个 RNG 预览值、shuffle 后候选顺序及候选transform位模式逐项相同。首个评估事件没有消耗新的随机采样：Rust对候选 `PItemKey(2v561)`、transform `(rot=00000000,x=3fff4417,y=3dbae967)` 返回 `Collision`、loss `+Inf`（`0x7f800000`）；C++对应候选/变换返回 `Invalid`、loss `0`（`0x00000000`）。该差异在三个worker中一致，随后Rust每worker移动2次，而C++没有移动。
 
-源代码路径与观测相符：Rust `collision_loss.rs::calc_weighted_loss_bounded` 的非SIMD `PlacedItem` 分支以 `loss <= max_loss` 接受有界结果；未设置有限上界时 `max_loss=+Inf`，所以 `+Inf <= +Inf` 成立并保留该碰撞损失。C++ `CollisionTracker::EvaluateCandidateHazardLoss` 对 `PlacedItem` 的非有限结果返回 `candidate hazard loss is not finite`；只有 `Exterior` 的正无穷有特殊放行。`SeparationEvaluator` 收到该错误后将候选分类为 `Invalid`。因此第449轮的首个内部差异已定位到同候选的非有限碰撞损失处理，不是 RNG、C++线程调度或worker聚合选择。此轮只记录差异，没有修改生产行为；E5仍部分，下一步应以最小成对 evaluator 用例裁决应保持 pinned Rust 行为还是同步修正。
+源代码路径与观测相符：Rust `collision_loss.rs::calc_weighted_loss_bounded` 的非SIMD `PlacedItem` 分支以 `loss <= max_loss` 接受有界结果；未设置有限上界时 `max_loss=+Inf`，所以 `+Inf <= +Inf` 成立并保留该碰撞损失。C++ `CollisionTracker::EvaluateCandidateHazardLoss` 对 `PlacedItem` 的非有限结果返回 `candidate hazard loss is not finite`；只有 `Exterior` 的正无穷有特殊放行。`SeparationEvaluator` 收到该错误后将候选分类为 `Invalid`。因此第449轮的首个内部差异已定位到同候选的非有限碰撞损失处理，不是 RNG、C++线程调度或worker聚合选择。此轮只记录差异，没有修改生产行为；后续用最小成对 evaluator 用例确认，结果见第十七轮。
+
+### E5 第十七轮：最小PlacedItem `+Inf`上界 evaluator 用例（2026-10-19）
+
+新增共享输入 `SparrowCore/Tests/Fixtures/CollisionLossPlacedItemWeightOverflowInfiniteBoundE5.json`（SHA-256=`88F64D07C7101ADA9E113D11549FB864FD0EAFA0868E0ECE6D6FACDA80EEF6BC`）：两个4×4方形置于8×8条带内同一位置，候选与另一个已放置物品重叠且不触碰Exterior。Rust/C++均初始化真实 `CollisionTracker`，将唯一PlacedItem pair weight设为最大有限`f32`=`0x7f7fffff`，并对真实`SeparationEvaluator`显式传入`Collision(+Inf)`上界。原始碰撞损失有限，raw bits=`0x41ad5b74`；乘权重结果为`+Inf`，bits=`0x7f800000`。
+
+新增Rust定向用例 `SparrowCore/Tests/RustReference/tests/e5_placed_item_weight_overflow_infinite_bound_reference.rs::placed_item_weight_overflow_with_infinite_bound_is_collision_in_rust`，以及C++ `TestQuantify.cpp::TestPlacedItemWeightOverflowWithInfiniteBound` / runner参数 `--e5-placed-item-weight-overflow-infinite-bound`。Rust 1.98.1 Debug/Release均为`1 passed`，两侧输出`Collision(+Inf)`；MSVC 14.44 C++ Debug/Release定向runner均退出码0，均输出`Invalid`、loss bits=`0x00000000`。同一结果在Release SparrowCore全量runner中通过；Rust文件`rustfmt --check`通过。C++ Debug全量runner已运行到本用例并打印相同结果，但整套运行超过65秒仍未结束，随后中止；定向Debug runner单独通过。
+
+该最小例确认seed=4第449轮的差异来自候选Evaluator对PlacedItem加权损失溢出的处理，不依赖worker、RNG或并行调度。此轮只加入测试与固定输入，没有修改生产算法。E5仍部分；下一步需裁决C++是否接受无上界下的`+Inf` PlacedItem损失并按pinned Rust分类，或把这种数值状态登记为语义残差。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

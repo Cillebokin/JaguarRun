@@ -360,6 +360,14 @@ Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release各采集445轮、每侧890个
 
 跨语言早期数值差异限于round0–6的部分worker key/raw loss/Tracker，以及round0–10的恢复坐标（最多16个f32 ULP）；从round11起逐轮诊断记录逐位一致。该case证明顶层Compression真实双worker结果收集、混合NaN/Inf选优及恢复路径可达，并不扩展为自然时限或一般输入矩阵等价；诊断埋点已移除，E5仍部分。
 
+### E5 第三十轮：裁决seed10前段worker搜索数值漂移（2026-10-19）
+
+本轮只复核第二十九轮seed10审计表，不增加seed或改变生产代码。最早可观测差异出现在Compression round 0的worker 1搜索结果：Rust weighted key为`0x3fb716c8`，C++ Debug/Release为`0x3fb716c7`；worker 0 key相同，两侧胜者均为worker 1。选中结果的首个placement平移x分别为`0x3f801e2d`与`0x3f801e2c`，raw loss相差1 ULP。该差异出现在worker搜索结果进入聚合选优之前；Rust路径为`SeparatorWorker::move_items → search::search_placement`，C++路径为`SeparatorWorker::MoveItems → FindBestSeparatorMoveImpl/RefineCoordinateDescent`。每侧master恢复均与本侧胜出worker一致，因此不是聚合选择或恢复错误。现有逐轮表不包含搜索内部每个candidate事件，无法据此把漂移归到sampler、refinement或evaluator中的单条算术操作。
+
+round0–10中，worker key最大绝对差为`9.53674316e-7`（最多2 ULP），raw loss最大绝对差为`1.19209290e-7`（最多1 ULP）；selected placement只有首个物品的x不同，最大为16 ULP、`1.19209290e-7`，y与rotation相同。449轮胜者索引全部一致，C++ Debug与Release诊断记录全程一致；round11起Rust Release与C++ Debug/Release的worker key、Tracker、胜者及恢复状态逐位一致。对照第十二节验收口径及`MatchesRustPhaseTrace`实际比较规则，loss容差为`1e-5`、translation容差为`5e-5`、rotation容差为`1e-6`；观测差异均在容差内，离散选优与事件计数无差异。
+
+裁决：将该前段漂移登记为此固定fixture下的有界浮点残差，接受，不修改生产算法、不要求逐位相同；该判断限于seed10、当前几何/worker配置和锁定参考revision。E5仍部分，其他输入与自然时限覆盖不由本裁决替代。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。
@@ -375,3 +383,27 @@ rustup run 1.98.1 cargo test --release --locked --manifest-path SparrowCore/Test
 Debug 与 Release 均为 `1 passed, 0 failed`。测试将运行时 trace 与 `OptimizeColdStartDefaultRustReference.tsv` 的非注释行逐行比较；两种 profile 都匹配全部 33 行。事件行按 UTF-8、LF 和末尾 LF 规范化后的 SHA-256 为 `86A0AE51F180992DDD93C317506BE61069250E88BAC98FCBAB00EAFA6DB279CE`；fixture 文件 SHA-256 为 `ADCCFE002BAD7FEC206A6057BD400BAF68079361C60CEE1E5A1F803576402B73`。compression 汇总为 647 次 progress callback，首末 iteration 为 0/646，分离结果为 403489 eval、2343 moves、646 iterations。
 
 随后用 Qt 6.5.3 `msvc2019_64` qmake Makefile、Visual Studio 2022 MSVC x64 toolset 14.44.35207 重建并运行 `SparrowCoreTests.exe` Debug 与 Release 全套 runner，两者均退出码 0。该 runner 包含 `TestDefaultColdStartOptimizeMatchesRustReference`。Release runner 输出的四行 evaluator bit 诊断属于其他测试的正常输出；构建有既存的 C4189 未引用局部变量警告，不影响成功状态。
+
+## E5验收清账与退出裁决（2026-10-19）
+
+### 退出结论
+
+E5维持“部分”，本轮不能标记完成。清账依据为总清单第十二节的离散量与浮点量比较标准、第十三节的Debug/Release端到端要求，以及`SparrowCore/Docs/Differential.md`中仍标为开放的自然时限和输入域事项。第三十轮确认的seed10前段残差在已登记容差内，不构成退出阻塞；以下未闭合项仍构成阻塞。
+
+### 验收矩阵
+
+| 验收面 | 判定 | 已有证据及适用范围 |
+|---|---|---|
+| 固定步数/共享测试时钟下的顶层`optimize → compress`状态比较 | 局部通过，跨profile未闭合 | partial warm-start、worker实际移动、TimeBased共享时钟等fixture已比较placed/remaining身份、feasibility、transform、width、density、loss、阶段/停止信息；这些既有用例有Debug/Release证据。seed4与seed10双worker顶层trace则是Rust Release对C++ Debug/Release；非有限状态下的Rust Debug对应真实搜索轨迹未完成。超出已列输入、seed和配置的确定性矩阵尚未核验。 |
+| `PlacedItem +Inf` evaluator及Compression可达路径 | 目标边界已覆盖，跨profile未闭合 | 第十七至二十二轮记录了成对evaluator差异收敛及顶层Compression的`+Inf/+Inf`实际命中。直接evaluator用例覆盖Rust Debug/Release和C++ Debug/Release；顶层Compression命中证据是Rust Release与C++ Debug/Release，Rust Debug在进入该阶段前触发`∞ > NaN`断言。 |
+| 双worker非有限key选优、胜者恢复及Round30数值容差 | seed10固定fixture通过 | 本轮重新核对Round29逐轮表：449数据行、34列；449轮胜者一致，C++ Debug/Release诊断一致，Round11起Rust Release与C++ Debug/Release状态一致，4轮出现非有限key。Round0–10最大差异为key 2 ULP、raw loss 1 ULP、首个placement平移x 16 ULP，均低于loss `1e-5`、translation `5e-5`容差。fixture SHA-256=`6C0972A4AE8FC9BBD8D05B3C6E4D6413A7655E9D50225BDF6A22EB4C6B428C36`；逐轮表SHA-256=`341CF091A165EFA4BF8B9F06C191F93BDD71A4A580FC130ECF93D71C5F71AAA1`。 |
+| 默认自然时限的端到端验收 | 部分 | 已记录的C++ Debug/Release与Rust Release均到达默认Explore/Compression时限并返回可行终态；同一fixture的Rust Debug约3.95秒触发`∞ > NaN`断言，未完成阶段。故不满足总清单第十三节的Rust/C++ Debug与Release端到端完成要求。 |
+| 自然时限资源边界与确定性输入域矩阵 | 未闭合 | 当前文档只有个别运行的线程数/内存采样，没有登记资源上限；`Differential.md`也明确记载完整确定性输入矩阵尚未完成，且没有列出可核验的矩阵分母。 |
+
+### 本轮核验边界
+
+本轮没有重跑构建或测试；上表中的运行结果沿用E4与差分文档已有执行记录。新核验只检查Round29逐轮表的结构、计数、跨profile/跨语言一致性指标与fixture哈希。终止判定不外推到未列输入、其他平台或未锁定revision。
+
+### 退出条件
+
+关闭E5前仍需按D1明确Rust Debug默认自然时限与非有限双worker顶层路径的处置并补齐对应profile证据，明确自然时限资源边界，并把待覆盖的确定性输入矩阵列出范围与分母后逐项清账。在这些条件满足前，保留E5“部分”状态；本裁决不要求继续扫描seed。

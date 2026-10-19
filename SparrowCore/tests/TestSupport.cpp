@@ -16,6 +16,8 @@ bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output);
 bool RunE5SameSeedWorkerTrajectory(std::ostream& output);
 bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output);
 bool RunE5Seed4TopLevelOptimizeCompress(std::ostream& output);
+bool RunE5Seed4TopLevelTwoWorkerCompression(std::ostream& output);
+bool RunE5Seed10TopLevelTwoWorkerCompression(std::ostream& output);
 bool RunE5PlacedItemWeightOverflowWithInfiniteBound(std::ostream& output);
 bool RunE5Round24PairedWorkerSelection(std::ostream& output);
 bool RunE5Round26PairedWorkerSearch(std::ostream& output);
@@ -49,6 +51,16 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view{argv[1]} == "--e5-seed4-top-level-optimize-compress")
     {
         return RunE5Seed4TopLevelOptimizeCompress(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2
+        && std::string_view{argv[1]} == "--e5-seed4-top-level-two-worker-compression")
+    {
+        return RunE5Seed4TopLevelTwoWorkerCompression(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2
+        && std::string_view{argv[1]} == "--e5-seed10-top-level-two-worker-compression")
+    {
+        return RunE5Seed10TopLevelTwoWorkerCompression(std::cerr) ? 0 : 1;
     }
     if (argc == 2
         && std::string_view{argv[1]} == "--e5-placed-item-weight-overflow-infinite-bound")

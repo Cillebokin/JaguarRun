@@ -21,6 +21,12 @@ use std::time::Duration;
 #[cfg(not(debug_assertions))]
 const REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv");
+#[cfg(not(debug_assertions))]
+const TWO_WORKER_COMPRESSION_REFERENCE: &str =
+    include_str!("../../Fixtures/OptimizeSeed4TopLevelTwoWorkerCompressionE5Reference.tsv");
+#[cfg(not(debug_assertions))]
+const SEED10_TWO_WORKER_COMPRESSION_REFERENCE: &str =
+    include_str!("../../Fixtures/OptimizeSeed10TopLevelTwoWorkerCompressionE5Reference.tsv");
 const EXPLORE_NO_IMPROVEMENT_LIMIT: usize = 451;
 const COMPRESSION_NO_IMPROVEMENT_LIMIT: usize = 219;
 
@@ -28,7 +34,6 @@ const COMPRESSION_NO_IMPROVEMENT_LIMIT: usize = 219;
 struct PhaseTerminator {
     stop: Arc<AtomicBool>,
 }
-
 impl Terminator for PhaseTerminator {
     fn kill(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
@@ -213,7 +218,10 @@ fn append_terminal_rows(
     }
 }
 
-fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
+fn run_top_level_trace(
+    seed: u64,
+    compression_worker_count: usize,
+) -> (Vec<String>, RecordingListener, bool) {
     let (external, _) =
         sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppCompressWorkerMove.json"))
             .expect("read seed4 top-level fixture");
@@ -252,7 +260,7 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
     config.cmpr_cfg.shrink_range = (0.03, 0.01);
     config.cmpr_cfg.shrink_decay = ShrinkDecayStrategy::FailureBased(0.5);
     config.cmpr_cfg.time_limit = Duration::from_secs(3600);
-    config.cmpr_cfg.separator_config.n_workers = 1;
+    config.cmpr_cfg.separator_config.n_workers = compression_worker_count;
     config.cmpr_cfg.separator_config.strike_limit = 1;
     config.cmpr_cfg.separator_config.iter_no_imprv_limit = COMPRESSION_NO_IMPROVEMENT_LIMIT;
     config.cmpr_cfg.separator_config.sample_config = sparrow::sample::search::SampleConfig {
@@ -270,14 +278,14 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
         ..RecordingListener::default()
     };
     listener.trace.push(format!(
-        "config\tparameters\t4\t{:.9}\t1\t1\t0\t1\t{EXPLORE_NO_IMPROVEMENT_LIMIT}\t1\t{COMPRESSION_NO_IMPROVEMENT_LIMIT}",
+        "config\tparameters\t{seed}\t{:.9}\t1\t1\t0\t1\t{EXPLORE_NO_IMPROVEMENT_LIMIT}\t{compression_worker_count}\t{COMPRESSION_NO_IMPROVEMENT_LIMIT}",
         warm_start.strip_width(),
     ));
     append_solution_rows(&mut listener.trace, "initial", &warm_start);
 
     let solution = optimize(
         instance.clone(),
-        Xoshiro256PlusPlus::seed_from_u64(4),
+        Xoshiro256PlusPlus::seed_from_u64(seed),
         &mut listener,
         &mut terminator,
         &config.expl_cfg,
@@ -285,7 +293,7 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
         Some(&warm_start),
     )
     .expect("run seed4 top-level optimize->compress");
-    append_terminal_rows(&mut listener.trace, 4, &instance, &solution);
+    append_terminal_rows(&mut listener.trace, seed, &instance, &solution);
     let stopped_at_fixed_boundaries = listener.exploration_stopped
         && listener.compression_stopped
         && listener.separation_results.len() == 2
@@ -301,7 +309,7 @@ fn run_top_level_seed4_trace() -> (Vec<String>, RecordingListener, bool) {
 #[cfg(not(debug_assertions))]
 #[test]
 fn seed4_top_level_optimize_compress_matches_reference() {
-    let (actual, listener, stopped_at_fixed_boundaries) = run_top_level_seed4_trace();
+    let (actual, listener, stopped_at_fixed_boundaries) = run_top_level_trace(4, 1);
     if std::env::var_os("SPARROW_PRINT_E5_SEED4_TOP_LEVEL_REFERENCE").is_some() {
         for row in &actual {
             println!("E5TRACE\t{row}");
@@ -332,12 +340,73 @@ fn seed4_top_level_optimize_compress_matches_reference() {
     );
 }
 
+#[cfg(not(debug_assertions))]
+#[test]
+fn seed4_top_level_two_worker_compression_matches_reference() {
+    let (actual, listener, stopped_at_fixed_boundaries) = run_top_level_trace(4, 2);
+    if std::env::var_os("SPARROW_PRINT_E5_SEED4_TWO_WORKER_COMPRESSION_REFERENCE").is_some() {
+        for row in &actual {
+            println!("E5TRACE\t{row}");
+        }
+        return;
+    }
+
+    let expected = TWO_WORKER_COMPRESSION_REFERENCE
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        actual.join("\n"),
+        expected,
+        "seed4 top-level two-worker Compression trace changed"
+    );
+    assert!(stopped_at_fixed_boundaries);
+    assert_eq!(listener.phase, Some("compression"));
+    assert_eq!(
+        (
+            listener.separation_results[1].iterations,
+            listener.separation_results[1].total_evals,
+            listener.separation_results[1].total_moves,
+        ),
+        (445, 50_550, 1_077),
+        "seed4 two-worker Compression must match the locked phase result"
+    );
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn seed10_top_level_two_worker_compression_matches_reference() {
+    let (actual, listener, stopped_at_fixed_boundaries) = run_top_level_trace(10, 2);
+    let expected = SEED10_TWO_WORKER_COMPRESSION_REFERENCE
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        actual.join("\n"),
+        expected,
+        "seed10 top-level two-worker Compression trace changed"
+    );
+    assert!(stopped_at_fixed_boundaries);
+    assert_eq!(listener.phase, Some("compression"));
+    assert_eq!(
+        (
+            listener.separation_results[1].iterations,
+            listener.separation_results[1].total_evals,
+            listener.separation_results[1].total_moves,
+        ),
+        (449, 51_094, 1_078),
+        "seed10 top-level two-worker Compression must reach the locked non-finite selection fixture"
+    );
+}
+
 #[cfg(debug_assertions)]
 #[test]
 fn seed4_top_level_debug_retains_known_gls_nonfinite_assertion() {
     use std::panic::AssertUnwindSafe;
 
-    let panic = match std::panic::catch_unwind(AssertUnwindSafe(|| run_top_level_seed4_trace())) {
+    let panic = match std::panic::catch_unwind(AssertUnwindSafe(|| run_top_level_trace(4, 1))) {
         Ok(_) => panic!("this pinned Debug scenario must hit the GLS assertion"),
         Err(payload) => payload,
     };

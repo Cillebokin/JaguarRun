@@ -3801,8 +3801,15 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
         "top-level optimize worker-move compression trace must match Rust");
 }
 
-bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
-    std::ostream& output)
+bool TestTopLevelSeedOptimizeCompressMatchesRustReference(
+    std::ostream& output,
+    std::uint64_t seed,
+    std::size_t compressionWorkerCount,
+    const std::string& referenceFixture,
+    const char* tracePrintEnvironment,
+    std::size_t expectedCompressionIterations,
+    std::size_t expectedCompressionEvaluations,
+    std::size_t expectedCompressionMoves)
 {
     const std::array<std::string, 4U> instancePaths{
         "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
@@ -3819,7 +3826,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     }
     if (!Expect(instanceFile.is_open(),
                 output,
-                "seed4 top-level E5 input must be readable"))
+                "top-level E5 input must be readable"))
     {
         return false;
     }
@@ -3862,7 +3869,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     const jaguar::SPSolution initialSolution = warmProblem.Save();
 
     sparrow::SparrowConfig config;
-    config.seed = 4U;
+    config.seed = seed;
     config.warmStart = initialSolution;
     config.exploration.timeLimit = std::chrono::hours{1};
     config.exploration.separator.nWorkers = 1U;
@@ -3878,7 +3885,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     config.compression.failureDecay = 0.5;
     config.compression.timeLimit = std::chrono::hours{1};
     config.compression.maxIterations = 1U;
-    config.compression.separator.nWorkers = 1U;
+    config.compression.separator.nWorkers = compressionWorkerCount;
     config.compression.separator.strikeLimit = 1U;
     config.compression.separator.noImprovementLimit = 219U;
     config.compression.separator.nContainerSamples = 1U;
@@ -3892,7 +3899,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     listener.events.push_back({
         "config",
         "parameters",
-        {4.0,
+        {static_cast<double>(seed),
          initialSolution.StripWidth(),
          static_cast<double>(config.exploration.separator.nWorkers),
          static_cast<double>(config.exploration.separator.nContainerSamples),
@@ -3951,7 +3958,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     listener.events.push_back({
         "terminal",
         "state",
-        {4.0,
+        {static_cast<double>(seed),
          static_cast<double>(finalProblem.PlacedItemCount()),
          static_cast<double>(remainingDemand),
          finalSolution.StripWidth(),
@@ -4006,16 +4013,18 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
                << '\n';
         return false;
     }
-    if (!Expect(listener.separationResults[1U].iterations == 447U
-                    && listener.separationResults[1U].totalEvaluations == 25928U
-                    && listener.separationResults[1U].totalMoves == 545U,
+    if (!Expect(listener.separationResults[1U].iterations
+                        == expectedCompressionIterations
+                    && listener.separationResults[1U].totalEvaluations
+                        == expectedCompressionEvaluations
+                    && listener.separationResults[1U].totalMoves
+                        == expectedCompressionMoves,
                 output,
-                "seed4 top-level E5 Compression trace must reach its locked 447-round boundary"))
+                "seed4 top-level E5 Compression statistics must match the locked worker-count fixture"))
     {
         return false;
     }
-    if (std::getenv("SPARROW_PRINT_E5_SEED4_TOP_LEVEL_CPP_REFERENCE")
-        != nullptr)
+    if (std::getenv(tracePrintEnvironment) != nullptr)
     {
         for (const ColdStartTraceEvent& event : listener.events)
         {
@@ -4029,7 +4038,7 @@ bool TestTopLevelSeed4OptimizeCompressMatchesRustReference(
     }
     return MatchesRustPhaseTrace(
         listener.events,
-        "OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv",
+        referenceFixture.c_str(),
         output,
         "seed4 top-level optimize -> compress trace must match Rust Release reference");
 }
@@ -11244,7 +11253,41 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
 
 bool RunE5Seed4TopLevelOptimizeCompress(std::ostream& output)
 {
-    return TestTopLevelSeed4OptimizeCompressMatchesRustReference(output);
+    return TestTopLevelSeedOptimizeCompressMatchesRustReference(
+        output,
+        4U,
+        1U,
+        "OptimizeSeed4TopLevelOptimizeCompressE5Reference.tsv",
+        "SPARROW_PRINT_E5_SEED4_TOP_LEVEL_CPP_REFERENCE",
+        447U,
+        25928U,
+        545U);
+}
+
+bool RunE5Seed4TopLevelTwoWorkerCompression(std::ostream& output)
+{
+    return TestTopLevelSeedOptimizeCompressMatchesRustReference(
+        output,
+        4U,
+        2U,
+        "OptimizeSeed4TopLevelTwoWorkerCompressionE5Reference.tsv",
+        "SPARROW_PRINT_E5_SEED4_TWO_WORKER_COMPRESSION_CPP_REFERENCE",
+        445U,
+        50550U,
+        1077U);
+}
+
+bool RunE5Seed10TopLevelTwoWorkerCompression(std::ostream& output)
+{
+    return TestTopLevelSeedOptimizeCompressMatchesRustReference(
+        output,
+        10U,
+        2U,
+        "OptimizeSeed10TopLevelTwoWorkerCompressionE5Reference.tsv",
+        "SPARROW_PRINT_E5_SEED10_TWO_WORKER_COMPRESSION_CPP_REFERENCE",
+        449U,
+        51094U,
+        1078U);
 }
 
 bool RunImmediateStopOptimizeConsoleProbe(
@@ -11256,7 +11299,9 @@ bool RunImmediateStopOptimizeConsoleProbe(
 
 bool RunExplorationTests(std::ostream& output)
 {
-    if (!TestTopLevelSeed4OptimizeCompressMatchesRustReference(output))
+    if (!RunE5Seed4TopLevelOptimizeCompress(output)
+        || !RunE5Seed4TopLevelTwoWorkerCompression(output)
+        || !RunE5Seed10TopLevelTwoWorkerCompression(output))
     {
         return false;
     }

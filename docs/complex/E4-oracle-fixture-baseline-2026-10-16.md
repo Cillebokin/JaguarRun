@@ -338,6 +338,28 @@ Rust Release定向trace测试`1 passed`，C++ Release定向runner退出码0。�
 
 Rust 1.98.1 Release定向用例通过，Rust Debug因锁定轨迹会触发既有`∞ > NaN`断言而标记为ignored；C++ MSVC 14.44 Debug/Release定向runner均退出码0。该用例把Round24的固定结果payload选择测试升级为确定起始状态上的真实搜索结果回归，但仍只覆盖seed=4、该fixture、固定轮数和此worker配置；不代表自然时限或一般输入的多worker等价，E5仍部分。
 
+### E5 第二十七轮：Compression 起点即双 worker 的顶层固定步数对拍（2026-10-19）
+
+新增Rust用例`optimizer_seed4_top_level_e5_reference.rs::seed4_top_level_two_worker_compression_matches_reference`、C++复用顶层对拍器`TestTopLevelSeedOptimizeCompressMatchesRustReference`，并注册runner参数`--e5-seed4-top-level-two-worker-compression`。该用例沿用seed=4、宽度3.0和两个重叠的2×1 warm-start item；Explore使用1个worker，Compression从阶段起点就配置2个worker，样本配置为1/0/1，Compression `noImprovementLimit=219`。相比第二十六轮从锁定checkpoint开始的单轮双worker搜索，本轮在顶层`Optimize`中完整运行Explore和Compression阶段，不在Compression中途插入第二个worker。
+
+新增fixture`SparrowCore/Tests/Fixtures/OptimizeSeed4TopLevelTwoWorkerCompressionE5Reference.tsv`，SHA-256=`698BBB40717999F3B9F1B4149B3AB8A7775C8574F5A0A4C0F60C7685F40E7AFE`，共2333行。Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release的顶层trace逐行匹配：Explore为910轮、44290次评估、1020次移动；双worker Compression为445轮、50550次评估、1077次移动。受控阶段边界停止时Compression未成功，最终返回可恢复但不可行的状态：placed=2、remaining=0、width=3.0、density=0.888888896、raw loss=2.362450600。该结果是固定seed、几何与阶段配置下的顶层双worker差分证据，不是自然deadline验收，也没有独立记录本轮的PlacedItem `+Inf/+Inf` evaluator命中；E5仍部分。
+
+### E5 第二十八轮：逐轮核对双worker选优与恢复状态（2026-10-19）
+
+为确认第二十七轮的顶层双worker Compression是否经过目标非有限值选优路径，本轮临时记录每个Compression轮次的两个worker加权key、solution与Tracker快照、胜者索引及恢复后的master状态。逐轮数据保存在[审计表](E5-Seed4-TwoWorker-Compression-Worker-Rounds-2026-10-19.tsv)，共445条数据行，SHA-256=`1A96AAE953CD29CA149C0150DDEB9B3ABC305582BEBF1EFDE767FBCD59E35202`。探针仅用于本轮采集，已从Rust与C++源码移除。
+
+Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release各采集445轮、每侧890个worker key。所有key及每轮Tracker快照中的loss/weight条目均为有限值，没有NaN、`+Inf`或`-Inf`；最大key为`0x7f03bc9f`（第440轮worker 1，约`1.75108e38`，仍低于float上限）。三侧胜者索引逐轮一致：worker 0胜314轮、worker 1胜131轮；175轮key相等，均稳定选择首项worker 0。每轮恢复后的solution和Tracker都与胜出worker一致；Rust与C++胜出solution数值及Tracker条目在445轮全部一致，C++ Debug/Release记录也逐轮一致。
+
+唯一Rust/C++未胜出候选差异发生在第0轮worker 0：key分别为`0x3fb6dc6e`与`0x3fb6dc6f`，对应一处pair loss相差1 ULP，solution坐标相差1至2 ULP；该轮两侧均选择worker 1，其胜出状态一致，后续worker状态也一致。因此，本轮确实验证了顶层真实双worker收集、有限key排序与恢复，但没有经过目标非有限worker key选优路径。此结论针对worker聚合结果，不排除搜索内部计算过未进入聚合结果的非有限候选；本轮没有单独采集候选evaluator事件。干净源码下Rust Release定向测试、Rust格式检查及C++ MSVC Debug/Release定向runner均通过；E5仍部分。
+
+### E5 第二十九轮：seed10顶层双worker Compression命中混合非有限key（2026-10-19）
+
+沿用第二十七轮的几何、宽度和样本配置，只将顶层seed改为10；Explore仍为1个worker，Compression从起点使用2个worker，`noImprovementLimit=219`。新增正式顶层trace fixture `SparrowCore/Tests/Fixtures/OptimizeSeed10TopLevelTwoWorkerCompressionE5Reference.tsv`，SHA-256=`6C0972A4AE8FC9BBD8D05B3C6E4D6413A7655E9D50225BDF6A22EB4C6B428C36`，共2359行；Rust 1.98.1 Release与C++ MSVC 14.44 Debug/Release定向用例均通过。Explore为912轮/45134次评估/1034次移动；双worker Compression为449轮/51094次评估/1078次移动，阶段边界停止后返回与seed4相同的可恢复不可行终态。
+
+临时生产路径诊断逐轮记录449组worker key、胜者、master恢复solution与Tracker，审计表见[E5逐轮审计表](E5-Seed10-TwoWorker-Compression-Worker-Rounds-2026-10-19.tsv)，SHA-256=`341CF091A165EFA4BF8B9F06C191F93BDD71A4A580FC130ECF93D71C5F71AAA1`。第445、446轮为`[+Inf,+Inf]`并稳定选择worker 0；第447轮为`[NaN,+Inf]`并选择worker 1；第448轮为`[+Inf,NaN]`并选择worker 0。Rust Release、C++ Debug与Release的449轮胜者索引全部一致，每轮master恢复的solution和Tracker均与所选worker一致；四个非有限key轮次的key位模式、胜者、solution及Tracker跨三侧逐位相同，C++ Debug与Release的全轮诊断记录一致。
+
+跨语言早期数值差异限于round0–6的部分worker key/raw loss/Tracker，以及round0–10的恢复坐标（最多16个f32 ULP）；从round11起逐轮诊断记录逐位一致。该case证明顶层Compression真实双worker结果收集、混合NaN/Inf选优及恢复路径可达，并不扩展为自然时限或一般输入矩阵等价；诊断埋点已移除，E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

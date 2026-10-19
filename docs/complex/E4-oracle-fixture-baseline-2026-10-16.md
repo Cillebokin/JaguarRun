@@ -170,7 +170,30 @@ rustup run 1.98.1 cargo run --quiet --release --locked --manifest-path JaguarCor
 
 Release 聚合点记录的首 12 个含 NaN 的轮次中，三个 worker 的 weighted-loss 总值均为 NaN。Rust `OrderedFloat` 将 NaN 排在有限数之后、多个 NaN 互相相等；该轮三者皆 NaN 时 `min_by_key` 保留索引 0。比如轮次 0 的 unweighted total collision loss 为 `[0.2639946, 0.2639217, 0.26390663]`，轮次 1 为 `[0.16895582, 0.10878802, 0.110008456]`，但两轮均选择索引 0。因此 Release 中断言消失并未消除 NaN；NaN 键会遮蔽 worker 间的加权排序，并在本输入上使较低原始 collision loss 的候选被丢弃。
 
-C++ `Separator.cpp` 的 worker 聚合现通过内部 `WorkerLossSelector` 实现 Rust `OrderedFloat` 的 NaN 排序：有限键小于 NaN，多个 NaN 相等并保留先到者。新增 RustReference 测试 `worker_loss_nan_order_reference.rs` 与 C++ `TestWorkerLossSelectorNaNOrdering`，对 `[NaN,4,2,NaN]`、`[4,NaN]`、`[NaN,NaN]` 都选择索引 `2/0/0`；旧 C++ 普通 `<` 的首个混合用例先失败，修正后通过。Rust 1.98.1 Debug/Release oracle 与 MSVC 2019 C++ Release 定向测试、全量 runner 均通过。此受控序列证明比较规则对齐，不证明自然运行中已观测到混合 worker 键。裁决为保留 pinned Rust 行为并把 C++ 选择器同步到其排序语义；不改 Rust oracle，也不对任一侧增加权重饱和，因此 Debug `∞ > NaN` 断言缺陷和 Release 全 NaN 候选选择退化仍按 pinned 现状记录。该短时诊断及合成选择器用例都不替代完整 E5 验收；E5 仍部分，完整确定性输入矩阵及 Rust Debug 自然时限完成证据尚缺。
+C++ `Separator.cpp` 的 worker 聚合现通过内部 `WorkerLossSelector` 实现 Rust `OrderedFloat` 的 NaN 排序：有限键小于 NaN，多个 NaN 相等并保留先到者。新增 RustReference 测试 `worker_loss_nan_order_reference.rs` 与 C++ `TestWorkerLossSelectorNaNOrdering`，对 `[NaN,4,2,NaN]`、`[4,NaN]`、`[NaN,NaN]` 都选择索引 `2/0/0`；旧 C++ 普通 `<` 的首个混合用例先失败，修正后通过。Rust 1.98.1 Debug/Release oracle 与 MSVC 2019 C++ Release 定向测试、全量 runner 均通过。此受控序列证明比较规则对齐；Rust Release 短时生产路径的混合键观察见第八轮记录，C++ 第七轮未观察到该类状态。裁决为保留 pinned Rust 行为并把 C++ 选择器同步到其排序语义；不改 Rust oracle，也不对任一侧增加权重饱和，因此 Debug `∞ > NaN` 断言缺陷和 Release 全 NaN 候选选择退化仍按 pinned 现状记录。该短时诊断及合成选择器用例都不替代完整 E5 验收；E5 仍部分，完整确定性输入矩阵及 Rust Debug 自然时限完成证据尚缺。
+
+### E5 第七轮：C++ Release 真实 worker 聚合（2026-10-19）
+
+复用 E4 锁定的 `RustSppCompressWorkerMove.json`、seed=42、width=4.2 双矩形可行 warm-start 和默认 3 workers，在 MSVC 2019 C++ Release 上运行真实顶层 `Optimize → Compress`。使用真实单调时钟，将 Explore/Compression 预算分别缩为 20 秒/2 秒；这是短时聚合观测，不是默认 9 分钟/60 秒自然时限验收。第二次完整采样耗时 22007 ms，Explore/Compression 分别产生 63/5 个 separation result，最终状态 feasible，strip width 为 `4.0002169609069824`。
+
+临时观测点位于生产 `Separator::Run` 的 worker-result 聚合处，逐轮记录三个 worker 的 `TotalWeightedLoss`、`TotalLoss` 与实际选中索引。Explore 共 8099 轮：5901 轮全为有限键、2198 轮 3/3 为 NaN；Compression 共 757 轮：592 轮全为有限键、165 轮 3/3 为 NaN。合计 8856 轮中，混合 NaN/非 NaN 键为 0，包含 Inf 且不含 NaN 的轮次为 0。NaN 示例与 Rust Release 对应值一致：某次 Explore `Separator::Run` 的第 448 轮 raw loss 为 `[0.263994604, 0.263921708, 0.263906628]`，轮次 449 为 `[0.168955818, 0.108788021, 0.110008456]`；两轮 weighted key 均为 `[NaN, NaN, NaN]`，选择器都选 worker 0，尽管 worker 2、worker 1 各自 raw loss 更低。
+
+这证明在该固定 fixture、seed、三 worker 和短时 Release profile 下，C++ 生产聚合确实会出现全 NaN 组并产生同样的候选选择退化；本次没有观察到混合 NaN/有限键，不能外推为所有输入或默认自然预算都不会出现混合。临时环境变量追踪、短预算入口和日志已移除；永久保留的是此前与 pinned Rust 一致的 `WorkerLossSelector` 及其受控键序列回归。E5 仍部分：Rust Debug 默认自然时限会提前断言失败，完整确定性输入矩阵仍未完成。
+
+### E5 第八轮：Rust Release 真实 worker 聚合与 C++ 并列复核（2026-10-19）
+
+使用 Rust 1.98.1、Cargo.lock 锁定的 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`，以及同一 `RustSppCompressWorkerMove.json`、seed=42、width=4.2 双矩形可行 warm-start 和默认 3 workers。以真实单调时钟执行顶层 `optimize → compress`，Explore/Compression 预算为 20秒/2秒；Rust Release 测试通过，运行 22014 ms，阶段 separation result 为 262/30，最终布局 feasible，width `4.000037`、density `0.6666605`。临时观测点位于生产 `move_items_multi` 的 `OrderedFloat::min_by_key` 选取之后，统计该次运行所有 worker 聚合轮次，并记录 weighted/raw loss 与实际选中索引的代表样本。
+
+| 阶段 | 实现 | 聚合轮数 | 全有限键 | 全 NaN 键 | 混合 NaN/非 NaN | 有 Inf 且无 NaN | Separation result |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Explore | C++ MSVC 2019 Release | 8099 | 5901 | 2198 | 0 | 0 | 63 |
+| Explore | Rust 1.98.1 Release | 128066 | 95272 | 32752 | 34 | 8 | 262 |
+| Compression | C++ MSVC 2019 Release | 757 | 592 | 165 | 0 | 0 | 5 |
+| Compression | Rust 1.98.1 Release | 17268 | 12520 | 4725 | 15 | 8 | 30 |
+
+Rust 示例与 C++ 第七轮数值相合：Rust 的 NaN 聚合轮次 447（该 `separate` 调用内零基编号）中 weighted keys 为 `[NaN, NaN, NaN]`，raw loss 为 `[0.2639946, 0.2639217, 0.26390663]`，实际选择 worker 0，尽管 worker 2 的 raw loss 更低；下一轮 raw loss `[0.16895582, 0.10878802, 0.110008456]` 也仍选择 worker 0。Rust 另外观测到混合键，例如 `[Inf, NaN, NaN]` 选择索引 0，以及 `[NaN, Inf, NaN]` 选择索引 1，与 `OrderedFloat` 把 NaN 排在 Inf 之后的规则相符。此处混合计数包含 NaN 与任一非 NaN 值（包括 Inf）；“有 Inf 且无 NaN”另行统计。
+
+两侧都确认全 NaN 组会令原始 loss 更低的 worker 落选；受控选择器排序保持一致。Rust 两阶段合计 145334 轮：107792 全有限、37477 全 NaN、49 混合 NaN/非 NaN、16 轮含 Inf 且无 NaN。Rust 本次在短预算中观察到 49 轮混合键和 16 轮含 Inf 且无 NaN，C++ 第七轮的 8856 轮样本中两类均为零。相同墙钟预算下，Rust 完成的聚合轮数明显更多；Rust 使用持续的 Rayon 线程池，C++ 每轮通过 `std::async` 派发 worker，但本轮没有隔离性能成因。自然时限计数受运行时吞吐和执行轨迹影响，不能视为固定步数差分。此次计数仅适用于所列 fixture、seed、Release profile 与短预算；Debug 默认自然时限仍会提前触发已记录的断言，E5 的更广确定性输入矩阵仍待验收。短预算入口、环境变量追踪和逐轮日志已从 Rust 源码与测试移除。
 
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 

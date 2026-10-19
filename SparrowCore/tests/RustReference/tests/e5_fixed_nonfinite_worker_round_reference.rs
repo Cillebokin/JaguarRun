@@ -10,6 +10,7 @@ use sparrow::optimizer::separator::Separator;
 use sparrow::sample::search::SampleConfig;
 use std::path::Path;
 
+#[cfg(not(debug_assertions))]
 const REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeMixedNonFiniteFixedWorkerRoundsRustReference.tsv");
 
@@ -104,6 +105,7 @@ fn run_fixed_real_worker_rounds() -> Vec<String> {
     trace
 }
 
+#[cfg(not(debug_assertions))]
 #[test]
 fn fixed_real_worker_rounds_reproduce_mixed_nonfinite_aggregate() {
     let first = run_fixed_real_worker_rounds();
@@ -121,5 +123,21 @@ fn fixed_real_worker_rounds_reproduce_mixed_nonfinite_aggregate() {
         first.join("\n"),
         expected,
         "fixed worker-round trace changed"
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn fixed_real_worker_rounds_retain_known_gls_nonfinite_assertion() {
+    let panic = std::panic::catch_unwind(run_fixed_real_worker_rounds)
+        .expect_err("Debug worker rounds should retain the pinned GLS assertion");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("weighted loss should never increase"),
+        "unexpected Debug assertion: {message}"
     );
 }

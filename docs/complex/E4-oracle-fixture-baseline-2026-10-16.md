@@ -386,24 +386,125 @@ Debug 与 Release 均为 `1 passed, 0 failed`。测试将运行时 trace 与 `Op
 
 ## E5验收清账与退出裁决（2026-10-19）
 
-### 退出结论
+> 状态说明：本节Round31至Round33内容保留为当时快照；其“E5仍部分”结论由文末Round34退出裁决更新。Round34只关闭明确列出的E5矩阵清账，不宣称所有矩阵格等价通过或全项目移植完成。
+
+### Round31初始退出结论（历史快照）
 
 E5维持“部分”，本轮不能标记完成。清账依据为总清单第十二节的离散量与浮点量比较标准、第十三节的Debug/Release端到端要求，以及`SparrowCore/Docs/Differential.md`中仍标为开放的自然时限和输入域事项。第三十轮确认的seed10前段残差在已登记容差内，不构成退出阻塞；以下未闭合项仍构成阻塞。
 
-### 验收矩阵
+状态更新说明：下方Round32矩阵保留为历史快照；Round33补充的全量门禁和profile专项结果更新了其中若干“未记录”格；当前退出状态以文末Round34裁决为准。
+
+### Round31验收矩阵（历史快照）
 
 | 验收面 | 判定 | 已有证据及适用范围 |
 |---|---|---|
-| 固定步数/共享测试时钟下的顶层`optimize → compress`状态比较 | 局部通过，跨profile未闭合 | partial warm-start、worker实际移动、TimeBased共享时钟等fixture已比较placed/remaining身份、feasibility、transform、width、density、loss、阶段/停止信息；这些既有用例有Debug/Release证据。seed4与seed10双worker顶层trace则是Rust Release对C++ Debug/Release；非有限状态下的Rust Debug对应真实搜索轨迹未完成。超出已列输入、seed和配置的确定性矩阵尚未核验。 |
-| `PlacedItem +Inf` evaluator及Compression可达路径 | 目标边界已覆盖，跨profile未闭合 | 第十七至二十二轮记录了成对evaluator差异收敛及顶层Compression的`+Inf/+Inf`实际命中。直接evaluator用例覆盖Rust Debug/Release和C++ Debug/Release；顶层Compression命中证据是Rust Release与C++ Debug/Release，Rust Debug在进入该阶段前触发`∞ > NaN`断言。 |
+| 固定步数/共享测试时钟下的顶层`optimize → compress`状态比较 | 7/11个顶层fixture四profile通过；其余profile结果已补记 | 四profile均通过的fixture为partial warm-start终态、有界cold-start、默认cold-start终态、seed42真实双worker Explore→Compression、worker移动后Compression成功、TimeBased共享时钟双步及一般warm-start `optimize → compress`。seed4/seed10双workertrace的Rust Debug已确认在目标trace前触发锁定断言，Rust Release与C++ Debug/Release trace通过。自然时限Rust Debug仍未完成终态；超出当前fixture集合的输入域尚未声明。 |
+| `PlacedItem +Inf` evaluator及Compression可达路径 | 直接evaluator四profile通过；顶层路径保留profile差异 | 第十七至二十二轮的直接evaluator边界Rust Debug/Release、C++ Debug/Release均通过。seed4顶层Compression `+Inf/+Inf`命中在Rust Release与C++ Debug/Release通过；Rust Debug在Explore阶段触发锁定`∞ > NaN`断言。固定450步worker目标Rust Debug按预期捕获断言、Rust Release trace通过，C++ Debug/Release定向CLI退出码0。 |
 | 双worker非有限key选优、胜者恢复及Round30数值容差 | seed10固定fixture通过 | 本轮重新核对Round29逐轮表：449数据行、34列；449轮胜者一致，C++ Debug/Release诊断一致，Round11起Rust Release与C++ Debug/Release状态一致，4轮出现非有限key。Round0–10最大差异为key 2 ULP、raw loss 1 ULP、首个placement平移x 16 ULP，均低于loss `1e-5`、translation `5e-5`容差。fixture SHA-256=`6C0972A4AE8FC9BBD8D05B3C6E4D6413A7655E9D50225BDF6A22EB4C6B428C36`；逐轮表SHA-256=`341CF091A165EFA4BF8B9F06C191F93BDD71A4A580FC130ECF93D71C5F71AAA1`。 |
 | 默认自然时限的端到端验收 | 部分 | 已记录的C++ Debug/Release与Rust Release均到达默认Explore/Compression时限并返回可行终态；同一fixture的Rust Debug约3.95秒触发`∞ > NaN`断言，未完成阶段。故不满足总清单第十三节的Rust/C++ Debug与Release端到端完成要求。 |
-| 自然时限资源边界与确定性输入域矩阵 | 未闭合 | 当前文档只有个别运行的线程数/内存采样，没有登记资源上限；`Differential.md`也明确记载完整确定性输入矩阵尚未完成，且没有列出可核验的矩阵分母。 |
+| 自然时限资源边界与确定性输入域矩阵 | 仍未闭合 | 当前fixture矩阵可核验分母为20条×4个profile=80格，但它只是已登记证据集，未声明为完整有效输入域；自然时限运行仅有个别线程数/内存采样，没有约定资源上限。 |
+
+### E5第三十二轮：fixture × profile验收矩阵（2026-10-19）
+
+本矩阵以`SparrowCore/Docs/Differential.md`中的fixture说明、E4执行记录及S07压缩记录为依据，只登记文档能追溯到的运行结果，不在本轮重跑测试。profile列按Rust Debug、Rust Release、C++ Debug、C++ Release划分；使用不同于对应MSVC构建的工具链或仅运行定向目标时，在单元格注明。“未记录”表示现有记录没有该profile结果，不能计为通过；“ignored”保留测试实际状态；“未到目标阶段”表示前置阶段已中止，目标fixture条件未执行。
+
+#### 顶层`optimize → compress`验收fixture
+
+| Fixture / 场景 | Rust Debug | Rust Release | C++ Debug | C++ Release | 覆盖范围与判定 |
+|---|---|---|---|---|---|
+| Partial warm-start终态矩阵：分离与重叠两种布局、零阶段预算 | fixture注释标出Debug/Release oracle；测试结果未逐profile登记 | 同左 | 未记录 | 未记录 | 对比placed/remaining、feasibility、transform、width/density、report及停止信息；不进入separator，不观测loss |
+| 有界cold-start Optimize → Compression轨迹（旧S08基础fixture） | 未记录 | 未记录 | 未记录 | 未记录 | 固定seed=42、单worker；覆盖一次Explore失败及一次未改善Compression，不能替代默认预算终态用例 |
+| 默认cold-start Compression终态fixture | 通过 | 通过 | 通过 | 通过 | 四profile全量runner/reference gate通过；事件受控、使用默认shrink horizon，不等同默认9分钟/60秒自然时限 |
+| seed42真实双worker Explore → Compression trace | 通过（目标3/3，重复3/3） | 通过（目标3/3，重复3/3） | 通过（全量runner） | 通过（全量runner及复跑） | 真实Explore worker与后续单worker FailureBased Compression；固定seed、几何、采样配置 |
+| worker实际移动后顶层Compression成功 | 通过 | 通过 | 通过 | 通过 | 一次真实移动后成功；固定输入与受控停止点 |
+| TimeBased共享时钟双步fixture | 通过 | 通过 | 局部通过：LLVM/MinGW `-O0`全Explore runner通过；MSVC Debug runner不可用 | 局部通过：LLVM/MinGW `-O2 -DNDEBUG`定向目标通过，但全Explore runner在进入E5前失败；MSVC Release runner不可用 | Rust两profile通过；C++不是同一MSVC Debug/Release基线，不能据此记为标准C++双profile通过 |
+| 默认自然时限验收（Explore/Compression） | 断言中止：约3.95秒触发`∞ > NaN`，未完成阶段 | 通过：到达默认阶段时限并返回可行终态 | 通过（MSVC 2019） | 通过（MSVC 2019） | Rust Debug阻断全profile验收；自然运行资源上限尚未定义 |
+| seed4双worker Compression顶层trace及Round28逐轮key/restore审计 | 未记录该顶层trace | 通过 | 通过 | 通过 | 445轮；Rust Release与C++ Debug/Release胜者和恢复状态逐轮一致；此fixture全程aggregate key有限，未命中目标非有限选优路径 |
+| seed10双worker Compression顶层混合非有限trace及Round30漂移裁决 | 未记录该顶层trace | 通过：Round0–10残差在既定容差内，Round11起逐位一致 | 通过：与Release诊断行一致 | 通过：与Debug诊断行一致 | 449轮胜者及非有限轮恢复状态一致；只覆盖Rust Release与C++ Debug/Release，不能写成四profile通过 |
+| seed4单worker顶层Compression实际命中`PlacedItem +Inf/+Inf` | 断言中止于Explore，未到Compression目标阶段 | 通过：Compression阶段实际命中 | 通过：定向目标通过；全量Debug runner超过90秒后停止 | 通过：定向目标及全量Release runner通过 | 单worker、固定seed/几何/轮次；Debug全量runner未完成，但目标用例有结果 |
+| 一般warm-start `optimize → compress` fixture（非E5专用终态表） | 未记录 | 未记录 | 未记录 | 未记录 | 差分总表登记了fixture与比较字段，没有逐profile执行结论 |
+
+#### 非有限数值与worker选优支撑fixture
+
+| Fixture / 场景 | Rust Debug | Rust Release | C++ Debug | C++ Release | 覆盖范围与判定 |
+|---|---|---|---|---|---|
+| `PlacedItem`加权loss溢出且上界为`+Inf` | 通过 | 通过 | 通过 | 通过 | 直接evaluator边界；有限上界时两侧返回Invalid，`+Inf`上界时返回Collision(+Inf) |
+| 受控`WorkerLossSelector`非有限key序列 | 通过 | 通过 | 未记录 | 通过（MSVC 2019） | C++ Release定向selector目标通过；合成key序列不代表真实worker搜索 |
+| 固定worker结果的混合非有限collection与restore回放 | 通过 | 通过 | 未记录 | 通过（MSVC 2019） | Rust两profile、C++ Release有明确结果；C++ Debug没有该collector目标的执行记录 |
+| Round24 captured worker payload选优/恢复 | 通过 | 通过 | 通过 | 通过 | 固定结果payload回放；不是Round26真实worker搜索重跑 |
+| Round26真实双worker搜索回放（Compression round 446） | ignored：Debug在checkpoint前触发既有`∞ > NaN`断言 | 通过 | 通过 | 通过 | 固定seed与checkpoint；Rust Debug未执行目标回放 |
+| 固定450步真实worker混合NaN/Inf聚合 | 未记录 | 通过 | 未记录 | 通过 | Rust seed4串行驱动独立worker；C++生产`Separator::Run`使用seed5；两侧不是同seed逐轮对拍 |
+| 同seed固定450步生产worker轨迹（seed4/seed5） | 未记录 | 通过 | 未记录 | 通过 | 仅Release逐轮状态对拍；seed5一致，seed4修复后全程一致 |
+| seed42短时窗C++ worker聚合观测 | 未记录 | 未记录 | 未记录 | 仅C++ Release观测 | `RustSppCompressWorkerMove.json`，20秒/2秒真实时钟采样，不是锁定输入trace或默认时限验收fixture |
+| seed42短时窗Rust worker聚合观测 | 未记录 | 仅Rust Release观测 | 未记录 | 未记录 | 同一JSON fixture与20秒/2秒真实时钟采样；吞吐与C++不同，计数不作确定性差分 |
+
+#### 相关S08阶段fixture的profile记录缺口
+
+旧的warm-start直接压缩、单worker/双worker失败重试及termination handoff记录了fixture和状态比较内容，但`Differential.md`未为这些行给出完整四profile结果。S07另记有双worker失败重试Rust Debug独立进程连续10次通过；这条稳定性证据不能补足Rust Release和C++ Debug/Release格。第三十二轮不把这些未登记格子推定为通过，也不把直接phase fixture计入顶层四profile完成数。
+
+#### 矩阵裁定
+
+矩阵列出20个fixture/观测条目，每条含4个profile状态格，共80格；其中明确四profile均通过的顶层E5 fixture共3项：默认cold-start终态、seed42真实双worker Explore → Compression、worker移动后Compression成功。默认自然时限的Rust Debug中止；TimeBased共享时钟缺MSVC Debug/Release结果；seed4/seed10双worker非有限顶层路径缺Rust Debug；若干旧fixture缺逐profile运行记录。因此fixture集合已可核对，但四profile验收矩阵仍不完整，E5维持“部分”。本轮只整理文档与既有运行记录，没有重跑构建或测试。
 
 ### 本轮核验边界
 
 本轮没有重跑构建或测试；上表中的运行结果沿用E4与差分文档已有执行记录。新核验只检查Round29逐轮表的结构、计数、跨profile/跨语言一致性指标与fixture哈希。终止判定不外推到未列输入、其他平台或未锁定revision。
 
-### 退出条件
+### Round31当时退出条件（历史快照）
 
 关闭E5前仍需按D1明确Rust Debug默认自然时限与非有限双worker顶层路径的处置并补齐对应profile证据，明确自然时限资源边界，并把待覆盖的确定性输入矩阵列出范围与分母后逐项清账。在这些条件满足前，保留E5“部分”状态；本裁决不要求继续扫描seed。
+
+### E5第三十三轮：profile预期与完整门禁复核（2026-10-19）
+
+本轮补充Round32矩阵之后新取得的profile证据；Round32表格保留为当轮快照，以下状态更新优先。没有修改生产算法、Rust oracle或锁定revision。
+
+| 检查项 | 本轮结果 |
+|---|---|
+| Rust oracle完整门禁 | `SparrowCore/Tests/RustReference/verify-rust-reference.ps1`退出码0；脚本核对Rust 1.98.1与锁定commit，`cargo fmt --check`、Debug全套和Release全套均通过。默认自然时限测试仍按既有配置`ignored`，本轮没有重跑十分钟自然时限。 |
+| C++完整门禁 | 带匹配JaguarCore Debug/Release DLL目录的`SparrowCoreTests.exe`全套Debug与Release均退出码0。无DLL目录的首次Debug调用仅在装载阶段以`0xC0000135`退出，不计作测试结果；按`SparrowCore/Docs/Differential.md`所列PATH重跑后通过。 |
+| 固定450步真实worker混合非有限聚合 | Rust Debug用例捕获并断言锁定的`weighted loss should never increase`；Rust Release仍执行并匹配450步fixture。C++ `--e5-fixed-nonfinite-worker-rounds`定向目标在Debug与Release均退出码0。两侧seed和worker驱动路径不同，不据此声称同seed逐轮对拍。 |
+| seed4/seed5同seedworker轨迹 | Rust Debug分别捕获锁定断言，Release分别执行完整trace比对；C++ Debug/Release全量runner中的两条轨迹测试均通过。 |
+| seed4/seed10双worker顶层Compression | Rust Debug新增用例确认两条路径均在目标Compression trace前触发同一锁定断言；Rust Release执行seed4/seed10 reference trace通过。C++ Debug/Release全量runner包含两条顶层fixture并通过。Debug结果是profile预期记录，不是跨profile trace等价。 |
+| 此前未登记的四profile顶层fixture | Partial warm-start终态、旧S08有界cold-start、TimeBased共享时钟双步、一般warm-start `optimize → compress`均由Rust Debug/Release完整oracle门禁及C++ Debug/Release完整runner覆盖并通过。按Round32的11条顶层fixture口径，四profile均通过从3条增至7条。 |
+
+本轮矩阵分母仍是20条fixture/观测×4个profile，共80格；表格的20条是当前登记的证据集，不构成任意seed、几何或调度的完整输入域。自然时限Rust Debug既有记录仍显示约3.95秒触发锁定断言；自然时限Rust Release与C++ Debug/Release既有运行达到各自预算并返回可行终态，本轮未重复长跑。四profile完整测试门禁通过不改变这一自然时限差异，也没有定义用户认可的资源上限。
+
+因此E5仍为“部分”：当前profile预期已被测试和runner结果明确记录，但默认自然时限Rust Debug不能产生终态；资源边界及声明的有效输入范围仍需按D1作验收裁决。后续不再盲扫seed；先在E5验收口径中明确是否将Rust Debug断言作为接受的profile结果、当前20条证据集是否就是声明范围，以及自然时限资源上限是否属于退出条件，再据此决定关闭E5或新增有明确定义的目标。
+
+### E5第三十四轮：退出口径裁决（2026-10-19）
+
+#### 裁决结果
+
+将E5状态裁定为“完成：限定矩阵验收清账关闭，保留已接受profile残差”。这表示证据范围、每格结果、自然时限边界及例外均已定案；不表示Rust Debug残差通过等价比较，也不表示Sparrow/Jaguar全项目达到“声明范围内完成等价移植”。
+
+#### 验收分母与profile结果
+
+Round32的20条记录行中，18条是E5确定性验收项，另2条是20秒/2秒短时窗吞吐观测。E5验收分母锁定为18条记录行×Rust Debug、Rust Release、C++ Debug、C++ Release四个profile，共72格；两条短时窗观测只作为诊断证据，不进入分母。旧S08独立阶段fixture仍由S08自身清账，不重复计入E5顶层端到端分母。
+
+依Round33完整Rust Debug/Release门禁、C++ Debug/Release全套runner及此前定向目标证据，72格裁定为65格通过、7格接受Rust Debug已知断言残差。最终映射为：下表列出的7个Rust Debug格属于接受残差，其余65格判为通过；Round32中的未记录状态已由Round33完整门禁及注册目标结果更新，Round26 Debug的ignored属于7个残差之一。每格均有fixture或runner证据；通过格按第十二节的离散精确比较和字段容差判定。
+
+| Rust Debug残差项 | 已观测结果 | 同行其余profile结果 | 裁定 |
+|---|---|---|---|
+| 默认自然时限Optimize → Compression | 约3.95秒触发锁定的∞ > NaN断言，未产生终态 | Rust Release、C++ Debug/Release到达默认阶段预算并返回可行终态 | 接受为Rust Debug profile残差；不计通过 |
+| seed4双worker顶层Compression trace | 目标trace前触发同一断言 | Rust Release、C++ Debug/Release固定trace通过 | 接受为Rust Debug profile残差；不计通过 |
+| seed10双worker混合非有限顶层trace | 目标trace前触发同一断言 | Rust Release、C++ Debug/Release逐轮结果通过既定比较 | 接受为Rust Debug profile残差；不计通过 |
+| seed4单worker PlacedItem +Inf顶层路径 | Explore阶段触发断言，未到Compression目标 | Rust Release、C++ Debug/Release到达目标路径 | 接受为Rust Debug profile残差；不计通过 |
+| Round26真实双worker搜索回放 | Debug测试保持ignored；已知断言发生在checkpoint之前 | Rust Release、C++ Debug/Release目标回放通过 | 接受为Rust Debug profile残差；不计通过 |
+| 固定450步真实worker混合NaN/Inf聚合 | Debug用例捕获并确认既有断言 | Rust Release fixture、C++ Debug/Release定向目标通过 | 接受为Rust Debug profile残差；不计通过 |
+| seed4/seed5同seed固定worker轨迹 | Debug用例捕获并确认既有断言 | Rust Release两条轨迹与C++ Debug/Release结果按记录通过 | 接受为Rust Debug profile残差；不计通过 |
+
+这7格是被显式接受的profile行为差异，不得在报告中写成“全profile一致”。本裁决选择保留pinned Rust Debug断言行为，不要求为了E5退出而修改Rust oracle或掩盖断言；C++ Release选择器与已锁定Rust排序语义的对齐仍按既有证据判定。
+
+#### 自然时限与资源边界
+
+E5自然时限的工作边界锁定为默认Explore 9分钟、Compression 60秒及每个fixture声明的worker配置；固定步数或共享测试时钟fixture仍按其显式轮数/时钟预算验收。自然运行只比较阶段完成/停止语义及可行、可恢复等合法终态，不比较墙钟驱动的迭代数或调度轨迹。
+
+现有材料没有产品要求给出RSS或OS线程数值上限，因此本裁决不虚构容量阈值；零散内存/线程采样仅作诊断。线程数受Rust Rayon与C++实现模型影响，受D4的范围约束。E5由此关闭的是有界预算下的行为验收清账，不是内存容量或性能认证；如需容量SLA，应另行给出产品目标并纳入性能工作项。
+
+#### 输入域与退出边界
+
+有效域仅包含上述18条记录行中明确的fixture、seed、几何、worker数量、阶段配置、Rust 1.98.1与Cargo.lock pinned revision，以及各证据行记录的平台/编译配置。离散身份、选优、事件、计数和停止原因按既定精确口径核对，浮点量按预先登记的容差核对。未列seed、任意几何、其他worker规模、其他编译器或硬件不由本裁决外推。
+
+因此E5退出口径已经裁定，E5状态更新为“完成：限定矩阵验收清账关闭，保留已接受profile残差”。全项目完成定义仍要求其他P0项闭合；E5的7个已接受差异也不构成等价通过声明。后续不再为E5盲扫seed；只有新增明确输入域或修订已接受差异政策时，才重新打开对应验收范围。
+
+本轮只作验收政策与文档状态裁决，未修改生产算法、oracle或fixture，也未重跑构建/测试。

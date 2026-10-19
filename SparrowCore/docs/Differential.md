@@ -8,6 +8,8 @@ expectations, matching their former infallible behavior for validated instances.
 
 ## Fixture matrix
 
+> E5 exit ruling (2026-10-19, Round34): the declared 18-row deterministic fixture matrix is closed as an evidence ledger (72 Rust/C++ Debug/Release cells: 65 pass and seven explicitly accepted Rust Debug assertion residuals); two short-window observations are excluded. This does not claim strict parity for those seven cells or arbitrary inputs. Earlier “E5 remains partial” notes are historical snapshots; see [the Round34 ruling](../../docs/complex/E4-oracle-fixture-baseline-2026-10-16.md#e5第三十四轮退出口径裁决2026-10-19).
+
 | Area | Fixture | Covered behavior |
 | --- | --- | --- |
 | RNG | `Tests/Fixtures/LbfSeed42Reference.tsv` | Rust rand 0.10.3 seed-42 xoshiro raw outputs and `f32 random_range`; Rust oracle and C++ RNG tests consume the same values |
@@ -91,6 +93,10 @@ expectations, matching their former infallible behavior for validated instances.
 | Positive-time TimeBased deadline and final layout | `Tests/Fixtures/OptimizeTimeBasedPositiveTimeoutRustReference.tsv`, `Tests/RustReference/tests/optimizer_exit_reference.rs::positive_time_based_timeout_finishes_current_attempt_and_matches_reference`, `TestExploration.cpp::TestPositiveTimeBasedTimeoutOptimizeMatchesRustReference` | `seed=3`, one-item warm start at width 4.0, zero exploration limit, 2 s TimeBased compression limit (`max=0.08/min=0.02`). The first compression progress callback waits 2100 ms without requesting a stop, so the phase timer expires naturally at a deterministic callback boundary. The already-started attempt finishes: one step near 0.08, separator success with zero evaluations/moves/iterations, feasible final layout near width 3.68, and matching phase/report/separation/placement trace. Float comparisons use the same documented tolerances in Rust and C++; this verifies deadline cleanup at the controlled crossing, not an unpaced 2 s search trajectory or general time-budget packing parity |
 | Positive-time TimeBased compression curve | `Tests/Fixtures/CompressionTimeBasedPositiveTimeoutRustReference.tsv`, `Tests/RustReference/tests/optimizer_exit_reference.rs::positive_time_based_compression_shrink_curve_matches_reference`, `TestExploration.cpp::TestPositiveTimeBasedCompressionCurveMatchesRustReference` | `seed=3`, one-item warm start, positive compression limit 2 s, TimeBased range `max=0.08/min=0.02`; capture five progress timestamps/steps, wait 400 ms after each of the first four, then request phase stop on the fifth. Rust and C++ both start near max and have decreasing slope `(min-max)/limit=-0.03/s` within 0.001/s when normalized by measured callback intervals. Rust uses f32 seconds; C++ uses elapsed milliseconds converted to double. Absolute step at the same iteration may differ because separator wall time differs; this checks the curve formula, not natural deadline completion or identical packing results |
 | Compression and end-to-end phase regression | `Tests/Fixtures/PhaseReference.tsv` | C++ phase transitions, strip width, density, and deterministic termination path; remains C++ regression evidence only |
+
+E5第三十二轮的fixture × profile逐项状态及未记录格子见[验收清账与profile矩阵](../../docs/complex/E4-oracle-fixture-baseline-2026-10-16.md#e5验收清账与退出裁决)。
+
+E5第三十三轮重跑Rust Debug/Release完整reference门禁及C++ Debug/Release完整runner，均退出码0；Rust Debug对固定450步、seed4/seed5同seed轨迹和seed4/seed10双worker顶层路径以独立测试捕获锁定的`∞ > NaN`断言，Release继续执行对应trace比较。C++固定450步CLI目标Debug/Release也退出码0。profile状态更新与E5未闭合退出条件见[第三十三轮验收记录](../../docs/complex/E4-oracle-fixture-baseline-2026-10-16.md#e5验收清账与退出裁决)。
 
 The `*CppReference.tsv` files are locked C++ outputs for behavior that depends on the
 JaguarCore geometry bridge. They are C++ regressions, not Rust differential evidence.

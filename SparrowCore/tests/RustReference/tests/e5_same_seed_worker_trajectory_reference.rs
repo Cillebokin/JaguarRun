@@ -10,8 +10,10 @@ use sparrow::optimizer::separator::Separator;
 use sparrow::sample::search::SampleConfig;
 use std::path::Path;
 
+#[cfg(not(debug_assertions))]
 const REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv");
+#[cfg(not(debug_assertions))]
 const SEED4_REFERENCE: &str =
     include_str!("../../Fixtures/OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv");
 const STEPS: usize = 450;
@@ -205,6 +207,7 @@ fn run_fixed_production_rounds(seed: u64) -> Vec<String> {
     trace
 }
 
+#[cfg(not(debug_assertions))]
 fn assert_fixed_production_worker_rounds_match_reference(
     seed: u64,
     reference: &str,
@@ -229,6 +232,7 @@ fn assert_fixed_production_worker_rounds_match_reference(
     );
 }
 
+#[cfg(not(debug_assertions))]
 #[test]
 fn same_seed_fixed_production_worker_rounds_match_reference() {
     assert_fixed_production_worker_rounds_match_reference(
@@ -238,6 +242,7 @@ fn same_seed_fixed_production_worker_rounds_match_reference() {
     );
 }
 
+#[cfg(not(debug_assertions))]
 #[test]
 fn seed4_fixed_production_worker_rounds_match_reference() {
     assert_fixed_production_worker_rounds_match_reference(
@@ -245,4 +250,31 @@ fn seed4_fixed_production_worker_rounds_match_reference() {
         SEED4_REFERENCE,
         "SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY_SEED4",
     );
+}
+
+#[cfg(debug_assertions)]
+fn assert_known_debug_nonfinite_assertion(seed: u64) {
+    let panic = std::panic::catch_unwind(|| run_fixed_production_rounds(seed))
+        .expect_err("Debug production rounds should retain the pinned GLS assertion");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("weighted loss should never increase"),
+        "unexpected Debug assertion for seed {seed}: {message}"
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn same_seed_fixed_production_worker_rounds_retain_known_debug_assertion() {
+    assert_known_debug_nonfinite_assertion(5);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn seed4_fixed_production_worker_rounds_retain_known_debug_assertion() {
+    assert_known_debug_nonfinite_assertion(4);
 }

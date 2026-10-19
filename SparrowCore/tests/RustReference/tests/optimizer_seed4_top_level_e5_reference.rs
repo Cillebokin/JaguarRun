@@ -420,3 +420,34 @@ fn seed4_top_level_debug_retains_known_gls_nonfinite_assertion() {
         "unexpected Debug panic: {message}"
     );
 }
+
+#[cfg(debug_assertions)]
+fn assert_top_level_debug_retains_known_gls_nonfinite_assertion(
+    seed: u64,
+    compression_workers: usize,
+) {
+    use std::panic::AssertUnwindSafe;
+
+    let panic = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        run_top_level_trace(seed, compression_workers)
+    })) {
+        Ok(_) => panic!("seed {seed} must hit the pinned Debug GLS assertion"),
+        Err(payload) => payload,
+    };
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("weighted loss should never increase"),
+        "unexpected Debug panic for seed {seed} with {compression_workers} compression workers: {message}"
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn seed4_and_seed10_two_worker_compression_retain_known_debug_assertion() {
+    assert_top_level_debug_retains_known_gls_nonfinite_assertion(4, 2);
+    assert_top_level_debug_retains_known_gls_nonfinite_assertion(10, 2);
+}

@@ -35,7 +35,7 @@
 ### `CtrlCTerminator::new()`（Rust 20-36：`ctrlc::set_handler` 全局信号处理器 + `Arc<AtomicBool>`）
 - C++ 对应：SparrowCli 的 `cli::ScopedCtrlCHandler`（`Tools/SparrowCli/OptimizationSignalHandler.h/.cpp`）+ `OptimizationTerminator::SetExternalPhaseStopFlag()`。
 - 判定：CLI 的 SIGINT 接线已实现；核心库不注册进程级处理器。
-- 证据与说明：Rust 在非 wasm 目标注册 Ctrl-C handler 并置位 `Arc<AtomicBool>`（`ctrlc_terminator.rs:26-29`，wasm 目标下整模块编译排除，mod.rs:8-9）。SparrowCli 用 `std::signal(SIGINT, ...)` 注册作用域 handler；回调只写入静态、无锁 `atomic<bool>`，优化轮询通过终止器读取该 phase-stop 标志。handler 在退出时恢复之前的 SIGINT 处理器；SparrowCore 本体不接管进程信号。`raise(SIGINT)` 用例验证信号处理器与 Rust phase-stop trace；另有 Windows 同控制台子进程用 `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)` 验证控制台事件确实到达同一处理器，人工键盘路径仍需单独冒烟。
+- 证据与说明：Rust 在非 wasm 目标注册 Ctrl-C handler 并置位 `Arc<AtomicBool>`（`ctrlc_terminator.rs:26-29`，wasm 目标下整模块编译排除，mod.rs:8-9）。SparrowCli 用 `std::signal(SIGINT, ...)` 注册作用域 handler；回调只写入静态、无锁 `atomic<bool>`，优化轮询通过终止器读取该 phase-stop 标志。handler 在退出时恢复之前的 SIGINT 处理器；SparrowCore 本体不接管进程信号。`raise(SIGINT)` 用例验证信号处理器与 Rust phase-stop trace；另有 Windows 同控制台子进程用 `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)` 验证控制台事件确实到达同一处理器，真实键盘路径由用户回报通过（见第12项）。
 
 ### `CtrlCTerminator::kill()`（Rust 39-42：超时 || ctrlc 标志）
 - C++ 对应：`ShouldTerminate()` 首分支检查 `m_StopRequested`、`m_PhaseStopRequested` 与可选外部 phase-stop flag（cpp:69-77）。
@@ -49,7 +49,8 @@
 
 ### `util/mod.rs` 的 wasm 条件门（Rust 8-9）
 - C++ 对应：信号适配位于 SparrowCli；WASM C ABI 不编译/注册 CLI 信号处理器。
-- 判定：宿主边界不同；WASM 同步 ABI 仍没有运行中取消参数。
+- 判定：当前 API 的范围边界，不构成 Rust parity 缺口。
+- 证据与说明：Rust 仅在 `not(target_arch = "wasm32")` 时导出 `ctrlc_terminator`；C++ WASM 当前只导出同步 `SparrowOptimizeJson`/`SparrowOptimizeSvg`，签名没有取消参数，CMake 也没有配置 pthread/shared-memory 通道。`SparrowWasm.cpp` 将 `terminator.maxIterations` 设为 `64U`，但这是入口内部配置，不是调用方可在执行中触发的取消。要新增该能力，需另行定义 ABI 与宿主并发契约；不属于当前按Rust支持行为做 parity 的范围。
 
 ## 逐条比对（C++ 侧独有）
 
@@ -71,9 +72,14 @@
 
 ### 2026-10-12 执行记录
 
-10. **【SIGINT 与原生宿主取消接线】** SparrowCli 的 `ScopedCtrlCHandler` 注册 `SIGINT`，信号回调只设置静态无锁 `atomic<bool>`；`OptimizationTerminator::ShouldTerminate()` 读取外部 phase-stop flag，`Start()`/`StartPhase()` 清除它。`TestImmediateStopOptimizeMatchesRustReference` 以 `std::raise(SIGINT)` 触发初始 exploration feasible report，确认 compression 恢复且完整 phase/report/step/separation/placement trace 与 Rust Ctrl-C reference 相同。另一个运行中 listener 启动独立 host thread 调用 `RequestStop()`，确认 Optimize 返回可行结果且未进入 separator；这验证原生宿主共享 `OptimizationTerminator&` 的跨线程取消接线。Debug/Release 全量测试通过，SparrowCli Release 构建及单件输入 smoke test 通过。此项记录早于下一项 Windows 控制台子进程核验；同步 WASM C ABI 也没有取消参数，需由其宿主另行提供可并发的共享控制通道。
-11. **【Windows 控制台 Ctrl-C 子进程核验】** `TestWindowsConsoleCtrlC.cpp` 为现有 `SparrowCoreTests.exe` 增加仅测试用子命令；`run-windows-console-ctrlc-probe.ps1` 创建 ready/release/observed 命名事件，在子进程到达首个 exploration feasible 回调后调用 `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)`。子进程通过同一 `ScopedCtrlCHandler` 收到事件，确认终止器观察到 phase-stop flag，再比较完整优化事件与 `OptimizeImmediateStopRustReference.tsv`；探索不进入 separator，phase reset 后压缩继续，最终布局匹配。Debug/Release 子进程探测与全量 runner 均通过。启动器在子进程创建后才忽略自身 Ctrl-C，并要求与子进程共享同一控制台；这是 Windows 控制台事件自动化，不等同于人按键。人工 Release 控制台冒烟结果见第 12 项。同步 WASM C ABI 也没有取消参数，需由其宿主另行提供可并发的共享控制通道。
+10. **【SIGINT 与原生宿主取消接线】** SparrowCli 的 `ScopedCtrlCHandler` 注册 `SIGINT`，信号回调只设置静态无锁 `atomic<bool>`；`OptimizationTerminator::ShouldTerminate()` 读取外部 phase-stop flag，`Start()`/`StartPhase()` 清除它。`TestImmediateStopOptimizeMatchesRustReference` 以 `std::raise(SIGINT)` 触发初始 exploration feasible report，确认 compression 恢复且完整 phase/report/step/separation/placement trace 与 Rust Ctrl-C reference 相同。另一个运行中 listener 启动独立 host thread 调用 `RequestStop()`，确认 Optimize 返回可行结果且未进入 separator；这验证原生宿主共享 `OptimizationTerminator&` 的跨线程取消接线。Debug/Release 全量测试通过，SparrowCli Release 构建及单件输入 smoke test 通过。此项记录早于下一项 Windows 控制台子进程核验；关于同步WASM C ABI取消能力的范围裁决见2026-10-19执行记录。
+11. **【Windows 控制台 Ctrl-C 子进程核验】** `TestWindowsConsoleCtrlC.cpp` 为现有 `SparrowCoreTests.exe` 增加仅测试用子命令；`run-windows-console-ctrlc-probe.ps1` 创建 ready/release/observed 命名事件，在子进程到达首个 exploration feasible 回调后调用 `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)`。子进程通过同一 `ScopedCtrlCHandler` 收到事件，确认终止器观察到 phase-stop flag，再比较完整优化事件与 `OptimizeImmediateStopRustReference.tsv`；探索不进入 separator，phase reset 后压缩继续，最终布局匹配。Debug/Release 子进程探测与全量 runner 均通过。启动器在子进程创建后才忽略自身 Ctrl-C，并要求与子进程共享同一控制台；这是 Windows 控制台事件自动化，不等同于人按键。人工 Release 控制台冒烟结果见第 12 项。记录时提出的“WASM宿主另行提供共享控制通道”建议已由2026-10-19范围裁决修正：当前Rust `wasm32` 不含Ctrl-C终止器，新增WASM中途取消不属于现有 parity 要求。
 12. **【真实键盘 Ctrl-C 冒烟】** 2026-10-12，用户在可见 Windows PowerShell 中运行 Release `SparrowCoreTests.exe --windows-console-ctrlc-manual`，在 `READY: press Ctrl+C in this console now` 后按下键盘 Ctrl+C；回报输出 `WINDOWS_CTRL_C_SIGNAL_OBSERVED` 与 `WINDOWS_CTRL_C_PROBE_PASS`，命令正常返回 PowerShell 提示符。此证据确认真实控制台键盘事件经过 `ScopedCtrlCHandler`，终止器观察到 phase-stop flag，且现有 immediate-stop Rust reference 轨迹通过；仅覆盖该 Windows/MSVC Release 环境和固定夹具，不扩展为其他终端、构建配置或自然运行时限的证明。
+
+### 2026-10-19 执行记录：S20范围裁决与Linux行为说明
+13. **【WASM中途取消范围裁决】** Rust `util/mod.rs` 仅在非 `wasm32` 目标编译 `ctrlc_terminator`；C++ WASM ABI 的 JSON/SVG 导出为同步调用，没有取消参数或可并发共享控制入口。当前WASM配置将 `terminator.maxIterations` 设为 `64U`，这不等于调用方可触发的中途取消。故S20不新增WASM取消API；若未来产品要求此能力，应另立ABI与宿主并发设计及验收项。
+14. **【Linux行为与证据边界】** `OptimizationSignalHandler.cpp` 使用 `std::signal(SIGINT, ...)`，处理函数只将无锁 `atomic<bool>` 置位；SparrowCli把该标志接到phase-stop，`StartPhase()` 清除相位中断。源码没有平台专属信号分支。当前部署文档声明的二进制包目标为Windows x64/MSVC2019，因此Linux结论仅为源码映射说明；本记录没有Linux构建或运行时验证，也不外推为Linux支持承诺。
+15. **【S20退出判断】** 现有Windows Debug/Release子进程和全量runner证据，以及用户回报的Release真实键盘冒烟证据仍按原范围有效；本轮未重跑这些测试。结合WASM与Linux边界裁决，S20在当前平台/API范围内关闭。若认证范围加入Linux运行时，或产品要求WASM中途取消，应重新打开对应验收项。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：文件覆盖完整性】** terminator.rs 44 行（trait 三方法 + BasicTerminator 三方法）与 ctrlc_terminator.rs 52 行（new/kill/new_timeout/timeout_at 四方法）逐方法比对——主文均有条目，无遗漏函数。

@@ -26,7 +26,10 @@ phase-scoped interrupt, matching Sparrow's `CtrlCTerminator` behavior. Native C+
 an `OptimizationTerminator` to `Optimize` and call `RequestStop()` from their cancellation thread
 to cancel across phases, or `RequestPhaseStop()` to stop only the current phase. The terminator
 must outlive the synchronous `Optimize` call. The WASM C ABI remains synchronous and exposes no
-mid-call cancellation handle.
+mid-call cancellation handle. The current adapter sets `terminator.maxIterations` to `64`; this is
+an internal termination setting, not caller-triggered cancellation. Rust excludes
+`ctrlc_terminator` on `wasm32`. Adding cancellation during a WASM call would require a separate
+ABI and host concurrency contract.
 
 ## WASM
 

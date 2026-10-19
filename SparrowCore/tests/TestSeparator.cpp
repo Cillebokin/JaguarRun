@@ -457,7 +457,15 @@ private:
     sparrow::Separator& m_Separator;
 };
 
-bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
+bool TestSameSeedFixedProductionWorkerTrajectory(
+    std::uint64_t seed,
+    const std::string& referenceFixture,
+    const char* printEnvironment,
+    std::optional<std::size_t> expectedMismatchIndex,
+    const std::string& expectedMismatchState,
+    const std::string& expectedFinalState,
+    const std::string& expectedCppTerminal,
+    std::ostream& output)
 {
     std::ifstream inputFile;
     for (const std::string& path : {
@@ -515,7 +523,7 @@ bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
                       "same-seed worker trajectory placements failed");
     }
 
-    auto separatorResult = sparrow::Separator::Create(std::move(problem), 5U);
+    auto separatorResult = sparrow::Separator::Create(std::move(problem), seed);
     if (!Expect(separatorResult.HasValue(),
                 output,
                 "same-seed worker trajectory separator creation failed"))
@@ -550,7 +558,7 @@ bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
              << std::setfill('0') << FloatBits(separator.Tracker().TotalLoss())
              << "\tweighted\t" << std::setw(8)
              << FloatBits(separator.Tracker().TotalWeightedLoss());
-    if (std::getenv("SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY") != nullptr)
+    if (std::getenv(printEnvironment) != nullptr)
     {
         for (const std::string& row : listener.states)
         {
@@ -569,10 +577,10 @@ bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
 
     std::ifstream traceFile;
     for (const std::string& path : {
-             std::string("SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
-             std::string("../SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
-             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectoryE5Reference.tsv"),
-             std::string("..\\SparrowCore\\Tests\\Fixtures\\OptimizeSameSeedWorkerTrajectoryE5Reference.tsv")})
+             std::string("SparrowCore/Tests/Fixtures/") + referenceFixture,
+             std::string("../SparrowCore/Tests/Fixtures/") + referenceFixture,
+             std::string("../JaguarRun/SparrowCore/Tests/Fixtures/") + referenceFixture,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + referenceFixture})
     {
         traceFile.open(path);
         if (traceFile.is_open())
@@ -602,27 +610,57 @@ bool TestSameSeedFixedProductionWorkerTrajectory(std::ostream& output)
             expectedTerminal = std::move(row);
         }
     }
-    if (listener.states != expectedStates)
+    std::size_t firstMismatch = 0U;
+    const std::size_t limit =
+        std::min(listener.states.size(), expectedStates.size());
+    while (firstMismatch < limit
+           && listener.states[firstMismatch] == expectedStates[firstMismatch])
     {
-        const std::size_t limit =
-            std::min(listener.states.size(), expectedStates.size());
-        for (std::size_t index = 0U; index < limit; ++index)
-        {
-            if (listener.states[index] != expectedStates[index])
-            {
-                output << "first trajectory mismatch at state index " << index
-                       << "\nRust: " << expectedStates[index]
-                       << "\nC++:  " << listener.states[index] << '\n';
-                break;
-            }
-        }
-        return Expect(false,
-                      output,
-                      "C++ production trajectory must match the Rust fixed-step state trace");
+        ++firstMismatch;
     }
-    return Expect(terminal.str() == expectedTerminal,
+
+    if (!expectedMismatchIndex.has_value())
+    {
+        if (listener.states != expectedStates)
+        {
+            if (firstMismatch < limit)
+            {
+                output << "first trajectory mismatch at state index "
+                       << firstMismatch << "\nRust: "
+                       << expectedStates[firstMismatch] << "\nC++:  "
+                       << listener.states[firstMismatch] << '\n';
+            }
+            return Expect(false,
+                          output,
+                          "C++ production trajectory must match the Rust fixed-step state trace");
+        }
+        return Expect(terminal.str() == expectedTerminal,
+                      output,
+                      "C++ terminal worker trajectory must match the Rust fixed-step reference");
+    }
+
+    const std::size_t mismatchIndex = *expectedMismatchIndex;
+    const bool expectedDivergenceMatches =
+        listener.states.size() == expectedStates.size()
+        && firstMismatch == mismatchIndex
+        && mismatchIndex < listener.states.size()
+        && listener.states[mismatchIndex] == expectedMismatchState
+        && listener.states.back() == expectedFinalState
+        && terminal.str() == expectedCppTerminal;
+    if (!expectedDivergenceMatches)
+    {
+        output << "expected seed=4 first mismatch at state index "
+               << mismatchIndex << ", observed index " << firstMismatch;
+        if (firstMismatch < limit)
+        {
+            output << "\nRust: " << expectedStates[firstMismatch]
+                   << "\nC++:  " << listener.states[firstMismatch];
+        }
+        output << '\n';
+    }
+    return Expect(expectedDivergenceMatches,
                   output,
-                  "C++ terminal worker trajectory must match the Rust fixed-step reference");
+                  "seed=4 production trajectory must retain the recorded divergence from Rust");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -3045,12 +3083,34 @@ bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output)
 
 bool RunE5SameSeedWorkerTrajectory(std::ostream& output)
 {
-    return TestSameSeedFixedProductionWorkerTrajectory(output);
+    return TestSameSeedFixedProductionWorkerTrajectory(
+        5U,
+        "OptimizeSameSeedWorkerTrajectoryE5Reference.tsv",
+        "SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY",
+        std::nullopt,
+        {},
+        {},
+        {},
+        output);
+}
+
+bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output)
+{
+    return TestSameSeedFixedProductionWorkerTrajectory(
+        4U,
+        "OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv",
+        "SPARROW_PRINT_E5_SAME_SEED_WORKER_TRAJECTORY_SEED4",
+        449U,
+        "state\t449\t3fad763f\t407f985c\t7f800000\t0:00000000:3fb8fedf:3f88d5e8\t0:00000000:3fff4417:3dbae967",
+        "state\t450\t3fad763f\t407f985c\t7f800000\t0:00000000:3fb8fedf:3f88d5e8\t0:00000000:3fff4417:3dbae967",
+        "terminal\tsteps\t450\tmoves\t1637\tevals\t76562\tloss\t3fad763f\tweighted\tffc00000",
+        output);
 }
 
 bool RunSeparatorTests(std::ostream& output)
 {
-    if (!TestSameSeedFixedProductionWorkerTrajectory(output))
+    if (!RunE5SameSeedWorkerTrajectory(output)
+        || !RunE5Seed4SameSeedWorkerTrajectory(output))
     {
         return false;
     }

@@ -232,6 +232,14 @@ C++ 侧通过真实生产 `Separator::Run`、`maxIterations=450` 执行同一输
 
 验证：Rust 1.98.1 Release定向测试 `1 passed`，新增Rust文件 `rustfmt --check` 通过；MSVC 14.44 Release测试runner重建成功，`--e5-same-seed-worker-trajectory` 定向对拍及SparrowCore完整Release runner均退出码0。该结论限于此几何、seed、worker/sample配置和Release；Rust逐worker harness是顺序调度，Debug与更广输入/调度矩阵仍未验收。E5继续部分，完整 `optimize → compress` 端到端矩阵尚未闭合。
 
+### E5 第十四轮：seed=4固定450步跨语言对拍复核（2026-10-19）
+
+沿用第十三轮输入、3 workers、样本 `1/0/1`、Release和450步，仅将根seed改为4。新增 Rust 用例 `e5_same_seed_worker_trajectory_reference.rs::seed4_fixed_production_worker_rounds_match_reference` 及 fixture `SparrowCore/Tests/Fixtures/OptimizeSameSeedWorkerTrajectorySeed4E5Reference.tsv`（SHA-256=`D1F395D2E136AF22797F19FB0790C5AAD8C1B8CC88292EFB8CB1713B25628619`）。fixture逐轮记录三worker的加权key/raw loss/胜出索引、master状态、变换位模式和终态计数。
+
+与seed=5不同，seed=4没有通过全程对拍。C++生产 `Separator::Run` 的初态至state 448（完成前448轮）与Rust逐位一致；首次差异是第449轮后的state 449。Rust第449轮worker key为 `[NaN,NaN,NaN]`，选择worker 0，raw loss从 `0x407f985c` 降为 `0x4075dc7a`，加权loss为NaN。C++同位置仍是前一轮状态，raw loss为 `0x407f985c`、加权loss为 `+Inf`；state 450仍未移动。C++终态为450 iterations、1637 moves、76562 evaluations、raw loss `0x3fad763f`、weighted loss NaN；Rust fixture的聚合计数为1649 moves、77040 evaluations，raw best也为 `0x3fad763f`。C++完整状态轨迹连续两次采集的SHA-256均为`FE09BB81DE07939C4B84AE645CBDFB905A67CDEEEB06A94B624AA5AA83A0D5E7`，确认该分歧在此环境下稳定复现。
+
+C++ seed=4回归入口现在验证state 0–448与Rust相同，并锁定state 449、450及终态为上述已观察结果；这是一条差异保持检查，不代表两侧通过了seed=4对拍。Rust seed=4/5两个Release fixture测试、C++ seed=4差异检查、seed=5逐轮对拍和SparrowCore完整Release runner均通过，Rust文件 `rustfmt --check` 通过。当前证据只证明seed=5在所测设置下逐轮一致；seed=4于第449轮分歧，差异根因尚未完全裁定，E5及更广seed/调度矩阵仍未收口。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

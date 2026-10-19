@@ -2,6 +2,7 @@
 #include "SparrowCore/Version.h"
 
 #include <iostream>
+#include <string_view>
 
 bool RunRngTests(std::ostream& output);
 bool RunSamplingTests(std::ostream& output);
@@ -11,11 +12,16 @@ bool RunBppLbfTests(std::ostream& output);
 bool RunQuantifyTests(std::ostream& output);
 bool RunSeparatorTests(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
+bool RunE5NaturalTimeAcceptance(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
 bool RunWindowsConsoleCtrlCProbe(int argc, char** argv, std::ostream& output);
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view{argv[1]} == "--e5-natural-time")
+    {
+        return RunE5NaturalTimeAcceptance(std::cerr) ? 0 : 1;
+    }
     if (argc > 1)
     {
         return RunWindowsConsoleCtrlCProbe(argc, argv, std::cerr) ? 0 : 1;

@@ -12594,3 +12594,242 @@ bool RunExplorationTests(std::ostream& output)
                   output,
                   "top-level optimizer must honor cancellation and warm start");
 }
+
+bool RunE5NaturalTimeAcceptance(std::ostream& output)
+{
+    class NaturalTimeListener final : public sparrow::OptimizationListener
+    {
+    public:
+        using Clock = std::chrono::steady_clock;
+
+        void OnPhase(sparrow::OptimizationPhase phase) override
+        {
+            const auto now = Clock::now();
+            phases.push_back(phase);
+            if (phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION)
+            {
+                explorationStart = now;
+            }
+            else if (phase == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION)
+            {
+                if (explorationStart.has_value())
+                {
+                    explorationElapsed = now - *explorationStart;
+                }
+                compressionStart = now;
+            }
+        }
+
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport& report) override
+        {
+            ++solutionReports;
+            if (report.type == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL)
+            {
+                ++finalReports;
+                finalReportFeasible = report.isFeasible
+                    && std::isfinite(report.stripWidth)
+                    && std::isfinite(report.density);
+            }
+        }
+
+        void OnSeparationProgress(
+            const sparrow::SeparationProgress&) override
+        {
+            ++separationProgressCount;
+            const auto index = CurrentPhaseIndex();
+            if (index.has_value())
+            {
+                ++separationProgressByPhase[*index];
+            }
+        }
+
+        void OnSeparationResult(
+            const sparrow::SeparationResult&) override
+        {
+            ++separationResultCount;
+            const auto index = CurrentPhaseIndex();
+            if (index.has_value())
+            {
+                ++separationResultsByPhase[*index];
+            }
+        }
+
+        void OnCompressionProgress(double shrinkStep) override
+        {
+            ++compressionProgressCount;
+            compressionStepsFinite = compressionStepsFinite
+                && std::isfinite(shrinkStep)
+                && shrinkStep >= 0.00001
+                && shrinkStep <= 0.0005;
+        }
+
+        std::optional<std::size_t> CurrentPhaseIndex() const
+        {
+            if (phases.empty())
+            {
+                return std::nullopt;
+            }
+            if (phases.back()
+                == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION)
+            {
+                return 0U;
+            }
+            if (phases.back()
+                == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION)
+            {
+                return 1U;
+            }
+            return std::nullopt;
+        }
+
+        std::vector<sparrow::OptimizationPhase> phases;
+        std::optional<Clock::time_point> explorationStart;
+        std::optional<Clock::time_point> compressionStart;
+        std::optional<Clock::duration> explorationElapsed;
+        std::array<std::size_t, 2U> separationProgressByPhase{};
+        std::array<std::size_t, 2U> separationResultsByPhase{};
+        std::size_t solutionReports = 0U;
+        std::size_t finalReports = 0U;
+        std::size_t separationProgressCount = 0U;
+        std::size_t separationResultCount = 0U;
+        std::size_t compressionProgressCount = 0U;
+        bool finalReportFeasible = false;
+        bool compressionStepsFinite = true;
+    } listener;
+
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppCompressWorkerMove.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppCompressWorkerMove.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(), output,
+                "E5 natural-time input fixture cannot be opened"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(), output,
+                "E5 natural-time input fixture must import"))
+    {
+        return false;
+    }
+
+    auto warmProblemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(warmProblemResult.HasValue(), output,
+                "E5 natural-time warm-start problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem warmProblem = std::move(warmProblemResult.Value());
+    const auto widthSet = warmProblem.ChangeStripWidth(4.2);
+    const auto firstPlaced = warmProblem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {1.05, 0.55})});
+    const auto secondPlaced = warmProblem.PlaceItem({
+        0U, jaguar::Transform2d::FromRotationTranslation(0.0, {3.15, 0.55})});
+    if (!Expect(widthSet.HasValue() && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "E5 natural-time warm start must be constructible"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    config.warmStart = warmProblem.Save();
+    if (!Expect(config.exploration.timeLimit == std::chrono::minutes{9}
+                    && config.compression.timeLimit == std::chrono::seconds{60}
+                    && !config.compression.phaseDeadlineOverride.has_value()
+                    && config.terminator.maxDuration.count() == 0
+                    && config.terminator.maxIterations == 0U,
+                output,
+                "E5 natural-time case must use default independent phase deadlines"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    const auto runStart = NaturalTimeListener::Clock::now();
+    const auto actual = sparrow::Optimize(
+        instance.Value(), config, terminator, &listener);
+    const auto runElapsed = NaturalTimeListener::Clock::now() - runStart;
+    const auto compressionElapsed = listener.compressionStart.has_value()
+        ? std::optional<NaturalTimeListener::Clock::duration>{
+              NaturalTimeListener::Clock::now() - *listener.compressionStart}
+        : std::nullopt;
+    const auto withinDeadlineWindow = [](
+        NaturalTimeListener::Clock::duration elapsed,
+        NaturalTimeListener::Clock::duration budget) {
+        return elapsed >= budget - std::chrono::seconds{2}
+            && elapsed <= budget + std::chrono::minutes{2};
+    };
+
+    if (!actual.HasValue())
+    {
+        output << "E5 natural-time optimize failed: "
+               << actual.GetError().message << '\n';
+        return false;
+    }
+    const auto& result = actual.Value();
+    const bool timingValid = listener.explorationElapsed.has_value()
+        && compressionElapsed.has_value()
+        && withinDeadlineWindow(*listener.explorationElapsed,
+                                std::chrono::minutes{9})
+        && withinDeadlineWindow(*compressionElapsed,
+                                std::chrono::seconds{60});
+    const bool eventBoundsValid = listener.solutionReports <= 5000000U
+        && listener.separationProgressCount <= 5000000U
+        && listener.separationResultCount <= 5000000U;
+    const bool phaseAndStateValid = listener.phases
+            == std::vector<sparrow::OptimizationPhase>{
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION}
+        && listener.separationResultsByPhase[0U] > 0U
+        && listener.separationResultsByPhase[1U] > 0U
+        && listener.compressionProgressCount > 0U
+        && listener.finalReports == 1U
+        && listener.finalReportFeasible
+        && result.metrics.feasible
+        && result.metrics.placedItemCount == 2U
+        && std::isfinite(result.metrics.stripWidth)
+        && std::isfinite(result.metrics.density)
+        && listener.compressionStepsFinite;
+
+    output << "E5 natural-time: explore="
+           << (listener.explorationElapsed.has_value()
+                   ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                         *listener.explorationElapsed).count()
+                   : -1)
+           << "ms/540000ms, compression="
+           << (compressionElapsed.has_value()
+                   ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                         *compressionElapsed).count()
+                   : -1)
+           << "ms/60000ms, run="
+           << std::chrono::duration_cast<std::chrono::milliseconds>(runElapsed).count()
+           << "ms, separation_results=" << listener.separationResultsByPhase[0U]
+           << ',' << listener.separationResultsByPhase[1U]
+           << ", reports=" << listener.solutionReports
+           << ", progress=" << listener.separationProgressCount
+           << ", compression_steps=" << listener.compressionProgressCount
+           << ", feasible=" << (result.metrics.feasible ? 1 : 0) << '\n';
+
+    return Expect(timingValid && phaseAndStateValid && eventBoundsValid,
+                  output,
+                  "E5 natural-time run must expire both real deadlines and return a bounded feasible final state");
+}

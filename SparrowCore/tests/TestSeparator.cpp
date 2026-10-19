@@ -42,9 +42,11 @@ bool Expect(bool condition, std::ostream& output, const char* message)
     return false;
 }
 
-bool TestWorkerLossSelectorNaNOrdering(std::ostream& output)
+bool TestWorkerLossSelectorNonFiniteOrdering(std::ostream& output)
 {
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float positiveInfinity = std::numeric_limits<float>::infinity();
+    const float negativeInfinity = -positiveInfinity;
     const auto select = [](std::initializer_list<float> losses) {
         sparrow::detail::WorkerLossSelector selector;
         std::size_t workerIndex = 0U;
@@ -64,7 +66,19 @@ bool TestWorkerLossSelectorNaNOrdering(std::ostream& output)
                   "later NaN worker must not replace an earlier finite worker")
         && Expect(select({nan, nan}) == 0U,
                   output,
-                  "equal NaN worker keys must retain the first worker");
+                  "equal NaN worker keys must retain the first worker")
+        && Expect(select({nan, positiveInfinity, nan}) == 1U,
+                  output,
+                  "positive infinity must beat NaN worker keys")
+        && Expect(select({positiveInfinity, nan, nan}) == 0U,
+                  output,
+                  "a later NaN worker must not replace positive infinity")
+        && Expect(select({nan, negativeInfinity, positiveInfinity}) == 1U,
+                  output,
+                  "negative infinity must beat NaN and positive infinity")
+        && Expect(select({positiveInfinity, positiveInfinity, nan}) == 0U,
+                  output,
+                  "equal positive infinity keys must retain the first worker");
 }
 
 jaguar::Item MakeItem(jaguar::ItemIndex index)
@@ -2476,12 +2490,12 @@ bool TestMultiworkerHazardStopsOptimizePhaseCallbacks(
 
 bool RunWorkerLossSelectorTests(std::ostream& output)
 {
-    return TestWorkerLossSelectorNaNOrdering(output);
+    return TestWorkerLossSelectorNonFiniteOrdering(output);
 }
 
 bool RunSeparatorTests(std::ostream& output)
 {
-    if (!TestWorkerLossSelectorNaNOrdering(output))
+    if (!TestWorkerLossSelectorNonFiniteOrdering(output))
     {
         return false;
     }

@@ -195,6 +195,12 @@ Rust 示例与 C++ 第七轮数值相合：Rust 的 NaN 聚合轮次 447（该 `
 
 两侧都确认全 NaN 组会令原始 loss 更低的 worker 落选；受控选择器排序保持一致。Rust 两阶段合计 145334 轮：107792 全有限、37477 全 NaN、49 混合 NaN/非 NaN、16 轮含 Inf 且无 NaN。Rust 本次在短预算中观察到 49 轮混合键和 16 轮含 Inf 且无 NaN，C++ 第七轮的 8856 轮样本中两类均为零。相同墙钟预算下，Rust 完成的聚合轮数明显更多；Rust 使用持续的 Rayon 线程池，C++ 每轮通过 `std::async` 派发 worker，但本轮没有隔离性能成因。自然时限计数受运行时吞吐和执行轨迹影响，不能视为固定步数差分。此次计数仅适用于所列 fixture、seed、Release profile 与短预算；Debug 默认自然时限仍会提前触发已记录的断言，E5 的更广确定性输入矩阵仍待验收。短预算入口、环境变量追踪和逐轮日志已从 Rust 源码与测试移除。
 
+### E5 第九轮：混合 NaN/Inf 选择器对拍（2026-10-19）
+
+在 E4 锁定的 Rust 1.98.1 与 jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 下，扩展 `worker_loss_nan_order_reference.rs` 与 C++ `TestWorkerLossSelectorNonFiniteOrdering` 的共同输入矩阵。Rust Debug/Release 各运行定向测试 1 项，均通过。两侧新增四组含 NaN 与正/负无穷的序列，选择索引依次为 `[NaN,+Inf,NaN] → 1`、`[+Inf,NaN,NaN] → 0`、`[NaN,-Inf,+Inf] → 1`、`[+Inf,+Inf,NaN] → 0`；原有有限值与 NaN 三组仍选 `2/0/0`。结果符合 `-Inf < 有限值 < +Inf < NaN`，相等键保留首个 worker。
+
+C++ 使用 MSVC 2019 Release 在 `SparrowCore/build/e5-round9-selector-release` 构建定向 runner；为保证当前测试代码与库实现一致，本次从当前源码构建了 SparrowCore Release 静态库到 `SparrowCore/build/e5-round9-sparrow-lib-release`。运行 `SparrowCoreTests.exe --worker-loss-selector` 并将匹配的 JaguarCore Release `Bin` 目录加入 `PATH` 后，退出码为 0。此轮仅增加 selector 边界覆盖，没有改变生产算法。受控键序列证明两侧排序语义一致，不证明短时自然运行中会出现相同聚合轨迹；真实聚合的计数仍以第七/八轮记录为准，E5 继续部分完成。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

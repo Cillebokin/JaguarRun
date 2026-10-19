@@ -12658,10 +12658,11 @@ bool RunE5NaturalTimeAcceptance(std::ostream& output)
         void OnCompressionProgress(double shrinkStep) override
         {
             ++compressionProgressCount;
+            // The callback widens the Rust-compatible f32 step to double.
             compressionStepsFinite = compressionStepsFinite
                 && std::isfinite(shrinkStep)
-                && shrinkStep >= 0.00001
-                && shrinkStep <= 0.0005;
+                && shrinkStep >= static_cast<double>(1.0e-5F)
+                && shrinkStep <= static_cast<double>(5.0e-4F);
         }
 
         std::optional<std::size_t> CurrentPhaseIndex() const

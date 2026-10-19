@@ -288,6 +288,14 @@ Rust 1.98.1 Release和Debug运行均输出命中标记；Debug标记出现在已
 
 临时诊断代码已完全移除。随后Rust Release顶层trace测试、Debug预期断言测试、`rustfmt --check`以及C++ Debug/Release顶层定向runner均在干净源码上通过；C++ SparrowCore Debug/Release核心库与定向测试程序均重建。没有新增永久埋点或改变第十八轮生产行为。第二十轮仅补齐实际可达性证据，不扩大输入域结论；E5仍部分。
 
+### E5 第二十一轮：区分顶层`PlacedItem +Inf`命中的阶段（2026-10-19）
+
+在真实顶层`Optimize`的Explore/Compression阶段边界，以及共享PlacedItem evaluator条件处，临时加入环境变量门控的阶段标记；原子阶段状态覆盖实际worker线程，每阶段最多报告一次。探针仍要求加权loss与剩余上界同时为`+Inf`，没有改变loss比较或候选选择。
+
+Rust 1.98.1 Release、Rust Debug、C++ MSVC 14.44 Debug/Release四种运行都在Explore阶段命中。Rust Release与C++ Debug/Release随后完成Compression，但Compression没有命中该条件。Rust Debug则在Explore命中后触发已知`weighted loss should never increase: ∞ > NaN`断言，未进入Compression。由此可确认第十九轮固定输入中的命中来自Explore；它没有在该配置的Compression阶段复现。
+
+阶段探针已撤回。干净源码上Rust Release顶层reference测试1/1通过，Rust Debug预期断言测试1/1通过，`rustfmt --check`通过；C++ SparrowCore Debug/Release核心库与定向测试程序重建，顶层定向runner均退出码0。无永久埋点或生产行为改动。结论限于该seed、几何与单worker配置；E5仍部分。
+
 ## Sparrow 默认 cold-start fixture（2026-10-17）
 
 `optimizer_cold_start_default_reference.rs` 使用自定义 `PhaseTerminator`：`timeout_at()` 恒为 `None`，`kill()` 只读取 listener 在每阶段首个 separation result 后设置的 stop flag。因此 Rust 参考运行保留默认配置中的 60 秒 compression time limit 作为 shrink-decay horizon，但不会因机器墙钟截断阶段。现有 fixture 已包含该契约说明；本轮重跑输出与 fixture 完全相同，没有改写 fixture 数据。

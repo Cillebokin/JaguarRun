@@ -17,10 +17,24 @@
         <input id="instanceFile" type="file" accept="application/json,.json">
       </label>
       <button id="runButton" type="button" disabled>Run SparrowCore</button>
-      <button id="svgButton" type="button" disabled>Export SVG preview</button>
+      <button id="cancelButton" type="button" disabled>Cancel</button>
       <p id="status" class="status">Waiting for a JSON instance.</p>
+      <section class="dashboard" aria-live="polite">
+        <div class="dashboard-heading">
+          <strong id="phase">Idle</strong>
+          <span id="elapsed">0.0 s</span>
+        </div>
+        <label for="timeProgress">Phase time budget used</label>
+        <progress id="timeProgress" max="1" value="0"></progress>
+        <p id="metrics" class="metrics">No solution reports yet.</p>
+        <pre id="eventProgress" class="event-progress">Waiting for an optimization run.</pre>
+      </section>
       <img id="preview" class="preview" alt="Optimized SparrowCore layout" hidden>
       <pre id="output" class="output" aria-live="polite"></pre>
+      <section class="logs" aria-live="polite">
+        <h2>Run log</h2>
+        <ol id="logEntries"></ol>
+      </section>
     </section>
   </main>
   <script src="App.js"></script>

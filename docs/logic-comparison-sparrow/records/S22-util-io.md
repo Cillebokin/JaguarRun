@@ -1,7 +1,7 @@
 # S22. util/io.rs + util/svg_exporter.rs + util/assertions.rs 逐文件逻辑比对
 **Rust**: `CodeResource/sparrow/src/util/io.rs`（149 行）+ `util/svg_exporter.rs`（65 行）+ `util/assertions.rs`（132 行）
 **C++**: 无集中对应模块——IO/JSON/SVG 全部委托 JaguarCore 公共 API（`JaguarCore/IO/Importer.h`、`JsonCodec.h`、`SvgExport.h`，JaguarCore 记录 33-36 已覆盖其内部语义），SparrowCore 侧接线分布在 `Tools/SparrowCli/Main.cpp`、`Tools/SparrowWasm/SparrowWasm.cpp`、`bench/BenchMain.cpp`；断言侧委托 `JaguarCore/Assertions.h`（JaguarCore 记录 39）
-**判定**: 基本等价（委托 JaguarCore；实例导入/解导出/SVG 接线一致；主要差异：CLI warm-start 文件回读、SvgExporter 三通道监听器与自动建目录；Tracker Debug 一致性检查已补齐）
+**判定**: 部分（Rust兼容SPP文件闭环与SVG父目录创建已通过Release CLI运行验收；Rust应用层logger和live/intermediate SVG仍需按宿主范围裁定；SVG绘制器的结构差异见JaguarCore记录36）
 
 ## 逐条比对（io.rs）
 
@@ -10,9 +10,9 @@
 - 判定：见 S23。
 
 ### `ExtSPOutput { #[serde(flatten)] instance, solution }`（Rust 60-65）
-- C++ 对应：`jaguar::ExternalSPSolutionFromSolution` + `jaguar::SerializeExternalSPSolutionJson(external, {pretty})`（Main.cpp:193-207；SparrowWasm.cpp:116-123）。
-- 判定：差异（输出形态）。
-- 证据与说明：Rust 输出"实例+解"扁平合并的单 JSON（serde flatten）；C++ CLI/WASM 导出的是**仅解**（ExternalSPSolution 序列化，`{true}`=pretty/`{false}`=紧凑，Main.cpp:202 vs SparrowWasm.cpp:123）——实例部分不回写。语义=可再次输入的 warm-start 文件：Rust 的输出文件可原样再喂给 `-i`；C++ 的输出能否再输入取决于 JaguarCore `DeserializeExternalSPSolutionJson` 是否被调用方接线（SparrowCore 现有两个入口都只 `ImportSPInstanceJson`，不回读解）。影响：C++ 侧 warm-start 闭环（读回自己导出的解）未在 CLI 接线，`config.warmStart` 只能由 API 调用方以 `jaguar::SPSolution` 对象传入（SparrowOptimizer.cpp:116-118 的 `MakeWarmStart` 路径）。
+- C++ 对应：`jaguar::ExternalSPOutput` + `SerializeExternalSPOutputJson`（JsonCodec.h/.cpp）；CLI将导入实例与优化解合并序列化。WASM `SparrowOptimizeJson` 保留独立的solution-only C ABI格式。
+- 判定：CLI输出字段结构及warm-start文件回读已通过Release运行验收（2026-10-19）。
+- 证据与说明：Rust输出根对象包含扁平实例字段和嵌套`solution`字段。C++新增同形DTO及Codec parse/serialize API，CLI输出`name/min_item_separation/items/strip_height/solution`，solution内含`strip_width/layout/density/run_time_sec`；运行时间按CLI启动后的整秒写入。以单件SPP fixture执行cold-start导出，再将输出作为warm-start输入；第二次运行成功，实例字段逐值稳定，除运行时间外的solution字段逐值稳定，两次`run_time_sec`均为0。JSON字段语义由JaguarCore记录33的ExternalRepr/JsonCodec映射承接。
 
 ### `init_logger(level_filter, log_file_path)`（Rust 67-103：fern，双通道 stdout+文件，[LEVEL][H:M:S]<thread> 前缀）
 - C++ 对应：无（SparrowCore 库无日志框架）。
@@ -21,18 +21,23 @@
 
 ### `write_svg(document, path, log_lvl)`（Rust 106-120：建父目录→svg::save→日志）
 - C++ 对应：CLI `ExportLayoutSvg` + `std::ofstream` 写盘（Main.cpp:222-255）。
-- 判定：一致（接线等价，细节差异见 DRAW_OPTIONS——S02 差异 3）。
-- 证据与说明：两侧均为"序列化 SVG→写文件"；C++ 不自动建父目录（Rust `create_dir_all`，io.rs:108-110）——CLI 调用方需保证目录存在（`--svg` 路径无父目录创建逻辑，Main.cpp:243-255）。SVG 内容生成在 JaguarCore 记录 36。
+- 判定：父目录行为已对齐；SVG绘制内容不逐属性等价。
+- 证据与说明：CLI在写`--svg`前用`std::filesystem::create_directories`创建父目录，对应Rust `write_svg`的`create_dir_all`。SVG文档结构、viewBox、坐标翻转和图层差异见JaguarCore记录36；Sparrow入口的有效绘制选项另见本记录的DRAW_OPTIONS条目。
 
 ### `write_json(json, path, log_lvl)`（Rust 122-133：pretty JSON 落盘）
-- C++ 对应：`SerializeExternalSPSolutionJson(external, {true})` + ofstream（Main.cpp:193-220）。
-- 判定：一致。
-- 证据与说明：`{true}`=pretty 对应 `serde_json::to_writer_pretty`；序列化字段语义在 JaguarCore 记录 33（ext-repr）。
+- C++ 对应：`SerializeExternalSPOutputJson(..., {true})` + ofstream（Main.cpp）。
+- 判定：字段结构已对齐；写JSON函数本身不创建父目录。
+- 证据与说明：`{true}`=pretty对应`serde_json::to_writer_pretty`；CLI输出现在同时序列化输入实例和优化解。Rust `write_json`本身也不建父目录；Rust CLI预先创建固定`output/`目录，C++则由调用方传入`--output`路径。字段定义见JaguarCore记录33。
 
 ### `read_spp_input(path) -> (ExtSPInstance, Option<ExtSPSolution>)`（Rust 135-149）
-- C++ 对应：`jaguar::Importer::ImportSPInstanceJson`，CLI/WASM/Bench 分别使用 `sparrow::MakeRustDefaultImporterConfig()` 构造 importer（Main.cpp:139-140、SparrowWasm.cpp:63-65、BenchMain.cpp:204-205；配置 helper 在 `SparrowConfig.h:80-96`）。该 helper 显式映射 Rust `DEFAULT_SPARROW_CONFIG` 的 CDE 和形状修改默认参数。
-- 判定：差异（双格式回退解析缺失）。
-- 证据与说明：Rust 先试"instance+solution 完整输出"（`ExtSPOutput`），失败再退回"仅 instance"——这让 `-i` 既可接新实例也可接 warm-start 解文件（cli.rs:76-83 据此把 `ext_solution` 传入 `optimize`）。C++ 三个入口全部只调 `ImportSPInstanceJson`，无"先试解文件"的回退：喂给 CLI 一个含解的 JSON，其 `solution` 字段不用于 warm start。实例几何导入的默认 CDE/形状修改参数已由 `MakeRustDefaultImporterConfig()` 映射并接入这三个入口；这不补足解文件回退，也不让 `SparrowConfig` 承载自定义 importer 参数。影响：warm-start 的 CLI 入口缺失，与上一条共同构成 C++ 侧"解回读"闭环缺口；库级 `config.warmStart` API 可接收解对象，`MakeWarmStart` 使用 Restore 处理结构并将剩余需求/解验证/碰撞可行性写入 metrics，不把这些质量条件作为 warm-start 拒绝条件；三条已测 Restore 边界见 S06。该库级入口仍不能补上 CLI 对导出解文件的回读。
+- C++ 对应：CLI先尝试`ParseExternalSPOutputJson`，成功后通过`Importer::ImportSPInstance`与`Importer::ImportSPSolution`恢复实例和warm-start；否则回退`ParseExternalSPInstanceJson`。Importer仍使用`MakeRustDefaultImporterConfig()`。
+- 判定：完整输出优先解析、warm-start导入与instance-only回退已通过Release CLI运行验收（2026-10-19）。
+- 证据与说明：结构对应Rust的“先解析完整输出、失败则仅解析实例”回退。解析成功的解写入`SparrowConfig::warmStart`，随后通过已有`MakeWarmStart`路径进入Optimize。若完整输出格式通过JSON解析但solution无法导入，CLI返回warm-start导入错误；instance-only JSON仍不会尝试解导入。WASM与Bench入口保持instance-only职责。warm-start Restore对剩余需求、解结构及碰撞的既有边界见S06。
+
+### Sparrow入口的 `DRAW_OPTIONS`（Rust `consts.rs:41-49`）
+- C++对应：CLI与WASM的`SvgExportOptions`。
+- 判定：有效共享选项已对齐；SVG导出器仍缺Rust的quadtree和可配置CD shape开关，完整绘制结果不等价。
+- 证据与说明：两入口使用`SvgLayoutTheme::Gray()`（Rust Gray的线宽倍数、容器/物品填充、质量区颜色与透明度、碰撞高亮色），`drawSurrogates=false`、`highlightCollisions=true`、`includeAxes=false`。C++当前固定绘制原始形与CD轮廓，效果对应`draw_cd_shapes=false`、`highlight_cd_shapes=true`；quadtree默认关闭且C++没有对应图层。C++导出整体仍有视口、坐标方向、标签和结构差异，详见JaguarCore记录36。
 
 ## 逐条比对（svg_exporter.rs）
 
@@ -62,18 +67,25 @@
 ## 差异汇总表
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | `read_spp_input` 双格式回退（instance+solution → instance） | C++缺失 | CLI/WASM/Bench 均只解析实例；warm-start 解文件不能直接作 `-i` 输入（库级 warmStart API 存在且校验更严） | io.rs:135-149 vs Main.cpp:139-140/SparrowWasm.cpp:63-65 |
-| 2 | `ExtSPOutput`（实例+解扁平输出） | 差异 | C++ 只导出解（`SerializeExternalSPSolutionJson`），实例不回写；与差异 1 合成回读闭环缺口 | io.rs:60-65 vs Main.cpp:193-207 |
+| 1 | `read_spp_input` 双格式回退（instance+solution → instance） | CLI cold-start/warm-start文件回读已通过Release运行验收 | CLI可将导出的实例+解文件作为warm-start输入；WASM与Bench仍为instance-only入口 | io.rs:135-149 vs SparrowCli/Main.cpp；单件SPP smoke 2026-10-19 |
+| 2 | `ExtSPOutput`（实例字段扁平+嵌套solution） | CLI字段与round-trip已通过Release运行验收 | C++ CLI输出Rust同形字段；WASM C ABI保持solution-only扩展格式 | io.rs:60-65 vs JsonCodec.h/.cpp、SparrowCli/Main.cpp；字段稳定性核对 2026-10-19 |
 | 3 | `init_logger`（fern 双通道+时间前缀） | C++缺失 | 应用层日志设施归 CLI/Demo/NestLab；C++ 入口仅 cout/cerr | io.rs:67-103 vs Main.cpp（无） |
-| 4 | `SvgExporter` 监听器（live/intermediate/final 三通道） | C++缺失 | C++ 仅 CLI 一次性最终导出；中间解可视化归宿主监听（NestLab/Demo，S24） | svg_exporter.rs:39-65 vs Main.cpp:222-255 |
-| 5 | `write_svg` 自动建父目录 | C++缺失 | C++ CLI 假定输出目录存在 | io.rs:108-110 vs Main.cpp:243-255 |
+| 4 | `SvgExporter` 监听器（live/intermediate/final 三通道） | C++缺失 | C++ 仅 CLI 一次性最终导出；中间解可视化归宿主监听（NestLab/Demo，S24） | svg_exporter.rs:39-65 vs Main.cpp |
+| 5 | `write_svg` 自动建父目录 | SparrowCli已对齐 | CLI创建`--svg`父目录；WASM返回内存字符串，无磁盘路径 | io.rs:108-110 vs SparrowCli/Main.cpp |
 | 6 | `tracker_matches_layout` 交叉断言（7 处 debug_assert） | C++ Debug 已实现 | `DebugAssertMatchesLayout` 在 Tracker 重建、移动更新及保留权重恢复后核对 mapping、pair/container loss 和双向 CDE；U 形单向路径有 Debug 告警测试。worker/separator 的 move 前和 Tracker 更新后均运行该检查；Optimize 末尾 Restore 仍不等同于该检查，影响低 | assertions.rs:12-132 vs CollisionTracker.cpp:933-1087, Separator.cpp:173-262,419-437; TestQuantify.cpp:1869-2064 |
 
 ## 结论
-util/io 与 svg 导出的**序列化语义**（JSON pretty 字段、SVG 内容）已在 JaguarCore 侧的记录 33/36 核对；SparrowCore 侧接线（ImportSPInstanceJson→Optimize→SerializeExternalSPSolutionJson→ExportLayoutSvg）与 Rust 主干流程可对应，判定基本等价。仍有 warm-start 文件级闭环差异（双格式输入回退与实例回写缺失；库级 `config.warmStart` API 可接收解对象，输入契约与 Restore 边界见 S06）、Rust 应用层日志及 `write_svg` 自动建父目录差异、live/intermediate SVG 导出缺失（归宿主 UI，S24）。`tracker_matches_layout` 的 Debug 检查主体及 worker/separator move 前、更新后调用边界已接入。
+已补齐Rust同形的SPP JSON输出DTO与Codec、CLI完整输出回读为warm-start、SVG选项预设和SVG目标父目录创建。2026-10-19以VS2019 MSVC 14.29 + Qt6.5.3 msvc2019_64 qmake Release构建JaguarCore、SparrowCore和SparrowCli成功；单件SPP fixture的cold-start输出、warm-start再读、实例字段及solution稳定性、整秒运行时间、SVG嵌套父目录创建均通过。S22当时的CLI要求显式`--output`，缺失该参数、缺失输入、非法实例和JSON写入失败分别观察到退出码2、3、4、8；S23后`--output`可省略并使用`output/final_<name>.json`默认路径。S22仍标记部分：Rust应用层日志未实现；live/intermediate SVG报告仍由宿主UI工作流承接（S24）；JaguarCore的SVG结果结构和几何展示仍是有意重写，不宣称逐属性相同，详见记录36。`tracker_matches_layout`的Debug检查主体及worker/separator move前、更新后调用边界已接入。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：io.rs 149 行覆盖完整性】** MainCli 7 字段+apply_config_overrides（归 S23）、ExtSPOutput、init_logger、write_svg、write_json、read_spp_input——主文均有条目；`init_logger` 的 fern 格式串（`[LEVEL][HH:MM:SS]<thread>` + 25 列左对齐前缀）与双通道（stdout+文件）细节、`log!("[EPOCH]: jiff 时间戳")` 首行均为应用层设施，C++ 缺失判定维持。
 2. **【遗漏补记：svg_exporter.rs 的三个 if let 链与计数器语义】** 主文记了三通道但未记细节：live 路径**对每个 report 都写**（含 ExplImproving，覆盖同名文件）、intermediate 路径 `&& report_type != ExplImproving` 排除改进解且 `svg_counter += 1` 仅在此分支递增（**live 写入不计数**）、final 路径 `&& report_type == Final` 用文件名 stem 而非计数器（svg_exporter.rs:45-64）。C++ 无对应物判定不变；此细节防止后续把"live 计数"误解进中间文件命名序。
 3. **【浅覆盖补全：assertions.rs 132 行的结构】** 主文已概括 tracker_matches_layout 全函数；补记内部结构以便定位：a) 前置两断言（pk_idx_map 覆盖 + layout_qt_matches_fresh_qt，:14-15）；b) 双层循环逐 pair 的三分支（有碰撞→loss 近似双序校验+反查 opp_collector（:25-73，含 10% 容差的双向 approx_eq 与"非对称碰撞"宽限）、无碰撞但 stored≠0→反查告警（:104-117））；c) container 逐项（ Exterior 命中→assert_approx_eq ulps=5，否则 assert==0，:118-131）。S18 的近等 bbox U 形 fixture 现已实际触发“无碰撞但 stored≠0、反向 CDE 命中”的告警分支；C++ Debug 的 `DebugAssertMatchesLayout` 同样输出该诊断，测试核对正向 0 个 hazard、反向 1 个 hazard 和 pair loss bits `0x409a27bb`，Release 不输出该调试诊断。Optimize 末尾的 snapshot restore/结构检查仍不能替代 Tracker/CDE 对照。
 4. **【核对确认：write_svg 的 canonicalize 日志】** Rust `fs::canonicalize(path).expect(...)` 在路径异常时 panic（io.rs:114-118）——属观测层日志的既定 panic 差异，主文未单独列出，影响可忽略（写盘成功后才会走到）。
+
+### 实施记录（2026-10-19）
+1. 新增`ExternalSPOutput`及`ParseExternalSPOutputJson`/`SerializeExternalSPOutputJson`，按Rust serde flatten 输出形态读写扁平实例字段和嵌套`solution`。
+2. SparrowCli现在先试完整输出、失败回退实例；完整输出的solution经`Importer::ImportSPSolution`装入`SparrowConfig::warmStart`。输出包含原实例、优化解及整秒运行时间。
+3. SparrowCli的SVG写入前创建父目录；CLI与WASM的Sparrow SVG入口使用Gray主题、关闭surrogate与额外坐标轴，并保留碰撞高亮。SVG整体几何、路径和图层差异仍按JaguarCore记录36界定。
+4. 四个变更源文件（JsonCodec.cpp、SvgExport.cpp、SparrowCli/Main.cpp、SparrowWasm.cpp）通过llvm-mingw g++ C++17 syntax-only；另以VS2019 MSVC 14.29 + Qt6.5.3 msvc2019_64 qmake Release构建JaguarCore、SparrowCore和SparrowCli成功。qmake提示`qt_build_config` feature不可用但继续生成；三个目标编译及链接均成功。g++仅对既有`MSpp.h`/磁盘`Mspp.h`大小写不一致给出可移植性warning，没有改该无关包含路径。
+5. CLI运行验收使用`JaguarCore/Tests/Fixtures/RustReference/spp_instance.json`：cold-start输出根级实例字段+嵌套`solution`，SVG写入原先不存在的多层父目录；再把输出作为`--input`完成warm-start。两次输出的实例字段逐值相同，除`run_time_sec`外的solution字段逐值相同，`run_time_sec`均为0。S22当时还检查缺失`--output`、缺失输入、非法实例、JSON输出写入失败的退出码分别为2/3/4/8；S23后省略`--output`会走实例名默认路径。此为单件fixture smoke，不外推为Rust/C++算法parity或全输入错误映射证明。

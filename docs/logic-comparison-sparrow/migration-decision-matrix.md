@@ -48,9 +48,9 @@
 | 记录 | 建议迁移决策 | 最低验收门槛 |
 |---|---|---|
 | [S19 SIMD](records/S19-simd.md) | 若目标 Rust 基线使用默认标量 feature，C++ 标量路径按该基线对齐；若目标基线启用 Rust SIMD，则该构建也属于 parity 范围，须单独复现其选择/损失行为。SIMD 实现形式是否移植只由性能目标决定 | 冻结目标 Rust feature 集；对纳入迁移范围的每个 feature 集分别建立 Rust 参考结果并核对候选选择、早停和浮点误差分布，不宣称未经测量的 ULP 上界 |
-| [S22 文件与 IO](records/S22-util-io.md) | 核心库只承诺导入/导出 API；warm-start 文件闭环、父目录创建、日志与 live SVG 按 CLI/Demo/NestLab 需求归属 | 若纳入 CLI，做实例+解输入回退、导入-优化-导出-再读回和输出目录不存在用例 |
-| [S23 CLI 与 benchmark](records/S23-cli-bench.md) | CLI 若纳入迁移接口，其会影响算法的有效 seed、配置和时限必须映射为 Rust 语义；输出格式、退出码和 benchmark 形态可作为宿主差异，但不能改变 Rust 算法输入或停止条件 | 对相同 CLI 输入核对解析后的有效 seed/配置/时限并比较最终布局；benchmark 统计能力另按产品需求验收 |
-| [S24 TUI/Demo](records/S24-tui.md) | 继续排除于 SparrowCore 算法核心；实时仪表盘、日志和 live SVG 作为宿主 UI 工作流单独立项。当前 Demo 只覆盖最终布局预览与 JSON | 若项目要求实时 UI，先验证监听器事件面和线程取消，再在宿主层做进度、日志与 live SVG 集成测试 |
+| [S22 文件与 IO](records/S22-util-io.md) | Rust同形SPP输出DTO、CLI warm-start回读、Sparrow SVG主题/选项及SVG父目录创建已实现；单件fixture round-trip/字段稳定性和主要错误码已通过Release smoke。日志与live/intermediate SVG仍按宿主需求归属，完整SVG渲染差异见JaguarCore记录36 | 已完成单件fixture的实例-only导入、完整输出再读、字段/运行时间、SVG父目录及退出码2/3/4/8 smoke；其余宿主日志和SVG绘制差异按S24/记录36裁定 |
+| [S23 CLI 与 benchmark](records/S23-cli-bench.md) | CLI 若纳入迁移接口，其会影响算法的有效 seed、配置和时限必须映射为 Rust 语义；benchmark统计纳入认证，末批按pinned Rust整批运行；Rust物理核心与C++逻辑线程批容量差异仍保留 | 对相同CLI输入核对有效seed/配置/时限；核对Bench请求数、批次形状与实际统计样本数，并分别记录seed和并发容量边界 |
+| [S24 TUI/Demo](records/S24-tui.md) | 继续排除于SparrowCore算法核心；Demo现由Web Worker单次Optimize并返回JSON/SVG，同时消费listener事件显示阶段、进度、日志和live SVG。取消通过终止Worker实现，当前不等价于Rust的合作式phase stop；浏览器验收未完成 | 对同一Optimize调用核对最终JSON/SVG、listener消息与状态转换；验收Worker取消的用户可见出口，并保留其不提供partial result的差异 |
 
 ## 建议执行顺序
 

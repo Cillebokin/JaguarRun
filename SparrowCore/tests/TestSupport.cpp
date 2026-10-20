@@ -12,6 +12,7 @@ bool RunBppLbfTests(std::ostream& output);
 bool RunQuantifyTests(std::ostream& output);
 bool RunSeparatorTests(std::ostream& output);
 bool RunWorkerLossSelectorTests(std::ostream& output);
+bool RunObserverBoundaryTests(std::ostream& output);
 bool RunE5FixedNonFiniteWorkerRounds(std::ostream& output);
 bool RunE5SameSeedWorkerTrajectory(std::ostream& output);
 bool RunE5Seed4SameSeedWorkerTrajectory(std::ostream& output);
@@ -35,6 +36,10 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view{argv[1]} == "--worker-loss-selector")
     {
         return RunWorkerLossSelectorTests(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--observer-boundaries")
+    {
+        return RunObserverBoundaryTests(std::cerr) ? 0 : 1;
     }
     if (argc == 2 && std::string_view{argv[1]} == "--e5-fixed-nonfinite-worker-rounds")
     {

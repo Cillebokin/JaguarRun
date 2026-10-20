@@ -119,6 +119,136 @@ public:
     std::size_t improvementCount = 0U;
 };
 
+class StopOnExplorationProgressObserver final
+    : public sparrow::OptimizationObserver
+{
+public:
+    explicit StopOnExplorationProgressObserver(
+        sparrow::OptimizationTerminator& terminator)
+        : m_Terminator(terminator)
+    {
+    }
+
+    void OnProgress(const sparrow::OptimizationProgress& progress) override
+    {
+        if (progress.phase
+                == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION
+            && !phaseStopRequested)
+        {
+            phaseStopRequested = true;
+            m_Terminator.RequestPhaseStop();
+        }
+    }
+
+    bool phaseStopRequested = false;
+
+private:
+    sparrow::OptimizationTerminator& m_Terminator;
+};
+
+class ThrowOnObserverProgress final : public sparrow::OptimizationObserver
+{
+public:
+    void OnProgress(const sparrow::OptimizationProgress& progress) override
+    {
+        ++progressCount;
+        lastPhase = progress.phase;
+        throw std::runtime_error("observer progress failure");
+    }
+
+    void OnImprovement(const sparrow::OptimizationProgress&) override
+    {
+        ++improvementCount;
+    }
+
+    std::size_t progressCount = 0U;
+    std::size_t improvementCount = 0U;
+    sparrow::OptimizationPhase lastPhase =
+        sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION;
+};
+
+class ThrowOnObserverImprovement final : public sparrow::OptimizationObserver
+{
+public:
+    void OnProgress(const sparrow::OptimizationProgress& progress) override
+    {
+        ++progressCount;
+        lastPhase = progress.phase;
+    }
+
+    void OnImprovement(const sparrow::OptimizationProgress& progress) override
+    {
+        ++improvementCount;
+        lastPhase = progress.phase;
+        throw std::runtime_error("observer improvement failure");
+    }
+
+    std::size_t progressCount = 0U;
+    std::size_t improvementCount = 0U;
+    sparrow::OptimizationPhase lastPhase =
+        sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION;
+};
+
+class PhaseRecordingListener final : public sparrow::OptimizationListener
+{
+public:
+    void OnPhase(sparrow::OptimizationPhase phase) override
+    {
+        currentPhase = phase;
+        phases.push_back(phase);
+    }
+
+    void OnSolution(const sparrow::OptimizationSolutionReport&) override {}
+
+    void OnSeparationResult(const sparrow::SeparationResult&) override
+    {
+        separationResultPhases.push_back(currentPhase);
+    }
+
+    sparrow::OptimizationPhase currentPhase =
+        sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION;
+    std::vector<sparrow::OptimizationPhase> phases;
+    std::vector<sparrow::OptimizationPhase> separationResultPhases;
+};
+
+std::optional<jaguar::SPInstance> LoadObserverBoundaryInstance(
+    std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "../SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/RustSppOptimizeImmediateStop.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\RustSppOptimizeImmediateStop.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "observer boundary input fixture cannot be opened"))
+    {
+        return std::nullopt;
+    }
+
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "observer boundary input must import with Rust defaults"))
+    {
+        return std::nullopt;
+    }
+    return std::move(instance.Value());
+}
+
 class RustOptimizeReferenceListener final : public sparrow::OptimizationListener
 {
 public:
@@ -2218,6 +2348,127 @@ bool TestListenerExceptionDuringSeparationProgressMatchesRust(
     return Expect(exceptionEscaped && listener.events == expectedEvents,
                   output,
                   "listener exception must escape at the matching Rust progress boundary without result or next-phase callbacks");
+}
+
+bool TestObserverPhaseStopResetsForCompression(std::ostream& output)
+{
+    const auto instance = LoadObserverBoundaryInstance(output);
+    if (!instance.has_value())
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    StopOnExplorationProgressObserver observer(terminator);
+    PhaseRecordingListener listener;
+    const auto optimized = sparrow::Optimize(
+        *instance, config, terminator, &listener, &observer);
+
+    const std::vector<sparrow::OptimizationPhase> expectedPhases{
+        sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
+        sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION};
+    const bool explorationWasSkipped =
+        std::find(listener.separationResultPhases.begin(),
+                  listener.separationResultPhases.end(),
+                  sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION)
+        == listener.separationResultPhases.end();
+    const bool compressionContinued =
+        std::find(listener.separationResultPhases.begin(),
+                  listener.separationResultPhases.end(),
+                  sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION)
+        != listener.separationResultPhases.end();
+    const bool boundaryMatched =
+        optimized.HasValue() && optimized.Value().metrics.feasible
+        && observer.phaseStopRequested
+        && listener.phases == expectedPhases
+        && explorationWasSkipped && compressionContinued;
+    if (!boundaryMatched)
+    {
+        output << "Observer phase-stop diagnostic: result="
+               << (optimized.HasValue() ? 1 : 0)
+               << ", feasible="
+               << (optimized.HasValue() && optimized.Value().metrics.feasible
+                       ? 1
+                       : 0)
+               << ", requested=" << (observer.phaseStopRequested ? 1 : 0)
+               << ", phase-count=" << listener.phases.size()
+               << ", exploration-skipped=" << (explorationWasSkipped ? 1 : 0)
+               << ", compression-continued=" << (compressionContinued ? 1 : 0)
+               << '\n';
+    }
+    return Expect(boundaryMatched,
+                  output,
+                  "observer phase stop must end exploration and reset for compression");
+}
+
+bool TestObserverExceptionPropagatesBeforeOptimizationPhases(
+    std::ostream& output)
+{
+    const auto instance = LoadObserverBoundaryInstance(output);
+    if (!instance.has_value())
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    ThrowOnObserverProgress observer;
+    PhaseRecordingListener listener;
+    bool exceptionEscaped = false;
+    try
+    {
+        (void)sparrow::Optimize(
+            *instance, config, terminator, &listener, &observer);
+    }
+    catch (const std::runtime_error& error)
+    {
+        exceptionEscaped =
+            std::string{error.what()} == "observer progress failure";
+    }
+
+    if (!Expect(exceptionEscaped && observer.progressCount == 1U
+                    && observer.improvementCount == 0U
+                    && observer.lastPhase
+                           == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION
+                    && listener.phases.empty(),
+                output,
+                "OnProgress exception must propagate before native listener phase callbacks"))
+    {
+        return false;
+    }
+
+    sparrow::OptimizationTerminator improvementTerminator(config.terminator);
+    improvementTerminator.Start();
+    ThrowOnObserverImprovement improvementObserver;
+    PhaseRecordingListener improvementListener;
+    bool improvementExceptionEscaped = false;
+    try
+    {
+        (void)sparrow::Optimize(instance.value(),
+                                config,
+                                improvementTerminator,
+                                &improvementListener,
+                                &improvementObserver);
+    }
+    catch (const std::runtime_error& error)
+    {
+        improvementExceptionEscaped =
+            std::string{error.what()} == "observer improvement failure";
+    }
+
+    return Expect(improvementExceptionEscaped
+                      && improvementObserver.progressCount == 1U
+                      && improvementObserver.improvementCount == 1U
+                      && improvementObserver.lastPhase
+                             == sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION
+                      && improvementListener.phases.empty(),
+                  output,
+                  "OnImprovement exception must propagate before native listener phase callbacks");
 }
 
 bool TestZeroTimeoutOptimizeMatchesRustReference(std::ostream& output)
@@ -11297,6 +11548,12 @@ bool RunImmediateStopOptimizeConsoleProbe(
     return TestImmediateStopOptimizeMatchesRustReference(output, signalTrigger);
 }
 
+bool RunObserverBoundaryTests(std::ostream& output)
+{
+    return TestObserverPhaseStopResetsForCompression(output)
+        && TestObserverExceptionPropagatesBeforeOptimizationPhases(output);
+}
+
 bool RunExplorationTests(std::ostream& output)
 {
     if (!RunE5Seed4TopLevelOptimizeCompress(output)
@@ -11574,6 +11831,14 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestListenerExceptionDuringSeparationProgressMatchesRust(output))
+    {
+        return false;
+    }
+    if (!TestObserverPhaseStopResetsForCompression(output))
+    {
+        return false;
+    }
+    if (!TestObserverExceptionPropagatesBeforeOptimizationPhases(output))
     {
         return false;
     }

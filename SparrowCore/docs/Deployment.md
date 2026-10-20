@@ -11,14 +11,22 @@ qmake SparrowCore/Tools/SparrowCli/SparrowCli.pro CONFIG+=release SPARROWCORE_BU
 nmake /nologo
 ```
 
-Run the CLI with an external Jaguar SPP instance:
+Run the CLI with an external Jaguar SPP instance. By default, it writes `output/final_<instance-name>.json` and `.svg`; both paths can be overridden. The JSON contains flat instance fields and a nested `solution` object, so it can be passed back as `--input` for a warm-start run:
 
 ```text
-SparrowCli --input instance.json --output solution.json --svg layout.svg \
+SparrowCli -i instance.json -t 600 -s 42 --workers 3
+SparrowCli -i instance.json --output solution.json --svg layout.svg \
   --seed 42 --samples 1000 --time-ms 2000 --early-termination
 ```
 
+With no time option, the CLI uses 480 seconds for exploration and 120 seconds for compression. `-t/--global-time` splits a total number of seconds 80/20; `-e/--exploration` and `-c/--compression` set both phase limits directly and must be supplied together. `--time-ms` remains a C++ global hard-time-limit extension and cannot be combined with those Rust-style time options. `--help` prints the complete option summary.
+
+To warm-start from the generated JSON, pass it back as `--input`; omit `--output` to write the next result under its instance-derived default name, or provide a new override path.
+
 CLI exit codes: `0` success; `2` usage error; `3` input file unreadable; `4` instance import failed; `5` optimization failed; `6` solution conversion failed; `7` solution serialization failed; `8` output write failed; `9` layout restore, SVG export or SVG write failed; `10` an unexpected exception escaped the library layer (reported on stderr).
+
+`SparrowCoreBench all` runs the fixed CSV/checksum regressions. The statistical benchmark accepts any SPP JSON instance, a total time limit in seconds, and a positive run count: `SparrowCoreBench <input.json> <time-limit-seconds> <runs>`. It writes one SVG per run plus the best-run SVG under `output/`, then prints width and usage distributions.
+Like the pinned Rust Bench, it runs a full batch for the final partial batch, so `actual_runs` may exceed the requested `<runs>`; both counts are printed. Batch size is estimated from `std::thread::hardware_concurrency()`, while Rust uses physical-core count, so the overshoot amount can differ across hosts.
 
 On `SIGINT`/Ctrl-C, SparrowCli requests a cooperative stop for the active phase. The optimizer
 finishes through its normal phase handoff and final-result path; a later phase clears that
@@ -45,23 +53,49 @@ int SparrowOptimizeSvg(const char* inputJson,
                        size_t inputSize,
                        char* outputSvg,
                        size_t outputCapacity)
+
+int SparrowOptimizeWithSvg(const char* inputJson,
+                           size_t inputSize,
+                           char** outputBuffer,
+                           size_t* outputJsonSize,
+                           size_t* outputSvgSize)
+
+void SparrowFreeOutput(char* outputBuffer)
 ```
 
-Use an Emscripten toolchain and pass the built SparrowCore and JaguarCore libraries to CMake:
+`SparrowOptimizeWithSvg` runs `Optimize` once and returns a malloc-owned
+`JSON\0SVG\0` buffer; the two lengths exclude their NUL terminators. Release
+the returned buffer with `SparrowFreeOutput`. The existing fixed-buffer JSON
+and SVG functions remain available. The combined entry publishes phase,
+solution, separation, and compression events through the worker's message
+channel; non-Emscripten builds keep those callbacks inert.
+
+With an Emscripten toolchain, CMake builds the SparrowCore and JaguarCore source files by default. The target compiles and links with `-pthread` and prewarms three Pthread workers to match the current WASM configuration. Build it from the repository root:
 
 ```text
 emcmake cmake -S SparrowCore/Tools/SparrowWasm -B build-wasm \
-  -DSPARROWCORE_LIBRARY=/absolute/path/libSparrowCore.a \
-  -DJAGUARCORE_LIBRARY=/absolute/path/libJaguarCore.a
-cmake --build build-wasm
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-wasm --parallel
 ```
 
-The return code is `0` for success, `1` only when the input is null or empty, `2` for any failure after input is accepted (JSON import/parse failure, optimization failure, layout restore, SVG export or serialization failure) and `3` when the output buffer is null or too small. Any C++ exception raised inside the optimizer is caught at the C ABI boundary and reported as code `2` with the payload `{"error":"internal error"}`. On a non-zero return code other than `3`, the output buffer contains `{"error":"<message>"}`.
+The build writes `sparrow_wasm.js` and `sparrow_wasm.wasm` into the build directory. Existing Emscripten-compatible static archives can be supplied with `SPARROWCORE_LIBRARY` and `JAGUARCORE_LIBRARY`; otherwise the in-tree sources are compiled. JaguarCore's x86 AVX2 implementation is excluded and its portable fallback is used.
+
+The fixed-buffer return code is `0` for success, `1` only when the input is null or empty, `2` for any failure after input is accepted (JSON import/parse failure, optimization failure, layout restore, SVG export or serialization failure) and `3` when the output buffer is null or too small. The combined function uses the same `0/1/2` input and optimization outcomes; `3` means an invalid output pointer or allocation failure. On a non-zero status with a valid combined-output pointer, the JSON segment contains `{"error":"<message>"}` and the SVG segment is empty. Any C++ exception raised inside an export is caught at the C ABI boundary and reported as code `2`.
 
 ## Browser demo
 
-Serve `SparrowCore/Demo` from a local HTTP server and load the Emscripten-generated bridge as
-`window.SparrowWasm.optimizeJson` and `window.SparrowWasm.optimizeSvg`. Run optimizes once and shows the JSON
-result; the bridge must return the JSON text on success, or a `{"error":"..."}` payload on failure. The
-`Export SVG preview` button is a separate request that re-runs the optimization to produce the SVG preview. `Demo/Index.html` intentionally
-has no network dependency and can be hosted as static files.
+Copy the Emscripten-generated `sparrow_wasm.js` and `sparrow_wasm.wasm` beside the files in
+`SparrowCore/Demo`, then serve that directory over HTTP. `SparrowWorker.js`
+loads the module in a Web Worker and calls `SparrowOptimizeWithSvg`; the JSON
+solution and SVG preview therefore come from the same optimization run. The
+Demo displays listener-driven phase, progress, result summaries, event logs,
+and throttled live SVG updates. Cancel terminates the Web Worker immediately;
+it does not request a cooperative phase stop and does not return a partial
+solution. The browser Demo currently has no cooperative WASM cancellation
+contract.
+
+Because the WASM build uses Pthreads and shared memory, serve the Demo with
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Serve JavaScript as
+`text/javascript` and the WASM binary as `application/wasm`. Direct `file://`
+loading is not supported for this threaded build.

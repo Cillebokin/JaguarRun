@@ -79,8 +79,11 @@ Known boundaries and compatibility choices:
   compression, default cold-start, termination handoff, and general end-to-end runs remain outside
   this evidence; bit-identical optimizer output is not claimed.
 - Legacy iteration, failure, and infeasible-pool limits remain available to existing C++ callers.
-- WASM exports the stable C ABI (`SparrowOptimizeJson` and `SparrowOptimizeSvg`); Emscripten
-  module packaging and host-side memory ownership remain deployment concerns.
+- WASM retains the fixed-buffer C ABI (`SparrowOptimizeJson` and `SparrowOptimizeSvg`) and adds
+  `SparrowOptimizeWithSvg` for a single Optimize call that returns both outputs in one owned
+  buffer; callers release it with `SparrowFreeOutput`. Emscripten packaging remains a deployment
+  concern. The browser Demo's Cancel action terminates its Worker and does not expose the native
+  cooperative terminator contract.
 
 Every successful C++ result is revalidated by JaguarCore. See `Docs/Differential.md` for the
 oracle command, fixture provenance, tolerances, and the remaining verification gaps.

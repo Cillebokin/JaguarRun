@@ -207,6 +207,16 @@ struct ExternalSPSolution
     std::uint64_t runTimeSec = 0;
 };
 
+// Rust-compatible SPP output: instance fields at the root and solution nested
+// under "solution".
+struct ExternalSPOutput
+{
+    // External SPP instance
+    ExternalSPInstance instance;
+    // External SPP solution
+    ExternalSPSolution solution;
+};
+
 // 外部装箱容器
 struct ExternalBin
 {

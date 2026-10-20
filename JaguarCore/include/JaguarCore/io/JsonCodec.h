@@ -86,6 +86,14 @@ JAGUARCORE_API Result<std::string> SerializeExternalSPSolutionJson(
     const ExternalSPSolution& solution,
     JsonCodecOptions options = {});
 
+// 解析实例字段扁平展开、解字段嵌套在 solution 下的 SPP 输出 JSON
+JAGUARCORE_API Result<ExternalSPOutput> ParseExternalSPOutputJson(
+    const std::string& json);
+// 序列化实例字段扁平展开、解字段嵌套在 solution 下的 SPP 输出 JSON
+JAGUARCORE_API Result<std::string> SerializeExternalSPOutputJson(
+    const ExternalSPOutput& output,
+    JsonCodecOptions options = {});
+
 // 解析外部 BPP 实例 JSON
 JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(
     const std::string& json);

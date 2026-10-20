@@ -1491,6 +1491,29 @@ JsonValue spSolutionJson(const ExternalSPSolution& solution)
     return JsonValue(std::move(object));
 }
 
+bool parseSPOutputValue(const JsonValue& value,
+                        ExternalSPOutput& output,
+                        std::string& error)
+{
+    if (rejectDuplicateFields(value, {"solution"}, error) ||
+        !parseSPInstanceValue(value, output.instance, error))
+        return false;
+
+    const auto* object = objectValue(value, "SP output", error);
+    if (!object)
+        return false;
+    const JsonValue* solution = requiredMember(*object, "solution", error);
+    return solution && parseSPSolutionValue(*solution, output.solution, error);
+}
+
+JsonValue spOutputJson(const ExternalSPOutput& output)
+{
+    JsonValue value = spInstanceJson(output.instance);
+    auto* object = std::get_if<JsonValue::Object>(&value.value);
+    object->emplace("solution", spSolutionJson(output.solution));
+    return value;
+}
+
 bool parseBinValue(const JsonValue& value,
                    ExternalBin& bin,
                    std::string& error)
@@ -1925,6 +1948,18 @@ JAGUARCORE_API Result<std::string> SerializeExternalSPSolutionJson(
     const ExternalSPSolution& solution, JsonCodecOptions options)
 {
     return writeJson(spSolutionJson(solution), options);
+}
+
+JAGUARCORE_API Result<ExternalSPOutput> ParseExternalSPOutputJson(
+    const std::string& json)
+{
+    return parseJson<ExternalSPOutput>(json, parseSPOutputValue);
+}
+
+JAGUARCORE_API Result<std::string> SerializeExternalSPOutputJson(
+    const ExternalSPOutput& output, JsonCodecOptions options)
+{
+    return writeJson(spOutputJson(output), options);
 }
 
 JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(

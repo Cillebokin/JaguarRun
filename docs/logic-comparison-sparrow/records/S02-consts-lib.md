@@ -52,8 +52,8 @@
 
 ### `DRAW_OPTIONS`（SvgDrawOptions，Rust 42-49）
 - C++ 对应：`jaguar::SvgExportOptions`（JaguarCore 侧，记录 36）。
-- 判定：差异（选项集不同，属 JaguarCore 层）。
-- 证据与说明：Rust `{GRAY 主题, quadtree:false, surrogate:false, highlight_collisions:true, draw_cd_shapes:false, highlight_cd_shapes:true}`；C++ SparrowCli 用 `svgOptions.title="SparrowCore Layout"; drawSurrogates=true`（Main.cpp:233-235）——C++ 导出打开 surrogate 绘制而 Rust 关闭，且无 quadtree/cd_shapes 选项（JaguarCore 记录 36 已记录选项差异）。SparrowCore 侧仅此一处接线。
+- 判定：Sparrow CLI/WASM入口的有效共享选项已按Rust对齐；JaguarCore选项集合与完整SVG输出仍有差异。
+- 证据与说明：Rust `{GRAY主题, quadtree:false, surrogate:false, highlight_collisions:true, draw_cd_shapes:false, highlight_cd_shapes:true}`；C++入口现设置`SvgLayoutTheme::Gray()`、`drawSurrogates=false`、`highlightCollisions=true`和`includeAxes=false`。C++固定绘制原始形与CD轮廓且无quadtree图层；因此只对齐默认有效显示配置，不宣称所有绘制功能和图层一致（S22与JaguarCore记录36）。
 
 ### `LBF_SAMPLE_CONFIG = {1000, 0, 3}`（Rust 51-55）
 - C++ 对应：`SparrowConstructorConfig` 默认值（LbfConfig.h:71-73）。
@@ -137,7 +137,7 @@
 |---|---|---|---|---|
 | 1 | `DEFAULT_EXPLORE_TIME_RATIO/COMPRESS_TIME_RATIO`（0.8/0.2） | C++缺失 | 全局时间→两阶段分摊逻辑归调用方；SparrowCli 不做比例分摊 | consts.rs:31-32 vs SparrowConfig.h:37/61、Main.cpp:163 |
 | 2 | `LOG_LEVEL_FILTER_*` | C++缺失 | 日志分级归应用层 | consts.rs:38-40 vs（无） |
-| 3 | `DRAW_OPTIONS` vs SvgExportOptions | 差异 | C++ 默认 drawSurrogates=true（Rust false）；选项集不同属 JaguarCore 记录 36 | consts.rs:42-49 vs Main.cpp:233-235 |
+| 3 | `DRAW_OPTIONS` vs SvgExportOptions | 默认Sparrow显示配置已对齐；导出器能力/结构仍不同 | 入口关闭surrogate并使用Gray主题、开启碰撞高亮；quadtree图层与绘制开关仍不完全对应 | consts.rs:42-49 vs SvgExport.cpp、SparrowCli/Main.cpp、SparrowWasm.cpp |
 | 4 | `EPOCH`/`FMT`/SVG 特性开关 | C++缺失 | 应用层设施（日志时间戳、numfmt、live/final-svg 编译开关） | lib.rs:17-39 vs（无） |
 | 5 | `SparrowRng` 内置 RNG 类及额外 `Normal01F32` helper | C++额外 | Xoshiro/SplitMix64/整数区间映射有 Rust reference 覆盖；Box–Muller helper 仅供 C++ LocalSearchSampler，不属于 Rust parity | SparrowRng.h:10-28; SparrowRng.cpp:89-110 vs cli.rs:17 |
 | 6 | PItemId/LItemId 等公共类型 | 不适用 | sparrow 侧不定义此类 ID 类型（属 jagua-rs↔JaguarCore） | lib.rs 全文 vs（无） |
@@ -182,7 +182,7 @@ consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 
 | `DEFAULT_FAIL_DECAY_RATIO_CMPR = 0.9` | `SparrowConfig.h:62`，`failureDecay = 0.9` | 一致 |
 | `LOG_LEVEL_FILTER_RELEASE = Info` | SparrowCore 无日志过滤器 | C++ 缺失；应用层日志设施，见 S22/S24 |
 | `LOG_LEVEL_FILTER_DEBUG = Debug` | SparrowCore 无日志过滤器 | C++ 缺失；应用层日志设施，见 S22/S24 |
-| `DRAW_OPTIONS` | SparrowCli `Main.cpp:233-235` 的 `SvgExportOptions` 接线 | 有意记录的选项差异：C++ 打开 surrogate 绘制，选项集由 JaguarCore 承担，见 JaguarCore 记录 36 |
+| `DRAW_OPTIONS` | SparrowCli 与 SparrowWasm 的 `SvgExportOptions` 接线 | surrogate 已关闭并映射Gray主题/碰撞高亮；Rust未关闭的额外SVG开关能力与整体结构差异见JaguarCore记录36/S22 |
 | `LBF_SAMPLE_CONFIG = {1000, 0, 3}` | `LbfConfig.h:67-69` 的 Sparrow constructor 默认值 | 三字段一致 |
 
 复核结果：19 个声明均有映射、宿主层归属或明确差异；没有发现未记录的算法常量数值漂移。`lib.rs` 现仍为 7 个 `pub mod`，无根级 `pub use`；另有公开 `EPOCH`、两组 feature-controlled SVG bool，`FMT` 为私有静态项。模块内部导出差异仍按 S05/S12/S17 等记录处理。

@@ -204,6 +204,8 @@ fixtures also do not establish other non-transitive SampleEval groups or general
 The final native acceptance path also validates both `jaguar::ValidateSPSolution` and
 `jaguar::Layout::IsFeasible`. The CLI and WASM boundaries additionally exercise JSON import,
 optimization, solution export, SVG export, buffer-capacity errors, and empty-input errors.
+The 2026-10-19 S24 Demo update adds a single-call JSON+SVG WASM export and listener-driven Worker
+events; this new browser boundary remains pending Emscripten build and browser verification.
 
 ## Re-running the gate
 

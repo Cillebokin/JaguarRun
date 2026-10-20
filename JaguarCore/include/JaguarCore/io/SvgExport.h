@@ -24,6 +24,9 @@ struct SvgColor
 // SVG 布局主题
 struct SvgLayoutTheme
 {
+    // Rust jagua-rs 的 GRAY 主题
+    static JAGUARCORE_API SvgLayoutTheme Gray() noexcept;
+
     // 线宽缩放倍数
     double strokeWidthMultiplier = 2.0;
     // 容器填充色

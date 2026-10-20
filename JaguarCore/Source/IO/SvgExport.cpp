@@ -12,6 +12,21 @@
 
 namespace jaguar
 {
+SvgLayoutTheme SvgLayoutTheme::Gray() noexcept
+{
+    SvgLayoutTheme theme{};
+    theme.strokeWidthMultiplier = 2.5;
+    theme.containerFill = {0xd3, 0xd3, 0xd3};
+    theme.itemFill = {0x7a, 0x7a, 0x7a};
+    theme.collisionStroke = {0x00, 0x00, 0x00};
+    theme.collisionHighlight = {0xd0, 0x00, 0x00};
+    theme.surrogateStroke = {0x00, 0x00, 0x00};
+    const SvgColor gray{0x63, 0x63, 0x63};
+    theme.qualityZoneFills.fill(gray);
+    theme.qualityZoneStrokeOpacity = 0.9;
+    return theme;
+}
+
 namespace
 {
 std::string number(double value)

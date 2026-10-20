@@ -21,6 +21,8 @@ sparrow Rust 工作源码（路径由负责人在本地指定，不写入仓库�
 
 SparrowCore 核心仍以 static library 作为 C++ 集成产物；CLI、WASM C ABI、Demo 和 Bench 作为外围发布边界分别构建。DLL/CRT/ABI 的最终政策仍由 JaguarRun 的发布工程决定。
 
+WASM保留固定缓冲区的JSON/SVG接口，并新增`SparrowOptimizeWithSvg`单次优化合并输出入口；Demo用Web Worker消费listener事件、生成实时仪表盘。该新增接口与Worker尚未在Emscripten/浏览器环境构建验收。
+
 ## 3. jagua-rs/lbf 映射
 
 | 参考文件 | 目标文件 | 保留语义 |
@@ -67,7 +69,7 @@ SparrowCore 核心仍以 static library 作为 C++ 集成产物；CLI、WASM C A
 Task 2～7 已补齐 SparrowCore 本体的构造、量化、分离、探索、压缩、顶层 Optimize、CLI、WASM C ABI、Demo 和 Bench；顶层 API 还支持外部 `OptimizationTerminator` 和完整可行解 warm start。当前仍明确不包含：
 
 - NestLab 适配、生产排料替换和上层业务协议；
-- 当前机器未安装 Emscripten，因此 Emscripten 生成的最终 glue、宿主内存管理和 CDN 发布仍需在 WASM 工具链环境执行；
+- 当前机器未找到 Emscripten，因此新增WASM合并输出、Worker事件和宿主内存释放仍需在 WASM 工具链环境构建验收；
 - Rust/C++ 全规模逐样本 bit-exact differential oracle；当前保留固定 seed fixture、行为不变量和 JaguarCore 最终验证。
 
 ## 6. Fixture 资产

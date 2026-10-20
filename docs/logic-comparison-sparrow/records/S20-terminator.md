@@ -77,7 +77,7 @@
 12. **【真实键盘 Ctrl-C 冒烟】** 2026-10-12，用户在可见 Windows PowerShell 中运行 Release `SparrowCoreTests.exe --windows-console-ctrlc-manual`，在 `READY: press Ctrl+C in this console now` 后按下键盘 Ctrl+C；回报输出 `WINDOWS_CTRL_C_SIGNAL_OBSERVED` 与 `WINDOWS_CTRL_C_PROBE_PASS`，命令正常返回 PowerShell 提示符。此证据确认真实控制台键盘事件经过 `ScopedCtrlCHandler`，终止器观察到 phase-stop flag，且现有 immediate-stop Rust reference 轨迹通过；仅覆盖该 Windows/MSVC Release 环境和固定夹具，不扩展为其他终端、构建配置或自然运行时限的证明。
 
 ### 2026-10-19 执行记录：S20范围裁决与Linux行为说明
-13. **【WASM中途取消范围裁决】** Rust `util/mod.rs` 仅在非 `wasm32` 目标编译 `ctrlc_terminator`；C++ WASM ABI 的 JSON/SVG 导出为同步调用，没有取消参数或可并发共享控制入口。当前WASM配置将 `terminator.maxIterations` 设为 `64U`，这不等于调用方可触发的中途取消。故S20不新增WASM取消API；若未来产品要求此能力，应另立ABI与宿主并发设计及验收项。
+13. **【WASM中途取消范围裁决】** Rust `util/mod.rs` 仅在非 `wasm32` 目标编译 `ctrlc_terminator`；C++ WASM ABI 的JSON/SVG导出仍是同步调用，没有合作式取消参数或可并发共享控制入口。当前WASM配置将`terminator.maxIterations`设为`64U`，不等于调用方可触发的中途取消。S24新增的浏览器Cancel直接终止Web Worker，属于宿主硬中止，不新增S20合作式WASM取消API，也不能返回partial result。
 14. **【Linux行为与证据边界】** `OptimizationSignalHandler.cpp` 使用 `std::signal(SIGINT, ...)`，处理函数只将无锁 `atomic<bool>` 置位；SparrowCli把该标志接到phase-stop，`StartPhase()` 清除相位中断。源码没有平台专属信号分支。当前部署文档声明的二进制包目标为Windows x64/MSVC2019，因此Linux结论仅为源码映射说明；本记录没有Linux构建或运行时验证，也不外推为Linux支持承诺。
 15. **【S20退出判断】** 现有Windows Debug/Release子进程和全量runner证据，以及用户回报的Release真实键盘冒烟证据仍按原范围有效；本轮未重跑这些测试。结合WASM与Linux边界裁决，S20在当前平台/API范围内关闭。若认证范围加入Linux运行时，或产品要求WASM中途取消，应重新打开对应验收项。
 

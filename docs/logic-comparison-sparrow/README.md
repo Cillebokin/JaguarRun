@@ -78,9 +78,9 @@
 | S19 | [records/S19-simd.md](records/S19-simd.md) | 默认标量路径对应/实现不同；32-byte 成员对齐不证明 vector heap backing alignment，Rust SIMD opt-in 且无 parity fixture | 8 |
 | S20 | [records/S20-terminator.md](records/S20-terminator.md) | phase deadline 与 stop/reset 已有 Rust reference；SparrowCli SIGINT 映射到 phase stop，原生宿主线程可用 `RequestStop` 全局取消。Windows 控制台子进程 `CTRL_C_EVENT` 与 Rust 轨迹对照、Debug/Release 全量测试通过；用户已在 Release 可见控制台完成真实键盘 Ctrl-C 冒烟；WASM 同步 ABI 无运行中取消参数 | 5 |
 | S21 | [records/S21-listener.md](records/S21-listener.md) | Rust 原生触发点和代表性跨语言轨迹已核对；`OptimizationListener` 不再含 C++ 独有进度事件。`OnProgress`/`OnImprovement` 仅由显式传入的 C++ `OptimizationObserver` 启用；`OptimizationHistory` 是返回值扩展 | 4 |
-| S22 | [records/S22-util-io.md](records/S22-util-io.md) | 基本等价（委托 JaguarCore；warm-start 文件级闭环缺失） | 6 |
-| S23 | [records/S23-cli-bench.md](records/S23-cli-bench.md) | CLI 全局时限与 Rust 分阶段时限模型不同；当前 importer 默认已映射，时间零值与构造计时起点仍不同 | 7 |
-| S24 | [records/S24-tui.md](records/S24-tui.md) | TUI 归属判定；浏览器 Demo 每次点击为 JSON 和 SVG 分别运行完整 Optimize 两次 | 5 |
+| S22 | [records/S22-util-io.md](records/S22-util-io.md) | 单件fixture的CLI同形输出/warm-start round-trip、字段稳定性和SVG父目录创建已通过Release smoke；日志、live/intermediate listener和SVG绘制结构仍有差异 | 3 |
+| S23 | [records/S23-cli-bench.md](records/S23-cli-bench.md) | CLI 全局时限与 Rust 分阶段时限模型不同；Bench末批已按pinned Rust整批执行，物理/逻辑核心批容量与seed派生仍不同 | 7 |
+| S24 | [records/S24-tui.md](records/S24-tui.md) | Demo由Worker单次Optimize返回JSON/SVG并显示listener状态、进度、日志与live SVG；Chrome 155代表性fixture浏览器验收通过（含运行中Cancel和非法JSON）；取消仍为Worker强制终止，Rust TUI差异见记录 | 5 |
 
 ## 汇总结论
 
@@ -193,6 +193,6 @@ S10 的边界 fixture 覆盖七组三样本输入、42 种输入/排序记录，
 2. **源码路径对应不等于逐位证明**：S06 搬迁链 fixtures 对列出的轨迹按容差比较；ZIGNOR 正态另有五个 seed、四个标准差、每组 128 个样本的逐项 raw-bit、消耗数及后续 4 个 u64 输出对照。37°、distinct 空池 fallback、distinct 双候选池、三候选池、单侧多子件、轴对齐双侧和非轴对齐双侧 contained relocation，以及独立宿主轮廓 37° limit=2/3/4/5/6 双侧轨迹、第一组独立几何 seed=11/12/13/14 limit=6 四条轨迹和第二组 H/I 几何 seed=10/11/12/13/14 limit=6 五条轨迹在内的二十五条实际 Explore trace 核对各自固定配置下的 pool/RNG/move 事件；另有一条单件 2×2 成功探索记录 initial width 加 32 次连续 f32 收缩的 33 个 raw-bit 宽度。12 候选轨迹使用固定 13 件样本，stddev=1.0 轨迹覆盖 seed=43 的 37° contained relocation；这些证据不证明其他候选池长度、seed、参数或布局的 disruption 随机流与完整优化过程。
 3. **端到端 parity 覆盖仍有限**：PhaseReference.tsv 与名称含 CppReference 的文件是 C++ 自回归基线。Rust 端到端/阶段 fixture 已覆盖固定 seed 的单件 warm-start、受控三件 cold-start、保留默认阶段配置且每阶段首个 separation result 后停止的三件 cold-start、单/双 worker 压缩失败重试，以及一个探索中断后的 separator/best 状态交接；另有四实例 64/0/1 LBF 配对测试，以及默认 1000/0/3 的独立 builder 输出与相邻初始宽度测试；这些构造用例都不是完整 optimize→compress。其他早停/终止/错误路径、自然完整默认阶段运行与几何退化行为仍需独立 Rust 参考用例。
 4. **性能/架构差异**：S04 worker 组织与状态重建、S11/S12 流式短路、S17 PairMatrix 布局、S18 tracker 的检测器重建开销、S19 SIMD 所在层级都会影响性能或累加顺序。内部结构可以不同，但必须通过 Rust 参考输入证明候选决策、随机流和结果满足对应验收门槛。
-5. **API 与产品边界差异**：S20 终止器、S21 listener、S22 warm-start、S23 CLI/bench、S24 TUI/Demo 的宿主归属可按 SparrowCore 范围划分；凡会影响算法输入、停止时机或对外必需结果的部分，纳入范围时仍按 Rust 语义验收。
+5. **API 与产品边界差异**：S20 终止器、S21 listener、S22 文件 round-trip、S23 CLI/bench、S24 TUI/Demo 的宿主归属可按 SparrowCore 范围划分；凡会影响算法输入、停止时机或对外必需结果的部分，纳入范围时仍按 Rust 语义验收。
 6. **历史验证说明**：2026-09-29 的实现/测试记录保留在各记录中。它们说明当时的代码和测试状态；2026-10-08 本轮另有 Rust 锁定 Debug/Release 测试及 SparrowCore Debug/Release 全量测试记录，均通过。
 7. **同 seed 重复性**：2026-10-08 对独立 U/十字形 limit=6 的 seed=10/11/12、2026-10-09 对 seed=13/14，在 Rust Debug 和 Release 下每个 seed/profile 均以 5 个独立测试进程重跑；seed=14 本轮 10/10 通过，累计 50/50。每次都重新生成完整轨迹并逐行匹配对应 golden。第一组结论限于这五个 seed、锁定工具链、Windows x64 MSVC 与 Debug/Release profile；第二组 H/I 几何 seed=10、11、12、13 于 2026-10-09 分别在 Rust Debug/Release 各由 5 个独立进程重放完整轨迹，各 10/10 次匹配 golden；详见 [S06 Explore 记录](records/S06-explore.md)；H/I seed=10–14 已在 Rust Debug/Release 各以 5 个独立进程重放完整轨迹，均为 10/10 逐行匹配 golden（共 50/50）；seed=14 golden SHA-256 为 4EFCB87CAC5324F8AA402CEC9CB148EC5C0DA2DD285BCBBA8142977A950F1CA1。

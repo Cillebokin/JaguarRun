@@ -118,16 +118,15 @@ Result<SppLbfResult> SolveSppLbf(
             }
             if (!search.Value().has_value())
             {
-                const std::size_t localSamples = static_cast<std::size_t>(std::floor(
-                    static_cast<double>(config.samplesPerItem)
-                    * config.localSearchFraction));
-                sampleCount += config.samplesPerItem - localSamples;
+                sampleCount += config.UniformSampleBudget();
                 if (widthGrowthAttempts >= config.maxWidthGrowthAttempts)
                 {
                     return InfeasibleSpp("SPP strip width growth limit exceeded");
                 }
-                const double nextWidth = problem.StripWidth() * config.widthGrowthRatio;
-                const auto changed = problem.ChangeStripWidth(nextWidth);
+                const float nextWidth = static_cast<float>(problem.StripWidth())
+                    * static_cast<float>(config.widthGrowthRatio);
+                const auto changed = problem.ChangeStripWidth(
+                    static_cast<double>(nextWidth));
                 if (!changed.HasValue())
                 {
                     return Result<SppLbfResult>::FromError(changed.GetError());

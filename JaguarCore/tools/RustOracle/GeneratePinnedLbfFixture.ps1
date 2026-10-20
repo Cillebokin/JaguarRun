@@ -54,6 +54,7 @@ if (Test-Path -LiteralPath $workspaceLock) {
 
 $fixtureRoot = Join-Path $repoRoot 'JaguarCore\Tests\Fixtures\RustReference'
 $inputFile = Join-Path $fixtureRoot 'optimizer_spp_instance.json'
+$bppInputFile = Join-Path $fixtureRoot 'bpp_instance.json'
 $configFile = Join-Path $fixtureRoot 'optimizer_lbf_config.json'
 $solutionFolder = Join-Path ([IO.Path]::GetTempPath()) ('JaguarRun-LbfPinned-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $solutionFolder | Out-Null
@@ -87,4 +88,29 @@ foreach ($extension in @('json', 'svg')) {
         [System.Text.UTF8Encoding]::new($false))
 }
 
-Write-Host "Generated optimizer fixture from jagua-rs $revision with Rust 1.98.1"
+$bppSolutionFolder = Join-Path $solutionFolder 'bpp'
+New-Item -ItemType Directory -Path $bppSolutionFolder | Out-Null
+& rustup run 1.98.1 cargo run --locked --manifest-path (Join-Path $pinnedRoot 'lbf\Cargo.toml') -- `
+    --input-file $bppInputFile `
+    --solution-folder $bppSolutionFolder `
+    --config-file $configFile `
+    --prob-var bpp `
+    --log-level info
+if ($LASTEXITCODE -ne 0) {
+    throw 'Pinned LBF BPP fixture generation failed'
+}
+
+$bppGenerated = Join-Path $bppSolutionFolder 'sol_bpp_instance.json'
+if (-not (Test-Path -LiteralPath $bppGenerated -PathType Leaf)) {
+    throw 'Pinned LBF did not generate the BPP JSON fixture'
+}
+$bppContent = [IO.File]::ReadAllText($bppGenerated)
+$bppContent = $bppContent.Replace("`r`n", "`n").Replace("`r", "`n").Replace("`n", "`r`n")
+$bppFixtureOutput = Join-Path $fixtureRoot 'LbfBpp'
+New-Item -ItemType Directory -Force -Path $bppFixtureOutput | Out-Null
+[IO.File]::WriteAllText(
+    (Join-Path $bppFixtureOutput 'sol_bpp_instance.json'),
+    $bppContent,
+    [System.Text.UTF8Encoding]::new($false))
+
+Write-Host "Generated pinned LBF SPP and BPP fixtures from jagua-rs $revision with Rust 1.98.1"

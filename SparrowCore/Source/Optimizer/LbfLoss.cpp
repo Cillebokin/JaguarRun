@@ -1,12 +1,25 @@
 #include "SparrowCore/Optimizer/LbfLoss.h"
 
-#include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace
 {
 constexpr float X_MULTIPLIER = 10.0F;
+
+float RustF32Min(float left, float right) noexcept
+{
+    // Rust f32::min ignores a single NaN, keeps the left operand when both
+    // are NaN, and keeps the right operand for equal numeric values.
+    if (std::isnan(left))
+    {
+        return std::isnan(right) ? left : right;
+    }
+    if (std::isnan(right))
+    {
+        return left;
+    }
+    return left < right ? left : right;
+}
 }
 
 namespace sparrow
@@ -18,22 +31,13 @@ LbfLoss LbfLoss::FromBoundingBox(const jaguar::Rect2d& bbox) noexcept
 
 float LbfLoss::Cost() const noexcept
 {
-    if (!std::isfinite(xMax) || !std::isfinite(yMax))
-    {
-        return std::numeric_limits<float>::infinity();
-    }
     return xMax * X_MULTIPLIER + yMax;
 }
 
 jaguar::Rect2d LbfLoss::TightenSampleBBox(const jaguar::Rect2d& sample) const noexcept
 {
     const float xMaxBound = Cost() / X_MULTIPLIER;
-    if (!std::isfinite(xMaxBound))
-    {
-        return sample;
-    }
-
-    const float tightenedXMax = std::min(static_cast<float>(sample.xMax), xMaxBound);
+    const float tightenedXMax = RustF32Min(static_cast<float>(sample.xMax), xMaxBound);
     return {sample.xMin,
             sample.yMin,
             static_cast<double>(tightenedXMax),
@@ -44,14 +48,6 @@ bool operator<(const LbfLoss& left, const LbfLoss& right) noexcept
 {
     const float leftCost = left.Cost();
     const float rightCost = right.Cost();
-    if (std::isnan(leftCost))
-    {
-        return false;
-    }
-    if (std::isnan(rightCost))
-    {
-        return true;
-    }
     return leftCost < rightCost;
 }
 }

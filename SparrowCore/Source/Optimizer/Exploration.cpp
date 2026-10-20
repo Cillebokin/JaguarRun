@@ -338,13 +338,6 @@ std::optional<std::size_t> ChooseFromRustFilteredRange(
     return selected;
 }
 
-double DoubleFromBits(std::uint64_t bits) noexcept
-{
-    double value = 0.0;
-    std::memcpy(&value, &bits, sizeof(value));
-    return value;
-}
-
 std::size_t CountConsumedU64Words(
     sparrow::SparrowRng before,
     const sparrow::SparrowRng& after) noexcept
@@ -371,100 +364,9 @@ std::array<std::uint64_t, 4U> FollowingU64(
     return values;
 }
 
-// rand_distr 0.6 samples StandardNormal with ZIGNOR in f64, then casts to f32.
-// Keep this local to Exploration so other SparrowRng consumers retain their sampler.
-struct NormalZigguratTables
-{
-    std::array<double, 257U> x{};
-    std::array<double, 257U> f{};
-};
-
-const NormalZigguratTables& GetNormalZigguratTables() noexcept
-{
-    static const NormalZigguratTables tables = [] {
-        constexpr double tail = 3.654152885361008796;
-        constexpr double area = 0.00492867323399;
-        NormalZigguratTables result;
-        result.x[1U] = tail;
-        for (std::size_t index = 2U; index < result.x.size(); ++index)
-        {
-            const double previous = result.x[index - 1U];
-            result.x[index] = std::sqrt(
-                -2.0 * std::log(
-                    area / previous
-                    + std::exp(-previous * previous / 2.0)));
-        }
-        result.x[0U] = area / std::exp(-tail * tail / 2.0);
-        // rand_distr 0.6 stores the terminal Ziggurat edge as exact zero.
-        // Reapplying the recurrence can round its log argument above 1.0,
-        // producing NaN and rejecting every candidate in the last layer.
-        result.x.back() = 0.0;
-        for (std::size_t index = 0U; index < result.x.size(); ++index)
-        {
-            result.f[index] =
-                std::exp(-result.x[index] * result.x[index] / 2.0);
-        }
-        return result;
-    }();
-    return tables;
-}
-
-double RustUniform01F64(sparrow::SparrowRng& rng) noexcept
-{
-    constexpr double scale = 1.0 / 9007199254740992.0;
-    return static_cast<double>(rng.NextU64() >> 11U) * scale;
-}
-
-double RustOpen01F64(sparrow::SparrowRng& rng) noexcept
-{
-    constexpr std::uint64_t exponentOne = 0x3ff0000000000000ULL;
-    const double oneToTwo = DoubleFromBits(
-        exponentOne | (rng.NextU64() >> 12U));
-    return oneToTwo
-        - (1.0 - std::numeric_limits<double>::epsilon() / 2.0);
-}
-
-double RustStandardNormalF64(sparrow::SparrowRng& rng)
-{
-    constexpr std::uint64_t exponentTwo = 0x4000000000000000ULL;
-    constexpr double tail = 3.654152885361008796;
-    const NormalZigguratTables& tables = GetNormalZigguratTables();
-    for (;;)
-    {
-        const std::uint64_t bits = rng.NextU64();
-        const std::size_t index = static_cast<std::size_t>(bits & 0xffU);
-        const double u = DoubleFromBits(exponentTwo | (bits >> 12U)) - 3.0;
-        const double x = u * tables.x[index];
-        if (std::abs(x) < tables.x[index + 1U])
-        {
-            return x;
-        }
-        if (index == 0U)
-        {
-            double tailX = 1.0;
-            double tailY = 0.0;
-            while (-2.0 * tailY < tailX * tailX)
-            {
-                tailX = std::log(RustOpen01F64(rng)) / tail;
-                tailY = std::log(RustOpen01F64(rng));
-            }
-            return u < 0.0 ? tailX - tail : tail - tailX;
-        }
-
-        const double vertical = tables.f[index + 1U]
-            + (tables.f[index] - tables.f[index + 1U])
-                * RustUniform01F64(rng);
-        if (vertical < std::exp(-x * x / 2.0))
-        {
-            return x;
-        }
-    }
-}
-
 float RustNormalF32(sparrow::SparrowRng& rng, float standardDeviation)
 {
-    return standardDeviation
-        * static_cast<float>(RustStandardNormalF64(rng));
+    return standardDeviation * rng.Normal01F32();
 }
 
 const jaguar::LayoutPlacementSnapshot* FindPlacement(

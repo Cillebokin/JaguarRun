@@ -11,6 +11,7 @@ namespace sparrow
 enum class LbfSearchTracePhase
 {
     ContainerSample,
+    LocalSearch,
     PreRefine,
     FinalRefine,
 };

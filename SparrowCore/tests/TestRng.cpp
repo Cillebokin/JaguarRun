@@ -510,11 +510,12 @@ bool TestStateAndIntegerDeterminism(std::ostream& output)
                   "different seeds must differ in their first 16 raw values");
 }
 
-bool TestNormalCacheAndDeterminism(std::ostream& output)
+bool TestNormalDeterminismAndConsumption(std::ostream& output)
 {
     sparrow::SparrowRng first(42U);
     sparrow::SparrowRng second(42U);
 
+    const auto initialState = first.State();
     const float firstNormal = first.Normal01F32();
     const auto stateAfterFirst = first.State();
     const float secondNormal = first.Normal01F32();
@@ -526,9 +527,10 @@ bool TestNormalCacheAndDeterminism(std::ostream& output)
     {
         return false;
     }
-    if (!Expect(stateAfterFirst == stateAfterSecond,
+    if (!Expect(initialState != stateAfterFirst
+                    && stateAfterFirst != stateAfterSecond,
                 output,
-                "normal spare sample must not consume another raw state"))
+                "each normal sample must consume the pinned Ziggurat RNG stream"))
     {
         return false;
     }
@@ -541,7 +543,7 @@ bool TestNormalCacheAndDeterminism(std::ostream& output)
     }
     return Expect(SameFloatBits(secondNormal, second.Normal01F32()),
                   output,
-                  "same seed cached normal sample mismatch");
+                  "same seed second normal sample mismatch");
 }
 
 bool ExpectInvalidConfig(sparrow::LbfConfig config,
@@ -651,7 +653,7 @@ bool RunRngTests(std::ostream& output)
         && TestUniformIndexRustReference(output)
         && TestSliceShuffleRustReference(output)
         && TestStateAndIntegerDeterminism(output)
-        && TestNormalCacheAndDeterminism(output)
+        && TestNormalDeterminismAndConsumption(output)
         && TestConfigValidation(output)
         && TestMetricsValueType(output);
 }

@@ -329,9 +329,9 @@ bool TestClosedBinFallbackDoesNotEmitEmptyLayouts(std::ostream& output)
 bool TestPartialInfeasibleQualityAndRotation(std::ostream& output)
 {
     const auto impossible = MakeInstance(
-        {MakeItem(0, 701, 8.0, 8.0)},
+        {MakeItem(0, 701, 5.0, 5.0)},
         {1},
-        {{0, 801, MakeContainer(801, 6.0, 6.0), 1, 13}});
+        {{0, 801, MakeContainer(801, 4.0, 4.0), 1, 5}});
     if (!Expect(impossible.HasValue(), output, "BPP impossible setup failed"))
     {
         return false;
@@ -346,6 +346,7 @@ bool TestPartialInfeasibleQualityAndRotation(std::ostream& output)
                     && impossibleResult.Value().metrics.placedItemCount == 0U
                     && impossibleResult.Value().metrics.remainingDemand == 1U
                     && !impossibleResult.Value().metrics.feasible
+                    && std::isnan(impossibleResult.Value().metrics.density)
                     && impossibleResult.Value().solution.Cost(impossible.Value()) == 0U,
                 output,
                 "BPP must preserve demand and stock when an item fits nowhere"))

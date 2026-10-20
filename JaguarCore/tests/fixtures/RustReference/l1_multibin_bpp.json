@@ -1,0 +1,37 @@
+{
+  "name": "l1-multibin-bpp",
+  "items": [
+    {
+      "id": 1103,
+      "demand": 3,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 2, "height": 2 } }
+    }
+  ],
+  "bins": [
+    {
+      "id": 1201,
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 1.5, "height": 1.5 } },
+      "stock": 1,
+      "cost": 5
+    },
+    {
+      "id": 1202,
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 2.5, "height": 2.5 } },
+      "stock": 1,
+      "cost": 8
+    },
+    {
+      "id": 1203,
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 2.5, "height": 2.5 } },
+      "stock": 1,
+      "cost": 13
+    },
+    {
+      "id": 1204,
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 2.5, "height": 2.5 } },
+      "stock": 1,
+      "cost": 15
+    }
+  ]
+}

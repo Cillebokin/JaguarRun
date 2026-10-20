@@ -1,0 +1,15 @@
+{
+  "name": "l1-irregular-concave-spp",
+  "items": [
+    {
+      "id": 1102,
+      "demand": 2,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0, 90, 180, 270] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [5, 0], [5, 5], [3.5, 5], [3.5, 2], [1.5, 2], [1.5, 5], [0, 5]]
+      }
+    }
+  ],
+  "strip_height": 7
+}

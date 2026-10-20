@@ -12,8 +12,8 @@ struct LbfConfig
 {
     std::uint64_t seed = 0;
     std::size_t samplesPerItem = 5000;
-    // Number of distinct candidates retained for the reference two-stage
-    // coordinate-descent refinement.
+    // Retained for source compatibility with earlier C++ search settings.
+    // jagua-rs/lbf uses localSearchFraction for its local-sampling budget.
     std::size_t nCoordinateDescents = 3;
     double localSearchFraction = 0.2;
     double minTranslationStddevRatio = 0.0005;
@@ -23,6 +23,28 @@ struct LbfConfig
     std::size_t maxWidthGrowthAttempts = 32;
     double widthGrowthRatio = 1.1;
     bool useSparrowConstructorOrder = true;
+
+    // Match jagua-rs/lbf: n_samples is converted to f32 before multiplying
+    // by ls_frac, and the result is truncated to an integer budget.
+    inline std::size_t LocalSearchSampleBudget() const noexcept
+    {
+        const float total = static_cast<float>(samplesPerItem);
+        const float requested = total * static_cast<float>(localSearchFraction);
+        if (!std::isfinite(requested) || requested <= 0.0F)
+        {
+            return 0U;
+        }
+        if (requested >= total)
+        {
+            return samplesPerItem;
+        }
+        return static_cast<std::size_t>(requested);
+    }
+
+    inline std::size_t UniformSampleBudget() const noexcept
+    {
+        return samplesPerItem - LocalSearchSampleBudget();
+    }
 
     inline Result<void> Validate() const
     {

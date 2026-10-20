@@ -23,7 +23,5 @@ public:
 
 private:
     std::array<std::uint64_t, 4> m_State{};
-    bool m_HasNormalSpare = false;
-    float m_NormalSpare = 0.0F;
 };
 }

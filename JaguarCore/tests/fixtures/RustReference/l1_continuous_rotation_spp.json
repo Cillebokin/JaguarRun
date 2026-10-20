@@ -1,0 +1,15 @@
+{
+  "name": "l1-continuous-rotation-spp",
+  "items": [
+    {
+      "id": 1101,
+      "demand": 3,
+      "orientation": { "rotation": { "mode": "continuous" } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [[0, 0], [4, 0], [4, 1.5], [0, 1.5]]
+      }
+    }
+  ],
+  "strip_height": 6
+}

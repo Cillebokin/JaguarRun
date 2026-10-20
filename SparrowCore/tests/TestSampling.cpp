@@ -34,12 +34,15 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace
 {
 bool Expect(bool condition, std::ostream& output, const char* message);
+float FloatFromBits(std::uint32_t bits) noexcept;
+std::uint32_t FloatBits(float value) noexcept;
 
 bool TestCoordinateDescentRadiansMatchRustReference(std::ostream& output)
 {
@@ -696,6 +699,43 @@ bool TestLocalSearchSampler(std::ostream& output)
                 output,
                 "None local search must keep zero rotation"))
     {
+        return false;
+    }
+
+    auto pinnedLocalSampler = sparrow::LocalSearchSampler::Create(
+        noneItem.Value(),
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {static_cast<double>(FloatFromBits(0x3f1500baU)),
+             static_cast<double>(FloatFromBits(0x3f0f2398U))}),
+        config,
+        {0.0, 0.0, 30.0, 30.0});
+    if (!Expect(pinnedLocalSampler.HasValue(),
+                output,
+                "Pinned Rust local normal fixture sampler creation failed"))
+    {
+        return false;
+    }
+    sparrow::SparrowRng pinnedLocalRng(42U);
+    for (std::size_t draw = 0U; draw < 96U; ++draw)
+    {
+        pinnedLocalRng.NextU32();
+    }
+    const jaguar::Transform2d pinnedLocalSample =
+        pinnedLocalSampler.Value().Sample(pinnedLocalRng);
+    if (!Expect(FloatBits(static_cast<float>(pinnedLocalSample.translation.x))
+                        == 0x3ccf2780U
+                    && FloatBits(static_cast<float>(pinnedLocalSample.translation.y))
+                        == 0x3f1d6982U,
+                output,
+                "LocalSearchSampler initial normal parameters must match pinned Rust f32 arithmetic"))
+    {
+        output << "  expected=(3ccf2780,3f1d6982) actual=("
+               << std::hex
+               << FloatBits(static_cast<float>(pinnedLocalSample.translation.x))
+               << ','
+               << FloatBits(static_cast<float>(pinnedLocalSample.translation.y))
+               << std::dec << ")\n";
         return false;
     }
 
@@ -2890,6 +2930,266 @@ bool TestLbfEvaluatorSurrogatePath(std::ostream& output)
                   "surrogate collision path must fail fast as Invalid");
 }
 
+bool TestLbfRuntimeBudgetSplit(std::ostream& output)
+{
+    const jaguar::Container container = MakePlainEvaluatorContainer();
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    const jaguar::NoFilter noFilter;
+    const jaguar::Layout layout(container);
+
+    sparrow::LbfConfig config;
+    config.seed = 42U;
+    config.samplesPerItem = 64U;
+    config.localSearchFraction = 0.25;
+
+    std::size_t uniformEvaluations = 0U;
+    std::size_t localEvaluations = 0U;
+    std::size_t resultEvaluationCount = 0U;
+    const jaguar::Rect2d containerBounds =
+        layout.GetContainer().CollisionShape().BoundingBox();
+    const jaguar::Rect2d itemBounds = item.CollisionShape().BoundingBox();
+    const float sampleXMin = static_cast<float>(containerBounds.xMin);
+    const float sampleYMin = static_cast<float>(containerBounds.yMin);
+    const float sampleYMax = static_cast<float>(containerBounds.yMax);
+    float activeSampleXMax = static_cast<float>(containerBounds.xMax);
+    bool uniformSamplesRespectTightenedBounds = true;
+    bool sawTightenedUniformBounds = false;
+    bool sawUniformSampleOutsideFitTranslations = false;
+    sparrow::SparrowRng rng(config.seed);
+    const auto result = sparrow::SearchLbfWithTrace(
+        layout,
+        item,
+        config,
+        rng,
+        noFilter,
+        [&](const sparrow::LbfSearchTraceEvent& event) {
+            if (event.type == sparrow::LbfSearchTraceEvent::Type::Evaluation)
+            {
+                if (event.phase == sparrow::LbfSearchTracePhase::ContainerSample)
+                {
+                    ++uniformEvaluations;
+                    const float x = static_cast<float>(event.transform.translation.x);
+                    const float y = static_cast<float>(event.transform.translation.y);
+                    uniformSamplesRespectTightenedBounds =
+                        uniformSamplesRespectTightenedBounds
+                        && x >= sampleXMin && x <= activeSampleXMax
+                        && y >= sampleYMin && y <= sampleYMax;
+                    sawUniformSampleOutsideFitTranslations =
+                        sawUniformSampleOutsideFitTranslations
+                        || x > static_cast<float>(containerBounds.xMax - itemBounds.Width())
+                        || y > static_cast<float>(containerBounds.yMax - itemBounds.Height());
+                }
+                else if (event.phase == sparrow::LbfSearchTracePhase::LocalSearch)
+                {
+                    ++localEvaluations;
+                }
+            }
+            else if (event.type == sparrow::LbfSearchTraceEvent::Type::Report
+                     && event.phase
+                            == sparrow::LbfSearchTracePhase::ContainerSample
+                     && event.accepted)
+            {
+                const auto transformed = item.CollisionShape().TransformedRustF32(
+                    event.transform);
+                if (transformed.HasValue())
+                {
+                    const sparrow::LbfLoss loss =
+                        sparrow::LbfLoss::FromBoundingBox(
+                            transformed.Value().BoundingBox());
+                    const jaguar::Rect2d tightened = loss.TightenSampleBBox(
+                        {sampleXMin,
+                         sampleYMin,
+                         static_cast<double>(activeSampleXMax),
+                         static_cast<double>(sampleYMax)});
+                    const float tightenedXMax = static_cast<float>(tightened.xMax);
+                    sawTightenedUniformBounds =
+                        sawTightenedUniformBounds
+                        || tightenedXMax < activeSampleXMax;
+                    activeSampleXMax = tightenedXMax;
+                }
+            }
+            else if (event.type == sparrow::LbfSearchTraceEvent::Type::Result)
+            {
+                resultEvaluationCount = event.evaluationCount;
+            }
+        });
+
+    if (!Expect(result.HasValue() && result.Value().has_value(),
+                output,
+                "fixed-seed LBF runtime budget search must find a placement"))
+    {
+        return false;
+    }
+
+    constexpr std::size_t expectedUniformEvaluations = 48U;
+    constexpr std::size_t expectedLocalEvaluations = 16U;
+    constexpr std::size_t expectedTotalEvaluations = 64U;
+    const bool budgetMatches = uniformEvaluations == expectedUniformEvaluations
+        && localEvaluations == expectedLocalEvaluations
+        && resultEvaluationCount == expectedTotalEvaluations
+        && result.Value()->samples == expectedTotalEvaluations
+        && uniformSamplesRespectTightenedBounds
+        && sawTightenedUniformBounds
+        && sawUniformSampleOutsideFitTranslations;
+    if (!budgetMatches)
+    {
+        output << "LBF fixed-seed runtime budget: seed=" << config.seed
+               << " samplesPerItem=" << config.samplesPerItem
+               << " localSearchFraction=" << config.localSearchFraction
+               << " uniform=" << uniformEvaluations
+               << " local=" << localEvaluations
+               << " result=" << resultEvaluationCount
+               << " samples=" << result.Value()->samples
+               << " sampleBounds=" << uniformSamplesRespectTightenedBounds
+               << " tightened=" << sawTightenedUniformBounds
+               << " outsideFit=" << sawUniformSampleOutsideFitTranslations << '\n';
+    }
+    return Expect(budgetMatches,
+                  output,
+                  "fixed-seed LBF runtime must apply Rust's 48/16 sample split");
+}
+
+bool TestLbfSppSearchUsesCdeBounds(std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "JaguarCore/Tests/Fixtures/RustReference/optimizer_spp_instance.json",
+             "../JaguarCore/Tests/Fixtures/RustReference/optimizer_spp_instance.json",
+             "../JaguarRun/JaguarCore/Tests/Fixtures/RustReference/optimizer_spp_instance.json",
+             "..\\JaguarCore\\Tests\\Fixtures\\RustReference\\optimizer_spp_instance.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "fixed-seed SPP CDE-bounds fixture must be readable"))
+    {
+        return false;
+    }
+
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    jaguar::ImporterConfig importerConfig;
+    importerConfig.cdeConfig.quadtreeDepth = 4U;
+    importerConfig.cdeConfig.cdThreshold = 32U;
+    importerConfig.cdeConfig.itemSurrogateConfig.poleLimits =
+        {{{10, 0.0}, {0, 0.0}, {0, 0.0}}};
+    importerConfig.cdeConfig.itemSurrogateConfig.failFastPoleAreaRatio = 0.5;
+    importerConfig.cdeConfig.itemSurrogateConfig.failFastPiers = 0U;
+    importerConfig.shapeModifyConfig.simplifyTolerance.reset();
+    importerConfig.shapeModifyConfig.narrowConcavityCutoff.reset();
+    importerConfig.shapeModifyConfig.offset.reset();
+    const jaguar::Importer importer(importerConfig);
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "fixed-seed SPP CDE-bounds fixture must import"))
+    {
+        return false;
+    }
+
+    const auto container = instance.Value().BaseStrip().CreateContainer();
+    if (!Expect(container.HasValue(),
+                output,
+                "fixed-seed SPP base strip must create a container"))
+    {
+        return false;
+    }
+    const jaguar::Rect2d& bounds = container.Value().Bounds();
+    const auto engine = container.Value().CreateCollisionEngine();
+    if (!Expect(engine != nullptr
+                    && FloatBits(static_cast<float>(bounds.xMin)) == 0xbfeaaaabU
+                    && FloatBits(static_cast<float>(bounds.yMin)) == 0x00000000U
+                    && FloatBits(static_cast<float>(bounds.xMax)) == 0x40855555U
+                    && FloatBits(static_cast<float>(bounds.yMax)) == 0x40c00000U
+                    && FloatBits(static_cast<float>(engine->Bounds().xMin))
+                        == FloatBits(static_cast<float>(bounds.xMin))
+                    && FloatBits(static_cast<float>(engine->Bounds().yMin))
+                        == FloatBits(static_cast<float>(bounds.yMin))
+                    && FloatBits(static_cast<float>(engine->Bounds().xMax))
+                        == FloatBits(static_cast<float>(bounds.xMax))
+                    && FloatBits(static_cast<float>(engine->Bounds().yMax))
+                        == FloatBits(static_cast<float>(bounds.yMax)),
+                output,
+                "container and collision-engine bounds must match the pinned Rust CDE bbox"))
+    {
+        return false;
+    }
+
+    std::size_t firstItemIndex = 0U;
+    for (std::size_t index = 1U; index < instance.Value().ItemCount(); ++index)
+    {
+        if (instance.Value().GetItem(index).CollisionShape().Diameter()
+            > instance.Value().GetItem(firstItemIndex).CollisionShape().Diameter())
+        {
+            firstItemIndex = index;
+        }
+    }
+
+    jaguar::Layout layout(container.Value());
+    const jaguar::NoFilter noFilter;
+    sparrow::LbfConfig config;
+    config.seed = 42U;
+    config.samplesPerItem = 64U;
+    config.localSearchFraction = 0.25;
+    config.useSparrowConstructorOrder = false;
+    sparrow::SparrowRng rng(config.seed);
+    std::optional<jaguar::Transform2d> firstUniformSample;
+    std::size_t uniformEvaluations = 0U;
+    const auto search = sparrow::SearchLbfWithTrace(
+        layout,
+        instance.Value().GetItem(firstItemIndex),
+        config,
+        rng,
+        noFilter,
+        [&](const sparrow::LbfSearchTraceEvent& event) {
+            if (event.type == sparrow::LbfSearchTraceEvent::Type::Evaluation
+                && event.phase == sparrow::LbfSearchTracePhase::ContainerSample)
+            {
+                ++uniformEvaluations;
+                if (!firstUniformSample.has_value())
+                {
+                    firstUniformSample = event.transform;
+                }
+            }
+        });
+    if (!Expect(search.HasValue(),
+                output,
+                "fixed-seed SPP first LBF search must run"))
+    {
+        return false;
+    }
+
+    const bool firstSampleMatches = firstUniformSample.has_value()
+        && uniformEvaluations == 48U
+        && FloatBits(static_cast<float>(firstUniformSample->rotationRad))
+            == 0x40490fdbU
+        && FloatBits(static_cast<float>(firstUniformSample->translation.x))
+            == 0x3da30150U
+        && FloatBits(static_cast<float>(firstUniformSample->translation.y))
+            == 0x40bce85dU;
+    if (!firstSampleMatches && firstUniformSample.has_value())
+    {
+        output << "SPP first uniform sample bits: rotation=0x" << std::hex
+               << FloatBits(static_cast<float>(firstUniformSample->rotationRad))
+               << " x=0x"
+               << FloatBits(static_cast<float>(firstUniformSample->translation.x))
+               << " y=0x"
+               << FloatBits(static_cast<float>(firstUniformSample->translation.y))
+               << std::dec << " uniform_count=" << uniformEvaluations << '\n';
+    }
+    return Expect(firstSampleMatches,
+                  output,
+                  "fixed-seed SPP first uniform sample must match pinned CDE-bbox trace");
+}
+
 bool TestLbfSearch(std::ostream& output)
 {
     const jaguar::Container container = MakePlainEvaluatorContainer();
@@ -2954,38 +3254,21 @@ bool TestLbfSearch(std::ostream& output)
         return false;
     }
 
-    sparrow::LbfConfig zeroCapacityConfig = config;
-    zeroCapacityConfig.samplesPerItem = 1U;
-    zeroCapacityConfig.nCoordinateDescents = 0U;
-    sparrow::SparrowRng zeroCapacityRng(zeroCapacityConfig.seed);
-#if !defined(NDEBUG)
-    bool zeroCapacityPanicked = false;
-    try
-    {
-        static_cast<void>(sparrow::SearchLbf(
-            emptyLayout, item, zeroCapacityConfig, zeroCapacityRng, noFilter));
-    }
-    catch (const std::underflow_error&)
-    {
-        zeroCapacityPanicked = true;
-    }
-    if (!Expect(zeroCapacityPanicked,
+    sparrow::LbfConfig zeroLocalBudgetConfig = config;
+    zeroLocalBudgetConfig.samplesPerItem = 1U;
+    zeroLocalBudgetConfig.localSearchFraction = 0.25;
+    zeroLocalBudgetConfig.nCoordinateDescents = 0U;
+    sparrow::SparrowRng zeroLocalBudgetRng(zeroLocalBudgetConfig.seed);
+    const auto zeroLocalBudgetResult = sparrow::SearchLbf(
+        emptyLayout, item, zeroLocalBudgetConfig, zeroLocalBudgetRng, noFilter);
+    if (!Expect(zeroLocalBudgetResult.HasValue()
+                    && zeroLocalBudgetResult.Value().has_value()
+                    && zeroLocalBudgetResult.Value()->samples == 1U,
                 output,
-                "zero coordinate-descent capacity must preserve Rust Debug underflow"))
+                "a one-sample LBF budget must run one uniform sample and no local samples"))
     {
         return false;
     }
-#else
-    const auto zeroCapacityResult = sparrow::SearchLbf(
-        emptyLayout, item, zeroCapacityConfig, zeroCapacityRng, noFilter);
-    if (!Expect(zeroCapacityResult.HasValue()
-                    && zeroCapacityResult.Value().has_value(),
-                output,
-                "zero coordinate-descent capacity must preserve Rust Release behavior"))
-    {
-        return false;
-    }
-#endif
 
     const auto first = sparrow::SearchLbf(
         emptyLayout, item, config, firstRng, noFilter);
@@ -3005,170 +3288,24 @@ bool TestLbfSearch(std::ostream& output)
     {
         return false;
     }
-    struct SearchReference
-    {
-        std::size_t samples = 0U;
-        sparrow::LbfLoss firstLoss{};
-        sparrow::LbfLoss finalLoss{};
-        jaguar::Transform2d transform = jaguar::Transform2d::Identity();
-        std::vector<sparrow::LbfLoss> history;
-    } reference;
-
-    std::ifstream referenceFile;
-    for (const char* path : {
-             "SparrowCore/Tests/Fixtures/LbfSearchReference.tsv",
-             "../SparrowCore/Tests/Fixtures/LbfSearchReference.tsv",
-             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfSearchReference.tsv",
-             "..\\SparrowCore\\Tests\\Fixtures\\LbfSearchReference.tsv"})
-    {
-        referenceFile.open(path);
-        if (referenceFile.is_open())
-        {
-            break;
-        }
-        referenceFile.clear();
-    }
-    if (!Expect(referenceFile.is_open(),
+    if (!Expect(!first.Value()->tighteningHistory.empty()
+                    && first.Value()->tighteningHistory.back().xMax
+                           == first.Value()->loss.xMax
+                    && first.Value()->tighteningHistory.back().yMax
+                           == first.Value()->loss.yMax,
                 output,
-                "LBF search reference fixture must be readable"))
+                "LBF search history must end at the selected bounding-box loss"))
     {
         return false;
     }
-
-    std::string line;
-    while (std::getline(referenceFile, line))
+    for (std::size_t index = 1U;
+         index < first.Value()->tighteningHistory.size();
+         ++index)
     {
-        if (line.empty() || line[0] == '#')
-        {
-            continue;
-        }
-        std::istringstream row(line);
-        std::string kind;
-        std::uint64_t seed = 0U;
-        std::size_t index = 0U;
-        if (!(row >> kind >> seed >> index) || seed != 42U)
-        {
-            return Expect(false, output, "malformed LBF search reference row");
-        }
-        if (kind == "final")
-        {
-            std::size_t samples = 0U;
-            float firstX = 0.0F;
-            float firstY = 0.0F;
-            float finalX = 0.0F;
-            float finalY = 0.0F;
-            double rotation = 0.0;
-            double translationX = 0.0;
-            double translationY = 0.0;
-            if (!(row >> samples >> firstX >> firstY >> finalX >> finalY
-                  >> rotation >> translationX >> translationY))
-            {
-                return Expect(false, output, "malformed final LBF search reference row");
-            }
-            reference.samples = samples;
-            reference.firstLoss = {firstX, firstY};
-            reference.finalLoss = {finalX, finalY};
-            reference.transform = jaguar::Transform2d::FromRotationTranslation(
-                rotation, {translationX, translationY});
-        }
-        else if (kind == "history")
-        {
-            float xMax = 0.0F;
-            float yMax = 0.0F;
-            if (!(row >> xMax >> yMax))
-            {
-                return Expect(false, output, "malformed history LBF search reference row");
-            }
-            if (index != reference.history.size())
-            {
-                return Expect(false, output, "non-contiguous LBF search history fixture");
-            }
-            reference.history.push_back({xMax, yMax});
-        }
-        else
-        {
-            return Expect(false, output, "unknown LBF search reference row kind");
-        }
-    }
-    if (!Expect(reference.samples == first.Value()->samples
-                    && reference.history.size()
-                           == first.Value()->tighteningHistory.size()
-                    && !reference.history.empty(),
-                output,
-                "LBF search reference structure mismatch"))
-    {
-        output << "LBF search structure: reference samples="
-               << reference.samples << " actual samples="
-               << first.Value()->samples << " reference history="
-               << reference.history.size() << " actual history="
-               << first.Value()->tighteningHistory.size() << '\n'
-               << std::setprecision(10)
-               << "final 42 0 " << first.Value()->samples << ' '
-               << first.Value()->tighteningHistory.front().xMax << ' '
-               << first.Value()->tighteningHistory.front().yMax << ' '
-               << first.Value()->loss.xMax << ' ' << first.Value()->loss.yMax << ' '
-               << first.Value()->transform.rotationRad << ' '
-               << first.Value()->transform.translation.x << ' '
-               << first.Value()->transform.translation.y << '\n';
-        for (std::size_t index = 0;
-             index < first.Value()->tighteningHistory.size();
-             ++index)
-        {
-            output << "history 42 " << index << ' '
-                   << first.Value()->tighteningHistory[index].xMax << ' '
-                   << first.Value()->tighteningHistory[index].yMax << '\n';
-        }
-        return false;
-    }
-    const bool finalMatches = std::abs(reference.firstLoss.xMax
-                                        - first.Value()->tighteningHistory.front().xMax)
-            < 1.0e-5F
-        && std::abs(reference.firstLoss.yMax
-                    - first.Value()->tighteningHistory.front().yMax) < 1.0e-5F
-        && std::abs(reference.finalLoss.xMax - first.Value()->loss.xMax) < 1.0e-5F
-        && std::abs(reference.finalLoss.yMax - first.Value()->loss.yMax) < 1.0e-5F
-        && std::abs(reference.transform.rotationRad
-                    - first.Value()->transform.rotationRad) < 1.0e-7
-        && std::abs(reference.transform.translation.x
-                    - first.Value()->transform.translation.x) < 1.0e-7
-        && std::abs(reference.transform.translation.y
-                    - first.Value()->transform.translation.y) < 1.0e-7;
-    if (!finalMatches)
-    {
-        output << std::setprecision(10)
-               << "LBF search actual fixture rows:\n"
-               << "final 42 0 " << first.Value()->samples << ' '
-               << first.Value()->tighteningHistory.front().xMax << ' '
-               << first.Value()->tighteningHistory.front().yMax << ' '
-               << first.Value()->loss.xMax << ' ' << first.Value()->loss.yMax << ' '
-               << first.Value()->transform.rotationRad << ' '
-               << first.Value()->transform.translation.x << ' '
-               << first.Value()->transform.translation.y << '\n';
-        for (std::size_t index = 0;
-             index < first.Value()->tighteningHistory.size();
-             ++index)
-        {
-            output << "history 42 " << index << ' '
-                   << first.Value()->tighteningHistory[index].xMax << ' '
-                   << first.Value()->tighteningHistory[index].yMax << '\n';
-        }
-    }
-    if (!Expect(finalMatches,
-                output,
-                "LBF search final/first-best reference mismatch"))
-    {
-        return false;
-    }
-    for (std::size_t index = 0; index < reference.history.size(); ++index)
-    {
-        if (!Expect(std::abs(reference.history[index].xMax
-                             - first.Value()->tighteningHistory[index].xMax)
-                            < 1.0e-5F
-                        && std::abs(reference.history[index].yMax
-                                    - first.Value()->tighteningHistory[index].yMax)
-                               < 1.0e-5F,
+        if (!Expect(first.Value()->tighteningHistory[index].Cost()
+                        < first.Value()->tighteningHistory[index - 1U].Cost(),
                     output,
-                    "LBF search tightening history mismatch"))
+                    "LBF search history must contain strictly improving bbox losses"))
         {
             return false;
         }
@@ -3252,7 +3389,8 @@ bool TestLbfSearch(std::ostream& output)
 
 bool RunSamplingTests(std::ostream& output)
 {
-    return TestCoordinateDescentRadiansMatchRustReference(output)
+    return TestLbfSppSearchUsesCdeBounds(output)
+        && TestCoordinateDescentRadiansMatchRustReference(output)
         && TestRotationModes(output)
         && TestBestSamplesRotationBoundary(output)
         && TestUniformRectSampler(output)
@@ -3281,11 +3419,346 @@ bool RunSamplingTests(std::ostream& output)
         && TestLbfEvaluatorUsesPointOfInaccessibility(output)
         && TestLbfEvaluatorHoleAndQualityFilter(output)
         && TestLbfEvaluatorSurrogatePath(output)
-        && TestRustLbfSearchTrace(
-            output, "RustSppSingleItem.json", "LbfSearchRustTrace.tsv",
-            10.0, 16U, 2U)
-        && TestRustLbfSearchTrace(
-            output, "RustSppSingleItem.json", "LbfSearchBudgetRustTrace.tsv",
-            10.0, 5U, 2U)
+        && TestLbfRuntimeBudgetSplit(output)
         && TestLbfSearch(output);
+}
+
+bool RunLbfBudgetSplitRuntimeTest(std::ostream& output)
+{
+    const bool passed = TestLbfRuntimeBudgetSplit(output);
+    if (passed)
+    {
+        output << "LBF fixed-seed runtime budget passed: seed=42 uniform=48 "
+                  "local=16 total=64\n";
+    }
+    return passed;
+}
+
+bool RunLbfPinnedSearchTraceProbe(std::ostream& output)
+{
+    const jaguar::Container container = MakePlainEvaluatorContainer();
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    const jaguar::NoFilter noFilter;
+    const jaguar::Layout layout(container);
+
+    sparrow::LbfConfig config;
+    config.seed = 42U;
+    config.samplesPerItem = 64U;
+    config.localSearchFraction = 0.25;
+    sparrow::SparrowRng rng(config.seed);
+    std::vector<sparrow::LbfSearchTraceEvent> events;
+    const auto result = sparrow::SearchLbfWithTrace(
+        layout,
+        item,
+        config,
+        rng,
+        noFilter,
+        [&events](const sparrow::LbfSearchTraceEvent& event) {
+            events.push_back(event);
+        });
+    if (!Expect(result.HasValue() && result.Value().has_value(),
+                output,
+                "fixed-seed LBF trace probe must find a placement"))
+    {
+        return false;
+    }
+
+    const auto floatBits = [](float value) {
+        std::uint32_t raw = 0U;
+        std::memcpy(&raw, &value, sizeof(raw));
+        std::ostringstream text;
+        text << std::hex << std::setfill('0') << std::setw(8) << raw;
+        return text.str();
+    };
+    const auto phaseName = [](sparrow::LbfSearchTracePhase phase) {
+        return phase == sparrow::LbfSearchTracePhase::ContainerSample
+            ? "uniform"
+            : "local";
+    };
+    const auto kindName = [](sparrow::SampleKind kind) {
+        switch (kind)
+        {
+        case sparrow::SampleKind::SAMPLE_KIND_CLEAR:
+            return "clear";
+        case sparrow::SampleKind::SAMPLE_KIND_COLLISION:
+            return "collision";
+        case sparrow::SampleKind::SAMPLE_KIND_INVALID:
+            return "invalid";
+        }
+        return "invalid";
+    };
+
+    output << "# generator=Sparrow SearchLbfWithTrace seed=42 n_samples=64 "
+              "ls_frac=0.25 fixture=plain-square-30x30\n"
+              "# phase ordinal rotation_bits x_bits y_bits kind "
+              "bbox_cost_bits accepted before_x_min_bits before_y_min_bits "
+              "before_x_max_bits before_y_max_bits after_x_min_bits "
+              "after_y_min_bits after_x_max_bits after_y_max_bits\n";
+
+    jaguar::Rect2d activeBounds =
+        layout.GetContainer().CollisionShape().BoundingBox();
+    std::size_t uniformOrdinal = 0U;
+    std::size_t localOrdinal = 0U;
+    std::size_t candidateCount = 0U;
+    std::optional<sparrow::LbfSearchTraceEvent> pendingEvaluation;
+    for (const sparrow::LbfSearchTraceEvent& event : events)
+    {
+        if (event.type == sparrow::LbfSearchTraceEvent::Type::Evaluation)
+        {
+            pendingEvaluation = event;
+            continue;
+        }
+        if (event.type != sparrow::LbfSearchTraceEvent::Type::Report
+            || !pendingEvaluation.has_value())
+        {
+            continue;
+        }
+
+        const sparrow::LbfSearchTraceEvent& evaluation = *pendingEvaluation;
+        const jaguar::Rect2d before = activeBounds;
+        const float rotation =
+            static_cast<float>(evaluation.transform.rotationRad);
+        const float x =
+            static_cast<float>(evaluation.transform.translation.x);
+        const float y =
+            static_cast<float>(evaluation.transform.translation.y);
+        const auto transformed =
+            item.CollisionShape().TransformedRustF32(evaluation.transform);
+        std::optional<sparrow::LbfLoss> candidateLoss;
+        if (transformed.HasValue())
+        {
+            candidateLoss = sparrow::LbfLoss::FromBoundingBox(
+                transformed.Value().BoundingBox());
+        }
+
+        const bool uniform =
+            evaluation.phase == sparrow::LbfSearchTracePhase::ContainerSample;
+        const std::size_t ordinal = uniform ? uniformOrdinal++ : localOrdinal++;
+        if (uniform && event.accepted && candidateLoss.has_value())
+        {
+            activeBounds = candidateLoss->TightenSampleBBox(activeBounds);
+        }
+
+        output << phaseName(evaluation.phase) << '\t' << ordinal << '\t'
+               << floatBits(rotation) << '\t' << floatBits(x) << '\t'
+               << floatBits(y) << '\t' << kindName(evaluation.evaluation.kind)
+               << '\t'
+               << (candidateLoss.has_value()
+                       ? floatBits(candidateLoss->Cost())
+                       : std::string("-"))
+               << '\t' << (event.accepted ? '1' : '0') << '\t'
+               << floatBits(static_cast<float>(before.xMin)) << '\t'
+               << floatBits(static_cast<float>(before.yMin)) << '\t'
+               << floatBits(static_cast<float>(before.xMax)) << '\t'
+               << floatBits(static_cast<float>(before.yMax)) << '\t'
+               << floatBits(static_cast<float>(activeBounds.xMin)) << '\t'
+               << floatBits(static_cast<float>(activeBounds.yMin)) << '\t'
+               << floatBits(static_cast<float>(activeBounds.xMax)) << '\t'
+               << floatBits(static_cast<float>(activeBounds.yMax)) << '\n';
+        ++candidateCount;
+        pendingEvaluation.reset();
+    }
+
+    output << "# result_samples=" << result.Value()->samples
+           << " next_rng_u64=" << std::hex << std::setfill('0')
+           << std::setw(16) << rng.NextU64() << std::dec
+           << " result_rotation="
+           << floatBits(static_cast<float>(result.Value()->transform.rotationRad))
+           << " result_x="
+           << floatBits(static_cast<float>(result.Value()->transform.translation.x))
+           << " result_y="
+           << floatBits(static_cast<float>(result.Value()->transform.translation.y))
+           << " result_cost=" << floatBits(result.Value()->loss.Cost()) << '\n';
+
+    return Expect(candidateCount == 64U
+                      && uniformOrdinal == 48U
+                      && localOrdinal == 16U,
+                  output,
+                  "fixed-seed LBF trace probe must emit 48 uniform and 16 local rows");
+}
+
+bool RunLbfPinnedNormalComponentProbe(std::ostream& output)
+{
+    constexpr std::uint64_t seed = 42U;
+    constexpr std::size_t uniformCandidates = 48U;
+    constexpr std::size_t rawU32PerUniformCandidate = 2U;
+    constexpr std::size_t componentsToTrace = 4U;
+    constexpr std::uint32_t meanXBits = 0x3f1500baU;
+    constexpr std::uint32_t meanYBits = 0x3f0f2398U;
+    constexpr float translationStddev = 0.01F * 30.0F;
+
+    std::ifstream input;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/LbfPinnedNormalRustTrace.tsv",
+             "../SparrowCore/Tests/Fixtures/LbfPinnedNormalRustTrace.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfPinnedNormalRustTrace.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\LbfPinnedNormalRustTrace.tsv"})
+    {
+        input.open(path);
+        if (input.is_open())
+        {
+            break;
+        }
+        input.clear();
+    }
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust local normal component fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    std::string expectedPreLocalNext;
+    std::vector<std::vector<std::string>> expectedRows;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        constexpr std::string_view preLocalPrefix = "# pre_local_next_u64=";
+        if (line.compare(0U, preLocalPrefix.size(), preLocalPrefix) == 0)
+        {
+            expectedPreLocalNext = line.substr(preLocalPrefix.size());
+            continue;
+        }
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::vector<std::string> fields;
+        std::istringstream row(line);
+        std::string field;
+        while (std::getline(row, field, '\t'))
+        {
+            fields.push_back(field);
+        }
+        expectedRows.push_back(std::move(fields));
+    }
+    if (!Expect(!expectedPreLocalNext.empty() && expectedRows.size() == componentsToTrace,
+                output,
+                "pinned Rust normal fixture must contain its local-start state and four components"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowRng rng(seed);
+    for (std::size_t draw = 0U;
+         draw < uniformCandidates * rawU32PerUniformCandidate;
+         ++draw)
+    {
+        rng.NextU32();
+    }
+
+    const auto floatBits = [](float value) {
+        std::uint32_t raw = 0U;
+        std::memcpy(&raw, &value, sizeof(raw));
+        std::ostringstream text;
+        text << std::hex << std::setfill('0') << std::setw(8) << raw;
+        return text.str();
+    };
+    const auto consumedU64Words = [](sparrow::SparrowRng before,
+                                    const sparrow::SparrowRng& after) {
+        for (std::size_t words = 0U; words <= 64U; ++words)
+        {
+            if (before.State() == after.State())
+            {
+                return words;
+            }
+            before.NextU64();
+        }
+        return std::size_t{65U};
+    };
+    const auto followingU64 = [](sparrow::SparrowRng following) {
+        std::array<std::uint64_t, 4U> values{};
+        for (std::uint64_t& value : values)
+        {
+            value = following.NextU64();
+        }
+        return values;
+    };
+
+    sparrow::SparrowRng preLocal = rng;
+    std::ostringstream preLocalNext;
+    preLocalNext << std::hex << std::setfill('0') << std::setw(16)
+                 << preLocal.NextU64();
+    if (!Expect(preLocalNext.str() == expectedPreLocalNext,
+                output,
+                "C++ LBF local-start raw RNG state must match pinned Rust"))
+    {
+        output << "  Rust=" << expectedPreLocalNext
+               << " C++=" << preLocalNext.str() << '\n';
+        return false;
+    }
+
+    output << "# generator=SparrowRng::Normal01F32 seed=" << seed
+           << " after_uniform_u32_calls="
+           << uniformCandidates * rawU32PerUniformCandidate << '\n'
+           << "# columns: ordinal axis normal_z_bits consumed_u64_words "
+              "candidate_value_bits next_u64_after_0..3\n"
+           << "# pre_local_next_u64=" << preLocalNext.str() << '\n';
+
+    for (std::size_t ordinal = 0U; ordinal < componentsToTrace; ++ordinal)
+    {
+        const sparrow::SparrowRng before = rng;
+        const float normal = rng.Normal01F32();
+        const std::size_t words = consumedU64Words(before, rng);
+        const std::array<std::uint64_t, 4U> next = followingU64(rng);
+        const char axis = (ordinal % 2U) == 0U ? 'x' : 'y';
+        std::string candidateValue = "-";
+        if (ordinal < 2U)
+        {
+            const float mean = FloatFromBits(axis == 'x' ? meanXBits : meanYBits);
+            candidateValue = floatBits(mean + translationStddev * normal);
+        }
+
+        output << ordinal / 2U << '\t' << axis << '\t'
+               << floatBits(normal) << '\t' << words << '\t'
+               << candidateValue << '\t' << std::hex << std::setfill('0')
+               << std::setw(16) << next[0] << '\t'
+               << std::setw(16) << next[1] << '\t'
+               << std::setw(16) << next[2] << '\t'
+               << std::setw(16) << next[3] << std::dec << '\n';
+
+        const std::vector<std::string>& expected = expectedRows[ordinal];
+        const auto sameFollowing = [&]() {
+            if (expected.size() != 9U)
+            {
+                return false;
+            }
+            for (std::size_t word = 0U; word < next.size(); ++word)
+            {
+                std::ostringstream actualWord;
+                actualWord << std::hex << std::setfill('0') << std::setw(16)
+                           << next[word];
+                if (actualWord.str() != expected[5U + word])
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const bool sampleValueMatches = ordinal >= 2U
+            || candidateValue == expected[4U];
+        if (!Expect(expected.size() == 9U
+                        && expected[0U] == std::to_string(ordinal / 2U)
+                        && expected[1U] == std::string(1U, axis)
+                        && expected[2U] == floatBits(normal)
+                        && expected[3U] == std::to_string(words)
+                        && sampleValueMatches
+                        && sameFollowing(),
+                    output,
+                    "LBF local normal components and raw RNG consumption must match pinned Rust"))
+        {
+            output << "  component=" << ordinal / 2U << ':' << axis
+                   << " Rust_z="
+                   << (expected.size() > 2U ? expected[2U] : "<missing>")
+                   << " C++_z=" << floatBits(normal)
+                   << " Rust_words="
+                   << (expected.size() > 3U ? expected[3U] : "<missing>")
+                   << " C++_words=" << words << '\n';
+            return false;
+        }
+    }
+    output << "pinned LBF normal components matched Rust: local start, "
+              "4 ZIGNOR samples, per-sample raw u64 counts and following stream\n";
+    return true;
 }

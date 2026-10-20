@@ -108,7 +108,7 @@ Result<BppLbfResult> SolveBppLbf(
                 }
                 sampleCount += searched.Value().has_value()
                     ? searched.Value()->samples
-                    : config.samplesPerItem;
+                    : config.UniformSampleBudget();
                 if (searched.Value().has_value())
                 {
                     found = jaguar::BPPlacement{
@@ -147,7 +147,7 @@ Result<BppLbfResult> SolveBppLbf(
                     }
                     sampleCount += searched.Value().has_value()
                         ? searched.Value()->samples
-                        : config.samplesPerItem;
+                        : config.UniformSampleBudget();
                     if (searched.Value().has_value())
                     {
                         found = jaguar::BPPlacement{

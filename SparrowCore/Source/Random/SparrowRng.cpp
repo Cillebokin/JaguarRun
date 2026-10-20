@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -11,7 +12,101 @@ constexpr std::uint64_t SPLIT_MIX_INCREMENT = 0x9E3779B97F4A7C15ULL;
 constexpr std::uint64_t SPLIT_MIX_MULTIPLIER_A = 0xBF58476D1CE4E5B9ULL;
 constexpr std::uint64_t SPLIT_MIX_MULTIPLIER_B = 0x94D049BB133111EBULL;
 constexpr std::uint32_t UNIFORM_MANTISSA_SCALE = 1U << 23U;
-constexpr float TWO_PI = 6.28318530717958647692F;
+constexpr double NORMAL_ZIGGURAT_TAIL = 3.654152885361008796;
+constexpr double NORMAL_ZIGGURAT_AREA = 0.00492867323399;
+
+double DoubleFromBits(std::uint64_t bits) noexcept
+{
+    double value = 0.0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+struct NormalZigguratTables
+{
+    std::array<double, 257U> x{};
+    std::array<double, 257U> f{};
+};
+
+const NormalZigguratTables& GetNormalZigguratTables() noexcept
+{
+    static const NormalZigguratTables tables = [] {
+        NormalZigguratTables result;
+        result.x[1U] = NORMAL_ZIGGURAT_TAIL;
+        for (std::size_t index = 2U; index < result.x.size(); ++index)
+        {
+            const double previous = result.x[index - 1U];
+            result.x[index] = std::sqrt(
+                -2.0 * std::log(
+                    NORMAL_ZIGGURAT_AREA / previous
+                    + std::exp(-previous * previous / 2.0)));
+        }
+        result.x[0U] =
+            NORMAL_ZIGGURAT_AREA
+            / std::exp(-NORMAL_ZIGGURAT_TAIL * NORMAL_ZIGGURAT_TAIL / 2.0);
+        // rand_distr 0.6 stores the terminal edge as exact zero.
+        result.x.back() = 0.0;
+        for (std::size_t index = 0U; index < result.x.size(); ++index)
+        {
+            result.f[index] =
+                std::exp(-result.x[index] * result.x[index] / 2.0);
+        }
+        return result;
+    }();
+    return tables;
+}
+
+double RustUniform01F64(sparrow::SparrowRng& rng) noexcept
+{
+    constexpr double scale = 1.0 / 9007199254740992.0;
+    return static_cast<double>(rng.NextU64() >> 11U) * scale;
+}
+
+double RustOpen01F64(sparrow::SparrowRng& rng) noexcept
+{
+    constexpr std::uint64_t exponentOne = 0x3ff0000000000000ULL;
+    const double oneToTwo = DoubleFromBits(
+        exponentOne | (rng.NextU64() >> 12U));
+    return oneToTwo
+        - (1.0 - std::numeric_limits<double>::epsilon() / 2.0);
+}
+
+double RustStandardNormalF64(sparrow::SparrowRng& rng)
+{
+    constexpr std::uint64_t exponentTwo = 0x4000000000000000ULL;
+    const NormalZigguratTables& tables = GetNormalZigguratTables();
+    for (;;)
+    {
+        const std::uint64_t bits = rng.NextU64();
+        const std::size_t index = static_cast<std::size_t>(bits & 0xffU);
+        const double u = DoubleFromBits(exponentTwo | (bits >> 12U)) - 3.0;
+        const double x = u * tables.x[index];
+        if (std::abs(x) < tables.x[index + 1U])
+        {
+            return x;
+        }
+        if (index == 0U)
+        {
+            double tailX = 1.0;
+            double tailY = 0.0;
+            while (-2.0 * tailY < tailX * tailX)
+            {
+                tailX = std::log(RustOpen01F64(rng)) / NORMAL_ZIGGURAT_TAIL;
+                tailY = std::log(RustOpen01F64(rng));
+            }
+            return u < 0.0 ? tailX - NORMAL_ZIGGURAT_TAIL
+                           : NORMAL_ZIGGURAT_TAIL - tailX;
+        }
+
+        const double vertical = tables.f[index + 1U]
+            + (tables.f[index] - tables.f[index + 1U])
+                * RustUniform01F64(rng);
+        if (vertical < std::exp(-x * x / 2.0))
+        {
+            return x;
+        }
+    }
+}
 
 std::uint64_t SplitMix64Next(std::uint64_t& state) noexcept
 {
@@ -89,25 +184,7 @@ float SparrowRng::Uniform01F32() noexcept
 
 float SparrowRng::Normal01F32()
 {
-    if (m_HasNormalSpare)
-    {
-        m_HasNormalSpare = false;
-        return m_NormalSpare;
-    }
-
-    float firstUniform = 0.0F;
-    do
-    {
-        firstUniform = Uniform01F32();
-    } while (firstUniform <= 0.0F);
-
-    const float secondUniform = Uniform01F32();
-    const float radius = std::sqrt(-2.0F * std::log(firstUniform));
-    const float angle = TWO_PI * secondUniform;
-
-    m_NormalSpare = radius * std::sin(angle);
-    m_HasNormalSpare = true;
-    return radius * std::cos(angle);
+    return static_cast<float>(RustStandardNormalF64(*this));
 }
 
 std::array<std::uint64_t, 4> SparrowRng::State() const noexcept

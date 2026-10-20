@@ -1,0 +1,8 @@
+# generator=pinned rand_distr 0.6.0 Normal<f32>/StandardNormal, SmallRng seed=42
+# fixture=plain-square-30x30; local start follows 48 no-rotation uniform samples
+# columns: local_ordinal axis standard_normal_z_bits consumed_u64_words normal_sample_value_bits next_u64_after_0..3
+# pre_local_next_u64=1d794276a8ce5c1f
+0	x	bfed8c7e	1	3ccf2780	b65f174485fe74fa	3fc1fcdc0aee5134	2f8925758fab4030	b2a33de25ca17dcd
+0	y	3e3e4ede	1	3f1d6982	3fc1fcdc0aee5134	2f8925758fab4030	b2a33de25ca17dcd	5d76a0dc556e1af2
+1	x	bf89ce12	1	3e84a3c5	2f8925758fab4030	b2a33de25ca17dcd	5d76a0dc556e1af2	037cf8cf7a40b2ae
+1	y	bfb020e3	1	3e15d90e	b2a33de25ca17dcd	5d76a0dc556e1af2	037cf8cf7a40b2ae	3977cd3a3da1d1b7

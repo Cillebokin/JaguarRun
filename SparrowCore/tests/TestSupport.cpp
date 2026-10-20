@@ -6,6 +6,9 @@
 
 bool RunRngTests(std::ostream& output);
 bool RunSamplingTests(std::ostream& output);
+bool RunLbfBudgetSplitRuntimeTest(std::ostream& output);
+bool RunLbfPinnedSearchTraceProbe(std::ostream& output);
+bool RunLbfPinnedNormalComponentProbe(std::ostream& output);
 bool RunLbfLossTests(std::ostream& output);
 bool RunSppLbfTests(std::ostream& output);
 bool RunBppLbfTests(std::ostream& output);
@@ -29,6 +32,22 @@ bool RunWindowsConsoleCtrlCProbe(int argc, char** argv, std::ostream& output);
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view{argv[1]} == "--lbf-budget-runtime")
+    {
+        return RunLbfBudgetSplitRuntimeTest(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--lbf-pinned-search-trace")
+    {
+        return RunLbfPinnedSearchTraceProbe(std::cout) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--lbf-pinned-normal-components")
+    {
+        return RunLbfPinnedNormalComponentProbe(std::cout) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--sampling")
+    {
+        return RunSamplingTests(std::cerr) ? 0 : 1;
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--e5-natural-time")
     {
         return RunE5NaturalTimeAcceptance(std::cerr) ? 0 : 1;

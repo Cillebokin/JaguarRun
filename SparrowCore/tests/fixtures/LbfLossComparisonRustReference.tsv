@@ -1,0 +1,422 @@
+# pinned=jagua-rs/f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# compiler=rustc 1.98.1
+# source=lbf/src/opt/loss.rs sha256=45BC8676B4324C13BBBBFA97FE73A00484B0A8B99E4DF3722E8A9F6DA3EB615D (compiled verbatim; geometry types are field-only stubs)
+kind	name	x_bits	y_bits	cost_bits
+loss	finite12_a	3f800000	40000000	41400000
+loss	finite12_b	00000000	41400000	41400000
+loss	negative10	bf800000	00000000	c1200000
+loss	zero_positive	00000000	00000000	00000000
+loss	zero_negative	80000000	80000000	80000000
+loss	zero_cancel_positive	3f800000	c1200000	00000000
+loss	zero_cancel_negative	bf800000	41200000	00000000
+loss	positive_subnormal	00000001	00000000	0000000a
+loss	negative_subnormal	80000001	00000000	8000000a
+loss	min_finite	ff7fffff	00000000	ff800000
+loss	max_finite	7f7fffff	00000000	7f800000
+loss	negative_infinity	ff800000	00000000	ff800000
+loss	positive_infinity	7f800000	00000000	7f800000
+loss	nan_x	7fc00000	00000000	7fc00000
+loss	nan_y	00000000	7fc00000	7fc00000
+loss	infinity_cancel	7f800000	ff800000	ffc00000
+cmp	finite12_a	finite12_a	equal
+cmp	finite12_a	finite12_b	equal
+cmp	finite12_a	negative10	greater
+cmp	finite12_a	zero_positive	greater
+cmp	finite12_a	zero_negative	greater
+cmp	finite12_a	zero_cancel_positive	greater
+cmp	finite12_a	zero_cancel_negative	greater
+cmp	finite12_a	positive_subnormal	greater
+cmp	finite12_a	negative_subnormal	greater
+cmp	finite12_a	min_finite	greater
+cmp	finite12_a	max_finite	less
+cmp	finite12_a	negative_infinity	greater
+cmp	finite12_a	positive_infinity	less
+cmp	finite12_a	nan_x	unordered
+cmp	finite12_a	nan_y	unordered
+cmp	finite12_a	infinity_cancel	unordered
+cmp	finite12_b	finite12_a	equal
+cmp	finite12_b	finite12_b	equal
+cmp	finite12_b	negative10	greater
+cmp	finite12_b	zero_positive	greater
+cmp	finite12_b	zero_negative	greater
+cmp	finite12_b	zero_cancel_positive	greater
+cmp	finite12_b	zero_cancel_negative	greater
+cmp	finite12_b	positive_subnormal	greater
+cmp	finite12_b	negative_subnormal	greater
+cmp	finite12_b	min_finite	greater
+cmp	finite12_b	max_finite	less
+cmp	finite12_b	negative_infinity	greater
+cmp	finite12_b	positive_infinity	less
+cmp	finite12_b	nan_x	unordered
+cmp	finite12_b	nan_y	unordered
+cmp	finite12_b	infinity_cancel	unordered
+cmp	negative10	finite12_a	less
+cmp	negative10	finite12_b	less
+cmp	negative10	negative10	equal
+cmp	negative10	zero_positive	less
+cmp	negative10	zero_negative	less
+cmp	negative10	zero_cancel_positive	less
+cmp	negative10	zero_cancel_negative	less
+cmp	negative10	positive_subnormal	less
+cmp	negative10	negative_subnormal	less
+cmp	negative10	min_finite	greater
+cmp	negative10	max_finite	less
+cmp	negative10	negative_infinity	greater
+cmp	negative10	positive_infinity	less
+cmp	negative10	nan_x	unordered
+cmp	negative10	nan_y	unordered
+cmp	negative10	infinity_cancel	unordered
+cmp	zero_positive	finite12_a	less
+cmp	zero_positive	finite12_b	less
+cmp	zero_positive	negative10	greater
+cmp	zero_positive	zero_positive	equal
+cmp	zero_positive	zero_negative	equal
+cmp	zero_positive	zero_cancel_positive	equal
+cmp	zero_positive	zero_cancel_negative	equal
+cmp	zero_positive	positive_subnormal	less
+cmp	zero_positive	negative_subnormal	greater
+cmp	zero_positive	min_finite	greater
+cmp	zero_positive	max_finite	less
+cmp	zero_positive	negative_infinity	greater
+cmp	zero_positive	positive_infinity	less
+cmp	zero_positive	nan_x	unordered
+cmp	zero_positive	nan_y	unordered
+cmp	zero_positive	infinity_cancel	unordered
+cmp	zero_negative	finite12_a	less
+cmp	zero_negative	finite12_b	less
+cmp	zero_negative	negative10	greater
+cmp	zero_negative	zero_positive	equal
+cmp	zero_negative	zero_negative	equal
+cmp	zero_negative	zero_cancel_positive	equal
+cmp	zero_negative	zero_cancel_negative	equal
+cmp	zero_negative	positive_subnormal	less
+cmp	zero_negative	negative_subnormal	greater
+cmp	zero_negative	min_finite	greater
+cmp	zero_negative	max_finite	less
+cmp	zero_negative	negative_infinity	greater
+cmp	zero_negative	positive_infinity	less
+cmp	zero_negative	nan_x	unordered
+cmp	zero_negative	nan_y	unordered
+cmp	zero_negative	infinity_cancel	unordered
+cmp	zero_cancel_positive	finite12_a	less
+cmp	zero_cancel_positive	finite12_b	less
+cmp	zero_cancel_positive	negative10	greater
+cmp	zero_cancel_positive	zero_positive	equal
+cmp	zero_cancel_positive	zero_negative	equal
+cmp	zero_cancel_positive	zero_cancel_positive	equal
+cmp	zero_cancel_positive	zero_cancel_negative	equal
+cmp	zero_cancel_positive	positive_subnormal	less
+cmp	zero_cancel_positive	negative_subnormal	greater
+cmp	zero_cancel_positive	min_finite	greater
+cmp	zero_cancel_positive	max_finite	less
+cmp	zero_cancel_positive	negative_infinity	greater
+cmp	zero_cancel_positive	positive_infinity	less
+cmp	zero_cancel_positive	nan_x	unordered
+cmp	zero_cancel_positive	nan_y	unordered
+cmp	zero_cancel_positive	infinity_cancel	unordered
+cmp	zero_cancel_negative	finite12_a	less
+cmp	zero_cancel_negative	finite12_b	less
+cmp	zero_cancel_negative	negative10	greater
+cmp	zero_cancel_negative	zero_positive	equal
+cmp	zero_cancel_negative	zero_negative	equal
+cmp	zero_cancel_negative	zero_cancel_positive	equal
+cmp	zero_cancel_negative	zero_cancel_negative	equal
+cmp	zero_cancel_negative	positive_subnormal	less
+cmp	zero_cancel_negative	negative_subnormal	greater
+cmp	zero_cancel_negative	min_finite	greater
+cmp	zero_cancel_negative	max_finite	less
+cmp	zero_cancel_negative	negative_infinity	greater
+cmp	zero_cancel_negative	positive_infinity	less
+cmp	zero_cancel_negative	nan_x	unordered
+cmp	zero_cancel_negative	nan_y	unordered
+cmp	zero_cancel_negative	infinity_cancel	unordered
+cmp	positive_subnormal	finite12_a	less
+cmp	positive_subnormal	finite12_b	less
+cmp	positive_subnormal	negative10	greater
+cmp	positive_subnormal	zero_positive	greater
+cmp	positive_subnormal	zero_negative	greater
+cmp	positive_subnormal	zero_cancel_positive	greater
+cmp	positive_subnormal	zero_cancel_negative	greater
+cmp	positive_subnormal	positive_subnormal	equal
+cmp	positive_subnormal	negative_subnormal	greater
+cmp	positive_subnormal	min_finite	greater
+cmp	positive_subnormal	max_finite	less
+cmp	positive_subnormal	negative_infinity	greater
+cmp	positive_subnormal	positive_infinity	less
+cmp	positive_subnormal	nan_x	unordered
+cmp	positive_subnormal	nan_y	unordered
+cmp	positive_subnormal	infinity_cancel	unordered
+cmp	negative_subnormal	finite12_a	less
+cmp	negative_subnormal	finite12_b	less
+cmp	negative_subnormal	negative10	greater
+cmp	negative_subnormal	zero_positive	less
+cmp	negative_subnormal	zero_negative	less
+cmp	negative_subnormal	zero_cancel_positive	less
+cmp	negative_subnormal	zero_cancel_negative	less
+cmp	negative_subnormal	positive_subnormal	less
+cmp	negative_subnormal	negative_subnormal	equal
+cmp	negative_subnormal	min_finite	greater
+cmp	negative_subnormal	max_finite	less
+cmp	negative_subnormal	negative_infinity	greater
+cmp	negative_subnormal	positive_infinity	less
+cmp	negative_subnormal	nan_x	unordered
+cmp	negative_subnormal	nan_y	unordered
+cmp	negative_subnormal	infinity_cancel	unordered
+cmp	min_finite	finite12_a	less
+cmp	min_finite	finite12_b	less
+cmp	min_finite	negative10	less
+cmp	min_finite	zero_positive	less
+cmp	min_finite	zero_negative	less
+cmp	min_finite	zero_cancel_positive	less
+cmp	min_finite	zero_cancel_negative	less
+cmp	min_finite	positive_subnormal	less
+cmp	min_finite	negative_subnormal	less
+cmp	min_finite	min_finite	equal
+cmp	min_finite	max_finite	less
+cmp	min_finite	negative_infinity	equal
+cmp	min_finite	positive_infinity	less
+cmp	min_finite	nan_x	unordered
+cmp	min_finite	nan_y	unordered
+cmp	min_finite	infinity_cancel	unordered
+cmp	max_finite	finite12_a	greater
+cmp	max_finite	finite12_b	greater
+cmp	max_finite	negative10	greater
+cmp	max_finite	zero_positive	greater
+cmp	max_finite	zero_negative	greater
+cmp	max_finite	zero_cancel_positive	greater
+cmp	max_finite	zero_cancel_negative	greater
+cmp	max_finite	positive_subnormal	greater
+cmp	max_finite	negative_subnormal	greater
+cmp	max_finite	min_finite	greater
+cmp	max_finite	max_finite	equal
+cmp	max_finite	negative_infinity	greater
+cmp	max_finite	positive_infinity	equal
+cmp	max_finite	nan_x	unordered
+cmp	max_finite	nan_y	unordered
+cmp	max_finite	infinity_cancel	unordered
+cmp	negative_infinity	finite12_a	less
+cmp	negative_infinity	finite12_b	less
+cmp	negative_infinity	negative10	less
+cmp	negative_infinity	zero_positive	less
+cmp	negative_infinity	zero_negative	less
+cmp	negative_infinity	zero_cancel_positive	less
+cmp	negative_infinity	zero_cancel_negative	less
+cmp	negative_infinity	positive_subnormal	less
+cmp	negative_infinity	negative_subnormal	less
+cmp	negative_infinity	min_finite	equal
+cmp	negative_infinity	max_finite	less
+cmp	negative_infinity	negative_infinity	equal
+cmp	negative_infinity	positive_infinity	less
+cmp	negative_infinity	nan_x	unordered
+cmp	negative_infinity	nan_y	unordered
+cmp	negative_infinity	infinity_cancel	unordered
+cmp	positive_infinity	finite12_a	greater
+cmp	positive_infinity	finite12_b	greater
+cmp	positive_infinity	negative10	greater
+cmp	positive_infinity	zero_positive	greater
+cmp	positive_infinity	zero_negative	greater
+cmp	positive_infinity	zero_cancel_positive	greater
+cmp	positive_infinity	zero_cancel_negative	greater
+cmp	positive_infinity	positive_subnormal	greater
+cmp	positive_infinity	negative_subnormal	greater
+cmp	positive_infinity	min_finite	greater
+cmp	positive_infinity	max_finite	equal
+cmp	positive_infinity	negative_infinity	greater
+cmp	positive_infinity	positive_infinity	equal
+cmp	positive_infinity	nan_x	unordered
+cmp	positive_infinity	nan_y	unordered
+cmp	positive_infinity	infinity_cancel	unordered
+cmp	nan_x	finite12_a	unordered
+cmp	nan_x	finite12_b	unordered
+cmp	nan_x	negative10	unordered
+cmp	nan_x	zero_positive	unordered
+cmp	nan_x	zero_negative	unordered
+cmp	nan_x	zero_cancel_positive	unordered
+cmp	nan_x	zero_cancel_negative	unordered
+cmp	nan_x	positive_subnormal	unordered
+cmp	nan_x	negative_subnormal	unordered
+cmp	nan_x	min_finite	unordered
+cmp	nan_x	max_finite	unordered
+cmp	nan_x	negative_infinity	unordered
+cmp	nan_x	positive_infinity	unordered
+cmp	nan_x	nan_x	unordered
+cmp	nan_x	nan_y	unordered
+cmp	nan_x	infinity_cancel	unordered
+cmp	nan_y	finite12_a	unordered
+cmp	nan_y	finite12_b	unordered
+cmp	nan_y	negative10	unordered
+cmp	nan_y	zero_positive	unordered
+cmp	nan_y	zero_negative	unordered
+cmp	nan_y	zero_cancel_positive	unordered
+cmp	nan_y	zero_cancel_negative	unordered
+cmp	nan_y	positive_subnormal	unordered
+cmp	nan_y	negative_subnormal	unordered
+cmp	nan_y	min_finite	unordered
+cmp	nan_y	max_finite	unordered
+cmp	nan_y	negative_infinity	unordered
+cmp	nan_y	positive_infinity	unordered
+cmp	nan_y	nan_x	unordered
+cmp	nan_y	nan_y	unordered
+cmp	nan_y	infinity_cancel	unordered
+cmp	infinity_cancel	finite12_a	unordered
+cmp	infinity_cancel	finite12_b	unordered
+cmp	infinity_cancel	negative10	unordered
+cmp	infinity_cancel	zero_positive	unordered
+cmp	infinity_cancel	zero_negative	unordered
+cmp	infinity_cancel	zero_cancel_positive	unordered
+cmp	infinity_cancel	zero_cancel_negative	unordered
+cmp	infinity_cancel	positive_subnormal	unordered
+cmp	infinity_cancel	negative_subnormal	unordered
+cmp	infinity_cancel	min_finite	unordered
+cmp	infinity_cancel	max_finite	unordered
+cmp	infinity_cancel	negative_infinity	unordered
+cmp	infinity_cancel	positive_infinity	unordered
+cmp	infinity_cancel	nan_x	unordered
+cmp	infinity_cancel	nan_y	unordered
+cmp	infinity_cancel	infinity_cancel	unordered
+min	finite12_a	sample_nan	7fc00000	3f99999a
+min	finite12_a	sample_negative_infinity	ff800000	ff800000
+min	finite12_a	sample_min_finite	ff7fffff	ff7fffff
+min	finite12_a	sample_negative_zero	80000000	80000000
+min	finite12_a	sample_positive_zero	00000000	00000000
+min	finite12_a	sample_subnormal	00000001	00000001
+min	finite12_a	sample_one	3f800000	3f800000
+min	finite12_a	sample_positive_infinity	7f800000	3f99999a
+min	finite12_a	sample_max_finite	7f7fffff	3f99999a
+min	finite12_b	sample_nan	7fc00000	3f99999a
+min	finite12_b	sample_negative_infinity	ff800000	ff800000
+min	finite12_b	sample_min_finite	ff7fffff	ff7fffff
+min	finite12_b	sample_negative_zero	80000000	80000000
+min	finite12_b	sample_positive_zero	00000000	00000000
+min	finite12_b	sample_subnormal	00000001	00000001
+min	finite12_b	sample_one	3f800000	3f800000
+min	finite12_b	sample_positive_infinity	7f800000	3f99999a
+min	finite12_b	sample_max_finite	7f7fffff	3f99999a
+min	negative10	sample_nan	7fc00000	bf800000
+min	negative10	sample_negative_infinity	ff800000	ff800000
+min	negative10	sample_min_finite	ff7fffff	ff7fffff
+min	negative10	sample_negative_zero	80000000	bf800000
+min	negative10	sample_positive_zero	00000000	bf800000
+min	negative10	sample_subnormal	00000001	bf800000
+min	negative10	sample_one	3f800000	bf800000
+min	negative10	sample_positive_infinity	7f800000	bf800000
+min	negative10	sample_max_finite	7f7fffff	bf800000
+min	zero_positive	sample_nan	7fc00000	00000000
+min	zero_positive	sample_negative_infinity	ff800000	ff800000
+min	zero_positive	sample_min_finite	ff7fffff	ff7fffff
+min	zero_positive	sample_negative_zero	80000000	00000000
+min	zero_positive	sample_positive_zero	00000000	00000000
+min	zero_positive	sample_subnormal	00000001	00000000
+min	zero_positive	sample_one	3f800000	00000000
+min	zero_positive	sample_positive_infinity	7f800000	00000000
+min	zero_positive	sample_max_finite	7f7fffff	00000000
+min	zero_negative	sample_nan	7fc00000	80000000
+min	zero_negative	sample_negative_infinity	ff800000	ff800000
+min	zero_negative	sample_min_finite	ff7fffff	ff7fffff
+min	zero_negative	sample_negative_zero	80000000	80000000
+min	zero_negative	sample_positive_zero	00000000	80000000
+min	zero_negative	sample_subnormal	00000001	80000000
+min	zero_negative	sample_one	3f800000	80000000
+min	zero_negative	sample_positive_infinity	7f800000	80000000
+min	zero_negative	sample_max_finite	7f7fffff	80000000
+min	zero_cancel_positive	sample_nan	7fc00000	00000000
+min	zero_cancel_positive	sample_negative_infinity	ff800000	ff800000
+min	zero_cancel_positive	sample_min_finite	ff7fffff	ff7fffff
+min	zero_cancel_positive	sample_negative_zero	80000000	00000000
+min	zero_cancel_positive	sample_positive_zero	00000000	00000000
+min	zero_cancel_positive	sample_subnormal	00000001	00000000
+min	zero_cancel_positive	sample_one	3f800000	00000000
+min	zero_cancel_positive	sample_positive_infinity	7f800000	00000000
+min	zero_cancel_positive	sample_max_finite	7f7fffff	00000000
+min	zero_cancel_negative	sample_nan	7fc00000	00000000
+min	zero_cancel_negative	sample_negative_infinity	ff800000	ff800000
+min	zero_cancel_negative	sample_min_finite	ff7fffff	ff7fffff
+min	zero_cancel_negative	sample_negative_zero	80000000	00000000
+min	zero_cancel_negative	sample_positive_zero	00000000	00000000
+min	zero_cancel_negative	sample_subnormal	00000001	00000000
+min	zero_cancel_negative	sample_one	3f800000	00000000
+min	zero_cancel_negative	sample_positive_infinity	7f800000	00000000
+min	zero_cancel_negative	sample_max_finite	7f7fffff	00000000
+min	positive_subnormal	sample_nan	7fc00000	00000001
+min	positive_subnormal	sample_negative_infinity	ff800000	ff800000
+min	positive_subnormal	sample_min_finite	ff7fffff	ff7fffff
+min	positive_subnormal	sample_negative_zero	80000000	80000000
+min	positive_subnormal	sample_positive_zero	00000000	00000000
+min	positive_subnormal	sample_subnormal	00000001	00000001
+min	positive_subnormal	sample_one	3f800000	00000001
+min	positive_subnormal	sample_positive_infinity	7f800000	00000001
+min	positive_subnormal	sample_max_finite	7f7fffff	00000001
+min	negative_subnormal	sample_nan	7fc00000	80000001
+min	negative_subnormal	sample_negative_infinity	ff800000	ff800000
+min	negative_subnormal	sample_min_finite	ff7fffff	ff7fffff
+min	negative_subnormal	sample_negative_zero	80000000	80000001
+min	negative_subnormal	sample_positive_zero	00000000	80000001
+min	negative_subnormal	sample_subnormal	00000001	80000001
+min	negative_subnormal	sample_one	3f800000	80000001
+min	negative_subnormal	sample_positive_infinity	7f800000	80000001
+min	negative_subnormal	sample_max_finite	7f7fffff	80000001
+min	min_finite	sample_nan	7fc00000	ff800000
+min	min_finite	sample_negative_infinity	ff800000	ff800000
+min	min_finite	sample_min_finite	ff7fffff	ff800000
+min	min_finite	sample_negative_zero	80000000	ff800000
+min	min_finite	sample_positive_zero	00000000	ff800000
+min	min_finite	sample_subnormal	00000001	ff800000
+min	min_finite	sample_one	3f800000	ff800000
+min	min_finite	sample_positive_infinity	7f800000	ff800000
+min	min_finite	sample_max_finite	7f7fffff	ff800000
+min	max_finite	sample_nan	7fc00000	7f800000
+min	max_finite	sample_negative_infinity	ff800000	ff800000
+min	max_finite	sample_min_finite	ff7fffff	ff7fffff
+min	max_finite	sample_negative_zero	80000000	80000000
+min	max_finite	sample_positive_zero	00000000	00000000
+min	max_finite	sample_subnormal	00000001	00000001
+min	max_finite	sample_one	3f800000	3f800000
+min	max_finite	sample_positive_infinity	7f800000	7f800000
+min	max_finite	sample_max_finite	7f7fffff	7f7fffff
+min	negative_infinity	sample_nan	7fc00000	ff800000
+min	negative_infinity	sample_negative_infinity	ff800000	ff800000
+min	negative_infinity	sample_min_finite	ff7fffff	ff800000
+min	negative_infinity	sample_negative_zero	80000000	ff800000
+min	negative_infinity	sample_positive_zero	00000000	ff800000
+min	negative_infinity	sample_subnormal	00000001	ff800000
+min	negative_infinity	sample_one	3f800000	ff800000
+min	negative_infinity	sample_positive_infinity	7f800000	ff800000
+min	negative_infinity	sample_max_finite	7f7fffff	ff800000
+min	positive_infinity	sample_nan	7fc00000	7f800000
+min	positive_infinity	sample_negative_infinity	ff800000	ff800000
+min	positive_infinity	sample_min_finite	ff7fffff	ff7fffff
+min	positive_infinity	sample_negative_zero	80000000	80000000
+min	positive_infinity	sample_positive_zero	00000000	00000000
+min	positive_infinity	sample_subnormal	00000001	00000001
+min	positive_infinity	sample_one	3f800000	3f800000
+min	positive_infinity	sample_positive_infinity	7f800000	7f800000
+min	positive_infinity	sample_max_finite	7f7fffff	7f7fffff
+min	nan_x	sample_nan	7fc00000	7fc00000
+min	nan_x	sample_negative_infinity	ff800000	ff800000
+min	nan_x	sample_min_finite	ff7fffff	ff7fffff
+min	nan_x	sample_negative_zero	80000000	80000000
+min	nan_x	sample_positive_zero	00000000	00000000
+min	nan_x	sample_subnormal	00000001	00000001
+min	nan_x	sample_one	3f800000	3f800000
+min	nan_x	sample_positive_infinity	7f800000	7f800000
+min	nan_x	sample_max_finite	7f7fffff	7f7fffff
+min	nan_y	sample_nan	7fc00000	7fc00000
+min	nan_y	sample_negative_infinity	ff800000	ff800000
+min	nan_y	sample_min_finite	ff7fffff	ff7fffff
+min	nan_y	sample_negative_zero	80000000	80000000
+min	nan_y	sample_positive_zero	00000000	00000000
+min	nan_y	sample_subnormal	00000001	00000001
+min	nan_y	sample_one	3f800000	3f800000
+min	nan_y	sample_positive_infinity	7f800000	7f800000
+min	nan_y	sample_max_finite	7f7fffff	7f7fffff
+min	infinity_cancel	sample_nan	7fc00000	7fc00000
+min	infinity_cancel	sample_negative_infinity	ff800000	ff800000
+min	infinity_cancel	sample_min_finite	ff7fffff	ff7fffff
+min	infinity_cancel	sample_negative_zero	80000000	80000000
+min	infinity_cancel	sample_positive_zero	00000000	00000000
+min	infinity_cancel	sample_subnormal	00000001	00000001
+min	infinity_cancel	sample_one	3f800000	3f800000
+min	infinity_cancel	sample_positive_infinity	7f800000	7f800000
+min	infinity_cancel	sample_max_finite	7f7fffff	7f7fffff
+sort	finite_infinite_stable	positive_infinity,finite12_b,negative_infinity,negative10,negative_subnormal,zero_positive,zero_negative,finite12_a,positive_subnormal,zero_cancel_positive	negative_infinity,negative10,negative_subnormal,zero_positive,zero_negative,zero_cancel_positive,positive_subnormal,finite12_b,finite12_a,positive_infinity
+sort	zero_ties_stable	zero_negative,zero_positive,zero_cancel_negative,zero_cancel_positive	zero_negative,zero_positive,zero_cancel_negative,zero_cancel_positive

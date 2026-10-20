@@ -201,7 +201,7 @@ bool TestSppDemandAndInvalidInputs(std::ostream& output)
         return false;
     }
 
-    const auto impossible = MakeInstance({MakeItem(0, 302, 8.0, 8.0)}, {1}, 4.0);
+    const auto impossible = MakeInstance({MakeItem(0, 302, 2.0, 5.0)}, {1}, 4.0);
     if (!Expect(impossible.HasValue(), output, "impossible SPP setup failed"))
     {
         return false;
@@ -213,9 +213,11 @@ bool TestSppDemandAndInvalidInputs(std::ostream& output)
     config.maxWidthGrowthAttempts = 0U;
     const auto impossibleResult = sparrow::SolveSppLbf(impossible.Value(), config);
     if (!Expect(!impossibleResult.HasValue()
-                    && impossibleResult.GetError().code == jaguar::ErrorCode::Infeasible,
+                    && impossibleResult.GetError().code == jaguar::ErrorCode::Infeasible
+                    && impossibleResult.GetError().message
+                           == "SPP strip width growth limit exceeded",
                 output,
-                "SPP width growth exhaustion must return Infeasible"))
+                "an item taller than the strip must map Rust's panic to a typed Infeasible error"))
     {
         return false;
     }
@@ -248,6 +250,86 @@ bool TestSppDemandAndInvalidInputs(std::ostream& output)
                       && invalidResult.GetError().code == jaguar::ErrorCode::Infeasible,
                   output,
                   "zero samples must follow Rust's no-placement path and fail at the width ceiling");
+}
+
+bool TestLbfContinuousRotationUsesRustF32WidthGrowth(std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "JaguarCore/Tests/Fixtures/RustReference/l1_continuous_rotation_spp.json",
+             "../JaguarCore/Tests/Fixtures/RustReference/l1_continuous_rotation_spp.json",
+             "../JaguarRun/JaguarCore/Tests/Fixtures/RustReference/l1_continuous_rotation_spp.json",
+             "..\\JaguarCore\\Tests\\Fixtures\\RustReference\\l1_continuous_rotation_spp.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "continuous-rotation LBF fixture must be readable"))
+    {
+        return false;
+    }
+
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    jaguar::ImporterConfig importerConfig;
+    importerConfig.cdeConfig.quadtreeDepth = 4;
+    importerConfig.cdeConfig.cdThreshold = 32;
+    importerConfig.cdeConfig.itemSurrogateConfig.poleLimits =
+        {{{10, 0.0}, {0, 0.0}, {0, 0.0}}};
+    importerConfig.cdeConfig.itemSurrogateConfig.failFastPoleAreaRatio = 0.5;
+    importerConfig.cdeConfig.itemSurrogateConfig.failFastPiers = 0;
+    importerConfig.shapeModifyConfig.simplifyTolerance.reset();
+    importerConfig.shapeModifyConfig.narrowConcavityCutoff.reset();
+    importerConfig.shapeModifyConfig.offset.reset();
+    const jaguar::Importer importer{importerConfig};
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "continuous-rotation LBF fixture must import"))
+    {
+        return false;
+    }
+
+    sparrow::LbfConfig config;
+    config.seed = 42U;
+    config.samplesPerItem = 64U;
+    config.localSearchFraction = 0.25;
+    const auto result = sparrow::SolveSppLbf(instance.Value(), config);
+    if (!Expect(result.HasValue(),
+                output,
+                "continuous-rotation LBF fixture must solve"))
+    {
+        return false;
+    }
+
+    const auto floatBits = [](double input) {
+        const float value = static_cast<float>(input);
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const auto& solved = result.Value();
+    const bool hasContinuousPlacement = std::any_of(
+        solved.solution.layoutSnapshot.placements.begin(),
+        solved.solution.layoutSnapshot.placements.end(),
+        [](const jaguar::LayoutPlacementSnapshot& placement) {
+            return std::abs(placement.placedItem.Transform().rotationRad) > 1.0e-6;
+        });
+    return Expect(solved.metrics.sampleCount == 672U
+                      && solved.metrics.placedItemCount == 3U
+                      && solved.metrics.remainingDemand == 0U
+                      && floatBits(solved.metrics.stripWidth) == 0x40f10086U
+                      && floatBits(solved.metrics.density) == 0x3ecbf2d0U
+                      && hasContinuousPlacement,
+                  output,
+                  "continuous-rotation SPP must retain Rust f32 width-growth and terminal bits");
 }
 
 bool TestSppJsonRoundTrip(std::ostream& output)
@@ -1439,6 +1521,7 @@ bool RunSppLbfTests(std::ostream& output)
 {
     return TestSmallSppFixture(output)
         && TestSppDemandAndInvalidInputs(output)
+        && TestLbfContinuousRotationUsesRustF32WidthGrowth(output)
         && TestSppJsonRoundTrip(output)
         && TestSparrowBuilderSmallInstance(output)
         && TestSparrowBuilderZeroContainerSamplesMatchesRustError(output)

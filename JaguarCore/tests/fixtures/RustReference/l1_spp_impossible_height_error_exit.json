@@ -1,0 +1,12 @@
+{
+  "name": "l1-spp-item-taller-than-strip",
+  "items": [
+    {
+      "id": 1105,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 2, "height": 5 } }
+    }
+  ],
+  "strip_height": 4
+}

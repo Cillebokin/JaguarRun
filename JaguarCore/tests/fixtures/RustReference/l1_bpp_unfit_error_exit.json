@@ -1,0 +1,19 @@
+{
+  "name": "l1-bpp-unfit-item",
+  "items": [
+    {
+      "id": 1104,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 5, "height": 5 } }
+    }
+  ],
+  "bins": [
+    {
+      "id": 1204,
+      "shape": { "type": "rectangle", "data": { "x_min": 0, "y_min": 0, "width": 4, "height": 4 } },
+      "stock": 1,
+      "cost": 5
+    }
+  ]
+}

@@ -6,17 +6,21 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <ostream>
+#include <set>
 #include <stdexcept>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace
@@ -93,15 +97,322 @@ bool TestLbfLossValues(std::ostream& output)
     const sparrow::LbfLoss nanLoss{
         std::numeric_limits<float>::quiet_NaN(), 1.0F};
     const sparrow::LbfLoss finiteLoss{1.0F, 1.0F};
-    if (!Expect(!(nanLoss < finiteLoss) && finiteLoss < nanLoss,
+    if (!Expect(!(nanLoss < finiteLoss) && !(finiteLoss < nanLoss),
                 output,
-                "NaN LBF loss must never be preferred over finite loss"))
+                "NaN LBF losses must be unordered like Rust partial_cmp"))
     {
         return false;
     }
-    return Expect(std::isinf(nanLoss.Cost()),
+    return Expect(std::isnan(nanLoss.Cost()),
                   output,
-                  "NaN LBF loss cost must be treated as non-finite");
+                  "NaN LBF loss cost must preserve Rust's IEEE result");
+}
+
+bool TestLbfLossComparisonMatrixMatchesRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/LbfLossComparisonRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/LbfLossComparisonRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfLossComparisonRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\LbfLossComparisonRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "LBF loss comparison Rust fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    const auto parseBits = [](const std::string& text, std::uint32_t& bits) {
+        if (text.size() != 8U)
+        {
+            return false;
+        }
+        const auto parsed = std::from_chars(
+            text.data(), text.data() + text.size(), bits, 16);
+        return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+    };
+    const auto fromBits = [](std::uint32_t bits) {
+        float value = 0.0F;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    const auto toBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const auto splitNames = [](const std::string& encoded) {
+        std::vector<std::string> names;
+        std::istringstream input(encoded);
+        std::string name;
+        while (std::getline(input, name, ','))
+        {
+            names.push_back(name);
+        }
+        return names;
+    };
+
+    std::map<std::string, sparrow::LbfLoss> losses;
+    std::set<std::pair<std::string, std::string>> comparedPairs;
+    std::size_t comparisonCount = 0U;
+    std::size_t minCount = 0U;
+    std::size_t sortCount = 0U;
+    bool headerSeen = false;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        if (line == "kind\tname\tx_bits\ty_bits\tcost_bits")
+        {
+            headerSeen = true;
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string kind;
+        if (!(row >> kind))
+        {
+            return Expect(false, output, "malformed LBF loss Rust fixture row");
+        }
+        if (kind == "loss")
+        {
+            std::string name;
+            std::string xBitsText;
+            std::string yBitsText;
+            std::string costBitsText;
+            std::uint32_t xBits = 0U;
+            std::uint32_t yBits = 0U;
+            std::uint32_t expectedCostBits = 0U;
+            if (!(row >> name >> xBitsText >> yBitsText >> costBitsText)
+                || !parseBits(xBitsText, xBits)
+                || !parseBits(yBitsText, yBits)
+                || !parseBits(costBitsText, expectedCostBits))
+            {
+                return Expect(false, output, "malformed LBF loss value row");
+            }
+            const auto inserted = losses.emplace(
+                name, sparrow::LbfLoss{fromBits(xBits), fromBits(yBits)});
+            if (!Expect(inserted.second, output, "duplicate LBF loss value name"))
+            {
+                return false;
+            }
+            if (toBits(inserted.first->second.Cost()) != expectedCostBits)
+            {
+                output << "LBF loss cost bits differ for " << name << '\n';
+                return Expect(false, output, "LBF loss cost differs from pinned Rust");
+            }
+            continue;
+        }
+
+        if (kind == "cmp")
+        {
+            std::string leftName;
+            std::string rightName;
+            std::string relation;
+            if (!(row >> leftName >> rightName >> relation))
+            {
+                return Expect(false, output, "malformed LBF loss comparison row");
+            }
+            const auto left = losses.find(leftName);
+            const auto right = losses.find(rightName);
+            const bool knownRelation = relation == "less" || relation == "equal"
+                || relation == "greater" || relation == "unordered";
+            if (!Expect(left != losses.end() && right != losses.end() && knownRelation,
+                        output,
+                        "unknown name or relation in LBF loss comparison row"))
+            {
+                return false;
+            }
+            const bool expectedForward = relation == "less";
+            const bool expectedReverse = relation == "greater";
+            if (!( (left->second < right->second) == expectedForward
+                   && (right->second < left->second) == expectedReverse))
+            {
+                output << "LBF loss comparison differs: " << leftName << ' ' << relation
+                       << ' ' << rightName << '\n';
+                return Expect(false,
+                              output,
+                              "LBF loss less-than relation differs from pinned Rust");
+            }
+            if (relation == "equal"
+                && !(left->second.Cost() == right->second.Cost()
+                     && !std::isnan(left->second.Cost())))
+            {
+                return Expect(false,
+                              output,
+                              "Rust Equal relation must correspond to equal non-NaN costs");
+            }
+            if (relation == "unordered"
+                && !(std::isnan(left->second.Cost())
+                     || std::isnan(right->second.Cost())))
+            {
+                return Expect(false,
+                              output,
+                              "Rust unordered relation must involve a NaN cost");
+            }
+            if (!Expect(comparedPairs.emplace(leftName, rightName).second,
+                        output,
+                        "duplicate pair in LBF loss comparison matrix"))
+            {
+                return false;
+            }
+            ++comparisonCount;
+            continue;
+        }
+
+        if (kind == "min")
+        {
+            std::string lossName;
+            std::string sampleName;
+            std::string sampleBitsText;
+            std::string expectedBitsText;
+            std::uint32_t sampleBits = 0U;
+            std::uint32_t expectedBits = 0U;
+            if (!(row >> lossName >> sampleName >> sampleBitsText >> expectedBitsText)
+                || !parseBits(sampleBitsText, sampleBits)
+                || !parseBits(expectedBitsText, expectedBits))
+            {
+                return Expect(false, output, "malformed LBF loss min row");
+            }
+            const auto loss = losses.find(lossName);
+            if (!Expect(loss != losses.end(), output, "unknown LBF loss name in min row"))
+            {
+                return false;
+            }
+            const jaguar::Rect2d sample{
+                0.0, 0.0, static_cast<double>(fromBits(sampleBits)), 3.0};
+            const auto tightened = loss->second.TightenSampleBBox(sample);
+            if (toBits(static_cast<float>(tightened.xMax)) != expectedBits)
+            {
+                output << "LBF min differs: loss=" << lossName << " sample="
+                       << sampleName << '\n';
+                return Expect(false,
+                              output,
+                              "LBF sample bound min differs from pinned Rust");
+            }
+            ++minCount;
+            continue;
+        }
+
+        if (kind == "sort")
+        {
+            std::string sortName;
+            std::string inputText;
+            std::string expectedText;
+            if (!(row >> sortName >> inputText >> expectedText))
+            {
+                return Expect(false, output, "malformed LBF loss sort row");
+            }
+            const auto inputNames = splitNames(inputText);
+            const auto expectedNames = splitNames(expectedText);
+            if (!Expect(!inputNames.empty() && inputNames.size() == expectedNames.size(),
+                        output,
+                        "invalid LBF loss sort sequence"))
+            {
+                return false;
+            }
+            std::vector<std::pair<std::string, sparrow::LbfLoss>> values;
+            values.reserve(inputNames.size());
+            for (const auto& name : inputNames)
+            {
+                const auto loss = losses.find(name);
+                if (!Expect(loss != losses.end() && !std::isnan(loss->second.Cost()),
+                            output,
+                            "LBF stable-sort reference must contain only ordered costs"))
+                {
+                    return false;
+                }
+                values.emplace_back(name, loss->second);
+            }
+            std::stable_sort(values.begin(), values.end(), [](const auto& left,
+                                                               const auto& right) {
+                return left.second < right.second;
+            });
+            std::vector<std::string> actualNames;
+            actualNames.reserve(values.size());
+            for (const auto& value : values)
+            {
+                actualNames.push_back(value.first);
+            }
+            if (!Expect(actualNames == expectedNames,
+                        output,
+                        "LBF stable-sort order differs from pinned Rust"))
+            {
+                output << "LBF sort case: " << sortName << '\n';
+                return false;
+            }
+            ++sortCount;
+            continue;
+        }
+
+        return Expect(false, output, "unknown record kind in LBF loss fixture");
+    }
+
+    return Expect(headerSeen && losses.size() == 16U
+                      && comparisonCount == losses.size() * losses.size()
+                      && comparedPairs.size() == comparisonCount
+                      && minCount == losses.size() * 9U
+                      && sortCount == 2U,
+                  output,
+                  "LBF loss matrix must cover 16 values, all pairs, 9 min inputs, and 2 sorts");
+}
+
+bool TestPinnedRustLbfLossTightening(std::ostream& output)
+{
+    const sparrow::LbfLoss finiteLoss{1.0F, 2.5F};
+    const jaguar::Rect2d nanSample{
+        0.0, 0.0, std::numeric_limits<double>::quiet_NaN(), 10.0};
+    const jaguar::Rect2d tightenedNanSample =
+        finiteLoss.TightenSampleBBox(nanSample);
+    if (!Expect(tightenedNanSample.xMax == 1.25,
+                output,
+                "Rust f32::min must replace a NaN sample x_max with the finite bound"))
+    {
+        return false;
+    }
+
+    const jaguar::Rect2d infiniteSample{
+        0.0, 0.0, std::numeric_limits<double>::infinity(), 10.0};
+    const jaguar::Rect2d tightenedInfiniteSample =
+        finiteLoss.TightenSampleBBox(infiniteSample);
+    if (!Expect(tightenedInfiniteSample.xMax == 1.25,
+                output,
+                "Rust f32::min must tighten an infinite sample x_max to a finite bound"))
+    {
+        return false;
+    }
+
+    const sparrow::LbfLoss negativeInfinityLoss{
+        -std::numeric_limits<float>::infinity(), 0.0F};
+    const jaguar::Rect2d tightenedNegativeInfinity =
+        negativeInfinityLoss.TightenSampleBBox({0.0, 0.0, 5.0, 10.0});
+    if (!Expect(std::isinf(tightenedNegativeInfinity.xMax)
+                    && std::signbit(tightenedNegativeInfinity.xMax),
+                output,
+                "Rust f32::min must propagate a negative-infinite loss bound"))
+    {
+        return false;
+    }
+
+    const sparrow::LbfLoss negativeZeroLoss{-0.0F, -0.0F};
+    const jaguar::Rect2d positiveZeroSample{0.0, 0.0, 0.0, 1.0};
+    const jaguar::Rect2d tightenedZeroSample =
+        negativeZeroLoss.TightenSampleBBox(positiveZeroSample);
+    return Expect(std::signbit(static_cast<float>(tightenedZeroSample.xMax)),
+                  output,
+                  "Rust f32::min must preserve negative zero when bounds tie");
 }
 
 bool TestSampleEvalOrdering(std::ostream& output)
@@ -1174,6 +1485,8 @@ bool TestSampleEvalNanMatchesRustFailure(std::ostream& output)
 bool RunLbfLossTests(std::ostream& output)
 {
     return TestLbfLossValues(output)
+        && TestLbfLossComparisonMatrixMatchesRustReference(output)
+        && TestPinnedRustLbfLossTightening(output)
         && TestSampleEvalOrdering(output)
         && TestNonTransitiveSampleEvalSortMatchesRustReference(output)
         && TestSampleEvalComparatorBoundaryMatchesRustReference(output)

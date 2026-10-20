@@ -107,19 +107,23 @@ Result<LocalSearchSampler> LocalSearchSampler::Create(
 
     const double maxDimension = std::max(containerBounds.xMax - containerBounds.xMin,
                                           containerBounds.yMax - containerBounds.yMin);
-    const double translationInit = maxDimension * config.maxTranslationStddevRatio;
-    const double translationLimit = maxDimension * config.minTranslationStddevRatio;
-    const double rotationInit = config.maxRotationStddevRad;
-    const double rotationLimit = config.minRotationStddevRad;
+    const float maxDimensionF32 = std::max(
+        static_cast<float>(containerBounds.xMax)
+            - static_cast<float>(containerBounds.xMin),
+        static_cast<float>(containerBounds.yMax)
+            - static_cast<float>(containerBounds.yMin));
+    const float translationInit =
+        static_cast<float>(config.maxTranslationStddevRatio) * maxDimensionF32;
+    const float translationLimit =
+        static_cast<float>(config.minTranslationStddevRatio) * maxDimensionF32;
+    const float rotationInit = static_cast<float>(config.maxRotationStddevRad);
+    const float rotationLimit = static_cast<float>(config.minRotationStddevRad);
     if (!std::isfinite(maxDimension) || maxDimension <= 0.0
+        || !std::isfinite(maxDimensionF32) || maxDimensionF32 <= 0.0F
         || !std::isfinite(translationInit) || !std::isfinite(translationLimit)
         || !std::isfinite(rotationInit) || !std::isfinite(rotationLimit)
-        || translationInit < 0.0 || translationLimit < 0.0
-        || rotationInit < 0.0 || rotationLimit < 0.0
-        || !IsRepresentableAsFloat(translationInit)
-        || !IsRepresentableAsFloat(translationLimit)
-        || !IsRepresentableAsFloat(rotationInit)
-        || !IsRepresentableAsFloat(rotationLimit)
+        || translationInit < 0.0F || translationLimit < 0.0F
+        || rotationInit < 0.0F || rotationLimit < 0.0F
         || !IsRepresentableAsFloat(reference.translation.x)
         || !IsRepresentableAsFloat(reference.translation.y)
         || !IsRepresentableAsFloat(reference.rotationRad))
@@ -143,10 +147,10 @@ Result<LocalSearchSampler> LocalSearchSampler::Create(
                             meanRotation,
                             meanX,
                             meanY,
-                            static_cast<float>(translationInit),
-                            static_cast<float>(translationLimit),
-                            static_cast<float>(rotationInit),
-                            static_cast<float>(rotationLimit)});
+                            translationInit,
+                            translationLimit,
+                            rotationInit,
+                            rotationLimit});
 }
 
 jaguar::Transform2d LocalSearchSampler::Sample(SparrowRng& rng)

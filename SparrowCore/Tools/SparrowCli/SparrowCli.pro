@@ -4,6 +4,8 @@ CONFIG += console c++17 warn_on
 CONFIG -= app_bundle
 QT -= core gui
 
+win32-msvc: QMAKE_CXXFLAGS += /fp:strict
+
 INCLUDEPATH += $$PWD/../../Include
 INCLUDEPATH += $$PWD/../../../JaguarCore/Include
 

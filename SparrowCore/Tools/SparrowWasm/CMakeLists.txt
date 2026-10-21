@@ -5,6 +5,12 @@ project(SparrowWasm LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+    set(SPARROW_FP_COMPILE_OPTIONS /fp:strict)
+else()
+    set(SPARROW_FP_COMPILE_OPTIONS -fno-fast-math -ffp-contract=off)
+endif()
+
 if(EMSCRIPTEN)
     get_filename_component(SPARROWCORE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
     get_filename_component(JAGUARCORE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../JaguarCore" ABSOLUTE)
@@ -16,7 +22,7 @@ if(EMSCRIPTEN)
         target_include_directories(SparrowCoreWasm PUBLIC
             "${SPARROWCORE_ROOT}/Include"
             "${JAGUARCORE_ROOT}/Include")
-        target_compile_options(SparrowCoreWasm PRIVATE -pthread)
+        target_compile_options(SparrowCoreWasm PRIVATE -pthread ${SPARROW_FP_COMPILE_OPTIONS})
         set(SPARROWCORE_LIBRARY SparrowCoreWasm)
     endif()
 
@@ -29,12 +35,12 @@ if(EMSCRIPTEN)
         add_library(JaguarCoreWasm STATIC ${JAGUARCORE_SOURCES})
         target_include_directories(JaguarCoreWasm PUBLIC
             "${JAGUARCORE_ROOT}/Include")
-        target_compile_options(JaguarCoreWasm PRIVATE -pthread)
+        target_compile_options(JaguarCoreWasm PRIVATE -pthread ${SPARROW_FP_COMPILE_OPTIONS})
         set(JAGUARCORE_LIBRARY JaguarCoreWasm)
     endif()
 
     add_executable(SparrowWasm SparrowWasm.cpp)
-    target_compile_options(SparrowWasm PRIVATE -pthread)
+    target_compile_options(SparrowWasm PRIVATE -pthread ${SPARROW_FP_COMPILE_OPTIONS})
     target_link_options(SparrowWasm PRIVATE
         "--no-entry"
         "-pthread"
@@ -49,6 +55,7 @@ if(EMSCRIPTEN)
         "${JAGUARCORE_LIBRARY}")
 else()
     add_library(SparrowWasm STATIC SparrowWasm.cpp)
+    target_compile_options(SparrowWasm PRIVATE ${SPARROW_FP_COMPILE_OPTIONS})
 endif()
 target_include_directories(SparrowWasm PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../Include"

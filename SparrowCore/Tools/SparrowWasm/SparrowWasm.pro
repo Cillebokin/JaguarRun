@@ -3,6 +3,8 @@ TARGET = SparrowWasm
 CONFIG += staticlib c++17 warn_on
 QT -= core gui
 
+win32-msvc: QMAKE_CXXFLAGS += /fp:strict
+
 INCLUDEPATH += $$PWD/../../Include
 INCLUDEPATH += $$PWD/../../../JaguarCore/Include
 

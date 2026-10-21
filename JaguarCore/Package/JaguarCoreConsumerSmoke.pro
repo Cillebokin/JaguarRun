@@ -1,7 +1,7 @@
 TEMPLATE = app
 TARGET = JaguarCoreConsumerSmoke
 CONFIG += console c++17 warn_on
-win32-msvc: QMAKE_CXXFLAGS += /utf-8
+win32-msvc: QMAKE_CXXFLAGS += /utf-8 /fp:strict
 CONFIG -= app_bundle
 QT -= core gui
 

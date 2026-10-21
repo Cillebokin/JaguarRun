@@ -634,6 +634,19 @@ bool TestSparrowBuilderGrowthBeyond32AttemptsMatchesRust(
         && expectedRotationBits == floatBits(transform.rotationRad)
         && expectedXBits == floatBits(transform.translation.x)
         && expectedYBits == floatBits(transform.translation.y);
+    if (!matches)
+    {
+        output << "growth-attempt expected bits: width=0x" << std::hex
+               << expectedWidthBits << " rotation=0x" << expectedRotationBits
+               << " x=0x" << expectedXBits << " y=0x" << expectedYBits
+               << "; actual: width=0x" << floatBits(metrics.stripWidth)
+               << " rotation=0x" << floatBits(transform.rotationRad)
+               << " x=0x" << floatBits(transform.translation.x)
+               << " y=0x" << floatBits(transform.translation.y) << std::dec
+               << "; placed=" << metrics.placedItemCount
+               << " remaining=" << metrics.remainingDemand
+               << " feasible=" << metrics.feasible << '\n';
+    }
     return Expect(matches,
                   output,
                   "Sparrow LBF result after more than 32 growth attempts must match Rust bits");

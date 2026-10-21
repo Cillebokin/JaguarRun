@@ -75,6 +75,19 @@ std::chrono::steady_clock::time_point sparrow::CompressionClockNow() noexcept
 
 namespace
 {
+float DurationAsRustSecondsF32(std::chrono::nanoseconds duration) noexcept
+{
+    // Match Rust's Duration::as_secs_f32 by converting whole seconds and
+    // subsecond nanoseconds separately.
+    const auto wholeSeconds = std::chrono::duration_cast<std::chrono::seconds>(
+        duration);
+    const auto subsecondNanoseconds = std::chrono::duration_cast<
+        std::chrono::nanoseconds>(duration - wholeSeconds);
+    return static_cast<float>(wholeSeconds.count())
+        + static_cast<float>(subsecondNanoseconds.count())
+            / 1'000'000'000.0F;
+}
+
 sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     const jaguar::SPInstance& instance,
     const jaguar::SPSolution& solution,
@@ -115,9 +128,9 @@ sparrow::Result<sparrow::LbfMetrics> CalculateMetrics(
     return sparrow::Result<sparrow::LbfMetrics>::FromValue(metrics);
 }
 
-float CalculateMinimumStripWidth(
+sparrow::Result<float> CalculateMinimumStripWidth(
     const jaguar::SPInstance& instance,
-    const jaguar::SPSolution& solution) noexcept
+    const jaguar::SPSolution& solution)
 {
     constexpr float relativeTolerance = 1.0e-6F;
     const jaguar::Rect2d containerBounds =
@@ -173,7 +186,8 @@ float CalculateMinimumStripWidth(
                     static_cast<double>(angle), {0.0, 0.0}));
             if (!transformed.HasValue())
             {
-                continue;
+                return sparrow::Result<float>::FromError(
+                    transformed.GetError());
             }
             const jaguar::Rect2d bounds = transformed.Value().BoundingBox();
             const float boundsHeight = static_cast<float>(bounds.Height());
@@ -186,7 +200,7 @@ float CalculateMinimumStripWidth(
         }
         minimumWidth = std::max(minimumWidth, itemWidth);
     }
-    return minimumWidth + widthInset;
+    return sparrow::Result<float>::FromValue(minimumWidth + widthInset);
 }
 
 sparrow::OptimizationProgress MakeProgress(
@@ -206,9 +220,9 @@ sparrow::OptimizationProgress MakeProgress(
 
 namespace sparrow::detail
 {
-float CompressionMinimumStripWidthForTrace(
+Result<float> CompressionMinimumStripWidthForTrace(
     const jaguar::SPInstance& instance,
-    const jaguar::SPSolution& solution) noexcept
+    const jaguar::SPSolution& solution)
 {
     return CalculateMinimumStripWidth(instance, solution);
 }
@@ -293,8 +307,14 @@ Result<CompressionResult> Compress(
 
     jaguar::SPSolution bestSolution = initialSolution;
     LbfMetrics bestMetrics = initialMetrics.Value();
-    const float minimumWidth = CalculateMinimumStripWidth(
+    const auto minimumWidthResult = CalculateMinimumStripWidth(
         instance, separatorState);
+    if (!minimumWidthResult.HasValue())
+    {
+        return Result<CompressionResult>::FromError(
+            minimumWidthResult.GetError());
+    }
+    const float minimumWidth = minimumWidthResult.Value();
     std::size_t failures = 0U;
     std::size_t iteration = 0U;
     const auto start = CompressionClockNow();
@@ -318,14 +338,19 @@ Result<CompressionResult> Compress(
                 // step, so the compression loop exits before reporting an attempt.
                 break;
             }
-            double ratio = 0.0;
             const auto elapsed = std::chrono::duration_cast<
                 std::chrono::nanoseconds>(
                 CompressionClockNow() - start);
-            ratio = static_cast<double>(elapsed.count())
-                / static_cast<double>(config.timeLimit.count());
-            step = config.shrinkMax
-                + ratio * (config.shrinkMin - config.shrinkMax);
+            // Rust computes elapsed seconds, ratio, step, and the min test in f32.
+            const float elapsedSeconds = DurationAsRustSecondsF32(elapsed);
+            const float timeLimitSeconds =
+                DurationAsRustSecondsF32(config.timeLimit);
+            const float shrinkMax = static_cast<float>(config.shrinkMax);
+            const float shrinkMin = static_cast<float>(config.shrinkMin);
+            const float ratio = elapsedSeconds / timeLimitSeconds;
+            step = static_cast<double>(
+                shrinkMax + ratio * (shrinkMin - shrinkMax));
+            minimumStep = static_cast<double>(shrinkMin);
         }
         else
         {
@@ -348,17 +373,17 @@ Result<CompressionResult> Compress(
             break;
         }
 
-        const double width = bestSolution.StripWidth();
-        const double nextWidth = width * (1.0 - step);
-        if (!std::isfinite(nextWidth) || nextWidth <= 0.0
+        const float width = static_cast<float>(bestSolution.StripWidth());
+        const float stepF32 = static_cast<float>(step);
+        const float nextWidth = width * (1.0F - stepF32);
+        if (!std::isfinite(nextWidth) || nextWidth <= 0.0F
             || nextWidth >= width
-            || (minimumWidth > 0.0 && nextWidth < minimumWidth))
+            || (minimumWidth > 0.0F && nextWidth < minimumWidth))
         {
             break;
         }
         if (listener != nullptr)
-            listener->OnCompressionProgress(
-                static_cast<double>(static_cast<float>(step)));
+            listener->OnCompressionProgress(static_cast<double>(stepF32));
         if (observer != nullptr)
         {
             observer->OnProgress(MakeProgress(
@@ -368,7 +393,8 @@ Result<CompressionResult> Compress(
                 0.0F));
         }
 
-        const auto restoredWidth = separator.ChangeStripWidth(width);
+        const auto restoredWidth = separator.ChangeStripWidth(
+            static_cast<double>(width));
         if (!restoredWidth.HasValue())
         {
             return Result<CompressionResult>::FromError(
@@ -381,8 +407,9 @@ Result<CompressionResult> Compress(
                 rolledBack.GetError());
         }
         const float split = separator.Random().Uniform01F32()
-            * static_cast<float>(width);
-        const auto changed = separator.ChangeStripWidth(nextWidth, split);
+            * width;
+        const auto changed = separator.ChangeStripWidth(
+            static_cast<double>(nextWidth), split);
         if (!changed.HasValue())
         {
             return Result<CompressionResult>::FromError(changed.GetError());

@@ -12,6 +12,17 @@ expectations, matching their former infallible behavior for validated instances.
 
 | Area | Fixture | Covered behavior |
 | --- | --- | --- |
+| Pinned LBF rotation-mode sampler traces | `Tests/Fixtures/LbfPinnedSearchRustTrace.tsv`, `Tests/Fixtures/LbfPinnedSearchRustTrace-Continuous.tsv`, `Tests/Fixtures/LbfPinnedSearchRustTrace-Discrete.tsv`; `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1`; `SparrowCoreTests.exe --lbf-pinned-search-trace`, `--lbf-pinned-search-trace-continuous`, and `--lbf-pinned-search-trace-discrete` | Actual pinned `lbf::search` and C++ `SearchLbfWithTrace`, seed 42, 1×1 square in 30×30 empty container, 64 samples (`48 uniform + 16 local`), None/Continuous/Discrete `{0, π/2}`. LLVM-MinGW scalar fallback Debug `-O0` and Release `-O2` match all 64 candidate phases and transform raw bits, accept decisions, final result/loss/sample count/post-search RNG; continuous and discrete also match all 48 uniform active-bbox transitions. This is a fixed fixture, not arbitrary-input parity |
+| Pinned LBF sampler boundary and error exits | `Tests/Fixtures/LbfSamplerBoundaryAdjacentXRustTrace.tsv`, `LbfSamplerBoundaryInvalidBoundsRustTrace.tsv`, `LbfSamplerBoundaryTightenInvalidRustTrace.tsv`; `TestSampling.cpp::TestLbfUniformSamplerNarrowBoundsRustReference`, `TestLbfUniformSamplerInvalidBoundsMapping`, `TestLbfSearchTighteningErrorAgainstRustReference`; `SparrowCoreTests.exe --sampling` | Pinned Rust `UniformRectSampler` versus private C++ `LbfUniformSampler`, plus a real `lbf::search` tightening failure. The 16-ULP x interval near `2^30` matches 48 rotation/x/y raw-bit samples and next RNG state; ordinal 1 reaches the exclusive x upper endpoint by `f32` rounding. Singleton, reversed and non-finite constructor inputs consume no RNG; Rust panics (`EmptyRange`/`NonFinite`), while C++ returns `InvalidInput`. In the real search, the accepted first candidate, bbox-derived LBF loss, tightened bounds and post-failure RNG match; Rust panics on the reversed tightened range and C++ returns `InvalidInput`. LLVM-MinGW scalar fallback Debug `-O0` and Release `-O2 -DNDEBUG` `--sampling` both pass. This records the mapped error-channel difference, not arbitrary-input parity |
+| Pinned LBF search with no valid uniform candidate | `Tests/Fixtures/LbfSearchNoUniformPlacementRustTrace.tsv`, `Tests/Fixtures/LbfSearchRectNoUniformPlacementRustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceBoundsMode no-valid-placement` and `no-valid-placement-rect`, `TestSampling.cpp::TestLbfSearchSkipsLocalWithoutUniformPlacementRustReference` | Two pinned `lbf::search` and C++ `SearchLbfWithTrace` fixtures: (1) seed 42, 30×30 container, 31×31 blocker, 1×1 item, `n_samples=64`, `ls_frac=0.25`; (2) seed 17, 40×24 container, 43×26 blocker, 3×2 item, `n_samples=80`, `ls_frac=0.30`. Both return no placement, reject every uniform candidate, skip local search, and count only 48/56 uniform samples. Candidate rotation/x/y bits and post-search RNG match Rust (`1d794276a8ce5c1f` / `2c5f14af6e306195`). Rust Debug/Release fixtures are byte-identical; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. Two fixed fixtures only |
+| Pinned LBF feasible search with local phase | `Tests/Fixtures/LbfSearchRectFeasibleRustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceBoundsMode feasible-rect`, `TestSampling.cpp::TestLbfSearchFeasibleRectLocalRustReference` | Seed 17, empty 40×24 container, 3×2 item, `n_samples=80`, `ls_frac=0.30`. Rust direct `lbf::search` and instrumented transcription return the same result and post-search RNG. C++ matches all 56 uniform and 24 local candidate transform bits, phases, Rust-recorded collision classifications, accepted reports, and the retained best transform after each report; 7 uniform and 2 local candidates are accepted. Final transform bits are `(rotation=00000000, x=3bf27c30, y=3efc8100)`, bbox loss bits `420244c9`, and next RNG `85179032088f99df`. Rust Debug/Release fixture bytes match; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. One fixed geometry only |
+| Pinned LBF feasible search with obstacle collisions | `Tests/Fixtures/LbfSearchRectObstacleFeasibleRustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceBoundsMode feasible-obstacle-rect`, same C++ feasible-search regression | Seed 17, 40×24 container, 3×2 item, 10×10 blocker at origin, `n_samples=80`, `ls_frac=0.30`. C++ matches all 56 uniform and 24 local candidate transforms/phases, Rust-recorded collision classifications, accepted reports, and retained best transforms. Uniform has 35 observed collision rejects and 4 best updates; local has 11 observed collision rejects and 2 best updates. Rust classifications are compared only when Rust performed the corresponding collision check. Final transform bits are `(rotation=00000000, x=3bc18490, y=412ad97a)`, bbox loss bits `422af2d8`, and next RNG `85179032088f99df`. Pinned Rust direct/instrumented results agree; Rust Debug/Release fixture bytes match; C++ Debug/Release `--sampling` pass. One fixed blocker layout only |
+| Pinned LBF feasible search with continuous rotation and obstacle | `Tests/Fixtures/LbfSearchRectObstacleFeasible-ContinuousRustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceRotationMode continuous -TraceBoundsMode feasible-obstacle-rect`, same C++ feasible-search regression | Seed 17, 40×24 container, 3×2 item, 10×10 blocker at origin, `n_samples=80`, `ls_frac=0.30`. All 56 uniform and 24 local candidate rotation/x/y bits match; each phase has distinct nonzero rotation bits. Rust-recorded collision classifications, report acceptance, retained best after every report, final transform/loss and post-search RNG also match. Uniform has 44 observed collision rejects and 4 best updates; local has no collision rejects and 12 best updates. Rust skips polygon collision checks for 20 loss-pruned candidates; C++ reports one of those as invalid, but none changes report acceptance or best state, so collision classification for those candidates is unobserved in Rust and is not claimed equivalent. Final transform bits are `(rotation=404b6936, x=40523e76, y=41adc35c)`, bbox loss bits `425d383f`, and next RNG `c2976202924be019`. Rust Debug/Release fixture SHA-256 is `811C0E7AE551F8F1BB75FE76B026741B7E8714975089A95A5D88950BB4008737`; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. One fixed rotation/obstacle fixture only |
+| Pinned LBF continuous-rotation obstacle search with a second seed | `Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-Seed42RustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceRotationMode continuous -TraceBoundsMode feasible-obstacle-rect -TraceSeed 42`, same C++ feasible-search regression | Seed 42, same 40×24 container, 3×2 item, 10×10 origin blocker, `n_samples=80`, `ls_frac=0.30`. All 56 uniform and 24 local rotation/x/y bits match and are nonzero/unique within each phase; phase, Rust-observed collision classification, accepted report, retained best after every report, final transform/loss and post-search RNG match. Uniform has 40 observed collision rejects and 8 accepted reports; local has 8 observed collision rejects and 3 accepted. Rust skipped collision checks for 21 loss-pruned candidates; C++ reports 2 invalid, neither changes acceptance or best state, so Rust collision classification is unobserved for these candidates. Final transform bits are `(rotation=3ffe4396, x=4044c293, y=418c861b)`, bbox loss bits `424c371b`, next RNG `417ec5add2d2ba4d`. Rust Debug/Release fixture SHA-256 is `E10785E58BD608101B891E0357F192E2F79D01944A7A4653CDF9519C23EC3510`; C++ LLVM-MinGW scalar fallback Debug `-O0` and Release `-O2 -DNDEBUG` `--sampling` pass. A second seed for this same geometry only |
+| Pinned LBF continuous-rotation obstacle search with an expanded sample budget | `Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-Seed42-Samples96RustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceRotationMode continuous -TraceBoundsMode feasible-obstacle-rect -TraceSeed 42 -TraceSamples 96`, same C++ feasible-search regression | Seed 42, same geometry and `ls_frac=0.30`, with `n_samples=96` split into 68 uniform and 28 local candidates. Every rotation/x/y bit, phase, Rust-observed collision classification, accepted report, retained best after every report, final transform/loss and post-search RNG match. Uniform has 49 observed collision rejects and 9 accepted reports; local has 7 observed collision rejects and 3 accepted. Rust skipped collision checks for 28 loss-pruned candidates; C++ reports 1 invalid without changing acceptance or best, so Rust classification is unobserved. Final transform bits are `(rotation=40093f5a, x=40542111, y=4142e968)`, bbox loss bits `423f6332`, next RNG `d71d1b2ccfe7581e`. Rust Debug/Release fixture SHA-256 is `E1755E9E35D380D142BC93FC8B9A86C64865F2DE7A061A72BA8DBEEF01AECA86`; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. One larger budget on the same seed and geometry |
+| Pinned LBF continuous-rotation search with a triangular obstacle | `Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-Triangle-Seed42-Samples96RustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceRotationMode continuous -TraceBoundsMode feasible-obstacle-rect -TraceSeed 42 -TraceSamples 96 -TraceObstacleShape triangle`, same C++ feasible-search regression | Seed 42, 40×24 container, 3×2 item, right-triangle blocker `(0,0),(10,0),(0,10)` with the same 10×10 bounds as the rectangular fixture, `n_samples=96`, `ls_frac=0.30`. All 68 uniform and 28 local rotation/x/y bits, phases, Rust-observed collision classifications, accepted reports, retained best after every report, final result and RNG match. Uniform has 45 observed collision rejects and 10 accepted reports; local has 6 observed collision rejects and 4 accepted. Rust skipped collision checks for 31 loss-pruned candidates; C++ reports 3 invalid without changing acceptance or best, so Rust classification is unobserved. Final transform bits are `(rotation=40077641, x=4051265c, y=4147220d)`, bbox loss bits `423ec22c`, next RNG `d71d1b2ccfe7581e`. Rust Debug/Release fixture SHA-256 is `E92A3F09DD97F64EFFC7C382338B76485860C2048ADDB8FD6F96C8DBF1F18DD6`; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. One triangular blocker shape only |
+| Pinned LBF continuous-rotation search with a concave obstacle | `Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-Concave-Seed42-Samples96RustTrace.tsv`, `Tests/RustReference/GeneratePinnedLbfSearchTrace.ps1 -TraceRotationMode continuous -TraceBoundsMode feasible-obstacle-rect -TraceSeed 42 -TraceSamples 96 -TraceObstacleShape concave`, same C++ feasible-search regression | Seed 42, same container/item/configuration as the triangular case, with an L-shaped concave blocker `(0,0),(10,0),(10,3),(3,3),(3,10),(0,10)` in the same 10×10 bounds. All 68 uniform and 28 local rotation/x/y bits, phases, Rust-observed collision classifications, accepted reports, retained best after every report, final result and RNG match. Uniform has 45 observed collision rejects and 9 accepted reports; local has 7 observed collision rejects and 3 accepted. Rust skipped collision checks for 32 loss-pruned candidates; C++ reports 1 invalid without changing acceptance or best, so Rust classification is unobserved. Final transform bits are `(rotation=40093f5a, x=40542111, y=4142e968)`, bbox loss bits `423f6332`, next RNG `d71d1b2ccfe7581e`. Rust Debug/Release fixture SHA-256 is `FD50D4594604E034347C804AF06502FAC5E9E00779C44690762D671E093CD2F2`; C++ LLVM-MinGW scalar fallback Debug/Release `--sampling` pass. One concave blocker topology only |
+| Sparrow generic sampler boundary contract | `TestSampling.cpp::TestUniformRectSampler`, `UniformSamplerUpperBoundaryRust.tsv`, `UniformSamplerSingletonAxisRust.tsv`, `UniformSamplerDegenerateBboxRust.tsv`, `UniformSamplerContinuousGridRust.tsv`; Rust integration targets `uniform_sampler_singleton_reference`, `uniform_sampler_boundary_reference`, `continuous_sampler_reference` | Existing coverage includes endpoint rounding, singleton axes and RNG continuation, degenerate axes, no-fit/reversed/non-finite bounds, bounds overflowing to f32 infinity, focused bounds, and the 16-entry continuous-rotation grid. Rust targets and C++ `--sampling` pass in Debug/Release. General Sparrow sampling remains distinct from pinned LBF continuous-angle sampling |
 | RNG | `Tests/Fixtures/LbfSeed42Reference.tsv` | Rust rand 0.10.3 seed-42 xoshiro raw outputs and `f32 random_range`; Rust oracle and C++ RNG tests consume the same values |
 | Bounded integer RNG | `Tests/Fixtures/SparrowUniformIndexRustReference.tsv` | Rust rand 0.10.3 `i32 random_range(0..bound)` for six seeds and bounds 1, 2, 3, 4, 6, and 16; C++ `UniformIndex` must match each draw |
 | Sampling and coordinate descent | `Tests/Fixtures/SamplingCoordinateDescentRustReference.tsv` | Eight real Rust `UniformBBoxSampler` samples plus every candidate, evaluation kind/loss, evaluation count, and final state from `refine_coord_desc` with a deterministic synthetic evaluator; compared against the C++ sampler and coordinate descent |
@@ -36,6 +47,8 @@ expectations, matching their former infallible behavior for validated instances.
 | Three-worker / alternate-seed separator round | `Tests/Fixtures/SeparatorRoundRustTrace.json`, `SeparatorThreeWorkerSeed43RoundRustTrace.tsv` | Actual Rust `Separator::separate` run with three Rayon workers and seed 43; same end-to-end state compared with C++ |
 | Legacy two-worker separator regression | `Tests/Fixtures/SeparatorReference.tsv` | Fixed-seed C++ regression for two workers; retained as an additional regression baseline |
 | Direct Exploration phase | `Tests/Fixtures/ExplorationRustTrace.tsv` | Actual Rust `exploration_phase` with zero separator strikes; compares repeated shrinking, minimum-width stopping, failed-pool termination, best width/density, feasibility, report sequence, progress widths, and placed-item bounds |
+| Compression `+Inf` minimum-width early stop | `Tests/Fixtures/ExplorationMinimumWidthInfinity.json`, `Tests/Fixtures/CompressionMinimumWidthInfinityRustReference.tsv`, `Tests/RustReference/tests/compression_minimum_width_reference.rs::compression_stops_before_progress_when_all_discrete_rotations_are_too_tall`, `TestExploration.cpp::TestCompressionInfiniteMinimumWidthStopsBeforeAttempt`, `SparrowCoreTests.exe --compression-minimum-width` | With the existing two-item fixture, Rust and C++ compute `minimum_width=+Inf`; direct Compression returns the original width 20 and emits no compression progress. RustReference Debug/Release and C++ MSVC 14.44 Debug/Release focused runners pass. Item 911 is initially placed at 0° although its only allowed discrete angle is 90°; this fixed test scopes evidence to the `+Inf` early-stop behavior and does not establish legal-rotation or general geometry parity |
+| Compression discrete-rotation transform error before attempt | `Tests/Fixtures/CompressionDiscreteRotationWorkerError.json`, `Tests/RustReference/tests/compression_extreme_rotation_error_reference.rs::valid_discrete_rotation_panics_during_compression_minimum_width`, `TestExploration.cpp::RunS07CompressionDiscreteRotationError`, `SparrowCoreTests.exe --s07-compression-discrete-rotation-error` | The importer accepts the finite polygon with discrete angles 0° and 315°. The 315° f32 transform collapses its vertical bbox span. Rust Debug/Release panics while computing `minimum_width`, before compression progress; C++ now propagates the same transform failure as `InvalidInput` at that boundary. C++ MSVC 14.44 Debug/Release and Rust Debug/Release focused tests pass. This is fixture-specific geometry evidence; it does not certify all discrete rotations or shapes |
 | Warm-start Restore profile boundaries | `Tests/Fixtures/ExplorationEmptyLarge.json`, `Tests/Fixtures/WarmStartItemDefinitionMismatch.json`, `Tests/RustReference/tests/optimizer_warm_start_rejection_reference.rs::warm_start_rejection_boundaries_match_observed_rust_profiles`, `Tests/RustReference/tests/optimizer_warm_start_rejection_reference.rs::restore_snapshot_cde_hazard_corruption_matches_observed_rust_profiles`, `TestExploration.cpp::TestWarmStartRejectionBoundariesMatchRust`, `TestExploration.cpp::TestWarmStartCdeHazardCorruptionMatchesRust` | Fifteen paired scenarios compare Restore state and accept/fail behavior; selected cases also compare top-level callbacks: excess demand, same-index alternate definition, empty/partial/wrong-identity/extra-distinct hazard sets, standalone out-of-range item index, valid-before-invalid ordering, valid sparse SlotMap, plus six CDE mutations (duplicate entity, wrong shape, wrong `pk`, wrong transform, non-dynamic entry, and an entity retyped to collide with static Exterior). The six malformed CDE cases fail in Debug inside the temporary layout and leave the outer target unchanged. Release accepts them with two placements, width 8, demand `[1,0,0]`, and dynamic-hazard counts `3/2/2/2/1/2`. A direct `Layout::restore` Exterior-collision probe additionally confirms Debug leaves two installed placements and no dynamic hazards, while Release retains two dynamic hazards. The low-level C++ CDE test verifies Debug removes the old dynamic hazard before duplicate Exterior registration fails. Two C++-only tests reject mismatched placement generation and incomplete free-slot metadata before mutation; a third C++-only null-shape guard returns `InvalidInput` before mutation because Rust's `Arc<SPolygon>` cannot represent null. These are representation checks, not Rust malformed-input equivalents. Other field combinations and arbitrary corrupted snapshots remain untested; panic/exception types are language mappings, not identical API types. |
 | Partial and geometrically infeasible warm start | `Tests/Fixtures/ExplorationEmptyLarge.json`, `Tests/RustReference/tests/optimizer_partial_warm_start_reference.rs::partial_overlapping_warm_start_is_accepted_and_reported`, `TestExploration.cpp::TestEmptyLargeAndPartialWarmStartMatchRust` | The restorable seed places two of three demanded items at overlapping poses. Rust and C++ top-level optimizers accept it and, when stopped at the initial report with zero phase budgets, return the two-placement snapshot with report order `ExplFeas` then `Final`. C++ also checks `isFeasible=false` and `remainingDemand=1`; report category does not certify full demand or collision feasibility. Fifteen paired Restore scenarios, two C++-only slot-metadata guards, and one C++-only null-shape guard are covered in the preceding row; other malformed snapshot shapes remain unaudited, so no general Rust panic/C++ error mapping is claimed |
 | E5 partial warm-start final-state matrix | `Tests/Fixtures/ExplorationEmptyLarge.json`, `Tests/Fixtures/OptimizePartialWarmStartRustReference.tsv` (SHA-256 `7BAEC4EA2A689A200A6C942899E3876D3E078BDA1905BAF91E5408CCF491DCD3`), `Tests/RustReference/tests/optimizer_partial_warm_start_reference.rs::partial_warm_start_final_states_match_the_checked_in_reference`, `TestExploration.cpp::TestE5PartialWarmStartMatchesRust` | Two seed=42 top-level `Optimize` runs start from the same partial two-of-three warm start: geometrically disjoint and overlapping placements. Both request a phase stop after the initial `ExplFeas` report and use zero exploration/compression deadlines. Rust/C++ compare initial and final placed/remaining indices, solution/layout feasibility, transforms, width/density, phase/report order, termination and zero progress/result/compression counts. Discrete rows are exact; C++ uses width/density tolerance `5e-7`, rotation `1e-6`, translation `5e-6`. No separator attempt occurs, so no loss value is observed. This closes only the stated early-stop final-state cases; it is not a completed compression attempt or full E5 corpus |
@@ -135,6 +148,436 @@ Y, simultaneous degenerate axes, or every geometry/seed combination.
 `LbfMetricsReference.tsv` is retained from the earlier `jagua-rs/lbf` work; the C++ test now
 consumes and validates its schema, provenance, and known rows, but does not compare those values
 to SparrowCore because the source algorithm differs.
+
+## L2 sampler relationship
+
+The pinned LBF `UniformRectSampler` maps to the private `LbfUniformSampler` in
+`Source/Optimizer/LbfSearch.cpp`. C++ uses `SparrowRng` operations that match the Rust rand
+draws. The general Sparrow `Source/Sampling/UniformRectSampler.cpp` serves Sparrow's
+sampling/search path and represents continuous rotation with 16 discrete angle candidates;
+pinned LBF draws a continuous angle from `Uniform<f32>(0, 2π)`. Keep these as separate semantic
+paths. The pinned `LSSampler` maps to `Source/Sampling/LocalSearchSampler.cpp`; LBF candidate
+traces cover the local phase and the rotation/x/y normal draw order for continuous rotation.
+
+The three pinned LBF traces compare the fixed-seed candidate values, search phase and final RNG
+continuation. The continuous and discrete fixtures additionally compare every tightened uniform
+bbox. The second L2 round adds direct narrow-interval sampling, invalid-bound construction and a
+real search failure after an accepted candidate tightens the x interval into a reversed range.
+Those checks preserve the mapped error-channel difference (Rust panic versus C++ `InvalidInput`).
+The third and fourth rounds add fully blocked searches with different seeds, rectangular/square
+container and item geometries, and different sample budgets. All 48/56 uniform candidates are
+rejected, local search is skipped, and the post-search RNG remains aligned with the pinned Rust
+revision. The fifth round adds one feasible rectangular search and compares the complete 56-sample
+uniform plus 24-sample local trajectory, per-report retained best, final result and RNG continuation.
+The sixth round adds a feasible search with an explicit 10×10 blocker at the origin and confirms that
+both uniform and local candidates include collision rejects while accepted candidates still update
+the retained best consistently. The seventh and eighth rounds add continuous rotation to that
+obstacle fixture at seeds 17 and 42. Both phases match every transform bit and report state. The
+loss-pruned collision checks remain unobserved on the Rust side (20 and 21 candidates); C++ reports
+one and two invalid outcomes, respectively, without changing acceptance or retained best. The ninth
+round increases the same seed-42 fixture from 80 to 96 samples (68 uniform plus 28 local), again
+matching every reported transform and search state. Rust leaves 28 loss-pruned collision checks
+unobserved; C++ reports one invalid with no effect on acceptance or best. These are recorded as
+evaluation-path differences, not collision-classification parity.
+The tenth round replaces the rectangular obstacle with a right triangle sharing its 10×10 bounds,
+keeping seed 42 and the 96-sample budget fixed. The direct Rust result and instrumented trace agree;
+C++ matches all reported candidate and best states. Rust leaves 31 loss-pruned collision checks
+unobserved; C++ reports three invalid outcomes with no effect on the selected result. The eleventh
+round uses a concave L-shaped six-vertex blocker with the same bounds and configuration. Rust and
+C++ again match all reported candidates and search states; 32 Rust-unobserved checks include one
+additional C++ invalid result, with no effect on the selected result.
+The twelfth round keeps that concave L-shaped blocker and translates it to `(12,8)` inside the
+container. Fixture `Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed42-Samples96RustTrace.tsv`
+has SHA-256 `47DB4DDA3A1387A17B64AFE7054BF31862CC19A8489040C476F0C987D6341887`; Rust Debug and Release
+outputs are byte-identical. C++ matches all 96 candidate transforms, phase/report states, retained
+best states, final result, loss and RNG continuation in both build profiles. The uniform/local
+phases report 40/5 observed collision rejects and 4/5 accepted candidates. Rust leaves 42
+loss-pruned collision classifications unobserved; C++ reports four invalid outcomes among them,
+without changing acceptance, best, result or RNG. This remains fixed-fixture evidence, not general
+collision-classification parity.
+The thirteenth round keeps the translated concave blocker and changes the seed to 17. Fixture
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed17-Samples96RustTrace.tsv`
+has SHA-256 `6E3698354DC76E3B7E7248F9BB95BF3E85ABBE7BEB0F00D972166FC73BC4D7D5`; Rust Debug and
+Release outputs are byte-identical. C++ matches all 96 candidate transforms, phase/report states,
+retained best states, final result, loss and RNG continuation in both profiles. Uniform/local
+phases report 46/8 observed collision rejects and 3/4 accepted candidates. Rust leaves 35
+loss-pruned collision classifications unobserved; C++ reports two invalid outcomes among them,
+without changing acceptance, best, result or RNG. The evidence remains limited to this seed and
+fixed geometry/configuration.
+The fourteenth round rotates the same concave blocker by 90 degrees and translates it by `(22,8)`,
+keeping its nominal 10×10 bounds inside the container at `(12,8)`. Fixture
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed42-Samples96RustTrace.tsv`
+has SHA-256 `AB5127F8108B84453DB50C80C79FAAE4D85694D3DC44264860EEC23CE3EE7E96`; Rust Debug and Release
+outputs are byte-identical. C++ matches all 96 transforms, phase/report states, retained best
+states, final result, loss and RNG continuation in both profiles. Uniform/local phases report 40/5
+observed collision rejects and 4/5 accepted candidates. Rust leaves 42 loss-pruned collision
+classifications unobserved; C++ reports four invalid outcomes among them, without changing
+acceptance, best, result or RNG. This remains fixed-fixture evidence for the selected rotation and
+translation. The 96-row search classifications, acceptance states and losses happen to match the
+unrotated-offset fixture, so the trace alone does not distinguish orientation. The fixture also
+records an orientation-sensitive probe at `(13,13)`: it collides with the unrotated left arm and is
+clear after rotation; Rust generation and the C++ regression both assert this result.
+The fifteenth round keeps the rotated blocker and changes the seed to 17. Fixture
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed17-Samples96RustTrace.tsv`
+has SHA-256 `22B681CF72ED0A83902A73BBD3DA7C8C208B4B32AB272C8FD802A073C31B00A6`; Rust Debug and Release
+outputs are byte-identical. C++ matches all 68 uniform and 28 local transforms, phases, Rust-observed
+collision classifications, accepted reports, retained best states, final result and RNG continuation.
+Uniform/local phases report 42/0 observed collision rejects and 3/4 accepted candidates; Rust leaves
+35 loss-pruned collision classifications unobserved, while C++ reports two invalid outcomes without
+changing acceptance, best, result or RNG. The 96 search rows also match the unrotated seed-17 fixture
+row for row, so the separate `(13,13)` orientation probe remains necessary. Final transform bits are
+`(rotation=3ff5bc70, x=403c0ea3, y=40d7a76c)`, bbox loss bits `421bc4dd`, and next RNG
+`a2648e6cb419c6e4`. LLVM-MinGW scalar fallback Debug and Release `--sampling` pass. This is fixed
+seed/geometry evidence and does not establish general collision-classification parity.
+The sixteenth round changes the blocker rotation to 45 degrees and translates it by `(19.1,8)`,
+placing the rotated bounds at approximately `x=12.029..26.171, y=8..22.142` inside the 40×24
+container. Fixture
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45-Seed42-Samples96RustTrace.tsv`
+has SHA-256 `FEA9C0AB4A02FD49298EF4B2F7C2924EE12FB88B26290385C1E88B666E61B3D6`; Rust Debug and Release
+outputs are byte-identical. C++ matches all 68 uniform and 28 local transforms, phases, Rust-observed
+collision classifications, accepted reports, retained best states, final result and RNG continuation.
+Uniform/local phases report 40/5 observed collision rejects and 4/5 accepted candidates. Rust leaves
+42 loss-pruned collision classifications unobserved; C++ reports four invalid outcomes without
+changing acceptance, best, result or RNG. A fixed candidate at `(14.5,17.1)` collides with the
+unrotated blocker and clears after 45-degree rotation; Rust generation and C++ Debug/Release tests
+assert this. The 96 search rows remain identical to both the unrotated and 90-degree seed-42 traces,
+so this fixture adds another direction-sensitive geometry check but no search-trajectory distinction.
+Final transform bits are `(rotation=3fc9d96c, x=4001b1a1, y=3fdd18b7)`, bbox loss bits `41c7ef77`,
+and next RNG `d71d1b2ccfe7581e`. LLVM-MinGW scalar fallback Debug and Release `--sampling` pass. The
+evidence remains limited to these fixed geometries, seeds and budgets.
+The seventeenth round moves the direction-sensitive candidate into the real search path while
+keeping the blocker bounds identical: the baseline concave L is unrotated at the origin, and the
+comparison rotates it 90 degrees and translates it by `(10,0)`, so both occupy the same 10×10
+bounds. Fixture
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90Origin-Seed42-Samples96RustTrace.tsv`
+has SHA-256 `B92CD1767BB55222FF9565602AD4DE7B6B3D836144E14124E78931AE0C21B78E`; Rust Debug and
+Release outputs are byte-identical. The first four uniform candidates retain the same transforms
+and collision classifications. Uniform ordinal 4 has transform bits
+`(rotation=4088b931, x=3fd3d359, y=4101f784)` and the same loss in both fixtures; it is
+polygon-colliding and rejected with the unrotated L, but clear and accepted with the rotated L.
+That acceptance updates the retained best and tightens the sampling bbox, changing the final
+result to `(rotation=40885bd6, x=3fa9e02c, y=40fe94b7)` with bbox loss bits `421ce74a`; the
+post-search RNG still matches at `d71d1b2ccfe7581e`. C++ explicitly checks this candidate in both
+fixtures and matches all 96 candidate/report/best states in Debug and Release; both LLVM-MinGW
+scalar-fallback `--sampling` runs pass. The fixture adds direct evidence that blocker orientation
+can change actual LBF search selection for this fixed seed and geometry. It does not establish
+general collision or search parity.
+The eighteenth round keeps the same concave L and seed-42 search, but compares 45-degree and
+225-degree orientations. Their translations `(7.0710678,4.0)` and `(7.0710678,13.192388)` align
+the actual six-vertex polygon bounds to approximately `x=0..14.142136, y=4..13.192388`; the Rust
+generator checks all four AABB edges within `2e-5`. Fixtures
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45SearchPair-Seed42-Samples96RustTrace.tsv`
+and
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveRot225SearchPair-Seed42-Samples96RustTrace.tsv`
+have SHA-256 `E0839CB81E1D8C95231FAB00A5020025D0F352AA44EEAB3354E1354BF3EBC360` and
+`53611CD0777045D93DA570155DC74FCAE7ABE3DD32E8A0A9F1F4212B2C7093E1`, respectively; Rust Debug
+and Release output for each fixture is byte-identical. The first four uniform candidates keep
+matching transforms and collision classifications. Ordinal 4 has bits
+`(rotation=4088b931, x=3fd3d359, y=4101f784)` in both traces and the same loss; the 45-degree
+orientation is polygon-clear and accepted, while the 225-degree orientation collides and is
+rejected. The changed report updates best/bounds and leads to different final transforms and losses:
+45 degrees ends at `(rotation=3fc9d96c, x=4001b1a1, y=3fdd18b7)`, loss `41c7ef77`; 225 degrees
+ends at `(rotation=4009d8cc, x=405494db, y=4141d994)`, loss `423f57e1`. Both consume 96 samples and
+continue with `next_rng=d71d1b2ccfe7581e`. C++ additionally checks the same candidate through an
+unregistered CDE query matching `LbfEvaluator`'s surrogate-then-polygon path: both orientations
+clear the surrogate, then 45 degrees clears the polygon while 225 degrees collides; it checks the
+transformed polygon AABBs within `2e-5`. C++ Debug and Release `--sampling` match all candidate,
+report, retained-best, result and RNG rows. This is fixed-fixture orientation evidence; L2 remains
+partial and does not claim general geometry or search parity.
+
+The nineteenth round repeats the same seed-42, 96-sample search with a second concave topology: an
+eight-vertex C-shaped blocker open on the right, with vertices `(0,0),(10,0),(10,1),(1,1),(1,9),
+(10,9),(10,10),(0,10)`. Its 45-degree and 225-degree placements share the actual AABB
+`x=0..14.142136, y=4..18.142136`; the Rust oracle checks all eight transformed vertices within
+`2e-5`. The paired fixtures
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot45SearchPair-Seed42-Samples96RustTrace.tsv`
+and
+`Tests/Fixtures/LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot225SearchPair-Seed42-Samples96RustTrace.tsv`
+have SHA-256 `E32A0792AEB49E2AEB4A355630A327CEB8FC06B42B1DD6D73D9AF72B1F736E22` and
+`167A68AF67F0C6BB8C9DC62D978E7C34C40468C76618D19D441C22A264F687F1`, respectively. Rust Debug and
+Release output is byte-identical for each orientation. The traces differ only at uniform ordinals
+8 and 33: the 45-degree orientation reports surrogate collision, while 225 degrees proceeds to
+loss values `42394dea` and `424f2709`; both candidates are pruned before polygon detection and are
+not accepted. The remaining candidates, acceptance history, and final result are equal:
+`(rotation=3fc9d96c, x=4001b1a1, y=3fdd18b7)`, loss `41c7ef77`, 96 samples, and
+`next_rng=d71d1b2ccfe7581e`. C++ checks both actual AABBs and the precise pairwise fixture rule;
+Debug and Release `--sampling` pass. The normal trace has no acceptance or search-result
+divergence. Round twenty's forced probes show the same stage classification on both sides for
+ordinals 8 and 33: the 45-degree pair is rejected at the surrogate, while the 225-degree pair
+clears both surrogate and polygon checks. The positive direction-sensitive search-result
+divergence remains specific to the concave-L fixture above.
+
+The twentieth round forces the Rust and C++ surrogate-then-polygon queries for the actual
+search transforms at uniform ordinals 8 and 33, including the 225-degree candidates that normal
+LBF search prunes before polygon detection. Both 45-degree probes are rejected at the surrogate;
+both 225-degree probes clear the surrogate and polygon. The candidate transforms are compared
+against the search trace before probing, and the C++ probe uses the same `ff_pole_area_ratio=0.5`
+as the Rust item configuration. The Rust Debug/Release fixtures remain byte-identical, and both
+C++ Debug and Release `--sampling` runs pass. No stage or effective collision difference was found
+for these fixed probes.
+
+The twenty-first round identifies every C++ `Invalid` event in the C-shaped pair
+whose collision classification was unobserved by Rust because polygon detection
+was pruned by the loss bound. The 45-degree search has uniform ordinals 7, 10, 39,
+50, and 67 plus local ordinal 26; the 225-degree search has uniform ordinals 7,
+10, 50, and 67 plus local ordinal 26. The regression locks these exact sets and
+their counts (6 and 5), then forces Rust and C++ surrogate-to-polygon queries for
+those candidates and ordinals 8 and 33 from round twenty. Ordinals 7, 10, 50, 67,
+and local 26 are surrogate-clear/polygon-collision in both orientations. Ordinal
+39 is surrogate-clear/polygon-collision at 45 degrees and clear/clear at 225
+degrees. Ordinals 8 and 33 remain surrogate collisions at 45 degrees and clear
+at both stages at 225 degrees. All forced classifications match. Updated fixture
+hashes are `E32A0792AEB49E2AEB4A355630A327CEB8FC06B42B1DD6D73D9AF72B1F736E22` and
+`167A68AF67F0C6BB8C9DC62D978E7C34C40468C76618D19D441C22A264F687F1`; Rust
+Debug/Release bytes match, and LLVM-MinGW scalar-fallback C++ Debug and Release
+`--sampling` pass. This closes the actual invalid candidates observed in these two
+fixed searches; it does not classify the remaining Rust-unobserved candidates or
+establish general collision/search parity.
+
+The twenty-second round returns to the six-vertex concave-L pair from round
+eighteen. In the actual C++ searches, the 45-degree fixture reports `Invalid` for
+uniform ordinals 10, 39, and 50 plus local ordinal 26; the 225-degree fixture
+reports uniform ordinals 33, 37, and 50 plus local ordinal 26. Rust leaves all
+eight polygon classifications unobserved because the loss bound prunes them.
+The pinned Rust generator now forces surrogate-to-polygon checks for those exact
+search transforms, and the C++ regression locks both their ordinal sets and
+transform bits. All eight classify as surrogate-clear/polygon-collision on both
+sides, explaining the C++ `Invalid` events.
+
+The updated fixture SHA-256 values are
+`4231A4EE415AECFA4BDCA97DE7C29DA0C43D974C3487C434FC8CC5AFC83C45E6` (45 degrees)
+and `F21AA7B3E677816A752750FF37676DA03BBF44307BB19160314E648D946B3377` (225 degrees).
+Rust Debug and Release output is byte-identical. The regular search results remain
+the round-eighteen results, with 96 samples and the same next RNG output
+`d71d1b2ccfe7581e`; LLVM-MinGW scalar-fallback C++ Debug and Release `--sampling`
+pass. This closes these eight fixed candidates only; L2 remains partial, with no
+claim about other Rust-unobserved candidates or general geometry/search parity.
+
+The twenty-third round completes the collision-classification matrix for the
+concave-L searches from round eighteen. Rust left 36 candidates unclassified
+after loss pruning at 45 degrees and 31 at 225 degrees. The actual C++ searches
+reported 32 clear and 4 invalid events for the 45-degree set, and 27 clear and
+4 invalid events for the 225-degree set. The Rust generator now enumerates all
+unclassified rows and forces surrogate-to-polygon checks; the C++ regression
+compares each forced classification and transform with the matching actual
+search event. All 67 candidates agree, including the eight invalid candidates
+from round twenty-two and the remaining 59 clear candidates.
+
+The normal search results, acceptance history, and RNG state remain unchanged:
+losses `41c7ef77` and `423f57e1` for 45 and 225 degrees, 96 samples, and
+`next_rng=d71d1b2ccfe7581e`. The updated fixture SHA-256 values are
+`6C20200E3AF8357EDFCE69ED4CFDBD869189CCEA1156B587B70618F46066AE26` and
+`C0B56E51D92430BA04D0B50B7AEFF2720FB41C7E795F3998602C3484CB686E6E`.
+Rust Debug/Release output is byte-identical, and LLVM-MinGW scalar-fallback C++
+Debug and Release `--sampling` pass. This closes the collision classifications
+for these two fixed searches; general geometry and search parity remain open.
+
+The twenty-fourth round completes the same loss-pruned collision-classification
+matrix for the C-shaped 45/225-degree pair from round nineteen. Rust left 33
+and 35 candidates unclassified after loss pruning. The actual C++ searches
+reported 27 clear and 6 invalid events at 45 degrees, and 30 clear and 5
+invalid events at 225 degrees. The Rust reference generator now enumerates all
+68 rows and forces surrogate-to-polygon checks; the C++ regression compares
+each candidate's transform bits, Rust forced classification, and matching
+actual search event. All 68 agree. The invalid ordinal sets remain those
+recorded in round twenty-one, and the existing uniform ordinal 8/33 paired
+probes remain covered by the round-nineteen comparison.
+
+Rust 1.98.1 Debug and Release outputs are byte-identical. The fixture SHA-256
+values are `F7FD0A7F0704EDCA5F84B5331DD3C15B57B9E9D7E343B7642CBA9E1E1EA0CDDF`
+(45 degrees) and `E5447B6EFF40A81D3CBF4E7DD408F9156AD68BFE34748C83171D3D69D71865AA`
+(225 degrees). LLVM-MinGW scalar-fallback C++ Debug and Release `--sampling`
+pass. This closes the loss-pruned classification for these two fixed searches;
+general collision, geometry, and search parity remain open.
+
+The twenty-fifth round completes the loss-pruned collision-classification
+matrix for the baseline rectangular blocker in the continuous seed-17 search
+from round seven (40×24 container, 3×2 item, 10×10 blocker at the origin,
+80 samples split into 56 uniform and 24 local candidates). Rust left 20
+candidates unclassified after loss pruning. Uniform ordinal 11 is invalid when
+forced through the collision evaluator; the other 19 candidates are clear.
+The Rust generator now forces classification for every such row, and the C++
+Debug/Release regression compares candidate transform bits, forced Rust
+classification, and the corresponding actual search event. All 20 agree.
+
+The regular result remains unchanged: transform bits
+`404b6936/40523e76/41adc35c`, loss `425d383f`, and
+`next_rng=c2976202924be019`. The Debug/Release fixture SHA-256 is
+`04FFB633885C596C7150E64E96793F59752E359DE34D4227884E9BEC1D5E25DE`; C++
+LLVM-MinGW scalar-fallback Debug and Release `--sampling` pass. This closes
+the hidden classification for this fixed baseline search only.
+
+The twenty-sixth round adds the same baseline rectangle search at seed 42 and
+80 samples (56 uniform, 24 local). Rust left 21 candidates unclassified after
+loss pruning. Forced classification finds uniform ordinal 31 and local ordinal
+11 invalid; the remaining 19 are clear. The C++ Debug/Release regression
+compares all 21 candidate transforms, forced Rust classifications, and actual
+search events, and all agree. The regular result remains unchanged: transform
+bits `3ffe4396/4044c293/418c861b`, loss `424c371b`, and
+`next_rng=417ec5add2d2ba4d`. The Debug/Release fixture SHA-256 is
+`6B33C58E15AA08FFE49F59C6F15F35C6F618D9A382668F23915FA62A99F1AB7C`.
+
+The twenty-seventh round extends the seed-42 baseline rectangle search to 96
+samples (68 uniform, 28 local). Rust left 28 candidates unclassified after
+loss pruning. Only uniform ordinal 31 is invalid; the other 27 are clear. The
+C++ Debug/Release regression compares each transform, forced Rust
+classification, and actual search event; all 28 agree. The regular result
+remains unchanged: transform bits `40093f5a/40542111/4142e968`, loss
+`423f6332`, and `next_rng=d71d1b2ccfe7581e`. The Debug/Release fixture
+SHA-256 is `7F08ECA7AFAD84CDD162390E710D94DDE71B2540DE92E76511F631978714B7F7`.
+
+Together with round twenty-five, the full loss-pruned collision classification
+is now locked for three fixed baseline rectangle searches. C++ Debug and
+Release `--sampling` pass; other seeds, obstacle geometries, and general-input
+parity remain unverified.
+
+The twenty-eighth round completes the loss-pruned collision-classification
+matrix for the right-triangle blocker from round ten (seed 42, 40×24 container,
+3×2 item, 10×10 blocker bounds, continuous rotation, 96 samples split into 68
+uniform and 28 local candidates). Rust left 31 candidates unclassified after
+loss pruning. Uniform ordinals 10 and 33 and local ordinal 26 are invalid; the
+other 28 candidates are clear. The Rust generator forces every classification,
+and the C++ Debug/Release regression compares candidate transform bits, forced
+Rust classification, and the matching actual search event. All 31 agree.
+
+The search result remains unchanged: transform bits
+`40077641/4051265c/4147220d`, loss `423ec22c`, and
+`next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release fixture SHA-256 is
+`F8FCCADF235B9FF5FFA4307D480A17A69F29CAE0086F6D879D2C4E044E82CA81`;
+C++ LLVM-MinGW scalar-fallback Debug and Release `--sampling` pass. This
+closes the hidden classification for this fixed triangle search only.
+
+The twenty-ninth round completes the loss-pruned classification matrix for the
+origin concave-L blocker from round eleven (seed 42, 40×24 container, 3×2 item,
+continuous rotation, 96 samples split into 68 uniform and 28 local candidates).
+Rust left 32 candidates unclassified after loss pruning. Uniform ordinal 50 is
+surrogate-clear but collides in the polygon check; the other 31 candidates are
+clear. The Rust generator forces all 32 classifications, and C++ Debug/Release
+compares their transform bits, forced Rust surrogate/polygon classifications,
+and actual search events. All 32 agree.
+
+The regular search result remains unchanged: transform bits
+`40093f5a/40542111/4142e968`, loss `423f6332`, and
+`next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release fixture output is
+byte-identical with SHA-256
+`DFB5FBCB2970D89916B6FD2A274AF404046ECF6513C274D9434FCF6E0901EEE9`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This closes the hidden classifications for
+this fixed origin concave-L search only; it does not establish general geometry
+or search parity.
+
+The thirtieth round repeats the concave-L loss-pruned classification check after
+translating the blocker to `(12, 8)`. It uses seed 42, a 40×24 container, a 3×2
+item, continuous rotation, and 96 samples split into 68 uniform and 28 local
+candidates. Rust left 42 candidates unclassified after loss pruning. Uniform
+ordinals 10, 50, and 63, plus local ordinal 26, are invalid; the other 38 are
+clear. The Rust generator forces all 42 classifications, and C++ Debug/Release
+compares candidate transform bits, the forced Rust surrogate/polygon results,
+and actual search events. All 42 agree.
+
+The regular search result has transform bits `3fc9d96c/4001b1a1/3fdd18b7`,
+loss `41c7ef77`, and `next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release
+fixture output is byte-identical with SHA-256
+`74D3A28820DE47C4260AFFD42545A04923CBEE79FFA1AEA8661F3AB166B8DC94`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This closes the hidden classifications for
+this fixed translated concave-L search only; it does not establish general
+geometry or search parity.
+
+The thirty-first round adds seed 17 for the translated concave-L blocker at
+`(12, 8)`, with a 40×24 container, 3×2 item, continuous rotation, and 96 samples
+split into 68 uniform and 28 local candidates. Rust left 35 candidates
+unclassified after loss pruning. Uniform ordinals 3 and 53 are invalid; the
+other 33 are clear. The Rust generator forces all 35 classifications, and C++
+Debug/Release compares transform bits, Rust surrogate/polygon results, and
+actual search events. All 35 agree.
+
+The regular search result has transform bits `3ff5bc70/403c0ea3/40d7a76c`,
+loss `421bc4dd`, and `next_rng=a2648e6cb419c6e4`. Rust 1.98.1 Debug/Release
+fixture output is byte-identical with SHA-256
+`435EEDE0CC3B05C5A88B73F357D05EB0CDB5C49633E0777A04E9FEC7E82A0507`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. Together with the seed-42 translated
+concave-L fixture, this adds a second fixed seed. Evidence remains limited to
+these fixtures and does not establish general geometry or search parity.
+
+The thirty-second round adds seed 17 for the 90-degree rotated concave-L blocker
+translated to `(22, 8)`, using a 40×24 container, a 3×2 item, continuous
+rotation, and 96 samples split into 68 uniform and 28 local candidates. Rust
+left 35 candidates unclassified after loss pruning. Uniform ordinals 3 and 53
+are invalid; the other 33 are clear. The Rust generator forces all 35
+classifications, and C++ Debug/Release compares transform bits, Rust
+surrogate/polygon results, and actual search events. All 35 agree.
+
+The regular search result has transform bits `3ff5bc70/403c0ea3/40d7a76c`,
+loss `421bc4dd`, and `next_rng=a2648e6cb419c6e4`. Rust 1.98.1 Debug/Release
+fixture output is byte-identical with SHA-256
+`527B784667876E707ACFF75F599CB490E1FFE96E5790EDBEDF1F9A36414129DC`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This closes the hidden classifications for
+this fixed rotated geometry, seed, and budget only; it does not establish
+general geometry or search parity.
+
+The thirty-third round adds seed 42 for the same 90-degree rotated concave-L
+blocker translated to `(22, 8)`, using a 40×24 container, a 3×2 item,
+continuous rotation, and 96 samples split into 68 uniform and 28 local
+candidates. Rust left 42 candidates unclassified after loss pruning. Uniform
+ordinals 10, 50, and 63 and local ordinal 26 are invalid; each is surrogate
+clear but polygon-colliding. The Rust generator forces all 42 classifications,
+and C++ Debug/Release compares transform bits, Rust surrogate/polygon results,
+and actual search events. All 42 agree.
+
+The regular search result has transform bits `3fc9d96c/4001b1a1/3fdd18b7`,
+loss `41c7ef77`, and `next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release
+fixture output is byte-identical with SHA-256
+`EB6190D5B01254E1A842170D5B4858FC71AFD6B7D37A59591D44CB1C42EC2153`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This adds a second seed for this fixed
+rotated geometry; it does not establish general geometry or search parity.
+
+The thirty-fourth round closes the loss-pruned classifications for the same-bbox
+orientation-sensitive search pair: the 90-degree rotated concave-L blocker is
+translated to `(10, 0)`, with seed 42, a 40×24 container, a 3×2 item, continuous
+rotation, and 96 samples split into 68 uniform and 28 local candidates. The
+fixed uniform ordinal 4 remains the search-level direction probe. Rust left 38
+candidates unclassified after loss pruning. Uniform ordinals 10, 50, and 63 are
+invalid; each is surrogate clear but polygon-colliding. The Rust generator
+forces all 38 classifications, and C++ Debug/Release compares candidate
+transform bits, Rust classifications, and actual search events. All 38 agree.
+
+The regular rotated-obstacle result has transform bits
+`40885bd6/3fa9e02c/40fe94b7`, loss `421ce74a`, and
+`next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release fixture output is
+byte-identical with SHA-256
+`2616A643315C8939EB3E3F4A5EA2F33D3525F168490D9C367BC38898D666C963`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This closes the hidden classifications for
+this fixed same-bbox orientation pair only; it does not establish general
+geometry or search parity.
+
+The thirty-fifth round closes the loss-pruned classifications for the standalone
+45-degree rotated concave-L search. It uses a 40×24 container, a 3×2 item, seed
+42, continuous rotation, 96 samples split into 68 uniform and 28 local
+candidates, and a blocker translated to `(19.1, 8)`. Rust left 42 candidates
+unclassified after loss pruning. Uniform ordinals 10, 50, and 63 and local
+ordinal 26 are invalid; each is surrogate clear but polygon-colliding. The Rust
+generator forces all 42 classifications, and C++ Debug/Release compares
+transform bits, Rust surrogate/polygon results, and actual search events. All
+42 agree.
+
+The regular search result remains at transform bits
+`3fc9d96c/4001b1a1/3fdd18b7`, loss `41c7ef77`, and
+`next_rng=d71d1b2ccfe7581e`. Rust 1.98.1 Debug/Release fixture output is
+byte-identical with SHA-256
+`E3C673C0293736CB0C64BC586E5C5FF1219AF282D809AAD9F7274CE564500FA0`.
+LLVM-MinGW scalar-fallback C++17 Debug `-O0` and Release `-O2 -DNDEBUG`
+`SparrowCoreTests --sampling` pass. This closes the hidden classifications for
+this fixed rotated geometry and budget only; it does not establish general
+geometry or search parity.
+
+The general Sparrow sampler has its own Rust/C++ boundary matrix for upper-endpoint rounding,
+singleton and degenerate axes, no-fit inputs, and rotation-grid selection. Coverage remains
+fixture-specific; more seeds, geometries and feasible-search cases are still needed.
 
 ## Acceptance rules
 

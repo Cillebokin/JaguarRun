@@ -4,7 +4,9 @@
 #include "SparrowCore/Optimizer/SampleEval.h"
 
 #include <functional>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace sparrow
 {
@@ -43,4 +45,12 @@ SPARROWCORE_API Result<std::optional<SearchResult>> SearchLbfWithTrace(
     SparrowRng& rng,
     const jaguar::HazardFilter& filter,
     const LbfSearchTraceCallback& callback);
+
+// Internal test seam for the private LBF uniform sampler. Not part of the
+// SparrowCore public include surface.
+Result<std::vector<jaguar::Transform2d>> SampleLbfUniformForTrace(
+    const jaguar::Rect2d& bounds,
+    const jaguar::Item& item,
+    SparrowRng& rng,
+    std::size_t sampleCount);
 }

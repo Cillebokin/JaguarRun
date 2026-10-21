@@ -6,6 +6,7 @@
 #include "JaguarCore/IO/JsonCodec.h"
 #include "JaguarCore/Problems/Bpp.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -472,6 +473,137 @@ bool TestPartialInfeasibleQualityAndRotation(std::ostream& output)
                   "quality and Hole rejection must not consume bin stock");
 }
 
+bool TestBppQualityZoneMatchesPinnedRustReference(std::ostream& output)
+{
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/LbfQualityZoneBppRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/LbfQualityZoneBppRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/LbfQualityZoneBppRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\LbfQualityZoneBppRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "pinned Rust BPP quality-zone fixture must be readable"))
+    {
+        return false;
+    }
+
+    struct Case
+    {
+        const char* name;
+        std::size_t quality;
+    };
+    constexpr std::array<Case, 3> cases{{
+        {"below-min-quality", 1U},
+        {"equal-to-min-quality", 2U},
+        {"hole", 0U},
+    }};
+
+    std::string line;
+    for (std::size_t index = 0U; index < cases.size(); ++index)
+    {
+        do
+        {
+            if (!std::getline(referenceFile, line))
+            {
+                return Expect(false,
+                              output,
+                              "pinned Rust BPP quality-zone fixture ended before all cases");
+            }
+        } while (line.empty() || line.front() == '#');
+
+        std::istringstream row(line);
+        std::string caseName;
+        std::size_t expectedPlaced = 0U;
+        std::size_t expectedLayouts = 0U;
+        std::uint64_t expectedCost = 0U;
+        unsigned int expectedOverlap = 0U;
+        if (!Expect(static_cast<bool>(row >> caseName >> expectedPlaced
+                                      >> expectedLayouts >> expectedCost
+                                      >> expectedOverlap),
+                    output,
+                    "pinned Rust BPP quality-zone row must have five fields"))
+        {
+            return false;
+        }
+        if (!Expect(caseName == cases[index].name,
+                    output,
+                    "pinned Rust BPP quality-zone cases must remain in fixture order"))
+        {
+            return false;
+        }
+
+        const jaguar::SimplePolygon zoneShape =
+            MakeContainer(9200U + index, 2.0, 3.0).CollisionShape();
+        const jaguar::Container container = MakeContainer(
+            9300U + index,
+            4.0,
+            3.0,
+            {{cases[index].quality, {zoneShape}}});
+        const auto instance = MakeInstance(
+            {MakeItem(0U, 9400U + index, 1.0, 1.0, 2U)},
+            {1U},
+            {{0U, 9500U + index, container, 1U, 19U}});
+        if (!Expect(instance.HasValue(),
+                    output,
+                    "BPP Rust-reference quality-zone instance must be constructible"))
+        {
+            return false;
+        }
+        const auto result = sparrow::SolveBppLbf(instance.Value(), TestConfig());
+        if (!Expect(result.HasValue(),
+                    output,
+                    "BPP Rust-reference quality-zone solve must succeed"))
+        {
+            return false;
+        }
+
+        const auto& solution = result.Value().solution;
+        const std::size_t actualPlaced = result.Value().metrics.placedItemCount;
+        const std::size_t actualLayouts = solution.layouts.size();
+        const std::uint64_t actualCost = solution.Cost(instance.Value());
+        bool actualOverlap = false;
+        if (!solution.layouts.empty()
+            && !solution.layouts.front().layoutSnapshot.placements.empty())
+        {
+            const jaguar::Transform2d transform = solution.layouts.front()
+                .layoutSnapshot.placements.front().placedItem.Transform();
+            actualOverlap = transform.translation.x < 2.0
+                && transform.translation.x + 1.0 > 0.0
+                && transform.translation.y < 3.0
+                && transform.translation.y + 1.0 > 0.0;
+        }
+        if (!Expect(actualPlaced == expectedPlaced
+                        && actualLayouts == expectedLayouts
+                        && actualCost == expectedCost
+                        && static_cast<unsigned int>(actualOverlap) == expectedOverlap,
+                    output,
+                    "C++ top-level BPP quality-zone result must match pinned Rust"))
+        {
+            return false;
+        }
+    }
+
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            return Expect(false,
+                          output,
+                          "pinned Rust BPP quality-zone fixture has unexpected extra rows");
+        }
+    }
+    return true;
+}
+
 bool TestBppJsonRoundTrip(std::ostream& output)
 {
     const auto instance = MakeInstance(
@@ -527,5 +659,11 @@ bool RunBppLbfTests(std::ostream& output)
         && TestOpenLayoutReuseAndInventory(output)
         && TestClosedBinFallbackDoesNotEmitEmptyLayouts(output)
         && TestPartialInfeasibleQualityAndRotation(output)
+        && TestBppQualityZoneMatchesPinnedRustReference(output)
         && TestBppJsonRoundTrip(output);
+}
+
+bool RunBppQualityZonePinnedReferenceTest(std::ostream& output)
+{
+    return TestBppQualityZoneMatchesPinnedRustReference(output);
 }

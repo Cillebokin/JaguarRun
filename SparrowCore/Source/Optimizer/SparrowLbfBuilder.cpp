@@ -1,6 +1,9 @@
 #include "SparrowCore/Optimizer/SparrowLbfBuilder.h"
 
-#include "SparrowCore/Optimizer/LbfSearch.h"
+#include "SparrowCore/Eval/LbfEvaluator.h"
+#include "SparrowCore/Sampling/BestSamples.h"
+#include "SparrowCore/Sampling/CoordinateDescent.h"
+#include "SparrowCore/Sampling/UniformRectSampler.h"
 
 #include "JaguarCore/Assertions.h"
 
@@ -31,17 +34,34 @@ sparrow::Result<sparrow::SppLbfResult> InfeasibleConstruction(
         {jaguar::ErrorCode::Infeasible, message});
 }
 
-sparrow::LbfConfig MakeSearchConfig(
-    const sparrow::SparrowConstructorConfig& config)
+sparrow::CoordinateDescentConfig MakeRefinementConfig(
+    const jaguar::Item& item,
+    bool finalRefinement)
 {
-    sparrow::LbfConfig result;
-    result.seed = config.seed;
-    result.samplesPerItem = config.nContainerSamples;
-    result.localSearchFraction = 0.0;
-    result.nCoordinateDescents = config.nCoordinateDescents;
-    result.maxWidthGrowthAttempts = config.maxWidthGrowthAttempts;
-    result.widthGrowthRatio = config.widthGrowthRatio;
-    result.useSparrowConstructorOrder = true;
+    const jaguar::Rect2d bounds = item.CollisionShape().BoundingBox();
+    const float minimumDimension = static_cast<float>(
+        std::min(bounds.Width(), bounds.Height()));
+    sparrow::CoordinateDescentConfig result;
+    if (!std::isfinite(minimumDimension) || minimumDimension <= 0.0F)
+    {
+        return result;
+    }
+    if (finalRefinement)
+    {
+        result.translationStepInit = minimumDimension * 0.01F;
+        result.translationStepLimit = minimumDimension * 0.001F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(0.5F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(0.05F);
+    }
+    else
+    {
+        result.translationStepInit = minimumDimension * 0.25F;
+        result.translationStepLimit = minimumDimension * 0.02F;
+        result.rotationStepInit = sparrow::RustF32DegreesToRadians(5.0F);
+        result.rotationStepLimit = sparrow::RustF32DegreesToRadians(1.0F);
+    }
+    result.rotationWiggle =
+        item.AllowedRotation().mode == jaguar::RotationMode::Continuous;
     return result;
 }
 
@@ -53,7 +73,7 @@ bool IsFiniteWidth(double width) noexcept
 sparrow::Result<std::optional<sparrow::SearchResult>> FindPlacement(
     const jaguar::SPProblem& problem,
     const jaguar::Item& item,
-    const sparrow::LbfConfig& searchConfig,
+    const sparrow::SparrowConstructorConfig& config,
     sparrow::SparrowRng& rng)
 {
     const jaguar::SPSolution snapshot = problem.Save();
@@ -75,18 +95,85 @@ sparrow::Result<std::optional<sparrow::SearchResult>> FindPlacement(
             && entity.quality < *minQuality;
     };
 
-    auto searched = sparrow::SearchLbf(layout, item, searchConfig, rng, filter);
-    if (!searched.HasValue() || !searched.Value().has_value())
+    const jaguar::Rect2d containerBounds =
+        layout.GetContainer().CollisionShape().BoundingBox();
+    const auto samplerResult = sparrow::UniformRectSampler::Create(
+        containerBounds, item, containerBounds);
+    if (!samplerResult.HasValue())
     {
-        if (!searched.HasValue())
-        {
-            return searched;
-        }
+        return sparrow::Result<std::optional<sparrow::SearchResult>>::FromError(
+            samplerResult.GetError());
+    }
+    if (!samplerResult.Value().has_value())
+    {
         return sparrow::Result<std::optional<sparrow::SearchResult>>::FromValue(
             std::nullopt);
     }
 
-    return searched;
+    const jaguar::Rect2d itemBounds = item.CollisionShape().BoundingBox();
+    const float itemMinimumDimension = static_cast<float>(std::min(
+        itemBounds.Width(), itemBounds.Height()));
+    if (!std::isfinite(itemMinimumDimension) || itemMinimumDimension <= 0.0F)
+    {
+        return sparrow::Result<std::optional<sparrow::SearchResult>>::FromError(
+            {jaguar::ErrorCode::InvalidInput,
+             "Sparrow item minimum dimension is invalid"});
+    }
+
+    sparrow::LbfEvaluator evaluator(layout, item, filter);
+    sparrow::BestSamples best(
+        config.nCoordinateDescents, itemMinimumDimension * 0.05F);
+    const sparrow::UniformRectSampler& sampler = *samplerResult.Value();
+    for (std::size_t index = 0U; index < config.nContainerSamples; ++index)
+    {
+        const jaguar::Transform2d candidate = sampler.Sample(rng);
+        const sparrow::SampleEval evaluation = evaluator.Evaluate(
+            candidate, std::optional<sparrow::SampleEval>{best.UpperBound()});
+        best.Report(candidate, evaluation);
+    }
+
+    const auto starts = best.Samples();
+    const sparrow::CoordinateDescentConfig preRefinement =
+        MakeRefinementConfig(item, false);
+    for (const auto& start : starts)
+    {
+        const auto refined = sparrow::RefineCoordinateDescent(
+            start, evaluator, preRefinement, rng);
+        if (!refined.HasValue())
+        {
+            return sparrow::Result<std::optional<sparrow::SearchResult>>::FromError(
+                refined.GetError());
+        }
+        best.Report(refined.Value().first, refined.Value().second);
+    }
+
+    const auto bestSample = best.Best();
+    if (!bestSample.has_value())
+    {
+        return sparrow::Result<std::optional<sparrow::SearchResult>>::FromValue(
+            std::nullopt);
+    }
+    const sparrow::CoordinateDescentConfig finalRefinement =
+        MakeRefinementConfig(item, true);
+    const auto refined = sparrow::RefineCoordinateDescent(
+        *bestSample, evaluator, finalRefinement, rng);
+    if (!refined.HasValue())
+    {
+        return sparrow::Result<std::optional<sparrow::SearchResult>>::FromError(
+            refined.GetError());
+    }
+    if (refined.Value().second.kind != sparrow::SampleKind::SAMPLE_KIND_CLEAR)
+    {
+        return sparrow::Result<std::optional<sparrow::SearchResult>>::FromValue(
+            std::nullopt);
+    }
+
+    sparrow::SearchResult result;
+    result.transform = refined.Value().first;
+    result.samples = evaluator.EvaluationCount();
+    return sparrow::Result<std::optional<sparrow::SearchResult>>::FromValue(
+        std::optional<sparrow::SearchResult>{std::move(result)});
+
 }
 }
 
@@ -149,7 +236,6 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
     }
     jaguar::SPProblem problem = std::move(problemResult.Value());
     SparrowRng rng(config.seed);
-    const LbfConfig searchConfig = MakeSearchConfig(config);
     std::size_t sampleCount = 0U;
     std::size_t widthAttempts = 0U;
 
@@ -160,7 +246,7 @@ Result<SppLbfResult> ConstructSparrowInitialSolution(
             const auto placement = FindPlacement(
                 problem,
                 instance.GetItem(ordered.index),
-                searchConfig,
+                config,
                 rng);
             if (!placement.HasValue())
             {

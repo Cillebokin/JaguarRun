@@ -74,3 +74,518 @@ result 1 0
 result 2 0
 result 3 0
 width 40866666 40866666
+case failure_decay_quintic_below
+config 3e800000 3e181233 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_quintic_equal
+config 3e800000 3e181234 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_quintic_above
+config 3e800000 3e181235 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_sextic_below
+config 3e800000 3e090710 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+step 6 3e090711
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_sextic_equal
+config 3e800000 3e090711 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+step 6 3e090711
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_sextic_above
+config 3e800000 3e090712 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_septic_below
+config 3e800000 3df6f1cb 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+step 6 3e090711
+step 7 3df6f1cc
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_septic_equal
+config 3e800000 3df6f1cc 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+step 6 3e090711
+step 7 3df6f1cc
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_septic_above
+config 3e800000 3df6f1cd 3f66ace8
+step 0 3e800000
+step 1 3e66ace8
+step 2 3e4fdb26
+step 3 3e3b4b47
+step 4 3e28c422
+step 5 3e181234
+step 6 3e090711
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_alt_quartic_below
+config 3e800000 3dd1b717 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_alt_quartic_equal
+config 3e800000 3dd1b718 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_alt_quartic_above
+config 3e800000 3dd1b719 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+width 40866666 40866666
+case failure_decay_alt_quintic_below
+config 3e800000 3da7c5ac 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_alt_quintic_equal
+config 3e800000 3da7c5ad 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_alt_quintic_above
+config 3e800000 3da7c5ae 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_alt_sextic_below
+config 3e800000 3d8637bd 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+step 6 3d8637be
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_alt_sextic_equal
+config 3e800000 3d8637be 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+step 6 3d8637be
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_alt_sextic_above
+config 3e800000 3d8637bf 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_alt_septic_below
+config 3e800000 3d56bf95 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+step 6 3d8637be
+step 7 3d56bf96
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_alt_septic_equal
+config 3e800000 3d56bf96 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+step 6 3d8637be
+step 7 3d56bf96
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_alt_septic_above
+config 3e800000 3d56bf97 3f4ccccd
+step 0 3e800000
+step 1 3e4ccccd
+step 2 3e23d70b
+step 3 3e03126f
+step 4 3dd1b718
+step 5 3da7c5ad
+step 6 3d8637be
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_canonical_quartic_below
+config 3e800000 3e27f629 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_canonical_quartic_equal
+config 3e800000 3e27f62a 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_canonical_quartic_above
+config 3e800000 3e27f62b 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+width 40866666 40866666
+case failure_decay_canonical_quintic_below
+config 3e800000 3e172a58 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_canonical_quintic_equal
+config 3e800000 3e172a59 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_canonical_quintic_above
+config 3e800000 3e172a5a 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+width 40866666 40866666
+case failure_decay_canonical_sextic_below
+config 3e800000 3e080c82 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+step 6 3e080c83
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_canonical_sextic_equal
+config 3e800000 3e080c83 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+step 6 3e080c83
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666
+case failure_decay_canonical_sextic_above
+config 3e800000 3e080c84 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+width 40866666 40866666
+case failure_decay_canonical_septic_below
+config 3e800000 3df4e351 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+step 6 3e080c83
+step 7 3df4e352
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_canonical_septic_equal
+config 3e800000 3df4e352 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+step 6 3e080c83
+step 7 3df4e352
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+result 7 0
+width 40866666 40866666
+case failure_decay_canonical_septic_above
+config 3e800000 3df4e353 3f666666
+step 0 3e800000
+step 1 3e666666
+step 2 3e4f5c28
+step 3 3e3a9fbd
+step 4 3e27f62a
+step 5 3e172a59
+step 6 3e080c83
+result 0 0
+result 1 0
+result 2 0
+result 3 0
+result 4 0
+result 5 0
+result 6 0
+width 40866666 40866666

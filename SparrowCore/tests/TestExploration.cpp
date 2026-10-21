@@ -3702,7 +3702,8 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     std::ostream& output,
     const std::string& fixtureName,
     bool timeBased,
-    bool explorationWorkerSearch = false)
+    bool explorationWorkerSearch = false,
+    bool zeroCapacityCompressionProfile = false)
 {
     std::ifstream instanceFile;
     const std::string inputFixtureName = "RustSppCompressWorkerMove.json";
@@ -3805,7 +3806,8 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     config.compression.separator.nWorkers = 1U;
     config.compression.separator.nContainerSamples = 8U;
     config.compression.separator.nFocussedSamples = 0U;
-    config.compression.separator.nCoordinateDescents = 1U;
+    config.compression.separator.nCoordinateDescents =
+        zeroCapacityCompressionProfile ? 0U : 1U;
     config.terminator.maxDuration = std::chrono::seconds{30};
 
     sparrow::OptimizationTerminator terminator(config.terminator);
@@ -3863,8 +3865,53 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
     {
         compressionClock.emplace(clockSamples);
     }
-    const auto actual = sparrow::Optimize(
-        instance.Value(), config, terminator, &listener);
+    using OptimizeResult = decltype(sparrow::Optimize(
+        instance.Value(), config, terminator, &listener));
+    std::optional<OptimizeResult> actual;
+    bool caughtZeroCapacityUnderflow = false;
+    try
+    {
+        actual.emplace(sparrow::Optimize(
+            instance.Value(), config, terminator, &listener));
+    }
+    catch (const std::underflow_error& error)
+    {
+        caughtZeroCapacityUnderflow = true;
+        output << "caught Compression worker underflow: " << error.what()
+               << '\n';
+    }
+    if (zeroCapacityCompressionProfile)
+    {
+        const bool enteredCompression = listener.stoppedExploration
+            && std::any_of(listener.events.begin(),
+                           listener.events.end(),
+                           [](const ColdStartTraceEvent& event) {
+                               return event.type == "phase"
+                                   && event.label == "compression";
+                           })
+            && std::any_of(listener.events.begin(),
+                           listener.events.end(),
+                           [](const ColdStartTraceEvent& event) {
+                               return event.type == "compression_step";
+                           });
+#if !defined(NDEBUG)
+        return Expect(caughtZeroCapacityUnderflow
+                          && !actual.has_value()
+                          && enteredCompression
+                          && listener.separationResults.empty(),
+                      output,
+                      "Debug Optimize must reach Compression worker search and propagate its zero-capacity underflow");
+#else
+        return Expect(!caughtZeroCapacityUnderflow
+                          && actual.has_value()
+                          && actual->HasValue()
+                          && enteredCompression
+                          && listener.stoppedCompression
+                          && listener.separationResults.size() == 1U,
+                      output,
+                      "Release Optimize must complete the zero-capacity Compression worker round");
+#endif
+    }
     if (compressionClock.has_value())
     {
         listener.events.push_back({
@@ -3873,19 +3920,19 @@ bool TestTopLevelWorkerMoveCompressionMatchesRustReference(
             {static_cast<double>(compressionClock->SamplesConsumed()),
              compressionClock->Exhausted() ? 1.0 : 0.0}});
     }
-    if (!actual.HasValue())
+    if (!actual->HasValue())
     {
         output << "Rust top-level worker-move Optimize error: "
-               << actual.GetError().message << '\n';
+               << actual->GetError().message << '\n';
     }
-    if (!Expect(actual.HasValue(),
+    if (!Expect(actual->HasValue(),
                 output,
                 "SparrowCore top-level worker-move Optimize must complete"))
     {
         return false;
     }
 
-    const auto& result = actual.Value();
+    const auto& result = actual->Value();
     const auto& finalSolution = result.solution;
     auto finalProblemResult = jaguar::SPProblem::Create(instance.Value());
     if (!Expect(finalProblemResult.HasValue(),
@@ -5110,14 +5157,47 @@ bool TestCompressionFailureDecayExponentBoundariesMatchRustReference(
         }
     }
 
-    const std::array<const char*, 7> expectedNames{
+    const std::array<const char*, 40> expectedNames{
         "failure_decay_squared_below",
         "failure_decay_squared_equal",
         "failure_decay_squared_above",
         "failure_decay_cubic_equal",
         "failure_decay_quartic_below",
         "failure_decay_quartic_equal",
-        "failure_decay_quartic_above"};
+        "failure_decay_quartic_above",
+        "failure_decay_quintic_below",
+        "failure_decay_quintic_equal",
+        "failure_decay_quintic_above",
+        "failure_decay_sextic_below",
+        "failure_decay_sextic_equal",
+        "failure_decay_sextic_above",
+        "failure_decay_septic_below",
+        "failure_decay_septic_equal",
+        "failure_decay_septic_above",
+        "failure_decay_alt_quartic_below",
+        "failure_decay_alt_quartic_equal",
+        "failure_decay_alt_quartic_above",
+        "failure_decay_alt_quintic_below",
+        "failure_decay_alt_quintic_equal",
+        "failure_decay_alt_quintic_above",
+        "failure_decay_alt_sextic_below",
+        "failure_decay_alt_sextic_equal",
+        "failure_decay_alt_sextic_above",
+        "failure_decay_alt_septic_below",
+        "failure_decay_alt_septic_equal",
+        "failure_decay_alt_septic_above",
+        "failure_decay_canonical_quartic_below",
+        "failure_decay_canonical_quartic_equal",
+        "failure_decay_canonical_quartic_above",
+        "failure_decay_canonical_quintic_below",
+        "failure_decay_canonical_quintic_equal",
+        "failure_decay_canonical_quintic_above",
+        "failure_decay_canonical_sextic_below",
+        "failure_decay_canonical_sextic_equal",
+        "failure_decay_canonical_sextic_above",
+        "failure_decay_canonical_septic_below",
+        "failure_decay_canonical_septic_equal",
+        "failure_decay_canonical_septic_above"};
     if (!Expect(references.size() == expectedNames.size(), output,
                 "Rust FailureBased exponent reference case count changed"))
     {
@@ -9281,6 +9361,213 @@ bool TestEmptyLargeAndPartialWarmStartMatchRust(
         && warmStartMatchesRust && overlappingWarmStartMatchesRust;
 }
 
+bool TestOptimizeEmptyLargeErrorMatchesRust(std::ostream& output)
+{
+    std::ifstream instanceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationEmptyLarge.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationEmptyLarge.json"})
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+        {
+            break;
+        }
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "Optimize empty-large input fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "Optimize empty-large fixture must import"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "Optimize empty-large warm-start problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(8.0).HasValue()
+                    && problem.PlaceItem({1U, {0.0, {1.5, 2.5}}}).HasValue()
+                    && problem.PlaceItem({2U, {0.0, {6.5, 2.5}}}).HasValue(),
+                output,
+                "Optimize empty-large partial warm start must be constructible"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 42U;
+    config.warmStart = problem.Save();
+    config.exploration.maxIterations = 2U;
+    config.exploration.shrinkStep = 0.5;
+    config.exploration.largeItemChAreaCutoffPercentile = 0.75;
+    config.exploration.maxConsecutiveFailures = std::nullopt;
+    config.exploration.timeLimit = std::chrono::seconds{2};
+    config.exploration.separator.strikeLimit = 0U;
+    config.exploration.separator.nWorkers = 1U;
+    config.exploration.separator.nContainerSamples = 0U;
+    config.exploration.separator.nFocussedSamples = 0U;
+    config.exploration.separator.nCoordinateDescents = 0U;
+    config.terminator.maxIterations = 32U;
+    config.terminator.maxDuration = std::chrono::seconds{2};
+
+    class TraceListener final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnPhase(sparrow::OptimizationPhase phase) override
+        {
+            const char* label = "unknown";
+            switch (phase)
+            {
+            case sparrow::OptimizationPhase::OPTIMIZATION_PHASE_CONSTRUCTION:
+                label = "construction";
+                break;
+            case sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION:
+                label = "exploration";
+                break;
+            case sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION:
+                label = "compression";
+                break;
+            case sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPLETE:
+                label = "complete";
+                break;
+            }
+            events.emplace_back(std::string{"phase\t"} + label);
+        }
+
+        void OnSolution(
+            const sparrow::OptimizationSolutionReport& report) override
+        {
+            const char* label = "unknown";
+            switch (report.type)
+            {
+            case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE:
+                label = "expl_feas";
+                break;
+            case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_INFEASIBLE:
+                label = "expl_infeas";
+                break;
+            case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_IMPROVING:
+                label = "expl_improving";
+                break;
+            case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_COMPRESSION_FEASIBLE:
+                label = "cmpr_feas";
+                break;
+            case sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL:
+                label = "final";
+                break;
+            }
+            std::ostringstream row;
+            row << "report\t" << label << '\t'
+                << report.solution.layoutSnapshot.placements.size();
+            events.push_back(row.str());
+        }
+
+        void OnSeparationProgress(
+            const sparrow::SeparationProgress&) override
+        {
+            events.emplace_back("separation_progress");
+        }
+
+        void OnSeparationResult(
+            const sparrow::SeparationResult& result) override
+        {
+            std::ostringstream row;
+            row << "separation\t" << static_cast<unsigned>(result.success)
+                << '\t' << result.totalEvaluations << '\t' << result.totalMoves
+                << '\t' << result.iterations;
+            events.push_back(row.str());
+        }
+
+        void OnCompressionProgress(double) override
+        {
+            events.emplace_back("compression_progress");
+        }
+
+        std::vector<std::string> events;
+    } listener;
+
+    sparrow::OptimizationTerminator terminator(config.terminator);
+    terminator.Start();
+    const auto result = sparrow::Optimize(
+        instance.Value(), config, terminator, &listener);
+    if (!Expect(!result.HasValue()
+                    && result.GetError().code == jaguar::ErrorCode::Infeasible
+                    && result.GetError().message
+                        == "[DSRP] failed to choose first item",
+                output,
+                "Optimize must return the Explore empty-large error unchanged"))
+    {
+        if (!result.HasValue())
+        {
+            output << "  error code=" << static_cast<int>(result.GetError().code)
+                   << " message=" << result.GetError().message << '\n';
+        }
+        return false;
+    }
+
+    std::ifstream referenceFile;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/OptimizeExploreEmptyLargeRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/OptimizeExploreEmptyLargeRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/OptimizeExploreEmptyLargeRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\OptimizeExploreEmptyLargeRustReference.tsv"})
+    {
+        referenceFile.open(path);
+        if (referenceFile.is_open())
+        {
+            break;
+        }
+        referenceFile.clear();
+    }
+    if (!Expect(referenceFile.is_open(),
+                output,
+                "Optimize empty-large Rust reference must be readable"))
+    {
+        return false;
+    }
+    std::vector<std::string> expected;
+    std::string line;
+    while (std::getline(referenceFile, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            expected.push_back(line);
+        }
+    }
+    if (!Expect(listener.events == expected,
+                output,
+                "Optimize phase and callback prefix must match Rust"))
+    {
+        for (const std::string& row : listener.events)
+        {
+            output << "  actual " << row << '\n';
+        }
+        for (const std::string& row : expected)
+        {
+            output << "expected " << row << '\n';
+        }
+        return false;
+    }
+    return true;
+}
+
 bool TestEmptyDiscreteRotationExplorePathMatchesRustFailureBoundary(
     std::ostream& output)
 {
@@ -10423,6 +10710,10 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed10Limit6MatchesRust(
     const float obliqueRotation = 0.6457718F;
     const float sinAngle = std::sin(obliqueRotation);
     const float cosAngle = std::cos(obliqueRotation);
+    // Keep f32 multiply and translation as separate Rust operations; a fused
+    // multiply-add here changes the seeded initial pose by one ULP.
+    const float fixtureOffsetX = 0.9F * cosAngle;
+    const float fixtureOffsetY = 0.9F * sinAngle;
     return TestDisruptionTraceMatchesRust(
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed10Limit6RustTrace.tsv",
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometry.json",
@@ -10431,8 +10722,8 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed10Limit6MatchesRust(
         0.8,
         {{1.6, 3.5},
          {6.8, 3.5},
-         {6.8F - 0.9F * cosAngle, 3.5F - 0.9F * sinAngle},
-         {6.8F + 0.9F * cosAngle, 3.5F + 0.9F * sinAngle},
+         {6.8F - fixtureOffsetX, 3.5F - fixtureOffsetY},
+         {6.8F + fixtureOffsetX, 3.5F + fixtureOffsetY},
          {1.6, 2.6},
          {1.6, 4.4}},
         {5U, 5U, 2U, 2U, 2U, 2U},
@@ -10455,6 +10746,10 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed11Limit6MatchesRust(
     const float obliqueRotation = 0.6457718F;
     const float sinAngle = std::sin(obliqueRotation);
     const float cosAngle = std::cos(obliqueRotation);
+    // Keep f32 multiply and translation as separate Rust operations; a fused
+    // multiply-add here changes the seeded initial pose by one ULP.
+    const float fixtureOffsetX = 0.9F * cosAngle;
+    const float fixtureOffsetY = 0.9F * sinAngle;
     return TestDisruptionTraceMatchesRust(
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed11Limit6RustTrace.tsv",
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometry.json",
@@ -10463,8 +10758,8 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed11Limit6MatchesRust(
         0.8,
         {{1.6, 3.5},
          {6.8, 3.5},
-         {6.8F - 0.9F * cosAngle, 3.5F - 0.9F * sinAngle},
-         {6.8F + 0.9F * cosAngle, 3.5F + 0.9F * sinAngle},
+         {6.8F - fixtureOffsetX, 3.5F - fixtureOffsetY},
+         {6.8F + fixtureOffsetX, 3.5F + fixtureOffsetY},
          {1.6, 2.6},
          {1.6, 4.4}},
         {5U, 5U, 2U, 2U, 2U, 2U},
@@ -10487,6 +10782,10 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed12Limit6MatchesRust(
     const float obliqueRotation = 0.6457718F;
     const float sinAngle = std::sin(obliqueRotation);
     const float cosAngle = std::cos(obliqueRotation);
+    // Keep f32 multiply and translation as separate Rust operations; a fused
+    // multiply-add here changes the seeded initial pose by one ULP.
+    const float fixtureOffsetX = 0.9F * cosAngle;
+    const float fixtureOffsetY = 0.9F * sinAngle;
     return TestDisruptionTraceMatchesRust(
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed12Limit6RustTrace.tsv",
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometry.json",
@@ -10495,8 +10794,8 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed12Limit6MatchesRust(
         0.8,
         {{1.6, 3.5},
          {6.8, 3.5},
-         {6.8F - 0.9F * cosAngle, 3.5F - 0.9F * sinAngle},
-         {6.8F + 0.9F * cosAngle, 3.5F + 0.9F * sinAngle},
+         {6.8F - fixtureOffsetX, 3.5F - fixtureOffsetY},
+         {6.8F + fixtureOffsetX, 3.5F + fixtureOffsetY},
          {1.6, 2.6},
          {1.6, 4.4}},
         {5U, 5U, 2U, 2U, 2U, 2U},
@@ -10519,6 +10818,10 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed13Limit6MatchesRust(
     const float obliqueRotation = 0.6457718F;
     const float sinAngle = std::sin(obliqueRotation);
     const float cosAngle = std::cos(obliqueRotation);
+    // Keep f32 multiply and translation as separate Rust operations; a fused
+    // multiply-add here changes the seeded initial pose by one ULP.
+    const float fixtureOffsetX = 0.9F * cosAngle;
+    const float fixtureOffsetY = 0.9F * sinAngle;
     return TestDisruptionTraceMatchesRust(
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed13Limit6RustTrace.tsv",
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometry.json",
@@ -10527,8 +10830,8 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed13Limit6MatchesRust(
         0.8,
         {{1.6, 3.5},
          {6.8, 3.5},
-         {6.8F - 0.9F * cosAngle, 3.5F - 0.9F * sinAngle},
-         {6.8F + 0.9F * cosAngle, 3.5F + 0.9F * sinAngle},
+         {6.8F - fixtureOffsetX, 3.5F - fixtureOffsetY},
+         {6.8F + fixtureOffsetX, 3.5F + fixtureOffsetY},
          {1.6, 2.6},
          {1.6, 4.4}},
         {5U, 5U, 2U, 2U, 2U, 2U},
@@ -10551,6 +10854,10 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed14Limit6MatchesRust(
     const float obliqueRotation = 0.6457718F;
     const float sinAngle = std::sin(obliqueRotation);
     const float cosAngle = std::cos(obliqueRotation);
+    // Keep f32 multiply and translation as separate Rust operations; a fused
+    // multiply-add here changes the seeded initial pose by one ULP.
+    const float fixtureOffsetX = 0.9F * cosAngle;
+    const float fixtureOffsetY = 0.9F * sinAngle;
     return TestDisruptionTraceMatchesRust(
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometrySeed14Limit6RustTrace.tsv",
         "ExplorationBothSidesObliqueContainedRelocationsSecondIndependentGeometry.json",
@@ -10559,8 +10866,8 @@ bool TestSecondIndependentGeometryObliqueBilateralSeed14Limit6MatchesRust(
         0.8,
         {{1.6, 3.5},
          {6.8, 3.5},
-         {6.8F - 0.9F * cosAngle, 3.5F - 0.9F * sinAngle},
-         {6.8F + 0.9F * cosAngle, 3.5F + 0.9F * sinAngle},
+         {6.8F - fixtureOffsetX, 3.5F - fixtureOffsetY},
+         {6.8F + fixtureOffsetX, 3.5F + fixtureOffsetY},
          {1.6, 2.6},
          {1.6, 4.4}},
         {5U, 5U, 2U, 2U, 2U, 2U},
@@ -11161,6 +11468,19 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
         bool shouldEnter = false;
         std::size_t progressCount = 0U;
     };
+    struct TimeBasedDurationTrace
+    {
+        std::string name;
+        std::int64_t timeLimitNs = 0;
+        std::uint32_t shrinkMaxBits = 0U;
+        std::uint32_t shrinkMinBits = 0U;
+        std::array<std::int64_t, 2U> clockSamples{};
+        std::size_t progressCount = 0U;
+        std::uint32_t stepBits = 0U;
+        std::uint32_t finalWidthBits = 0U;
+        std::size_t clockSamplesConsumed = 0U;
+        unsigned int clockExhausted = 0U;
+    };
     std::ifstream traceInput;
     for (const char* path : {
              "SparrowCore/Tests/Fixtures/CompressionMinimumWidthRustReference.tsv",
@@ -11192,7 +11512,18 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
     std::size_t zeroTimeProgressCount = 0U;
     bool foundMinimumWidth = false;
     bool foundZeroTimeBased = false;
+    std::int64_t timeBasedThresholdTimeLimitNs = 0;
+    std::uint32_t timeBasedThresholdShrinkMaxBits = 0U;
+    std::uint32_t timeBasedThresholdShrinkMinBits = 0U;
+    std::array<std::int64_t, 4U> timeBasedThresholdClockSamples{};
+    std::size_t timeBasedThresholdProgressCount = 0U;
+    std::array<std::uint32_t, 2U> timeBasedThresholdStepBits{};
+    std::uint32_t timeBasedThresholdFinalWidthBits = 0U;
+    std::size_t timeBasedThresholdClockSamplesConsumed = 0U;
+    unsigned int timeBasedThresholdClockExhausted = 0U;
+    bool foundTimeBasedThreshold = false;
     std::vector<Probe> probes;
+    std::vector<TimeBasedDurationTrace> timeBasedDurationTraces;
     std::string line;
     while (std::getline(traceInput, line))
     {
@@ -11255,6 +11586,84 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
             }
             foundZeroTimeBased = true;
         }
+        else if (record == "time_based_threshold")
+        {
+            std::string shrinkMaxBits;
+            std::string shrinkMinBits;
+            std::array<std::string, 2U> stepBits;
+            std::string finalWidthBits;
+            if (!Expect(static_cast<bool>(row
+                                              >> timeBasedThresholdTimeLimitNs
+                                              >> shrinkMaxBits
+                                              >> shrinkMinBits
+                                              >> timeBasedThresholdClockSamples[0]
+                                              >> timeBasedThresholdClockSamples[1]
+                                              >> timeBasedThresholdClockSamples[2]
+                                              >> timeBasedThresholdClockSamples[3]
+                                              >> timeBasedThresholdProgressCount
+                                              >> stepBits[0]
+                                              >> stepBits[1]
+                                              >> finalWidthBits
+                                              >> timeBasedThresholdClockSamplesConsumed
+                                              >> timeBasedThresholdClockExhausted)
+                            && parseHex(shrinkMaxBits,
+                                        timeBasedThresholdShrinkMaxBits)
+                            && parseHex(shrinkMinBits,
+                                        timeBasedThresholdShrinkMinBits)
+                            && parseHex(stepBits[0],
+                                        timeBasedThresholdStepBits[0])
+                            && parseHex(stepBits[1],
+                                        timeBasedThresholdStepBits[1])
+                            && parseHex(finalWidthBits,
+                                        timeBasedThresholdFinalWidthBits)
+                            && timeBasedThresholdTimeLimitNs > 0
+                            && timeBasedThresholdProgressCount == 2U
+                            && timeBasedThresholdClockSamplesConsumed <= 4U
+                            && timeBasedThresholdClockExhausted <= 1U,
+                        output,
+                        "malformed Rust TimeBased threshold reference"))
+            {
+                return false;
+            }
+            foundTimeBasedThreshold = true;
+        }
+        else if (record == "time_based_duration")
+        {
+            TimeBasedDurationTrace trace;
+            std::string shrinkMaxBits;
+            std::string shrinkMinBits;
+            std::string stepBits;
+            std::string finalWidthBits;
+            if (!Expect(static_cast<bool>(row
+                                              >> trace.name
+                                              >> trace.timeLimitNs
+                                              >> shrinkMaxBits
+                                              >> shrinkMinBits
+                                              >> trace.clockSamples[0]
+                                              >> trace.clockSamples[1]
+                                              >> trace.progressCount
+                                              >> stepBits
+                                              >> finalWidthBits
+                                              >> trace.clockSamplesConsumed
+                                              >> trace.clockExhausted)
+                            && parseHex(shrinkMaxBits, trace.shrinkMaxBits)
+                            && parseHex(shrinkMinBits, trace.shrinkMinBits)
+                            && parseHex(stepBits, trace.stepBits)
+                            && parseHex(finalWidthBits, trace.finalWidthBits)
+                            && trace.timeLimitNs > 0
+                            && trace.clockSamples[1] >= trace.clockSamples[0]
+                            && trace.progressCount <= 1U
+                            && trace.clockSamplesConsumed <= 2U
+                            && trace.clockExhausted <= 1U
+                            && trace.shrinkMinBits <= trace.shrinkMaxBits
+                            && trace.shrinkMaxBits <= 0x3f800000U,
+                        output,
+                        "malformed Rust TimeBased duration reference"))
+            {
+                return false;
+            }
+            timeBasedDurationTraces.push_back(std::move(trace));
+        }
         else
         {
             return Expect(false,
@@ -11262,10 +11671,11 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
                           "unknown Rust compression minimum-width record");
         }
     }
-    if (!Expect(foundMinimumWidth && probes.size() == 2U
-                    && foundZeroTimeBased,
+    if (!Expect(foundMinimumWidth && probes.size() == 3U
+                    && foundZeroTimeBased && foundTimeBasedThreshold
+                    && timeBasedDurationTraces.size() == 33U,
                 output,
-                "Rust compression trace must contain width probes and zero-time case"))
+                "Rust compression trace must contain width probes and TimeBased cases"))
     {
         return false;
     }
@@ -11317,10 +11727,12 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
         return false;
     }
     const jaguar::SPSolution initial = problem.Save();
-    const float actualMinimumWidth =
+    const auto actualMinimumWidth =
         sparrow::detail::CompressionMinimumStripWidthForTrace(
             instance.Value(), initial);
-    if (!Expect(floatBits(actualMinimumWidth) == expectedMinimumWidthBits,
+    if (!Expect(actualMinimumWidth.HasValue()
+                    && floatBits(actualMinimumWidth.Value())
+                           == expectedMinimumWidthBits,
                 output,
                 "C++ compression minimum width differs from Rust f32 bits"))
     {
@@ -11498,6 +11910,358 @@ bool TestCompressionMinimumWidthMatchesRustBoundary(std::ostream& output)
                << " Rust progress=" << zeroTimeProgressCount << '\n';
         return false;
     }
+
+    float timeBasedThresholdShrinkMax = 0.0F;
+    float timeBasedThresholdShrinkMin = 0.0F;
+    std::memcpy(&timeBasedThresholdShrinkMax,
+                &timeBasedThresholdShrinkMaxBits,
+                sizeof(timeBasedThresholdShrinkMax));
+    std::memcpy(&timeBasedThresholdShrinkMin,
+                &timeBasedThresholdShrinkMinBits,
+                sizeof(timeBasedThresholdShrinkMin));
+    sparrow::CompressionConfig timeBasedThresholdConfig;
+    timeBasedThresholdConfig.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED;
+    timeBasedThresholdConfig.timeLimit = std::chrono::nanoseconds{
+        timeBasedThresholdTimeLimitNs};
+    timeBasedThresholdConfig.shrinkMin = timeBasedThresholdShrinkMin;
+    timeBasedThresholdConfig.shrinkMax = timeBasedThresholdShrinkMax;
+    timeBasedThresholdConfig.maxIterations = 4U;
+    timeBasedThresholdConfig.maxConsecutiveFailures = 4U;
+    timeBasedThresholdConfig.separator.strikeLimit = 0U;
+    timeBasedThresholdConfig.separator.nWorkers = 1U;
+    timeBasedThresholdConfig.separator.nContainerSamples = 0U;
+    timeBasedThresholdConfig.separator.nFocussedSamples = 0U;
+    timeBasedThresholdConfig.separator.nCoordinateDescents = 0U;
+    class TimeBasedThresholdProgress final
+        : public sparrow::OptimizationListener
+    {
+    public:
+        void OnSolution(const sparrow::OptimizationSolutionReport&) override {}
+        void OnCompressionProgress(double step) override
+        {
+            const float stepF32 = static_cast<float>(step);
+            std::uint32_t bits = 0U;
+            std::memcpy(&bits, &stepF32, sizeof(bits));
+            stepBits.push_back(bits);
+        }
+        std::vector<std::uint32_t> stepBits;
+    } timeBasedThresholdProgress;
+    sparrow::OptimizationTerminator timeBasedThresholdTerminator;
+    timeBasedThresholdTerminator.Start();
+    sparrow::testing::ScopedCompressionClockSequence timeBasedThresholdClock({
+        std::chrono::nanoseconds{timeBasedThresholdClockSamples[0]},
+        std::chrono::nanoseconds{timeBasedThresholdClockSamples[1]},
+        std::chrono::nanoseconds{timeBasedThresholdClockSamples[2]},
+        std::chrono::nanoseconds{timeBasedThresholdClockSamples[3]}});
+    const auto timeBasedThresholdResult = sparrow::Compress(
+        instance.Value(),
+        initial,
+        timeBasedThresholdConfig,
+        0U,
+        timeBasedThresholdTerminator,
+        &timeBasedThresholdProgress);
+    if (!Expect(timeBasedThresholdResult.HasValue(),
+                output,
+                "direct TimeBased shrink-min threshold run must complete"))
+    {
+        return false;
+    }
+    const std::uint32_t timeBasedThresholdActualWidthBits = floatBits(
+        static_cast<float>(timeBasedThresholdResult.Value().solution.StripWidth()));
+    const bool timeBasedThresholdMatches =
+        timeBasedThresholdProgress.stepBits.size()
+            == timeBasedThresholdProgressCount
+        && std::equal(timeBasedThresholdProgress.stepBits.begin(),
+                      timeBasedThresholdProgress.stepBits.end(),
+                      timeBasedThresholdStepBits.begin())
+        && timeBasedThresholdActualWidthBits
+            == timeBasedThresholdFinalWidthBits
+        && timeBasedThresholdClock.SamplesConsumed()
+            == timeBasedThresholdClockSamplesConsumed
+        && timeBasedThresholdClock.Exhausted()
+            == (timeBasedThresholdClockExhausted != 0U);
+    if (!Expect(timeBasedThresholdMatches,
+                output,
+                "C++ TimeBased elapsed rounding must match Rust at shrink-min"))
+    {
+        output << "TimeBased threshold actual steps=";
+        for (const std::uint32_t bits : timeBasedThresholdProgress.stepBits)
+        {
+            output << "0x" << std::hex << bits << ' ';
+        }
+        output << "width=0x" << std::hex << timeBasedThresholdActualWidthBits
+               << std::dec << " clock_samples="
+               << timeBasedThresholdClock.SamplesConsumed()
+               << " exhausted=" << timeBasedThresholdClock.Exhausted()
+               << " Rust steps=" << timeBasedThresholdProgressCount
+               << " width=0x" << std::hex
+               << timeBasedThresholdFinalWidthBits << std::dec
+               << " clock_samples="
+               << timeBasedThresholdClockSamplesConsumed
+               << " exhausted=" << timeBasedThresholdClockExhausted << '\n';
+        return false;
+    }
+
+    for (const TimeBasedDurationTrace& trace : timeBasedDurationTraces)
+    {
+        float shrinkMax = 0.0F;
+        float shrinkMin = 0.0F;
+        std::memcpy(&shrinkMax, &trace.shrinkMaxBits, sizeof(shrinkMax));
+        std::memcpy(&shrinkMin, &trace.shrinkMinBits, sizeof(shrinkMin));
+        sparrow::CompressionConfig config;
+        config.decayStrategy =
+            sparrow::ShrinkDecayStrategy::SHRINK_DECAY_TIME_BASED;
+        config.timeLimit = std::chrono::nanoseconds{trace.timeLimitNs};
+        config.shrinkMax = static_cast<double>(shrinkMax);
+        config.shrinkMin = static_cast<double>(shrinkMin);
+        config.maxIterations = 1U;
+        config.maxConsecutiveFailures = 1U;
+        config.separator.strikeLimit = 0U;
+        config.separator.nWorkers = 1U;
+        config.separator.nContainerSamples = 0U;
+        config.separator.nFocussedSamples = 0U;
+        config.separator.nCoordinateDescents = 0U;
+
+        TimeBasedThresholdProgress progress;
+        sparrow::OptimizationTerminator terminator;
+        terminator.Start();
+        sparrow::testing::ScopedCompressionClockSequence clock({
+            std::chrono::nanoseconds{trace.clockSamples[0]},
+            std::chrono::nanoseconds{trace.clockSamples[1]}});
+        const auto result = sparrow::Compress(
+            instance.Value(), initial, config, 0U, terminator, &progress);
+        if (!Expect(result.HasValue(),
+                    output,
+                    "direct TimeBased duration probe must complete"))
+        {
+            return false;
+        }
+        const std::uint32_t finalWidthBits = floatBits(
+            static_cast<float>(result.Value().solution.StripWidth()));
+        const std::uint32_t actualStepBits = progress.stepBits.empty()
+            ? 0U
+            : progress.stepBits.front();
+        const bool matches =
+            progress.stepBits.size() == trace.progressCount
+            && actualStepBits == trace.stepBits
+            && finalWidthBits == trace.finalWidthBits
+            && clock.SamplesConsumed() == trace.clockSamplesConsumed
+            && clock.Exhausted() == (trace.clockExhausted != 0U);
+        if (!Expect(matches,
+                    output,
+                    "C++ TimeBased duration conversion and clock anchor must match Rust"))
+        {
+            output << "duration case=" << trace.name
+                   << " steps=" << progress.stepBits.size()
+                   << " step=0x" << std::hex << actualStepBits
+                   << " width=0x" << finalWidthBits << std::dec
+                   << " clock_samples=" << clock.SamplesConsumed()
+                   << " exhausted=" << clock.Exhausted()
+                   << " Rust steps=" << trace.progressCount
+                   << " step=0x" << std::hex << trace.stepBits
+                   << " width=0x" << trace.finalWidthBits << std::dec
+                   << " clock_samples=" << trace.clockSamplesConsumed
+                   << " exhausted=" << trace.clockExhausted << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TestCompressionInfiniteMinimumWidthStopsBeforeAttempt(
+    std::ostream& output)
+{
+    const auto floatBits = [](float value) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+
+    std::ifstream referenceInput;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CompressionMinimumWidthInfinityRustReference.tsv",
+             "../SparrowCore/Tests/Fixtures/CompressionMinimumWidthInfinityRustReference.tsv",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CompressionMinimumWidthInfinityRustReference.tsv",
+             "..\\SparrowCore\\Tests\\Fixtures\\CompressionMinimumWidthInfinityRustReference.tsv"})
+    {
+        referenceInput.open(path);
+        if (referenceInput.is_open())
+        {
+            break;
+        }
+        referenceInput.clear();
+    }
+    if (!Expect(referenceInput.is_open(),
+                output,
+                "Rust Compression +Inf minimum-width trace cannot be opened"))
+    {
+        return false;
+    }
+    std::uint32_t expectedMinimumWidthBits = 0U;
+    std::uint32_t expectedInitialWidthBits = 0U;
+    std::uint32_t expectedFinalWidthBits = 0U;
+    std::size_t expectedProgressCount = 0U;
+    bool foundCase = false;
+    std::string line;
+    while (std::getline(referenceInput, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        std::istringstream row(line);
+        std::string record;
+        std::string caseName;
+        std::string minimumWidthBits;
+        std::string initialWidthBits;
+        std::string finalWidthBits;
+        if (!Expect(static_cast<bool>(row >> record >> caseName
+                                      >> minimumWidthBits >> initialWidthBits
+                                      >> finalWidthBits >> expectedProgressCount)
+                        && record == "case"
+                        && caseName == "all_discrete_rotations_too_tall",
+                    output,
+                    "malformed Rust Compression +Inf minimum-width row"))
+        {
+            return false;
+        }
+        const auto parseHex = [](const std::string& text,
+                                 std::uint32_t& value) {
+            std::istringstream parser(text);
+            parser >> std::hex >> value;
+            return static_cast<bool>(parser) && parser.eof();
+        };
+        if (!Expect(parseHex(minimumWidthBits, expectedMinimumWidthBits)
+                        && parseHex(initialWidthBits, expectedInitialWidthBits)
+                        && parseHex(finalWidthBits, expectedFinalWidthBits),
+                    output,
+                    "invalid f32 bits in Rust Compression +Inf minimum-width row"))
+        {
+            return false;
+        }
+        foundCase = true;
+    }
+    if (!Expect(foundCase && expectedProgressCount == 0U,
+                output,
+                "Rust Compression +Inf reference must describe one zero-attempt case"))
+    {
+        return false;
+    }
+
+    std::ifstream instanceInput;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/ExplorationMinimumWidthInfinity.json",
+             "../SparrowCore/Tests/Fixtures/ExplorationMinimumWidthInfinity.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/ExplorationMinimumWidthInfinity.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\ExplorationMinimumWidthInfinity.json"})
+    {
+        instanceInput.open(path);
+        if (instanceInput.is_open())
+        {
+            break;
+        }
+        instanceInput.clear();
+    }
+    if (!Expect(instanceInput.is_open(),
+                output,
+                "minimum-width infinity fixture cannot be opened for Compression"))
+    {
+        return false;
+    }
+    const std::string instanceJson{
+        std::istreambuf_iterator<char>(instanceInput),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto instance = importer.ImportSPInstanceJson(instanceJson);
+    if (!Expect(instance.HasValue(),
+                output,
+                "minimum-width infinity fixture must import for Compression"))
+    {
+        return false;
+    }
+    auto problemResult = jaguar::SPProblem::Create(instance.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "minimum-width infinity Compression problem must be created"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    if (!Expect(problem.ChangeStripWidth(20.0).HasValue()
+                    && problem.PlaceItem({0U, {0.0, {3.0, 2.0}}}).HasValue()
+                    && problem.PlaceItem({1U, {0.0, {12.0, 2.0}}}).HasValue(),
+                output,
+                "minimum-width infinity Compression initial placements must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initial = problem.Save();
+    const auto actualMinimumWidth =
+        sparrow::detail::CompressionMinimumStripWidthForTrace(
+            instance.Value(), initial);
+    if (!Expect(actualMinimumWidth.HasValue(),
+                output,
+                "minimum-width infinity calculation must succeed"))
+    {
+        return false;
+    }
+    const std::uint32_t actualMinimumWidthBits =
+        floatBits(actualMinimumWidth.Value());
+
+    class Progress final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnSolution(const sparrow::OptimizationSolutionReport&) override {}
+        void OnCompressionProgress(double) override { ++count; }
+        std::size_t count = 0U;
+    } progress;
+    sparrow::CompressionConfig config;
+    config.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.maxIterations = 1U;
+    config.maxConsecutiveFailures = 1U;
+    config.shrinkMin = 0.01;
+    config.shrinkMax = 0.25;
+    config.failureDecay = 0.5;
+    config.separator.strikeLimit = 0U;
+    config.separator.nWorkers = 1U;
+    config.separator.nContainerSamples = 0U;
+    config.separator.nFocussedSamples = 0U;
+    config.separator.nCoordinateDescents = 0U;
+    sparrow::OptimizationTerminator terminator({
+        1U, std::chrono::seconds{2}});
+    terminator.Start();
+    const auto result = sparrow::Compress(
+        instance.Value(), initial, config, 42U, terminator, &progress);
+    if (!Expect(result.HasValue(),
+                output,
+                "C++ Compression +Inf minimum-width run must return its initial solution"))
+    {
+        return false;
+    }
+    const auto& finalSolution = result.Value().solution;
+    const std::uint32_t actualInitialWidthBits =
+        floatBits(static_cast<float>(initial.StripWidth()));
+    const std::uint32_t actualFinalWidthBits =
+        floatBits(static_cast<float>(finalSolution.StripWidth()));
+    const bool matches =
+        actualMinimumWidthBits == expectedMinimumWidthBits
+        && actualInitialWidthBits == expectedInitialWidthBits
+        && actualFinalWidthBits == expectedFinalWidthBits
+        && progress.count == expectedProgressCount
+        && SameSolution(finalSolution, initial);
+    if (!Expect(matches,
+                output,
+                "C++ Compression must preserve the initial state and skip progress when minimum width is +Inf"))
+    {
+        output << "minimum_width=0x" << std::hex << actualMinimumWidthBits
+               << " initial_width=0x" << actualInitialWidthBits
+               << " final_width=0x" << actualFinalWidthBits << std::dec
+               << " progress=" << progress.count << '\n';
+        return false;
+    }
+    output << "S07 Compression +Inf minimum width: early stop preserved width 20 and emitted no progress\n";
     return true;
 }
 }
@@ -11541,6 +12305,510 @@ bool RunE5Seed10TopLevelTwoWorkerCompression(std::ostream& output)
         1078U);
 }
 
+static bool RunS07CompressionRotationErrorFixture(
+    const char* fixtureName,
+    bool verifyTopLevelOptimize,
+    bool expectCompressionAttempt,
+    std::ostream& output)
+{
+    std::ifstream instanceFile;
+    const std::string fixturePath{fixtureName};
+    const std::array<std::string, 4> paths{
+        std::string{"SparrowCore/Tests/Fixtures/"} + fixturePath,
+        std::string{"../SparrowCore/Tests/Fixtures/"} + fixturePath,
+        std::string{"../JaguarRun/SparrowCore/Tests/Fixtures/"} + fixturePath,
+        std::string{"..\\SparrowCore\\Tests\\Fixtures\\"} + fixturePath};
+    for (const std::string& path : paths)
+    {
+        instanceFile.open(path);
+        if (instanceFile.is_open())
+            break;
+        instanceFile.clear();
+    }
+    if (!Expect(instanceFile.is_open(),
+                output,
+                "S07 rotation-error fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(instanceFile),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(json);
+    if (!Expect(imported.HasValue(),
+                output,
+                "S07 rotation-error fixture must satisfy the default importer"))
+    {
+        return false;
+    }
+
+    const auto& bbox = imported.Value().GetItem(0U)
+                           .CollisionShape()
+                           .BoundingBox();
+    if (!Expect(bbox.xMin == static_cast<double>(403210.875F)
+                    && bbox.yMin == static_cast<double>(98.50647F)
+                    && bbox.xMax == static_cast<double>(403918.0F)
+                    && bbox.yMax == static_cast<double>(805.6203F),
+                output,
+                "S07 imported collision bbox must match the pinned Rust f32 fixture"))
+    {
+        return false;
+    }
+
+    auto problemResult = jaguar::SPProblem::Create(imported.Value());
+    if (!Expect(problemResult.HasValue(),
+                output,
+                "S07 rotation-error problem must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto widthResult = problem.ChangeStripWidth(2'000'000.0);
+    const jaguar::Transform2d placement =
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0,
+            {500'000.0 - bbox.xMin, 1'000.0 - bbox.yMin});
+    const auto firstPlaced = problem.PlaceItem({0U, placement});
+    const auto secondPlaced = problem.PlaceItem({0U, placement});
+    if (!Expect(widthResult.HasValue() && firstPlaced.HasValue()
+                    && secondPlaced.HasValue(),
+                output,
+                "S07 overlapping warm start must be constructible"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution initial = problem.Save();
+
+    class FailureListener final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnPhase(sparrow::OptimizationPhase phase) override
+        {
+            phases.push_back(phase);
+        }
+        void OnSolution(const sparrow::OptimizationSolutionReport& report) override
+        {
+            reports.push_back(report.type);
+        }
+        void OnSeparationProgress(
+            const sparrow::SeparationProgress&) override
+        {
+            ++separationProgressCount;
+        }
+        void OnCompressionProgress(double step) override
+        {
+            compressionSteps.push_back(step);
+        }
+        void OnSeparationResult(const sparrow::SeparationResult&) override
+        {
+            ++separationResultCount;
+        }
+
+        std::vector<sparrow::OptimizationPhase> phases;
+        std::vector<sparrow::OptimizationReportType> reports;
+        std::size_t separationProgressCount = 0U;
+        std::vector<double> compressionSteps;
+        std::size_t separationResultCount = 0U;
+    };
+
+    sparrow::CompressionConfig config;
+    config.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.maxIterations = 1U;
+    config.shrinkMin = 0.01;
+    config.shrinkMax = 0.01;
+    config.separator.strikeLimit = 1U;
+    config.separator.noImprovementLimit = 1U;
+    config.separator.nContainerSamples = 1U;
+    config.separator.nFocussedSamples = 1U;
+    config.separator.nCoordinateDescents = 1U;
+    config.separator.nWorkers = 1U;
+
+    sparrow::OptimizationTerminator terminator;
+    FailureListener listener;
+    const auto compressed = sparrow::Compress(
+        imported.Value(), initial, initial, config, 123U, terminator, &listener);
+    if (!Expect(listener.compressionSteps.size()
+                        == (expectCompressionAttempt ? 1U : 0U)
+                    && (!expectCompressionAttempt
+                        || static_cast<float>(listener.compressionSteps.front())
+                               == 0.01F),
+                output,
+                "S07 compression progress must match the geometry failure stage"))
+    {
+        return false;
+    }
+    if (!Expect(!compressed.HasValue(),
+                output,
+                "C++ S07 compression must return the rotated-geometry error"))
+    {
+        return false;
+    }
+    if (!Expect(compressed.GetError().code == jaguar::ErrorCode::InvalidInput,
+                output,
+                "C++ S07 rotated-geometry error must be InvalidInput"))
+    {
+        return false;
+    }
+    if (!Expect(listener.separationResultCount == 0U,
+                output,
+                "C++ S07 geometry failure must occur before a separation result"))
+    {
+        return false;
+    }
+    if (!Expect(listener.separationProgressCount
+                    == (expectCompressionAttempt ? 1U : 0U),
+                output,
+                "C++ S07 geometry failure must preserve its pre-attempt callback boundary"))
+    {
+        return false;
+    }
+
+    if (!verifyTopLevelOptimize)
+    {
+        output << "S07 discrete-rotation error: importer accepted; direct Compression "
+                  "returned InvalidInput before progress; no separation result\n";
+        return true;
+    }
+
+    sparrow::SparrowConfig topLevelConfig;
+    topLevelConfig.seed = 123U;
+    topLevelConfig.warmStart = initial;
+    topLevelConfig.exploration.timeLimit = std::chrono::nanoseconds{0};
+    topLevelConfig.exploration.separator.nWorkers = 1U;
+    topLevelConfig.compression.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    topLevelConfig.compression.maxIterations = 1U;
+    topLevelConfig.compression.shrinkMin = 0.01;
+    topLevelConfig.compression.shrinkMax = 0.01;
+    topLevelConfig.compression.failureDecay = 0.0;
+    topLevelConfig.compression.timeLimit = std::chrono::seconds{10};
+    topLevelConfig.compression.separator.strikeLimit = 1U;
+    topLevelConfig.compression.separator.noImprovementLimit = 1U;
+    topLevelConfig.compression.separator.nContainerSamples = 1U;
+    topLevelConfig.compression.separator.nFocussedSamples = 1U;
+    topLevelConfig.compression.separator.nCoordinateDescents = 1U;
+    topLevelConfig.compression.separator.nWorkers = 1U;
+
+    FailureListener topLevelListener;
+    const auto optimized = sparrow::Optimize(
+        imported.Value(), topLevelConfig, &topLevelListener);
+    if (!Expect(!optimized.HasValue()
+                    && optimized.GetError().code
+                           == jaguar::ErrorCode::InvalidInput,
+                output,
+                "top-level C++ Optimize must return the Compression geometry error"))
+    {
+        return false;
+    }
+    if (!Expect(topLevelListener.phases
+                        == std::vector<sparrow::OptimizationPhase>{
+                            sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
+                            sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION}
+                    && topLevelListener.reports.size() == 1U
+                    && topLevelListener.reports.front()
+                           == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE,
+                output,
+                "top-level C++ failure must stop after the initial Explore report in Compression"))
+    {
+        return false;
+    }
+    if (!Expect(topLevelListener.compressionSteps.size() == 1U
+                    && static_cast<float>(topLevelListener.compressionSteps.front())
+                           == 0.01F
+                    && topLevelListener.separationProgressCount == 1U
+                    && topLevelListener.separationResultCount == 0U,
+                output,
+                "top-level C++ geometry failure must emit one compression step, initial separation progress, and no result"))
+    {
+        return false;
+    }
+
+    output << "S07 extreme-rotation error: importer accepted; direct and top-level "
+              "Compression failed as InvalidInput after one step; no separation result\n";
+    return true;
+}
+
+bool RunS07CompressionExtremeRotationError(std::ostream& output)
+{
+    return RunS07CompressionRotationErrorFixture(
+        "CompressionExtremeRotationWorkerError.json", true, true, output);
+}
+
+bool RunS07CompressionDiscreteRotationError(std::ostream& output)
+{
+    return RunS07CompressionRotationErrorFixture(
+        "CompressionDiscreteRotationWorkerError.json", false, false, output);
+}
+
+bool RunS07CompressionZeroCapacityHandoff(std::ostream& output)
+{
+    return TestTopLevelWorkerMoveCompressionMatchesRustReference(
+        output,
+        "OptimizeWorkerMoveCompressionRustReference.tsv",
+        false,
+        false,
+        true);
+}
+
+bool RunS07CompressionStripShiftTransformError(std::ostream& output)
+{
+    std::ifstream fixture;
+    for (const char* path : {
+             "SparrowCore/Tests/Fixtures/CompressionStripShiftTransformError.json",
+             "../SparrowCore/Tests/Fixtures/CompressionStripShiftTransformError.json",
+             "../JaguarRun/SparrowCore/Tests/Fixtures/CompressionStripShiftTransformError.json",
+             "..\\SparrowCore\\Tests\\Fixtures\\CompressionStripShiftTransformError.json"})
+    {
+        fixture.open(path);
+        if (fixture.is_open())
+            break;
+        fixture.clear();
+    }
+    if (!Expect(fixture.is_open(), output,
+                "S07 strip-shift fixture must be readable"))
+    {
+        return false;
+    }
+    const std::string json{
+        std::istreambuf_iterator<char>(fixture),
+        std::istreambuf_iterator<char>()};
+    const jaguar::Importer importer(sparrow::MakeRustDefaultImporterConfig());
+    const auto imported = importer.ImportSPInstanceJson(json);
+    if (!Expect(imported.HasValue(), output,
+                "S07 strip-shift fixture must satisfy the default importer"))
+    {
+        return false;
+    }
+
+    auto problemResult = jaguar::SPProblem::Create(imported.Value());
+    if (!Expect(problemResult.HasValue(), output,
+                "S07 strip-shift warm-start problem must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPProblem problem = std::move(problemResult.Value());
+    const auto widthResult = problem.ChangeStripWidth(
+        1'152'921'504'606'846'976.0);
+    const auto placed = problem.PlaceItem({
+        0U,
+        jaguar::Transform2d::FromRotationTranslation(
+            0.0, {144'115'188'075'855'872.0, 0.0})});
+    if (!Expect(widthResult.HasValue() && placed.HasValue(), output,
+                "S07 strip-shift warm start must be a valid placed solution"))
+    {
+        return false;
+    }
+    const jaguar::SPSolution warmStart = problem.Save();
+    const double initialCentroidX =
+        warmStart.layoutSnapshot.placements.front()
+            .placedItem.CollisionShape().Centroid().x;
+    output << "S07 strip-shift geometry: initialCentroidX="
+           << initialCentroidX << '\n';
+    if (!Expect(std::isnan(initialCentroidX),
+                output,
+                "S07 strip-shift fixture must exercise a NaN centroid"))
+    {
+        return false;
+    }
+
+    sparrow::SparrowConfig config;
+    config.seed = 4U;
+    config.warmStart = warmStart;
+    config.exploration.timeLimit = std::chrono::nanoseconds{0};
+    config.exploration.separator.nWorkers = 1U;
+    config.compression.decayStrategy =
+        sparrow::ShrinkDecayStrategy::SHRINK_DECAY_FAILURE_BASED;
+    config.compression.shrinkMin = 0.875;
+    config.compression.shrinkMax = 0.875;
+    config.compression.failureDecay = 0.0;
+    config.compression.timeLimit = std::chrono::seconds{10};
+    config.compression.separator.nWorkers = 1U;
+
+    sparrow::SparrowRng phaseRng(4U);
+    const std::uint64_t explorationSeed = phaseRng.NextU64();
+    const std::uint64_t compressionSeed = phaseRng.NextU64();
+    sparrow::SparrowRng compressionRng(compressionSeed);
+    const std::uint64_t initialWorkerSeed = compressionRng.NextU64();
+    const std::uint64_t resetWorkerSeed = compressionRng.NextU64();
+    sparrow::SparrowRng splitProbe = compressionRng;
+    const std::uint32_t splitRawU32 = splitProbe.NextU32();
+    const float splitFraction = compressionRng.Uniform01F32();
+    const float splitPosition = splitFraction
+        * static_cast<float>(1'152'921'504'606'846'976.0);
+    output << "S07 strip-shift RNG: explorationSeed=" << explorationSeed
+           << " compressionSeed=" << compressionSeed
+           << " initialWorkerSeed=" << initialWorkerSeed
+           << " resetWorkerSeed=" << resetWorkerSeed
+           << " splitRawU32=" << splitRawU32
+           << " split=" << splitPosition
+           << " fraction=" << splitFraction << '\n';
+    if (!Expect(explorationSeed == 12'535'900'630'535'485'233ULL
+                    && compressionSeed == 11'181'963'833'181'290'292ULL
+                    && initialWorkerSeed == 15'267'030'695'124'774'896ULL
+                    && resetWorkerSeed == 4'245'659'235'216'480'335ULL
+                    && splitRawU32 == 224'259'143U,
+                output,
+                "S07 strip-shift RNG path must match the Rust split draw"))
+    {
+        return false;
+    }
+
+    auto probeProblemResult = jaguar::SPProblem::Create(imported.Value());
+    if (!Expect(probeProblemResult.HasValue(),
+                output,
+                "S07 NaN-centroid probe problem must be constructible"))
+    {
+        return false;
+    }
+    jaguar::SPProblem probeProblem = std::move(probeProblemResult.Value());
+    if (!probeProblem.ChangeStripWidth(
+             1'152'921'504'606'846'976.0).HasValue()
+        || !probeProblem.PlaceItem({
+                0U,
+                jaguar::Transform2d::FromRotationTranslation(
+                    0.0, {144'115'188'075'855'872.0, 0.0})})
+                .HasValue())
+    {
+        return Expect(false, output,
+                      "S07 NaN-centroid probe warm start must be valid");
+    }
+    auto probeSeparatorResult = sparrow::Separator::Create(
+        std::move(probeProblem), compressionSeed);
+    if (!Expect(probeSeparatorResult.HasValue(),
+                output,
+                "S07 NaN-centroid probe separator must be constructible"))
+    {
+        return false;
+    }
+    sparrow::Separator probeSeparator = std::move(probeSeparatorResult.Value());
+    probeSeparator.ResetWorkerRngs(1U);
+    const auto probeShrink = probeSeparator.ChangeStripWidth(
+        144'115'188'075'855'872.0,
+        static_cast<double>(splitPosition));
+    const bool nanCentroidStaysLeft =
+        probeShrink.HasValue()
+        && probeSeparator.SaveSolution().layoutSnapshot.placements.front()
+                .placedItem.Transform().translation.x
+            == 144'115'188'075'855'872.0;
+    if (!Expect(nanCentroidStaysLeft,
+                output,
+                "NaN centroid must not be shifted by the Rust strict-greater split rule"))
+    {
+        output << "  shrink error="
+               << (probeShrink.HasValue()
+                       ? std::string{"<none>"}
+                       : probeShrink.GetError().message)
+               << '\n';
+        return false;
+    }
+
+    class Listener final : public sparrow::OptimizationListener
+    {
+    public:
+        void OnPhase(sparrow::OptimizationPhase phase) override
+        {
+            phases.push_back(phase);
+        }
+        void OnSolution(const sparrow::OptimizationSolutionReport& report) override
+        {
+            reports.push_back(report.type);
+        }
+        void OnSeparationProgress(const sparrow::SeparationProgress&) override
+        {
+            ++separationProgressCount;
+        }
+        void OnCompressionProgress(double step) override
+        {
+            compressionSteps.push_back(static_cast<float>(step));
+        }
+        void OnSeparationResult(const sparrow::SeparationResult&) override
+        {
+            ++separationResultCount;
+        }
+
+        std::vector<sparrow::OptimizationPhase> phases;
+        std::vector<sparrow::OptimizationReportType> reports;
+        std::vector<float> compressionSteps;
+        std::size_t separationProgressCount = 0U;
+        std::size_t separationResultCount = 0U;
+    } listener;
+
+#ifndef NDEBUG
+    bool caughtPartialHazardAssertion = false;
+    try
+    {
+        static_cast<void>(
+            sparrow::Optimize(imported.Value(), config, &listener));
+    }
+    catch (const std::logic_error& error)
+    {
+        caughtPartialHazardAssertion =
+            std::string{error.what()}.find("constricted_hazards")
+            != std::string::npos;
+    }
+    const bool debugMatchesRust =
+        caughtPartialHazardAssertion
+        && listener.phases
+            == std::vector<sparrow::OptimizationPhase>{
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION}
+        && listener.reports
+            == std::vector<sparrow::OptimizationReportType>{
+                sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE,
+                sparrow::OptimizationReportType::OPTIMIZATION_REPORT_COMPRESSION_FEASIBLE}
+        && listener.compressionSteps == std::vector<float>{0.875F, 0.875F}
+        && listener.separationProgressCount == 2U
+        && listener.separationResultCount == 1U;
+    output << "S07 strip-shift Debug: assertion="
+           << caughtPartialHazardAssertion
+           << " reports=" << listener.reports.size()
+           << " compressionSteps=" << listener.compressionSteps.size()
+           << " separationProgress=" << listener.separationProgressCount
+           << " separationResults=" << listener.separationResultCount << '\n';
+    return Expect(debugMatchesRust,
+                  output,
+                  "C++ Debug must preserve the Rust partial-hazard assertion and callback prefix");
+#else
+    const auto optimized = sparrow::Optimize(imported.Value(), config, &listener);
+    output << "S07 strip-shift: result=" << optimized.HasValue()
+           << " error=" << (optimized.HasValue()
+                                  ? std::string{"<none>"}
+                                  : optimized.GetError().message)
+           << " phases=" << listener.phases.size()
+           << " reports=" << listener.reports.size()
+           << " compressionSteps=" << listener.compressionSteps.size()
+           << " separationProgress=" << listener.separationProgressCount
+           << " separationResults=" << listener.separationResultCount << '\n';
+    const bool compressionMatchesRustReleasePath =
+        optimized.HasValue()
+        && listener.phases
+            == std::vector<sparrow::OptimizationPhase>{
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_EXPLORATION,
+                sparrow::OptimizationPhase::OPTIMIZATION_PHASE_COMPRESSION}
+        && listener.reports.size() == 10U
+        && listener.reports.front()
+            == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_EXPLORATION_FEASIBLE
+        && listener.reports.back()
+            == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_FINAL
+        && std::all_of(
+            listener.reports.begin() + 1,
+            listener.reports.end() - 1,
+            [](sparrow::OptimizationReportType type) {
+                return type
+                    == sparrow::OptimizationReportType::OPTIMIZATION_REPORT_COMPRESSION_FEASIBLE;
+            })
+        && listener.compressionSteps == std::vector<float>(8U, 0.875F)
+        && listener.separationProgressCount == 16U
+        && listener.separationResultCount == 8U
+        && optimized.Value().solution.StripWidth() == 68'719'476'736.0;
+    return Expect(compressionMatchesRustReleasePath,
+                  output,
+                  "C++ strip-shift flow must match the Rust Release compression trajectory");
+#endif
+}
+
 bool RunImmediateStopOptimizeConsoleProbe(
     std::ostream& output,
     const std::function<bool(sparrow::OptimizationTerminator&)>& signalTrigger)
@@ -11554,9 +12822,22 @@ bool RunObserverBoundaryTests(std::ostream& output)
         && TestObserverExceptionPropagatesBeforeOptimizationPhases(output);
 }
 
+bool RunCompressionMinimumWidthBoundaryTest(std::ostream& output)
+{
+    return TestCompressionMinimumWidthMatchesRustBoundary(output)
+        && TestCompressionInfiniteMinimumWidthStopsBeforeAttempt(output);
+}
+
+bool RunOptimizeEmptyLargeErrorTest(std::ostream& output)
+{
+    return TestOptimizeEmptyLargeErrorMatchesRust(output);
+}
+
 bool RunExplorationTests(std::ostream& output)
 {
-    if (!RunE5Seed4TopLevelOptimizeCompress(output)
+    if (!RunS07CompressionExtremeRotationError(output)
+        || !RunS07CompressionDiscreteRotationError(output)
+        || !RunE5Seed4TopLevelOptimizeCompress(output)
         || !RunE5Seed4TopLevelTwoWorkerCompression(output)
         || !RunE5Seed10TopLevelTwoWorkerCompression(output))
     {
@@ -11641,6 +12922,10 @@ bool RunExplorationTests(std::ostream& output)
         return false;
     }
     if (!TestEmptyLargeAndPartialWarmStartMatchRust(output))
+    {
+        return false;
+    }
+    if (!TestOptimizeEmptyLargeErrorMatchesRust(output))
     {
         return false;
     }

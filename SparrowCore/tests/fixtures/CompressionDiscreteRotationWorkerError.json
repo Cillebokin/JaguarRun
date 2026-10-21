@@ -1,0 +1,20 @@
+{
+  "name": "s07-discrete-rotation-worker-error",
+  "items": [
+    {
+      "id": 7,
+      "demand": 2,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0.0, 315.0] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [999646.4375, -353.5569152832031],
+          [1000353.5625, 353.54986572265625],
+          [1000353.5625, 353.5569152832031],
+          [999646.4375, -353.54986572265625]
+        ]
+      }
+    }
+  ],
+  "strip_height": 2000
+}

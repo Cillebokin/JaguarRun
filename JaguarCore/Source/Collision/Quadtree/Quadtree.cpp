@@ -6,6 +6,7 @@
 #include <cassert>
 #include <functional>
 #include <limits>
+#include <stdexcept>
 
 namespace jaguar
 {
@@ -412,6 +413,18 @@ std::array<QuadTree::NodeHazard, 4> QuadTree::Constrict(
                 constricted[i] = std::move(child);
             }
         }
+
+#ifndef NDEBUG
+        if (std::none_of(
+                constricted.begin(), constricted.end(),
+                [](const std::optional<NodeHazard>& child) {
+                    return child.has_value();
+                }))
+        {
+            throw std::logic_error(
+                "debug assertion failed: constricted_hazards has no partial child");
+        }
+#endif
 
         // 无相交边的象限按邻居 presence 或质心包含判定 Entire/None
         for (std::size_t i = 0; i < 4; ++i)

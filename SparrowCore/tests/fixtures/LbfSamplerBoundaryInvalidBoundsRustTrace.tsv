@@ -1,0 +1,7 @@
+# generator=pinned rand_distr 0.6.0 Uniform<f32>::new at f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# fixture=invalid-sampler-bounds; constructor-only cases, no RNG draws
+# case rust_status rust_error
+x-singleton	panic	EmptyRange
+y-singleton	panic	EmptyRange
+x-reversed	panic	EmptyRange
+x-nonfinite	panic	NonFinite

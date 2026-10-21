@@ -14,6 +14,7 @@ use sparrow::util::listener::{
     OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
 };
 use sparrow::util::terminator::Terminator;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -232,10 +233,14 @@ fn append_terminal_rows(
 }
 
 fn run_optimize_compression_worker_move_reference(time_based: bool) {
-    run_optimize_worker_move_reference(time_based, false);
+    run_optimize_worker_move_reference(time_based, false, false);
 }
 
-fn run_optimize_worker_move_reference(time_based: bool, exploration_worker_search: bool) {
+fn run_optimize_worker_move_reference(
+    time_based: bool,
+    exploration_worker_search: bool,
+    zero_capacity_compression_profile: bool,
+) {
     let seed = 42;
     let (external_instance, _) =
         sparrow::util::io::read_spp_input(Path::new("../Fixtures/RustSppCompressWorkerMove.json"))
@@ -303,7 +308,11 @@ fn run_optimize_worker_move_reference(time_based: bool, exploration_worker_searc
     config.cmpr_cfg.separator_config.sample_config = SampleConfig {
         n_container_samples: 8,
         n_focussed_samples: 0,
-        n_coord_descents: 1,
+        n_coord_descents: if zero_capacity_compression_profile {
+            0
+        } else {
+            1
+        },
     };
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -381,16 +390,54 @@ fn run_optimize_worker_move_reference(time_based: bool, exploration_worker_searc
     let clock = time_based
         .then(|| sparrow::optimizer::compress::ScopedCompressionClockSequence::new(clock_sequence));
 
-    let final_solution = optimize(
-        instance.clone(),
-        Xoshiro256PlusPlus::seed_from_u64(seed),
-        &mut listener,
-        &mut terminator,
-        &config.expl_cfg,
-        &config.cmpr_cfg,
-        Some(&warm_start),
-    )
-    .expect("run top-level Rust optimize worker-move case");
+    let optimize_result = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            instance.clone(),
+            Xoshiro256PlusPlus::seed_from_u64(seed),
+            &mut listener,
+            &mut terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&warm_start),
+        )
+    }));
+    if zero_capacity_compression_profile {
+        assert!(listener.stopped_exploration);
+        assert_eq!(listener.phase, Some("compression"));
+        assert!(
+            listener
+                .trace
+                .iter()
+                .any(|row| row.starts_with("compression_step\t"))
+        );
+        if cfg!(debug_assertions) {
+            assert!(listener.separation_results.is_empty());
+            let panic = optimize_result.expect_err(
+                "Rust Debug top-level Compression must fail fast for zero-capacity BestSamples",
+            );
+            let panic_message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("<non-string panic payload>");
+            assert!(
+                panic_message.contains("subtract with overflow"),
+                "expected the zero-capacity BestSamples underflow, got: {panic_message}"
+            );
+        } else {
+            let final_solution = optimize_result
+                .expect("Rust Release top-level Compression must not panic")
+                .expect("Rust Release top-level Compression must return a solution");
+            assert!(listener.stopped_compression);
+            assert_eq!(listener.compression_results_seen, 1);
+            assert_eq!(listener.separation_results.len(), 1);
+            assert!(final_solution.strip_width() <= warm_start.strip_width());
+        }
+        return;
+    }
+    let final_solution = optimize_result
+        .expect("top-level Rust optimize worker-move case must not panic")
+        .expect("run top-level Rust optimize worker-move case");
     if let Some(clock) = &clock {
         listener.trace.push(format!(
             "clock_usage\tcompression\t{}\t{}",
@@ -474,5 +521,10 @@ fn optimize_time_based_compression_uses_shared_clock_and_matches_reference() {
 
 #[test]
 fn optimize_real_exploration_workers_then_compress_matches_reference() {
-    run_optimize_worker_move_reference(false, true);
+    run_optimize_worker_move_reference(false, true, false);
+}
+
+#[test]
+fn optimize_zero_capacity_compression_profile_reaches_worker_handoff() {
+    run_optimize_worker_move_reference(false, false, true);
 }

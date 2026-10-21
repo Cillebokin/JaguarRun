@@ -1,3 +1,6 @@
-# Task10 C++ SparrowCore BPP reference generated from TestBppLbf.cpp seed=42.
+# Rust-equivalent C++ SparrowCore reference generated from TestSmallBppFixture
+# using pinned jagua-rs/lbf::LBFOptimizerBP at f5e2b5ffd14931f17a20ce283a2122e877953ceb.
+# Regenerated 2026-10-20 with matching item, bin, CDE, seed, sample budget,
+# and ls_frac; the old C++-only sample count (178) is not the pinned Rust result.
 # fixture problem seed samples placed remaining width density cost feasible
-lbf_bpp_small_cpp 42 178 1 0 0 0.1111111111111111 10 true
+lbf_bpp_small_cpp 42 64 1 0 0 0.11111111193895340 10 true

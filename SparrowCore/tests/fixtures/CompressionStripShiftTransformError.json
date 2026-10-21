@@ -1,0 +1,20 @@
+{
+  "name": "s07-strip-shift-transform-error",
+  "items": [
+    {
+      "id": 707,
+      "demand": 1,
+      "orientation": { "rotation": { "mode": "discrete", "angles": [0] } },
+      "shape": {
+        "type": "simple_polygon",
+        "data": [
+          [0, 0],
+          [17179869184, 0],
+          [17179869184, 1099511627776],
+          [0, 1099511627776]
+        ]
+      }
+    }
+  ],
+  "strip_height": 4398046511104
+}

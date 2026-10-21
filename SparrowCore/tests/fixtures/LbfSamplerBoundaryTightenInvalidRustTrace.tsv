@@ -1,0 +1,5 @@
+# generator=pinned jagua-rs/lbf::opt::search::search at f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# fixture=negative-y-tightens-x-below-minimum seed=42 n_samples=64 ls_frac=0.25 rotation=none
+# direct_status=panic traced_status=panic panic_kind=EmptyRange first_accepted=1
+# first_rotation_bits=00000000 first_x_bits=43356e36 first_y_bits=c472078c first_cost_bits=44564bfc tightened_x_min_bits=42c80000 tightened_x_max_bits=42ab6ffd
+# direct_next_rng_u64=fbe07cfb0c24ed8c traced_next_rng_u64=fbe07cfb0c24ed8c post_one_sample_rng_u64=fbe07cfb0c24ed8c direct_sample_counter=0 traced_sample_counter=0

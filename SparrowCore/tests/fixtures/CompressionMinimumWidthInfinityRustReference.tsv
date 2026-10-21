@@ -1,0 +1,5 @@
+# generator=Sparrow Rust optimizer::minimum_strip_width and compression_phase
+# input=ExplorationMinimumWidthInfinity.json strip_height=4 initial_width=20 shrink_max=0.25 shrink_min=0.01 seed=42
+# scope=initial placement of item 911 uses 0 degrees although its discrete allowed rotation is 90 degrees; only the +Inf Compression early-stop behavior is compared
+# case minimum_width_f32_bits initial_width_f32_bits final_width_f32_bits compression_progress_count
+case all_discrete_rotations_too_tall 7f800000 41a00000 41a00000 0

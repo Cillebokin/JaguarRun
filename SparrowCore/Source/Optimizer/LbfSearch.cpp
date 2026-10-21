@@ -366,4 +366,28 @@ Result<std::optional<SearchResult>> SearchLbfWithTrace(
 {
     return SearchLbfImpl(layout, item, config, rng, filter, &callback);
 }
+
+Result<std::vector<jaguar::Transform2d>> SampleLbfUniformForTrace(
+    const jaguar::Rect2d& bounds,
+    const jaguar::Item& item,
+    SparrowRng& rng,
+    std::size_t sampleCount)
+{
+    auto samplerResult = LbfUniformSampler::Create(bounds, item);
+    if (!samplerResult.HasValue())
+    {
+        return Result<std::vector<jaguar::Transform2d>>::FromError(
+            samplerResult.GetError());
+    }
+
+    const LbfUniformSampler sampler = std::move(samplerResult.Value());
+    std::vector<jaguar::Transform2d> samples;
+    samples.reserve(sampleCount);
+    for (std::size_t index = 0U; index < sampleCount; ++index)
+    {
+        samples.push_back(sampler.Sample(rng));
+    }
+    return Result<std::vector<jaguar::Transform2d>>::FromValue(
+        std::move(samples));
+}
 }

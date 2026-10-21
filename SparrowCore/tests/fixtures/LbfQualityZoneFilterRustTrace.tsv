@@ -1,0 +1,6 @@
+# generator=pinned jagua-rs lbf quality-filter call path at f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# item=1x1 min_quality=2 container=20x20 zones=quality0-hole,quality1,quality2; transforms use no rotation
+# case surrogate_collision polygon_collision lbf_search_invalid
+hole	0	1	1
+below-min-quality	0	0	0
+equal-to-min-quality	1	0	1

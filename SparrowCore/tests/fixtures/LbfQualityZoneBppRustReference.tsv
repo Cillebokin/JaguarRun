@@ -1,0 +1,6 @@
+# generator=pinned jagua-rs lbf::LBFOptimizerBP::solve at f5e2b5ffd14931f17a20ce283a2122e877953ceb
+# item=1x1 min_quality=2 bin=4x3 qzone=x0..2,y0..3 seed=42 n_samples=64 ls_frac=0.25
+# case placed_items layouts cost overlaps_qzone
+below-min-quality	1	1	19	1
+equal-to-min-quality	1	1	19	0
+hole	1	1	19	0

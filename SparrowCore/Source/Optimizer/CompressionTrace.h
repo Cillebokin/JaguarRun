@@ -4,7 +4,7 @@
 
 namespace sparrow::detail
 {
-float CompressionMinimumStripWidthForTrace(
+Result<float> CompressionMinimumStripWidthForTrace(
     const jaguar::SPInstance& instance,
-    const jaguar::SPSolution& solution) noexcept;
+    const jaguar::SPSolution& solution);
 }

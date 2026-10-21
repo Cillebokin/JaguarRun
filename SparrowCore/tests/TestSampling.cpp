@@ -2668,10 +2668,32 @@ jaguar::Container MakePlainEvaluatorContainer()
     return container.Value();
 }
 
+jaguar::Container MakeLbfContainerWithBounds(const jaguar::Rect2d& bounds)
+{
+    const jaguar::SimplePolygon outer = MakePolygon({
+        {bounds.xMin, bounds.yMin},
+        {bounds.xMax, bounds.yMin},
+        {bounds.xMax, bounds.yMax},
+        {bounds.xMin, bounds.yMax}});
+    jaguar::CDEConfig config{};
+    config.quadtreeDepth = 4;
+    config.cdThreshold = 8;
+    const auto container = jaguar::Container::Create(
+        9103,
+        {outer,
+         jaguar::Transform2d::Identity(),
+         jaguar::ShapeModifyMode::Deflate,
+         {}},
+        {},
+        config);
+    return container.Value();
+}
+
 jaguar::Item MakeEvaluatorItem(
     std::vector<jaguar::Point2d> points,
     std::optional<std::size_t> minQuality = std::nullopt,
-    jaguar::SurrogateConfig surrogateConfig = {})
+    jaguar::SurrogateConfig surrogateConfig = {},
+    jaguar::RotationRange allowedRotation = {})
 {
     auto polygon = jaguar::SimplePolygon::Create(std::move(points));
     surrogateConfig.poleLimits = {{{4, 0.0}, {2, 0.8}, {1, 0.9}}};
@@ -2683,7 +2705,8 @@ jaguar::Item MakeEvaluatorItem(
          jaguar::ShapeModifyMode::Inflate,
          {}},
         surrogateConfig,
-        minQuality);
+        minQuality,
+        std::move(allowedRotation));
     return item.Value();
 }
 
@@ -3385,6 +3408,2335 @@ bool TestLbfSearch(std::ostream& output)
                   output,
                   "LBF search with zero samples must return no candidate without evaluation");
 }
+
+std::ifstream OpenLbfSamplerFixture(const char* filename)
+{
+    std::ifstream input;
+    for (const std::string& path : {
+             std::string("SparrowCore/Tests/Fixtures/") + filename,
+             std::string("../SparrowCore/Tests/Fixtures/") + filename,
+             std::string("..\\SparrowCore\\Tests\\Fixtures\\") + filename})
+    {
+        input.open(path);
+        if (input.is_open())
+        {
+            return input;
+        }
+        input.clear();
+    }
+    return input;
+}
+
+bool TestLbfQualityZoneFilterMatchesRustReference(std::ostream& output)
+{
+    std::ifstream input = OpenLbfSamplerFixture("LbfQualityZoneFilterRustTrace.tsv");
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust LBF quality-zone fixture must be readable"))
+    {
+        return false;
+    }
+
+    struct Case
+    {
+        const char* name;
+        double x;
+        double y;
+    };
+    constexpr std::array<Case, 3> cases{{
+        {"hole", 8.5, 8.5},
+        {"below-min-quality", 1.0, 1.0},
+        {"equal-to-min-quality", 15.5, 0.5},
+    }};
+
+    const jaguar::Container container = MakeEvaluatorContainer();
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}, 2U);
+    jaguar::HazardFilter qualityFilter{};
+    qualityFilter.irrelevant = [](const jaguar::HazardEntity& entity) {
+        return entity.kind == jaguar::HazardKind::InferiorQualityZone
+            && entity.quality < 2U;
+    };
+    jaguar::Layout layout(container);
+    sparrow::LbfEvaluator evaluator(layout, item, qualityFilter);
+
+    std::size_t caseIndex = 0U;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string caseName;
+        unsigned int surrogateCollision = 0U;
+        unsigned int polygonCollision = 0U;
+        unsigned int rustInvalid = 0U;
+        if (!Expect(static_cast<bool>(row >> caseName >> surrogateCollision
+                                      >> polygonCollision >> rustInvalid),
+                    output,
+                    "pinned Rust LBF quality-zone row must have four fields"))
+        {
+            return false;
+        }
+        if (!Expect(caseIndex < cases.size(),
+                    output,
+                    "pinned Rust LBF quality-zone fixture has unexpected extra rows"))
+        {
+            return false;
+        }
+        const Case& testCase = cases[caseIndex];
+        if (!Expect(caseName == testCase.name,
+                    output,
+                    "pinned Rust LBF quality-zone cases must remain in fixture order"))
+        {
+            return false;
+        }
+        if (!Expect(rustInvalid == (surrogateCollision || polygonCollision),
+                    output,
+                    "pinned Rust LBF invalid classification must match its collision phases"))
+        {
+            return false;
+        }
+
+        const auto actual = evaluator.Evaluate(
+            jaguar::Transform2d::FromRotationTranslation(0.0, {testCase.x, testCase.y}),
+            std::nullopt);
+        const bool actualInvalid = actual.kind == sparrow::SampleKind::SAMPLE_KIND_INVALID;
+        if (!Expect(actualInvalid == (rustInvalid != 0U),
+                    output,
+                    "C++ LBF quality-zone filtering must match the pinned Rust fixture"))
+        {
+            return false;
+        }
+        ++caseIndex;
+    }
+
+    return Expect(caseIndex == cases.size(),
+                  output,
+                  "pinned Rust LBF quality-zone fixture must contain all three cases");
+}
+
+std::string LbfSamplerFixtureField(
+    const std::string& contents,
+    std::string_view key)
+{
+    const std::size_t start = contents.find(key);
+    if (start == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t valueStart = start + key.size();
+    const std::size_t end = contents.find_first_of(" \t\r\n", valueStart);
+    return contents.substr(valueStart,
+                           end == std::string::npos
+                               ? std::string::npos
+                               : end - valueStart);
+}
+
+std::string LbfSamplerBitsText(float value)
+{
+    std::ostringstream text;
+    text << std::hex << std::nouppercase << std::setfill('0') << std::setw(8)
+         << FloatBits(value);
+    return text.str();
+}
+
+std::vector<std::string> LbfSamplerTsvFields(const std::string& line)
+{
+    std::vector<std::string> fields;
+    std::istringstream row(line);
+    std::string field;
+    while (std::getline(row, field, '\t'))
+    {
+        fields.push_back(field);
+    }
+    return fields;
+}
+
+bool TestLbfUniformSamplerNarrowBoundsRustReference(std::ostream& output)
+{
+    std::ifstream input = OpenLbfSamplerFixture(
+        "LbfSamplerBoundaryAdjacentXRustTrace.tsv");
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust narrow LBF sampler fixture cannot be opened"))
+    {
+        return false;
+    }
+    std::ostringstream fixtureText;
+    fixtureText << input.rdbuf();
+    const std::string contents = fixtureText.str();
+    const std::string expectedNext =
+        LbfSamplerFixtureField(contents, "next_rng_u64=");
+    const std::string expectedXMin =
+        LbfSamplerFixtureField(contents, "x_min_bits=");
+    const std::string expectedXMax =
+        LbfSamplerFixtureField(contents, "x_max_bits=");
+    if (!Expect(expectedNext == "1d794276a8ce5c1f"
+                    && expectedXMin == "4e800000"
+                    && expectedXMax == "4e800010",
+                output,
+                "pinned Rust narrow LBF sampler fixture must lock its bounds and RNG tail"))
+    {
+        return false;
+    }
+
+    std::vector<std::vector<std::string>> expectedRows;
+    std::istringstream lines(contents);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        expectedRows.push_back(LbfSamplerTsvFields(line));
+    }
+    if (!Expect(expectedRows.size() == 48U,
+                output,
+                "pinned Rust narrow LBF sampler fixture must contain 48 draws"))
+    {
+        return false;
+    }
+
+    const float xMin = FloatFromBits(0x4e800000U);
+    const float xMax = FloatFromBits(0x4e800010U);
+    const jaguar::Rect2d bounds{
+        static_cast<double>(xMin), 0.0, static_cast<double>(xMax), 512.0};
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    sparrow::SparrowRng rng(42U);
+    const auto samples = sparrow::SampleLbfUniformForTrace(
+        bounds, item, rng, expectedRows.size());
+    if (!Expect(samples.HasValue()
+                    && samples.Value().size() == expectedRows.size(),
+                output,
+                "private C++ LBF sampler must construct and emit all narrow-range draws"))
+    {
+        return false;
+    }
+
+    bool sawUpperEndpoint = false;
+    for (std::size_t index = 0U; index < expectedRows.size(); ++index)
+    {
+        const auto& fields = expectedRows[index];
+        if (!Expect(fields.size() == 4U
+                        && fields[0] == std::to_string(index),
+                    output,
+                    "pinned Rust narrow sampler rows must have ordinal and three f32 values"))
+        {
+            return false;
+        }
+        const jaguar::Transform2d& sample = samples.Value()[index];
+        const std::array<std::string, 3U> actual{
+            LbfSamplerBitsText(static_cast<float>(sample.rotationRad)),
+            LbfSamplerBitsText(static_cast<float>(sample.translation.x)),
+            LbfSamplerBitsText(static_cast<float>(sample.translation.y))};
+        if (!Expect(actual[0] == fields[1]
+                        && actual[1] == fields[2]
+                        && actual[2] == fields[3],
+                    output,
+                    "private C++ LBF sampler draw must match pinned Rust raw f32 bits"))
+        {
+            output << "  ordinal=" << index << " Rust=" << fields[1] << ','
+                   << fields[2] << ',' << fields[3] << " C++=" << actual[0]
+                   << ',' << actual[1] << ',' << actual[2] << '\n';
+            return false;
+        }
+        sawUpperEndpoint |= FloatBits(static_cast<float>(sample.translation.x))
+            == 0x4e800010U;
+    }
+
+    std::ostringstream next;
+    next << std::hex << std::nouppercase << std::setfill('0') << std::setw(16)
+         << rng.NextU64();
+    return Expect(sawUpperEndpoint && next.str() == expectedNext,
+                  output,
+                  "narrow LBF sampling must preserve the rounded upper endpoint and Rust RNG continuation");
+}
+
+bool TestLbfUniformSamplerInvalidBoundsMapping(std::ostream& output)
+{
+    std::ifstream input = OpenLbfSamplerFixture(
+        "LbfSamplerBoundaryInvalidBoundsRustTrace.tsv");
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust invalid LBF sampler bounds fixture cannot be opened"))
+    {
+        return false;
+    }
+    std::ostringstream fixtureText;
+    fixtureText << input.rdbuf();
+    const std::string contents = fixtureText.str();
+    std::vector<std::vector<std::string>> expectedRows;
+    std::istringstream lines(contents);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        expectedRows.push_back(LbfSamplerTsvFields(line));
+    }
+    if (!Expect(expectedRows.size() == 4U,
+                output,
+                "pinned Rust invalid bounds fixture must contain four constructor exits"))
+    {
+        return false;
+    }
+
+    const double infinity = std::numeric_limits<double>::infinity();
+    const std::array<std::pair<const char*, jaguar::Rect2d>, 4U> cases{{
+        {"x-singleton", {1.0, 0.0, 1.0, 2.0}},
+        {"y-singleton", {1.0, 0.0, 2.0, 0.0}},
+        {"x-reversed", {2.0, 0.0, 1.0, 2.0}},
+        {"x-nonfinite", {0.0, 0.0, infinity, 2.0}},
+    }};
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    for (std::size_t index = 0U; index < cases.size(); ++index)
+    {
+        const auto& expected = expectedRows[index];
+        if (!Expect(expected.size() == 3U
+                        && expected[0] == cases[index].first
+                        && expected[1] == "panic",
+                    output,
+                    "pinned Rust invalid bound row must record its panic channel"))
+        {
+            return false;
+        }
+        sparrow::SparrowRng rng(42U);
+        const auto before = rng.State();
+        const auto result = sparrow::SampleLbfUniformForTrace(
+            cases[index].second, item, rng, 1U);
+        if (!Expect(!result.HasValue()
+                        && result.GetError().code == jaguar::ErrorCode::InvalidInput,
+                    output,
+                    "C++ LBF sampler must map invalid constructor bounds to InvalidInput"))
+        {
+            output << "  case=" << cases[index].first << '\n';
+            return false;
+        }
+        if (!Expect(expected[2] == (index == 3U ? "NonFinite" : "EmptyRange")
+                        && rng.State() == before,
+                    output,
+                    "invalid LBF bounds must preserve Rust panic class and consume no RNG in C++"))
+        {
+            output << "  case=" << cases[index].first
+                   << " Rust=" << expected[2] << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TestLbfSearchTighteningErrorAgainstRustReference(std::ostream& output)
+{
+    std::ifstream input = OpenLbfSamplerFixture(
+        "LbfSamplerBoundaryTightenInvalidRustTrace.tsv");
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust LBF tightening-error fixture cannot be opened"))
+    {
+        return false;
+    }
+    std::ostringstream fixtureText;
+    fixtureText << input.rdbuf();
+    const std::string contents = fixtureText.str();
+    const auto fieldEquals = [&contents](
+                                 std::string_view key,
+                                 std::string_view expected) {
+        return LbfSamplerFixtureField(contents, key) == expected;
+    };
+    if (!Expect(fieldEquals("direct_status=", "panic")
+                    && fieldEquals("traced_status=", "panic")
+                    && fieldEquals("panic_kind=", "EmptyRange")
+                    && fieldEquals("first_accepted=", "1"),
+                output,
+                "pinned Rust LBF reference must lock accepted-candidate panic semantics"))
+    {
+        return false;
+    }
+
+    const jaguar::Rect2d bounds{100.0, -1000.0, 200.0, -900.0};
+    const jaguar::Container container = MakeLbfContainerWithBounds(bounds);
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+    const jaguar::NoFilter noFilter;
+    const jaguar::Layout layout(container);
+    sparrow::LbfConfig config;
+    config.seed = 42U;
+    config.samplesPerItem = 64U;
+    config.localSearchFraction = 0.25;
+    sparrow::SparrowRng rng(config.seed);
+    std::vector<sparrow::LbfSearchTraceEvent> events;
+    const auto result = sparrow::SearchLbfWithTrace(
+        layout,
+        item,
+        config,
+        rng,
+        noFilter,
+        [&events](const sparrow::LbfSearchTraceEvent& event) {
+            events.push_back(event);
+        });
+    if (!Expect(!result.HasValue()
+                    && result.GetError().code == jaguar::ErrorCode::InvalidInput
+                    && result.GetError().message
+                        == "LBF uniform sampler bounds must be finite and non-degenerate",
+                output,
+                "C++ LBF search must report structured InvalidInput after invalid tightening"))
+    {
+        return false;
+    }
+    if (!Expect(events.size() == 2U
+                    && events[0].type
+                        == sparrow::LbfSearchTraceEvent::Type::Evaluation
+                    && events[1].type
+                        == sparrow::LbfSearchTraceEvent::Type::Report
+                    && events[1].accepted,
+                output,
+                "invalid tightening must occur after the first accepted uniform candidate"))
+    {
+        return false;
+    }
+    const auto& first = events[0].transform;
+    if (!Expect(LbfSamplerBitsText(static_cast<float>(first.rotationRad))
+                        == LbfSamplerFixtureField(contents, "first_rotation_bits=")
+                    && LbfSamplerBitsText(static_cast<float>(first.translation.x))
+                        == LbfSamplerFixtureField(contents, "first_x_bits=")
+                    && LbfSamplerBitsText(static_cast<float>(first.translation.y))
+                        == LbfSamplerFixtureField(contents, "first_y_bits="),
+                output,
+                "first accepted LBF candidate must match the Rust panic trace"))
+    {
+        output << "  Rust="
+               << LbfSamplerFixtureField(contents, "first_rotation_bits=") << ','
+               << LbfSamplerFixtureField(contents, "first_x_bits=") << ','
+               << LbfSamplerFixtureField(contents, "first_y_bits=")
+               << " C++="
+               << LbfSamplerBitsText(static_cast<float>(first.rotationRad)) << ','
+               << LbfSamplerBitsText(static_cast<float>(first.translation.x)) << ','
+               << LbfSamplerBitsText(static_cast<float>(first.translation.y)) << '\n';
+        return false;
+    }
+    const auto transformed = item.CollisionShape().TransformedRustF32(first);
+    if (!Expect(transformed.HasValue(),
+                output,
+                "first accepted LBF candidate must transform before tightening"))
+    {
+        return false;
+    }
+    // SearchLbf uses the transformed bbox loss; SampleEval.loss is a separate
+    // POI-weighted heuristic and is not the search's tightening cost.
+    const sparrow::LbfLoss candidateLoss = sparrow::LbfLoss::FromBoundingBox(
+        transformed.Value().BoundingBox());
+    if (!Expect(LbfSamplerBitsText(candidateLoss.Cost())
+                    == LbfSamplerFixtureField(contents, "first_cost_bits="),
+                output,
+                "accepted LBF bbox loss must match the Rust panic trace"))
+    {
+        output << "  Rust="
+               << LbfSamplerFixtureField(contents, "first_cost_bits=")
+               << " C++=" << LbfSamplerBitsText(candidateLoss.Cost()) << '\n';
+        return false;
+    }
+    const auto tightened = candidateLoss.TightenSampleBBox(bounds);
+    if (!Expect(LbfSamplerBitsText(static_cast<float>(tightened.xMin))
+                        == LbfSamplerFixtureField(contents, "tightened_x_min_bits=")
+                    && LbfSamplerBitsText(static_cast<float>(tightened.xMax))
+                        == LbfSamplerFixtureField(contents, "tightened_x_max_bits=")
+                    && tightened.xMax < tightened.xMin,
+                output,
+                "LBF loss must tighten x below the current lower bound in the Rust fixture"))
+    {
+        return false;
+    }
+    std::ostringstream next;
+    next << std::hex << std::nouppercase << std::setfill('0') << std::setw(16)
+         << rng.NextU64();
+    return Expect(next.str()
+                      == LbfSamplerFixtureField(contents, "direct_next_rng_u64=")
+                      && next.str()
+                          == LbfSamplerFixtureField(contents, "post_one_sample_rng_u64="),
+                  output,
+                  "C++ structured failure must retain the RNG state after Rust's panicking candidate");
+}
+
+bool RunLbfSearchSkipsLocalFixture(
+    std::ostream& output,
+    const char* fixtureName,
+    const jaguar::Rect2d& bounds,
+    double itemWidth,
+    double itemHeight,
+    double blockerWidth,
+    double blockerHeight,
+    std::uint64_t seed,
+    std::size_t samplesPerItem,
+    double localSearchFraction,
+    std::size_t expectedUniformSamples)
+{
+    std::ifstream input = OpenLbfSamplerFixture(fixtureName);
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust no-uniform-placement fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    std::ostringstream fixtureText;
+    fixtureText << input.rdbuf();
+    const std::string contents = fixtureText.str();
+    std::vector<std::vector<std::string>> expectedRows;
+    std::istringstream fixtureLines(contents);
+    std::string line;
+    while (std::getline(fixtureLines, line))
+    {
+        if (line.empty() || line.front() == '#')
+        {
+            continue;
+        }
+        expectedRows.push_back(LbfSamplerTsvFields(line));
+    }
+    std::ostringstream fractionText;
+    fractionText << localSearchFraction;
+    if (!Expect(LbfSamplerFixtureField(contents, "result_status=") == "none"
+                    && LbfSamplerFixtureField(contents, "sample_counter=")
+                        == std::to_string(expectedUniformSamples)
+                    && LbfSamplerFixtureField(contents, "uniform_rows=")
+                        == std::to_string(expectedUniformSamples)
+                    && LbfSamplerFixtureField(contents, "local_rows=") == "0"
+                    && LbfSamplerFixtureField(contents, "seed=")
+                        == std::to_string(seed)
+                    && LbfSamplerFixtureField(contents, "n_samples=")
+                        == std::to_string(samplesPerItem)
+                    && LbfSamplerFixtureField(contents, "ls_frac=")
+                        == fractionText.str()
+                    && expectedRows.size() == expectedUniformSamples,
+                output,
+                "pinned Rust must spend only the uniform budget when no candidate is valid"))
+    {
+        return false;
+    }
+
+    const jaguar::Container container = MakeLbfContainerWithBounds(bounds);
+    const jaguar::Item item = MakeEvaluatorItem({
+        {0.0, 0.0}, {itemWidth, 0.0},
+        {itemWidth, itemHeight}, {0.0, itemHeight}});
+    const jaguar::Item blocker = MakeEvaluatorItem({
+        {0.0, 0.0}, {blockerWidth, 0.0},
+        {blockerWidth, blockerHeight}, {0.0, blockerHeight}});
+    jaguar::Layout blockedLayout(container);
+    if (!Expect(blockedLayout.PlaceItem(
+                        blocker, jaguar::Transform2d::Identity()).HasValue(),
+                output,
+                "blocked LBF fixture setup failed"))
+    {
+        return false;
+    }
+
+    sparrow::LbfConfig config;
+    config.seed = seed;
+    config.samplesPerItem = samplesPerItem;
+    config.localSearchFraction = localSearchFraction;
+    const jaguar::NoFilter noFilter;
+    sparrow::SparrowRng rng(config.seed);
+    std::vector<sparrow::LbfSearchTraceEvent> events;
+    const auto result = sparrow::SearchLbfWithTrace(
+        blockedLayout,
+        item,
+        config,
+        rng,
+        noFilter,
+        [&events](const sparrow::LbfSearchTraceEvent& event) {
+            events.push_back(event);
+        });
+    if (!Expect(result.HasValue() && !result.Value().has_value(),
+                output,
+                "blocked fixed-seed LBF search must return no placement"))
+    {
+        return false;
+    }
+
+    std::size_t uniformEvaluations = 0U;
+    std::size_t localEvaluations = 0U;
+    std::size_t rejectedUniformReports = 0U;
+    for (const auto& event : events)
+    {
+        if (event.type == sparrow::LbfSearchTraceEvent::Type::Evaluation)
+        {
+            if (event.phase == sparrow::LbfSearchTracePhase::LocalSearch)
+            {
+                ++localEvaluations;
+                continue;
+            }
+            if (event.phase != sparrow::LbfSearchTracePhase::ContainerSample
+                || uniformEvaluations >= expectedRows.size())
+            {
+                output << "unexpected LBF evaluation phase or count\n";
+                return false;
+            }
+            const auto& expected = expectedRows[uniformEvaluations];
+            if (!Expect(expected.size() == 18U
+                            && expected[0] == "uniform"
+                            && expected[1] == std::to_string(uniformEvaluations)
+                            && (expected[5] == "1"
+                                || (expected[7] == "1" && expected[8] == "1"))
+                            && expected[9] == "0"
+                            && event.evaluation.kind
+                                != sparrow::SampleKind::SAMPLE_KIND_CLEAR
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.rotationRad)) == expected[2]
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.translation.x)) == expected[3]
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.translation.y)) == expected[4],
+                        output,
+                        "blocked LBF uniform candidate must match the pinned Rust trace"))
+            {
+                output << "  uniform ordinal=" << uniformEvaluations << '\n';
+                return false;
+            }
+            ++uniformEvaluations;
+        }
+        else if (event.type == sparrow::LbfSearchTraceEvent::Type::Report)
+        {
+            if (event.phase != sparrow::LbfSearchTracePhase::ContainerSample
+                || event.accepted)
+            {
+                output << "blocked LBF trace reported an accepted or non-uniform candidate\n";
+                return false;
+            }
+            ++rejectedUniformReports;
+        }
+        else
+        {
+            output << "blocked LBF trace unexpectedly emitted a result event\n";
+            return false;
+        }
+    }
+
+    std::ostringstream next;
+    next << std::hex << std::nouppercase << std::setfill('0') << std::setw(16)
+         << rng.NextU64();
+    return Expect(uniformEvaluations == expectedUniformSamples
+                      && localEvaluations == 0U
+                      && rejectedUniformReports == expectedUniformSamples
+                      && next.str()
+                          == LbfSamplerFixtureField(contents, "next_rng_u64="),
+                  output,
+                  "blocked LBF search must skip local RNG draws and match Rust's post-search state");
+}
+
+bool TestLbfSearchSkipsLocalWithoutUniformPlacementRustReference(
+    std::ostream& output)
+{
+    return RunLbfSearchSkipsLocalFixture(
+               output,
+               "LbfSearchNoUniformPlacementRustTrace.tsv",
+               {0.0, 0.0, 30.0, 30.0},
+               1.0,
+               1.0,
+               31.0,
+               31.0,
+               42U,
+               64U,
+               0.25,
+               48U)
+        && RunLbfSearchSkipsLocalFixture(
+               output,
+               "LbfSearchRectNoUniformPlacementRustTrace.tsv",
+               {0.0, 0.0, 40.0, 24.0},
+               3.0,
+               2.0,
+               43.0,
+               26.0,
+               17U,
+               80U,
+               0.30,
+               56U);
+}
+
+bool TestConcaveNotchSearchPairFixturesMatch(std::ostream& output)
+{
+    auto leftInput = OpenLbfSamplerFixture(
+        "LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot45SearchPair-Seed42-Samples96RustTrace.tsv");
+    auto rightInput = OpenLbfSamplerFixture(
+        "LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot225SearchPair-Seed42-Samples96RustTrace.tsv");
+    if (!Expect(leftInput.is_open() && rightInput.is_open(),
+                output,
+                "notched 45/225 Rust trace fixtures must be available for pair comparison"))
+    {
+        return false;
+    }
+
+    std::ostringstream leftText;
+    std::ostringstream rightText;
+    leftText << leftInput.rdbuf();
+    rightText << rightInput.rdbuf();
+    const std::string leftContents = leftText.str();
+    const std::string rightContents = rightText.str();
+    const auto dataRows = [](const std::string& contents) {
+        std::vector<std::string> rows;
+        std::istringstream lines(contents);
+        std::string line;
+        while (std::getline(lines, line))
+        {
+            if (!line.empty() && line.front() != '#')
+                rows.push_back(line);
+        }
+        return rows;
+    };
+    const std::array<std::string_view, 6> resultFields = {
+        "result_samples=",
+        "next_rng_u64=",
+        "result_rotation=",
+        "result_x=",
+        "result_y=",
+        "result_cost=",
+    };
+    const bool sameResult = std::all_of(
+        resultFields.begin(),
+        resultFields.end(),
+        [&](std::string_view field) {
+            return LbfSamplerFixtureField(leftContents, field)
+                == LbfSamplerFixtureField(rightContents, field);
+        });
+    const auto leftRows = dataRows(leftContents);
+    const auto rightRows = dataRows(rightContents);
+    bool onlyExpectedPrunedDifferences = leftRows.size() == rightRows.size();
+    std::size_t prunedSurrogateDifferences = 0;
+    for (std::size_t index = 0;
+         onlyExpectedPrunedDifferences && index < leftRows.size();
+         ++index)
+    {
+        const auto left = LbfSamplerTsvFields(leftRows[index]);
+        const auto right = LbfSamplerTsvFields(rightRows[index]);
+        if (left == right)
+            continue;
+        const std::string expectedLoss = left.size() > 1 && left[1] == "8"
+            ? "42394dea"
+            : "424f2709";
+        const bool expectedOrdinal = left.size() == 18
+            && (left[1] == "8" || left[1] == "33");
+        const bool sameCandidateAndOutcome = left.size() == 18
+            && right.size() == 18
+            && left[0] == "uniform"
+            && right[0] == "uniform"
+            && left[0] == right[0]
+            && left[1] == right[1]
+            && std::equal(left.begin() + 2, left.begin() + 5, right.begin() + 2)
+            && left[7] == right[7]
+            && left[8] == right[8]
+            && left[9] == right[9]
+            && std::equal(left.begin() + 10, left.end(), right.begin() + 10);
+        const bool expectedSurrogateDifference = expectedOrdinal
+            && left[5] == "1"
+            && left[6] == "-"
+            && right[5] == "0"
+            && right[6] == expectedLoss
+            && left[7] == "-"
+            && right[7] == "-"
+            && left[8] == "-"
+            && right[8] == "-"
+            && left[9] == "0"
+            && right[9] == "0";
+        onlyExpectedPrunedDifferences = sameCandidateAndOutcome
+            && expectedSurrogateDifference;
+        if (onlyExpectedPrunedDifferences)
+            ++prunedSurrogateDifferences;
+    }
+
+    const auto parseBits = [](const std::string& value)
+        -> std::optional<std::uint32_t> {
+        std::uint32_t bits = 0;
+        std::istringstream input(value);
+        input >> std::hex >> bits;
+        return input ? std::optional<std::uint32_t>{bits} : std::nullopt;
+    };
+    const jaguar::Container container = MakeLbfContainerWithBounds(
+        {0.0, 0.0, 40.0, 24.0});
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.failFastPoleAreaRatio = 0.5;
+    const jaguar::Item item = MakeEvaluatorItem(
+        {{0.0, 0.0}, {3.0, 0.0}, {3.0, 2.0}, {0.0, 2.0}},
+        std::nullopt,
+        surrogateConfig);
+    const jaguar::Item blocker = MakeEvaluatorItem(
+        {{0.0, 0.0}, {10.0, 0.0}, {10.0, 1.0}, {1.0, 1.0},
+         {1.0, 9.0}, {10.0, 9.0}, {10.0, 10.0}, {0.0, 10.0}},
+        std::nullopt,
+        surrogateConfig);
+    const auto classifyForcedProbe = [&](const std::string& contents,
+                                         std::string_view probePrefix,
+                                         double blockerRotation,
+                                         jaguar::Point2d blockerTranslation)
+        -> std::optional<std::pair<bool, std::optional<bool>>> {
+        const std::string key(probePrefix);
+        const auto rotationBits = parseBits(
+            LbfSamplerFixtureField(contents, key + "rotation="));
+        const auto xBits = parseBits(LbfSamplerFixtureField(contents, key + "x="));
+        const auto yBits = parseBits(LbfSamplerFixtureField(contents, key + "y="));
+        if (!rotationBits || !xBits || !yBits)
+            return std::nullopt;
+
+        jaguar::Layout layout(container);
+        const auto blockerTransform = jaguar::Transform2d::FromRotationTranslation(
+            blockerRotation, blockerTranslation);
+        if (!layout.PlaceItem(blocker, blockerTransform).HasValue())
+            return std::nullopt;
+        auto engine = layout.GetContainer().CreateCollisionEngine();
+        if (!engine || !engine->Restore(layout.Save().cdeSnapshot).HasValue())
+            return std::nullopt;
+
+        const auto transform = jaguar::Transform2d::FromRotationTranslation(
+            static_cast<double>(FloatFromBits(*rotationBits)),
+            {static_cast<double>(FloatFromBits(*xBits)),
+             static_cast<double>(FloatFromBits(*yBits))});
+        const auto surrogateCollision = engine->DetectSurrogateCollision(
+            *item.CollisionShape().GetSurrogate(), transform, jaguar::NoFilter{});
+        if (!surrogateCollision.HasValue())
+            return std::nullopt;
+        if (surrogateCollision.Value())
+            return std::make_pair(true, std::optional<bool>{});
+
+        const auto candidateShape =
+            item.CollisionShape().TransformedRustF32(transform);
+        if (!candidateShape.HasValue())
+            return std::nullopt;
+        return std::make_pair(
+            false,
+            std::optional<bool>{engine->DetectPolygonCollision(
+                candidateShape.Value(), jaguar::NoFilter{})});
+    };
+
+    bool forcedProbeAgreement = true;
+    struct ForcedProbe
+    {
+        std::string_view phase;
+        std::string_view ordinal;
+        std::string_view fixturePrefix;
+    };
+    const std::array<ForcedProbe, 8> forcedProbes = {{
+        {"uniform", "7", "forced_probe_uniform_7_"},
+        {"uniform", "8", "forced_probe_uniform_8_"},
+        {"uniform", "10", "forced_probe_uniform_10_"},
+        {"uniform", "33", "forced_probe_uniform_33_"},
+        {"uniform", "39", "forced_probe_uniform_39_"},
+        {"uniform", "50", "forced_probe_uniform_50_"},
+        {"uniform", "67", "forced_probe_uniform_67_"},
+        {"local", "26", "forced_probe_local_26_"},
+    }};
+    for (const ForcedProbe& probe : forcedProbes)
+    {
+        const std::string rowPrefix = std::string(probe.phase) + "\t"
+            + std::string(probe.ordinal) + "\t";
+        const auto leftFields = std::find_if(
+            leftRows.begin(), leftRows.end(), [&](const std::string& row) {
+                return row.compare(0, rowPrefix.size(), rowPrefix) == 0;
+            });
+        const auto rightFields = std::find_if(
+            rightRows.begin(), rightRows.end(), [&](const std::string& row) {
+                return row.compare(0, rowPrefix.size(), rowPrefix) == 0;
+            });
+        if (leftFields == leftRows.end() || rightFields == rightRows.end())
+        {
+            forcedProbeAgreement = false;
+            break;
+        }
+
+        const auto candidateFields = LbfSamplerTsvFields(*leftFields);
+        if (candidateFields.size() != 18)
+        {
+            forcedProbeAgreement = false;
+            break;
+        }
+        const std::string key(probe.fixturePrefix);
+        const bool sameProbeTransform =
+            LbfSamplerFixtureField(leftContents, key + "rotation=")
+                == candidateFields[2]
+            && LbfSamplerFixtureField(leftContents, key + "x=")
+                == candidateFields[3]
+            && LbfSamplerFixtureField(leftContents, key + "y=")
+                == candidateFields[4]
+            && LbfSamplerFixtureField(rightContents, key + "rotation=")
+                == candidateFields[2]
+            && LbfSamplerFixtureField(rightContents, key + "x=")
+                == candidateFields[3]
+            && LbfSamplerFixtureField(rightContents, key + "y=")
+                == candidateFields[4];
+        const auto actual45 = classifyForcedProbe(
+            leftContents,
+            key,
+            static_cast<double>(std::acos(-1.0f) / 4.0f),
+            {static_cast<double>(7.071068f), static_cast<double>(4.0f)});
+        const auto actual225 = classifyForcedProbe(
+            rightContents,
+            key,
+            static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+            {static_cast<double>(7.071068f),
+             static_cast<double>(18.142136f)});
+        const auto expected45Surrogate = LbfSamplerFixtureField(
+            leftContents, key + "surrogate=");
+        const auto expected45Polygon = LbfSamplerFixtureField(
+            leftContents, key + "polygon=");
+        const auto expected225Surrogate = LbfSamplerFixtureField(
+            rightContents, key + "surrogate=");
+        const auto expected225Polygon = LbfSamplerFixtureField(
+            rightContents, key + "polygon=");
+        const auto classificationText = [](
+            const std::optional<std::pair<bool, std::optional<bool>>>& value) {
+            if (!value)
+                return std::string("error");
+            const std::string surrogate = value->first ? "surrogate" : "clear";
+            const std::string polygon = !value->second
+                ? "-"
+                : *value->second ? "collision" : "clear";
+            return surrogate + "/" + polygon;
+        };
+        const std::string expected45Text = expected45Surrogate + "/"
+            + expected45Polygon;
+        const std::string expected225Text = expected225Surrogate + "/"
+            + expected225Polygon;
+        const auto matchesProbe = [](
+            const std::optional<std::pair<bool, std::optional<bool>>>& actual,
+            const std::string& expectedSurrogate,
+            const std::string& expectedPolygon) {
+            if (!actual || (expectedSurrogate != "0" && expectedSurrogate != "1"))
+                return false;
+            if (actual->first != (expectedSurrogate == "1"))
+                return false;
+            if (expectedPolygon == "-")
+                return !actual->second.has_value();
+            if (expectedPolygon == "0")
+                return actual->second == std::optional<bool>{false};
+            if (expectedPolygon == "1")
+                return actual->second == std::optional<bool>{true};
+            return false;
+        };
+        const bool expectedProbeMapping = matchesProbe(
+                actual45, expected45Surrogate, expected45Polygon)
+            && matchesProbe(
+                actual225, expected225Surrogate, expected225Polygon);
+        if (!expectedProbeMapping)
+        {
+            output << "forced probe " << probe.phase << '/' << probe.ordinal
+                   << ": Rust45=" << expected45Text
+                   << " C++45=" << classificationText(actual45)
+                   << " Rust225=" << expected225Text
+                   << " C++225=" << classificationText(actual225)
+                   << " candidate_bits=" << candidateFields[2] << ','
+                   << candidateFields[3] << ',' << candidateFields[4] << '\n';
+        }
+        forcedProbeAgreement = forcedProbeAgreement
+            && sameProbeTransform
+            && expectedProbeMapping;
+    }
+    return Expect(onlyExpectedPrunedDifferences
+                      && prunedSurrogateDifferences == 2U
+                      && sameResult
+                      && forcedProbeAgreement,
+                  output,
+                  "C-shape 45/225 traces may differ only at pruned surrogate checks on uniform ordinals 8 and 33; all C++-invalid candidates with Rust-unobserved collision classification must match forced Rust/C++ surrogate and polygon probes");
+}
+
+struct LbfUnobservedSearchEvent
+{
+    std::string phase;
+    std::size_t ordinal = 0U;
+    sparrow::SampleKind kind = sparrow::SampleKind::SAMPLE_KIND_CLEAR;
+};
+
+bool TestLossPrunedSearchEventsMatchForcedProbes(
+    std::ostream& output,
+    const std::vector<LbfUnobservedSearchEvent>& plainNoObstacleSearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularNoneSearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularDiscreteSearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularDiscreteThreeAngleSearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& triangleDiscreteThreeAngleSearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularSeed17SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularSeed42SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rectangularSeed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& triangleSeed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveOriginSeed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveOffsetSeed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveOffsetSeed17Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveRot90Seed17Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveRot90Seed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveRot90OriginSeed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& concaveRot45Seed42Samples96SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rotated45SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& rotated225SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& notchRotated45SearchEvents,
+    const std::vector<LbfUnobservedSearchEvent>& notchRotated225SearchEvents)
+{
+    struct Fixture
+    {
+        std::string_view name;
+        bool rectangular;
+        bool triangular;
+        bool originConcave;
+        bool offsetConcave;
+        bool notched;
+        bool rotated45;
+        std::size_t expectedUnobservedCount;
+        const std::vector<LbfUnobservedSearchEvent>* searchEvents;
+        bool rotated90 = false;
+        bool rotated90Origin = false;
+        bool rotated45Translated = false;
+        bool hasBlocker = true;
+        bool discreteThreeAngles = false;
+    };
+    const std::array<Fixture, 20> fixtures = {{
+        {"LbfSearchRectFeasibleRustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         40U,
+         &plainNoObstacleSearchEvents,
+         false,
+         false,
+         false,
+         false},
+        {"LbfSearchRectObstacleFeasibleRustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         false,
+         28U,
+         &rectangularNoneSearchEvents},
+        {"LbfSearchRectObstacleFeasible-DiscreteRustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         false,
+         21U,
+         &rectangularDiscreteSearchEvents},
+        {"LbfSearchRectObstacleFeasible-Discrete-0-45-90RustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         false,
+         23U,
+         &rectangularDiscreteThreeAngleSearchEvents,
+         false,
+         false,
+         false,
+         true,
+         true},
+        {"LbfSearchRectObstacleFeasible-Discrete-0-45-90-TriangleRustTrace.tsv",
+         false,
+         true,
+         false,
+         false,
+         false,
+         false,
+         26U,
+         &triangleDiscreteThreeAngleSearchEvents,
+         false,
+         false,
+         false,
+         true,
+         true},
+        {"LbfSearchRectObstacleFeasible-ContinuousRustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         true,
+         20U,
+         &rectangularSeed17SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-Seed42RustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         true,
+         21U,
+         &rectangularSeed42SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-Seed42-Samples96RustTrace.tsv",
+         true,
+         false,
+         false,
+         false,
+         false,
+         true,
+         28U,
+         &rectangularSeed42Samples96SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-Triangle-Seed42-Samples96RustTrace.tsv",
+         false,
+         true,
+         false,
+         false,
+         false,
+         true,
+         31U,
+         &triangleSeed42Samples96SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-Concave-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         true,
+         false,
+         false,
+         false,
+         32U,
+         &concaveOriginSeed42Samples96SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         true,
+         false,
+         false,
+         42U,
+         &concaveOffsetSeed42Samples96SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed17-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         true,
+         false,
+         false,
+         35U,
+         &concaveOffsetSeed17Samples96SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed17-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         35U,
+         &concaveRot90Seed17Samples96SearchEvents,
+         true},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         42U,
+         &concaveRot90Seed42Samples96SearchEvents,
+         true},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90Origin-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         38U,
+         &concaveRot90OriginSeed42Samples96SearchEvents,
+         false,
+         true},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         42U,
+         &concaveRot45Seed42Samples96SearchEvents,
+         false,
+         false,
+         true},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45SearchPair-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         true,
+         36U,
+         &rotated45SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveRot225SearchPair-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         31U,
+         &rotated225SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot45SearchPair-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         true,
+         true,
+         33U,
+         &notchRotated45SearchEvents},
+        {"LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot225SearchPair-Seed42-Samples96RustTrace.tsv",
+         false,
+         false,
+         false,
+         false,
+         true,
+         false,
+         35U,
+         &notchRotated225SearchEvents},
+    }};
+    const auto parseBits = [](const std::string& value)
+        -> std::optional<std::uint32_t> {
+        std::uint32_t bits = 0;
+        std::istringstream input(value);
+        input >> std::hex >> bits;
+        return input ? std::optional<std::uint32_t>{bits} : std::nullopt;
+    };
+    const jaguar::Container container = MakeLbfContainerWithBounds(
+        {0.0, 0.0, 40.0, 24.0});
+    jaguar::SurrogateConfig surrogateConfig{};
+    surrogateConfig.failFastPoleAreaRatio = 0.5;
+    const jaguar::Item item = MakeEvaluatorItem(
+        {{0.0, 0.0}, {3.0, 0.0}, {3.0, 2.0}, {0.0, 2.0}},
+        std::nullopt,
+        surrogateConfig);
+    const jaguar::Item lBlocker = MakeEvaluatorItem(
+        {{0.0, 0.0}, {10.0, 0.0}, {10.0, 3.0}, {3.0, 3.0},
+         {3.0, 10.0}, {0.0, 10.0}},
+        std::nullopt,
+        surrogateConfig);
+    const jaguar::Item rectangularBlocker = MakeEvaluatorItem(
+        {{0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}},
+        std::nullopt,
+        surrogateConfig);
+    const jaguar::Item triangularBlocker = MakeEvaluatorItem(
+        {{0.0, 0.0}, {10.0, 0.0}, {0.0, 10.0}},
+        std::nullopt,
+        surrogateConfig);
+    const jaguar::Item notchBlocker = MakeEvaluatorItem(
+        {{0.0, 0.0}, {10.0, 0.0}, {10.0, 1.0}, {1.0, 1.0},
+         {1.0, 9.0}, {10.0, 9.0}, {10.0, 10.0}, {0.0, 10.0}},
+        std::nullopt,
+        surrogateConfig);
+
+    for (const Fixture& fixture : fixtures)
+    {
+        std::ifstream input = OpenLbfSamplerFixture(fixture.name.data());
+        if (!Expect(input.is_open(),
+                    output,
+                    "loss-pruned forced-probe Rust fixture must be available"))
+        {
+            return false;
+        }
+        std::ostringstream text;
+        text << input.rdbuf();
+        const std::string contents = text.str();
+        if (!Expect(!fixture.discreteThreeAngles
+                        || LbfSamplerFixtureField(contents, "rotation_angles=")
+                            == "0,pi/4,pi/2",
+                    output,
+                    "discrete three-angle Rust fixture must identify its allowed angle set"))
+        {
+            return false;
+        }
+        const auto blockerTransform = fixture.rectangular || fixture.triangular
+                || fixture.originConcave
+            ? jaguar::Transform2d::FromRotationTranslation(0.0, {0.0, 0.0})
+            : fixture.offsetConcave
+            ? jaguar::Transform2d::FromRotationTranslation(0.0, {12.0, 8.0})
+            : fixture.rotated90Origin
+                ? jaguar::Transform2d::FromRotationTranslation(
+                      static_cast<double>(std::acos(-1.0f) / 2.0f),
+                      {10.0, 0.0})
+            : fixture.rotated90
+                ? jaguar::Transform2d::FromRotationTranslation(
+                      static_cast<double>(std::acos(-1.0f) / 2.0f),
+                      {22.0, 8.0})
+            : fixture.rotated45Translated
+                ? jaguar::Transform2d::FromRotationTranslation(
+                      static_cast<double>(std::acos(-1.0f) / 4.0f),
+                      {19.1, 8.0})
+            : fixture.notched
+            ? (fixture.rotated45
+                   ? jaguar::Transform2d::FromRotationTranslation(
+                         static_cast<double>(std::acos(-1.0f) / 4.0f),
+                         {7.071068f, 4.0f})
+                   : jaguar::Transform2d::FromRotationTranslation(
+                         static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                         {7.071068f, 18.142136f}))
+            : (fixture.rotated45
+                   ? jaguar::Transform2d::FromRotationTranslation(
+                         static_cast<double>(std::acos(-1.0f) / 4.0f),
+                         {7.0710678, 4.0})
+                   : jaguar::Transform2d::FromRotationTranslation(
+                         static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                         {7.0710678, 13.192388}));
+        jaguar::Layout layout(container);
+        const jaguar::Item& blocker = fixture.rectangular
+            ? rectangularBlocker
+            : (fixture.triangular
+                   ? triangularBlocker
+                   : (fixture.notched ? notchBlocker : lBlocker));
+        if (fixture.hasBlocker
+            && !Expect(layout.PlaceItem(blocker, blockerTransform).HasValue(),
+                       output,
+                       "forced-probe blocker setup must succeed"))
+        {
+            return false;
+        }
+        auto engine = layout.GetContainer().CreateCollisionEngine();
+        if (!Expect(engine && engine->Restore(layout.Save().cdeSnapshot).HasValue(),
+                    output,
+                    "forced-probe CDE restore must succeed"))
+        {
+            return false;
+        }
+
+        std::vector<std::string> rows;
+        std::istringstream lines(contents);
+        std::string line;
+        while (std::getline(lines, line))
+        {
+            if (!line.empty() && line.front() != '#')
+                rows.push_back(line);
+        }
+        std::size_t unobservedCount = 0U;
+        for (const std::string& row : rows)
+        {
+            const auto fields = LbfSamplerTsvFields(row);
+            const bool rustCollisionUnobserved = fields.size() == 18
+                && fields[5] == "0"
+                && fields[7] == "-"
+                && fields[8] == "-"
+                && fields[9] == "0";
+            if (!rustCollisionUnobserved)
+                continue;
+
+            ++unobservedCount;
+            std::size_t ordinalValue = 0U;
+            std::istringstream ordinalInput(fields[1]);
+            ordinalInput >> ordinalValue;
+            if (!Expect(fields[9] == "0" && ordinalInput,
+                        output,
+                        "loss-pruned candidate must be rejected and have a numeric ordinal"))
+            {
+                return false;
+            }
+
+            const auto searchEvent = std::find_if(
+                fixture.searchEvents->begin(),
+                fixture.searchEvents->end(),
+                [&](const LbfUnobservedSearchEvent& event) {
+                    return event.phase == fields[0]
+                        && event.ordinal == ordinalValue;
+                });
+            if (!Expect(searchEvent != fixture.searchEvents->end(),
+                        output,
+                        "every Rust-unobserved candidate must have a corresponding C++ search event"))
+            {
+                return false;
+            }
+
+            const std::string ordinal = std::to_string(ordinalValue);
+            const std::string key = "forced_probe_" + fields[0]
+                + "_" + ordinal + "_";
+            const auto rotationBits = parseBits(fields[2]);
+            const auto xBits = parseBits(fields[3]);
+            const auto yBits = parseBits(fields[4]);
+            const auto probeRotationBits = parseBits(
+                LbfSamplerFixtureField(contents, key + "rotation="));
+            const auto probeXBits = parseBits(
+                LbfSamplerFixtureField(contents, key + "x="));
+            const auto probeYBits = parseBits(
+                LbfSamplerFixtureField(contents, key + "y="));
+            if (!Expect(rotationBits && xBits && yBits
+                            && probeRotationBits == rotationBits
+                            && probeXBits == xBits
+                            && probeYBits == yBits,
+                        output,
+                        "forced-probe transform must match the actual search candidate bits"))
+            {
+                return false;
+            }
+
+            const auto transform = jaguar::Transform2d::FromRotationTranslation(
+                static_cast<double>(FloatFromBits(*rotationBits)),
+                {static_cast<double>(FloatFromBits(*xBits)),
+                 static_cast<double>(FloatFromBits(*yBits))});
+            const auto surrogateCollision = engine->DetectSurrogateCollision(
+                *item.CollisionShape().GetSurrogate(),
+                transform,
+                jaguar::NoFilter{});
+            if (!Expect(surrogateCollision.HasValue(),
+                        output,
+                        "forced C++ surrogate query must return a classification"))
+            {
+                return false;
+            }
+            std::optional<bool> polygonCollision;
+            if (!surrogateCollision.Value())
+            {
+                const auto candidateShape =
+                    item.CollisionShape().TransformedRustF32(transform);
+                if (!Expect(candidateShape.HasValue(),
+                            output,
+                            "forced C++ polygon candidate must transform successfully"))
+                {
+                    return false;
+                }
+                polygonCollision = engine->DetectPolygonCollision(
+                    candidateShape.Value(), jaguar::NoFilter{});
+            }
+            const auto collisionText = [](bool surrogate, std::optional<bool> polygon) {
+                return std::pair<std::string, std::string>{
+                    surrogate ? "1" : "0",
+                    polygon ? (*polygon ? "1" : "0") : "-"};
+            };
+            const auto actual = collisionText(
+                surrogateCollision.Value(), polygonCollision);
+            const auto expected = std::pair<std::string, std::string>{
+                LbfSamplerFixtureField(contents, key + "surrogate="),
+                LbfSamplerFixtureField(contents, key + "polygon=")};
+            if (!Expect(actual == expected
+                            && ((surrogateCollision.Value()
+                                 || polygonCollision == std::optional<bool>{true})
+                                == (searchEvent->kind
+                                    == sparrow::SampleKind::SAMPLE_KIND_INVALID))
+                            && (searchEvent->kind
+                                    == sparrow::SampleKind::SAMPLE_KIND_INVALID
+                                || searchEvent->kind
+                                    == sparrow::SampleKind::SAMPLE_KIND_CLEAR),
+                        output,
+                        "forced Rust/C++ classification must match the actual clear/invalid C++ search event"))
+            {
+                output << "  fixture=" << fixture.name
+                       << " phase=" << fields[0] << " ordinal=" << ordinal
+                       << " Rust=" << expected.first << '/' << expected.second
+                       << " C++=" << actual.first << '/' << actual.second << '\n';
+                return false;
+            }
+        }
+        if (!Expect(unobservedCount == fixture.expectedUnobservedCount
+                        && fixture.searchEvents->size() == fixture.expectedUnobservedCount,
+                    output,
+                    "forced-probe matrix must cover every Rust-unobserved search event and retain the reviewed size"))
+        {
+            output << "  fixture=" << fixture.name
+                   << " fixture_unobserved=" << unobservedCount
+                   << " C++_unobserved=" << fixture.searchEvents->size() << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RunLbfSearchFeasibleRectLocalFixture(
+    std::ostream& output,
+    const char* fixtureName,
+    double blockerWidth,
+    double blockerHeight,
+    jaguar::RotationMode rotationMode,
+    std::uint64_t seed,
+    std::size_t sampleCount,
+    std::size_t uniformSampleCount,
+    std::string_view obstacleShape,
+    std::vector<LbfUnobservedSearchEvent>* unobservedSearchEvents = nullptr,
+    bool include45DiscreteAngle = false)
+{
+    std::ifstream input = OpenLbfSamplerFixture(fixtureName);
+    if (!Expect(input.is_open(),
+                output,
+                "pinned Rust feasible-rectangle LBF fixture cannot be opened"))
+    {
+        return false;
+    }
+
+    std::ostringstream fixtureText;
+    fixtureText << input.rdbuf();
+    const std::string contents = fixtureText.str();
+    std::vector<std::vector<std::string>> expectedRows;
+    std::istringstream fixtureLines(contents);
+    std::string line;
+    while (std::getline(fixtureLines, line))
+    {
+        if (!line.empty() && line.front() != '#')
+        {
+            expectedRows.push_back(LbfSamplerTsvFields(line));
+        }
+    }
+    if (!Expect(LbfSamplerFixtureField(contents, "result_status=") == "some"
+                    && LbfSamplerFixtureField(contents, "seed=")
+                        == std::to_string(seed)
+                    && LbfSamplerFixtureField(contents, "n_samples=")
+                        == std::to_string(sampleCount)
+                    && LbfSamplerFixtureField(contents, "ls_frac=") == "0.3"
+                    && LbfSamplerFixtureField(contents, "uniform_rows=")
+                        == std::to_string(uniformSampleCount)
+                    && LbfSamplerFixtureField(contents, "local_rows=")
+                        == std::to_string(sampleCount - uniformSampleCount)
+                    && LbfSamplerFixtureField(contents, "result_samples=")
+                        == std::to_string(sampleCount)
+                    && LbfSamplerFixtureField(contents, "rotation=")
+                        == (rotationMode == jaguar::RotationMode::Continuous
+                                ? "continuous"
+                                : rotationMode == jaguar::RotationMode::Discrete
+                                    ? "discrete"
+                                    : "none")
+                    && (!include45DiscreteAngle
+                        || LbfSamplerFixtureField(contents, "rotation_angles=")
+                            == "0,pi/4,pi/2")
+                    && ((obstacleShape != "concave"
+                         && obstacleShape != "concave-offset"
+                         && obstacleShape != "concave-rot90"
+                         && obstacleShape != "concave-rot90-origin"
+                         && obstacleShape != "concave-rot45"
+                         && obstacleShape != "concave-rot45-searchpair"
+                         && obstacleShape != "concave-rot225-searchpair"
+                         && obstacleShape != "concave-notch-rot45-searchpair"
+                         && obstacleShape != "concave-notch-rot225-searchpair")
+                        || LbfSamplerFixtureField(contents, "obstacle=")
+                            == std::string(obstacleShape))
+                    && (obstacleShape != "concave-rot90"
+                        || LbfSamplerFixtureField(contents, "orientation_probe=")
+                            == "unrotated-left-collides-rotated-left-clear")
+                    && (obstacleShape != "concave-rot45"
+                        || LbfSamplerFixtureField(contents, "orientation_probe=")
+                            == "unrotated-left-collides-rotated45-clear")
+                    && (obstacleShape != "concave-rot90-origin"
+                        || LbfSamplerFixtureField(contents, "search_candidate_probe=")
+                            == "uniform-ordinal-4-same-bbox-rotation-sensitive")
+                    && ((obstacleShape != "concave-rot45-searchpair"
+                         && obstacleShape != "concave-rot225-searchpair"
+                         && obstacleShape != "concave-notch-rot45-searchpair"
+                         && obstacleShape != "concave-notch-rot225-searchpair")
+                        || LbfSamplerFixtureField(contents, "search_candidate_probe=")
+                            == (obstacleShape == "concave-notch-rot45-searchpair"
+                                    || obstacleShape
+                                        == "concave-notch-rot225-searchpair"
+                                    ? "same-aabb-45-vs-225-notched-topology"
+                                    : "same-aabb-45-vs-225"))
+                    && expectedRows.size() == sampleCount,
+                output,
+                "pinned Rust fixture must contain the configured uniform and local samples"))
+    {
+        return false;
+    }
+
+    const jaguar::Container container = MakeLbfContainerWithBounds(
+        {0.0, 0.0, 40.0, 24.0});
+    jaguar::RotationRange allowedRotation{rotationMode, {}};
+    if (rotationMode == jaguar::RotationMode::Discrete)
+    {
+        allowedRotation.radians = include45DiscreteAngle
+            ? std::vector<double>{
+                  0.0,
+                  static_cast<double>(std::acos(-1.0F) / 4.0F),
+                  static_cast<double>(std::acos(-1.0F) / 2.0F)}
+            : std::vector<double>{0.0, std::acos(-1.0) / 2.0};
+    }
+    const jaguar::Item item = MakeEvaluatorItem(
+        {{0.0, 0.0}, {3.0, 0.0}, {3.0, 2.0}, {0.0, 2.0}},
+        std::nullopt,
+        {},
+        allowedRotation);
+    jaguar::Layout layout(container);
+    if (blockerWidth > 0.0 && blockerHeight > 0.0)
+    {
+        const jaguar::Item blocker = obstacleShape == "triangle"
+            ? MakeEvaluatorItem({
+                  {0.0, 0.0}, {blockerWidth, 0.0}, {0.0, blockerHeight}})
+            : ((obstacleShape == "concave-notch-rot45-searchpair"
+                || obstacleShape == "concave-notch-rot225-searchpair")
+                ? MakeEvaluatorItem({
+                      {0.0, 0.0}, {blockerWidth, 0.0},
+                      {blockerWidth, 1.0}, {1.0, 1.0},
+                      {1.0, 9.0}, {blockerWidth, 9.0},
+                      {blockerWidth, blockerHeight}, {0.0, blockerHeight}})
+            : (obstacleShape == "concave"
+                || obstacleShape == "concave-offset"
+                || obstacleShape == "concave-rot90"
+                || obstacleShape == "concave-rot90-origin"
+                || obstacleShape == "concave-rot45"
+                || obstacleShape == "concave-rot45-searchpair"
+                || obstacleShape == "concave-rot225-searchpair")
+                ? MakeEvaluatorItem({
+                      {0.0, 0.0}, {blockerWidth, 0.0},
+                      {blockerWidth, 3.0}, {3.0, 3.0},
+                      {3.0, blockerHeight}, {0.0, blockerHeight}})
+                : MakeEvaluatorItem({
+                      {0.0, 0.0}, {blockerWidth, 0.0},
+                      {blockerWidth, blockerHeight}, {0.0, blockerHeight}}));
+        const auto blockerTransform = obstacleShape == "concave-offset"
+            ? jaguar::Transform2d::FromRotationTranslation(0.0, {12.0, 8.0})
+            : obstacleShape == "concave-rot90"
+                ? jaguar::Transform2d::FromRotationTranslation(
+                      static_cast<double>(std::acos(-1.0f) / 2.0f),
+                      {22.0, 8.0})
+                : obstacleShape == "concave-rot90-origin"
+                    ? jaguar::Transform2d::FromRotationTranslation(
+                          static_cast<double>(std::acos(-1.0f) / 2.0f),
+                          {10.0, 0.0})
+                : obstacleShape == "concave-rot45"
+                    ? jaguar::Transform2d::FromRotationTranslation(
+                          static_cast<double>(std::acos(-1.0f) / 4.0f),
+                          {19.1, 8.0})
+                    : obstacleShape == "concave-rot45-searchpair"
+                        ? jaguar::Transform2d::FromRotationTranslation(
+                              static_cast<double>(std::acos(-1.0f) / 4.0f),
+                              {7.0710678, 4.0})
+                        : obstacleShape == "concave-rot225-searchpair"
+                            ? jaguar::Transform2d::FromRotationTranslation(
+                                  static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                                  {7.0710678, 13.192388})
+                            : obstacleShape == "concave-notch-rot45-searchpair"
+                                ? jaguar::Transform2d::FromRotationTranslation(
+                                      static_cast<double>(std::acos(-1.0f) / 4.0f),
+                                      {7.071068f, 4.0f})
+                                : obstacleShape == "concave-notch-rot225-searchpair"
+                                    ? jaguar::Transform2d::FromRotationTranslation(
+                                          static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                                          {7.071068f, 18.142136f})
+                : jaguar::Transform2d::Identity();
+        if (!Expect(layout.PlaceItem(blocker, blockerTransform).HasValue(),
+                    output,
+                    "feasible obstacle fixture setup failed"))
+        {
+            return false;
+        }
+        if (obstacleShape == "concave-rot45-searchpair"
+            || obstacleShape == "concave-rot225-searchpair")
+        {
+            const auto probeTransform = jaguar::Transform2d::FromRotationTranslation(
+                FloatFromBits(0x4088b931U),
+                {static_cast<double>(FloatFromBits(0x3fd3d359U)),
+                 static_cast<double>(FloatFromBits(0x4101f784U))});
+            const auto rotated45Transform =
+                jaguar::Transform2d::FromRotationTranslation(
+                    static_cast<double>(std::acos(-1.0f) / 4.0f),
+                    {7.0710678, 4.0});
+            const auto rotated225Transform =
+                jaguar::Transform2d::FromRotationTranslation(
+                    static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                    {7.0710678, 13.192388});
+            const auto rotated45Shape =
+                blocker.CollisionShape().TransformedRustF32(rotated45Transform);
+            const auto rotated225Shape =
+                blocker.CollisionShape().TransformedRustF32(rotated225Transform);
+            const auto boundsDifferByAtMost = [](const jaguar::Rect2d& left,
+                                                  const jaguar::Rect2d& right,
+                                                  double tolerance) {
+                return std::abs(left.xMin - right.xMin) <= tolerance
+                    && std::abs(left.yMin - right.yMin) <= tolerance
+                    && std::abs(left.xMax - right.xMax) <= tolerance
+                    && std::abs(left.yMax - right.yMax) <= tolerance;
+            };
+            const auto classify = [&](const jaguar::Transform2d& obstacleTransform)
+                -> std::optional<std::pair<bool, std::optional<bool>>> {
+                jaguar::Layout obstacleLayout(
+                    MakeLbfContainerWithBounds({0.0, 0.0, 40.0, 24.0}));
+                if (!obstacleLayout.PlaceItem(blocker, obstacleTransform).HasValue())
+                    return std::nullopt;
+                auto engine = obstacleLayout.GetContainer().CreateCollisionEngine();
+                if (!engine
+                    || !engine->Restore(obstacleLayout.Save().cdeSnapshot).HasValue())
+                {
+                    return std::nullopt;
+                }
+                const auto surrogateCollision = engine->DetectSurrogateCollision(
+                    *item.CollisionShape().GetSurrogate(),
+                    probeTransform,
+                    jaguar::NoFilter{});
+                if (!surrogateCollision.HasValue())
+                    return std::nullopt;
+                if (surrogateCollision.Value())
+                    return std::make_pair(true, std::optional<bool>{});
+                const auto candidateShape =
+                    item.CollisionShape().TransformedRustF32(probeTransform);
+                if (!candidateShape.HasValue())
+                    return std::nullopt;
+                return std::make_pair(
+                    false,
+                    std::optional<bool>{engine->DetectPolygonCollision(
+                        candidateShape.Value(), jaguar::NoFilter{})});
+            };
+            const auto classes45 = classify(rotated45Transform);
+            const auto classes225 = classify(rotated225Transform);
+            if (!Expect(rotated45Shape.HasValue()
+                            && rotated225Shape.HasValue()
+                            && boundsDifferByAtMost(
+                                rotated45Shape.Value().BoundingBox(),
+                                rotated225Shape.Value().BoundingBox(),
+                                2.0e-5),
+                        output,
+                        "45/225-degree blocker shapes must have the same actual AABB")
+                || !Expect(classes45.has_value()
+                               && classes225.has_value()
+                               && *classes45
+                                   == std::make_pair(false,
+                                                     std::optional<bool>{false})
+                               && *classes225
+                                   == std::make_pair(false,
+                                                     std::optional<bool>{true}),
+                           output,
+                           "LBF collision query must clear ordinal 4 at 45 degrees and reach polygon collision at 225 degrees"))
+            {
+                return false;
+            }
+        }
+        if (obstacleShape == "concave-notch-rot45-searchpair"
+            || obstacleShape == "concave-notch-rot225-searchpair")
+        {
+            const auto rotated45Transform =
+                jaguar::Transform2d::FromRotationTranslation(
+                    static_cast<double>(std::acos(-1.0f) / 4.0f),
+                    {7.071068f, 4.0f});
+            const auto rotated225Transform =
+                jaguar::Transform2d::FromRotationTranslation(
+                    static_cast<double>(5.0f * std::acos(-1.0f) / 4.0f),
+                    {7.071068f, 18.142136f});
+            const auto rotated45Shape =
+                blocker.CollisionShape().TransformedRustF32(rotated45Transform);
+            const auto rotated225Shape =
+                blocker.CollisionShape().TransformedRustF32(rotated225Transform);
+            const auto boundsDifferByAtMost = [](const jaguar::Rect2d& left,
+                                                  const jaguar::Rect2d& right,
+                                                  double tolerance) {
+                return std::abs(left.xMin - right.xMin) <= tolerance
+                    && std::abs(left.yMin - right.yMin) <= tolerance
+                    && std::abs(left.xMax - right.xMax) <= tolerance
+                    && std::abs(left.yMax - right.yMax) <= tolerance;
+            };
+            if (!Expect(rotated45Shape.HasValue()
+                            && rotated225Shape.HasValue()
+                            && boundsDifferByAtMost(
+                                rotated45Shape.Value().BoundingBox(),
+                                rotated225Shape.Value().BoundingBox(),
+                                2.0e-5),
+                        output,
+                        "notched 45/225-degree blocker shapes must share the same actual AABB"))
+            {
+                return false;
+            }
+        }
+        if (obstacleShape == "concave-rot90"
+            || obstacleShape == "concave-rot45")
+        {
+            const auto probeTransform = obstacleShape == "concave-rot90"
+                ? jaguar::Transform2d::FromRotationTranslation(0.0, {13.0, 13.0})
+                : jaguar::Transform2d::FromRotationTranslation(0.0, {14.5, 17.1});
+            jaguar::Layout unrotatedProbe(MakeLbfContainerWithBounds(
+                {0.0, 0.0, 40.0, 24.0}));
+            jaguar::Layout rotatedProbe(MakeLbfContainerWithBounds(
+                {0.0, 0.0, 40.0, 24.0}));
+            const bool probePlacementsSucceeded =
+                unrotatedProbe.PlaceItem(
+                    blocker,
+                    jaguar::Transform2d::FromRotationTranslation(
+                        0.0, {12.0, 8.0})).HasValue()
+                && unrotatedProbe.PlaceItem(item, probeTransform).HasValue()
+                && rotatedProbe.PlaceItem(blocker, blockerTransform).HasValue()
+                && rotatedProbe.PlaceItem(item, probeTransform).HasValue();
+            if (!Expect(probePlacementsSucceeded,
+                        output,
+                        "orientation-sensitive collision probe setup failed")
+                || !Expect(!unrotatedProbe.IsFeasible()
+                               && rotatedProbe.IsFeasible(),
+                           output,
+                           obstacleShape == "concave-rot90"
+                               ? "90-degree blocker rotation must clear the left-arm probe"
+                               : "45-degree blocker rotation must clear the left-arm probe"))
+            {
+                return false;
+            }
+        }
+    }
+    const jaguar::NoFilter noFilter;
+    sparrow::LbfConfig config;
+    config.seed = seed;
+    config.samplesPerItem = sampleCount;
+    config.localSearchFraction = 0.30;
+    sparrow::SparrowRng rng(config.seed);
+    std::vector<sparrow::LbfSearchTraceEvent> events;
+    const auto result = sparrow::SearchLbfWithTrace(
+        layout,
+        item,
+        config,
+        rng,
+        noFilter,
+        [&events](const sparrow::LbfSearchTraceEvent& event) {
+            events.push_back(event);
+        });
+    if (!Expect(result.HasValue() && result.Value().has_value(),
+                output,
+                "feasible rectangular LBF search must return a placement"))
+    {
+        return false;
+    }
+
+    std::size_t rowIndex = 0U;
+    std::size_t uniformEvaluations = 0U;
+    std::size_t localEvaluations = 0U;
+    std::size_t uniformCollisions = 0U;
+    std::size_t localCollisions = 0U;
+    std::size_t uniformAccepted = 0U;
+    std::size_t localAccepted = 0U;
+    std::size_t uniformRotated = 0U;
+    std::size_t localRotated = 0U;
+    std::size_t rustCollisionUnobserved = 0U;
+    std::size_t cppInvalidWithUnobservedCollision = 0U;
+    std::size_t bestRowIndex = std::numeric_limits<std::size_t>::max();
+    bool directionSensitiveCandidateObserved = false;
+    bool awaitingReport = false;
+    std::size_t resultEvents = 0U;
+    const auto matchesTransform = [](const jaguar::Transform2d& transform,
+                                     const std::vector<std::string>& row) {
+        return row.size() == 18U
+            && LbfSamplerBitsText(static_cast<float>(transform.rotationRad))
+                == row[2]
+            && LbfSamplerBitsText(static_cast<float>(transform.translation.x))
+                == row[3]
+            && LbfSamplerBitsText(static_cast<float>(transform.translation.y))
+                == row[4];
+    };
+    for (const auto& event : events)
+    {
+        if (event.type == sparrow::LbfSearchTraceEvent::Type::Evaluation)
+        {
+            if (awaitingReport || rowIndex >= expectedRows.size())
+            {
+                output << "unexpected feasible LBF evaluation event ordering\n";
+                return false;
+            }
+            const auto& expected = expectedRows[rowIndex];
+            if (expected.size() != 18U)
+            {
+                output << "malformed pinned Rust feasible LBF row " << rowIndex
+                       << '\n';
+                return false;
+            }
+            const bool local = expected[0] == "local";
+            const std::size_t ordinal = local
+                ? localEvaluations++
+                : uniformEvaluations++;
+            const auto expectedPhase = local
+                ? sparrow::LbfSearchTracePhase::LocalSearch
+                : sparrow::LbfSearchTracePhase::ContainerSample;
+            const bool expectedCollision = expected[5] == "1"
+                || (expected[7] == "1" && expected[8] == "1");
+            const bool collisionClassificationKnown = expected[5] == "1"
+                || expected[7] != "-";
+            if (expectedCollision)
+            {
+                local ? ++localCollisions : ++uniformCollisions;
+            }
+            if (!collisionClassificationKnown)
+            {
+                ++rustCollisionUnobserved;
+                if (unobservedSearchEvents != nullptr)
+                {
+                    unobservedSearchEvents->push_back(
+                        {expected[0], ordinal, event.evaluation.kind});
+                }
+                if (event.evaluation.kind
+                    == sparrow::SampleKind::SAMPLE_KIND_INVALID)
+                {
+                    ++cppInvalidWithUnobservedCollision;
+                    if (obstacleShape == "concave-rot45-searchpair"
+                        || obstacleShape == "concave-rot225-searchpair"
+                        || obstacleShape == "concave-notch-rot45-searchpair"
+                        || obstacleShape == "concave-notch-rot225-searchpair")
+                    {
+                        const bool isRot45 = obstacleShape
+                                == "concave-rot45-searchpair"
+                            || obstacleShape
+                                == "concave-notch-rot45-searchpair";
+                        const bool isNotched = obstacleShape
+                                == "concave-notch-rot45-searchpair"
+                            || obstacleShape
+                                == "concave-notch-rot225-searchpair";
+                        const bool expectedInvalidCandidate = isNotched
+                            ? local
+                                ? ordinal == 26U
+                                : ordinal == 7U || ordinal == 10U
+                                    || ordinal == 50U || ordinal == 67U
+                                    || (isRot45 && ordinal == 39U)
+                            : local
+                                ? ordinal == 26U
+                                : isRot45
+                                    ? ordinal == 10U || ordinal == 39U
+                                        || ordinal == 50U
+                                    : ordinal == 33U || ordinal == 37U
+                                        || ordinal == 50U;
+                        if (!Expect(expectedInvalidCandidate,
+                                    output,
+                                    "concave search-pair loss-pruned invalid candidates must remain in the reviewed fixed ordinal set"))
+                        {
+                            output << "  phase=" << expected[0]
+                                   << " ordinal=" << ordinal << '\n';
+                            return false;
+                        }
+                    }
+                }
+            }
+            if (rotationMode == jaguar::RotationMode::Continuous
+                && expected[2] != "00000000")
+            {
+                local ? ++localRotated : ++uniformRotated;
+            }
+            const auto expectedKind = expectedCollision
+                ? sparrow::SampleKind::SAMPLE_KIND_INVALID
+                : sparrow::SampleKind::SAMPLE_KIND_CLEAR;
+            if ((obstacleShape == "concave"
+                 || obstacleShape == "concave-rot90-origin"
+                 || obstacleShape == "concave-rot45-searchpair"
+                 || obstacleShape == "concave-rot225-searchpair")
+                && !local && ordinal == 4U)
+            {
+                const bool baselineCollision = obstacleShape == "concave"
+                    || obstacleShape == "concave-rot225-searchpair";
+                if (!Expect(expected[2] == "4088b931"
+                                && expected[3] == "3fd3d359"
+                                && expected[4] == "4101f784"
+                                && expected[5] == "0"
+                                && expected[7] == "1"
+                                && expected[8] == (baselineCollision ? "1" : "0")
+                                && expected[9] == (baselineCollision ? "0" : "1"),
+                            output,
+                            "fixed uniform ordinal 4 must have the direction-sensitive collision and acceptance recorded in the fixture"))
+                {
+                    return false;
+                }
+                directionSensitiveCandidateObserved = true;
+            }
+            const bool expectedKindMatches = !collisionClassificationKnown
+                || event.evaluation.kind == expectedKind;
+            if (!Expect(expected[1] == std::to_string(ordinal)
+                            && event.phase == expectedPhase
+                            && expectedKindMatches
+                            && matchesTransform(event.transform, expected),
+                        output,
+                        "C++ feasible LBF candidate must match the pinned Rust phase and transform"))
+            {
+                output << "  row=" << rowIndex << " phase=" << expected[0]
+                       << " ordinal=" << expected[1]
+                       << " expected_bits=" << expected[2] << ',' << expected[3]
+                       << ',' << expected[4] << " actual_bits="
+                       << LbfSamplerBitsText(static_cast<float>(
+                              event.transform.rotationRad))
+                       << ',' << LbfSamplerBitsText(static_cast<float>(
+                              event.transform.translation.x))
+                       << ',' << LbfSamplerBitsText(static_cast<float>(
+                              event.transform.translation.y))
+                       << " expected_kind="
+                       << (!collisionClassificationKnown
+                               ? "unobserved"
+                               : expectedCollision ? "invalid" : "clear")
+                       << " actual_kind="
+                       << static_cast<int>(event.evaluation.kind) << '\n';
+                return false;
+            }
+            awaitingReport = true;
+        }
+        else if (event.type == sparrow::LbfSearchTraceEvent::Type::Report)
+        {
+            if (!awaitingReport || rowIndex >= expectedRows.size())
+            {
+                output << "unexpected feasible LBF report event ordering\n";
+                return false;
+            }
+            const auto& expected = expectedRows[rowIndex];
+            const bool accepted = expected[9] == "1";
+            if (event.phase
+                    != (expected[0] == "local"
+                            ? sparrow::LbfSearchTracePhase::LocalSearch
+                            : sparrow::LbfSearchTracePhase::ContainerSample)
+                || event.accepted != accepted
+                || !matchesTransform(event.transform, expected))
+            {
+                output << "Rust/C++ feasible LBF report differs at row "
+                       << rowIndex << '\n';
+                return false;
+            }
+            if (accepted)
+            {
+                bestRowIndex = rowIndex;
+                expected[0] == "local" ? ++localAccepted : ++uniformAccepted;
+            }
+            const bool retainedMatches =
+                bestRowIndex == std::numeric_limits<std::size_t>::max()
+                    ? event.retained.empty()
+                    : event.retained.size() == 1U
+                        && matchesTransform(event.retained[0].first,
+                                            expectedRows[bestRowIndex]);
+            if (!retainedMatches)
+            {
+                output << "Rust/C++ feasible LBF retained sample differs at row "
+                       << rowIndex << '\n';
+                return false;
+            }
+            ++rowIndex;
+            awaitingReport = false;
+        }
+        else
+        {
+            ++resultEvents;
+            if (!Expect(resultEvents == 1U && !awaitingReport
+                            && rowIndex == expectedRows.size()
+                            && event.evaluationCount == expectedRows.size()
+                            && result.Value()->samples == expectedRows.size()
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.rotationRad))
+                                == LbfSamplerFixtureField(
+                                    contents, "result_rotation=")
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.translation.x))
+                                == LbfSamplerFixtureField(contents, "result_x=")
+                            && LbfSamplerBitsText(static_cast<float>(
+                                   event.transform.translation.y))
+                                == LbfSamplerFixtureField(contents, "result_y="),
+                        output,
+                        "Rust/C++ feasible LBF result transform and sample count must match"))
+            {
+                return false;
+            }
+        }
+    }
+
+    std::ostringstream next;
+    next << std::hex << std::nouppercase << std::setfill('0') << std::setw(16)
+         << rng.NextU64();
+    const bool expectedSearchPairInvalidCount =
+        (obstacleShape != "concave-rot45-searchpair"
+         && obstacleShape != "concave-rot225-searchpair"
+         && obstacleShape != "concave-notch-rot45-searchpair"
+         && obstacleShape != "concave-notch-rot225-searchpair")
+        || ((obstacleShape == "concave-rot45-searchpair"
+             || obstacleShape == "concave-rot225-searchpair")
+            && cppInvalidWithUnobservedCollision == 4U)
+        || (obstacleShape == "concave-notch-rot45-searchpair"
+            && cppInvalidWithUnobservedCollision == 6U)
+        || (obstacleShape == "concave-notch-rot225-searchpair"
+            && cppInvalidWithUnobservedCollision == 5U);
+    const bool matches = Expect(rowIndex == expectedRows.size()
+                                    && uniformEvaluations == uniformSampleCount
+                                    && localEvaluations
+                                        == sampleCount - uniformSampleCount
+                                    && expectedSearchPairInvalidCount
+                                    && uniformCollisions > 0U
+                                    && (rotationMode
+                                                == jaguar::RotationMode::Continuous
+                                            ? uniformRotated == uniformEvaluations
+                                                && localRotated == localEvaluations
+                                            : localCollisions > 0U)
+                                    && uniformAccepted > 0U
+                                    && localAccepted > 0U
+                                    && resultEvents == 1U
+                                    && (((obstacleShape == "concave"
+                                          || obstacleShape == "concave-rot90-origin"
+                                          || obstacleShape == "concave-rot45-searchpair"
+                                          || obstacleShape == "concave-rot225-searchpair")
+                                             && directionSensitiveCandidateObserved)
+                                        || (obstacleShape != "concave"
+                                            && obstacleShape != "concave-rot90-origin"
+                                            && obstacleShape != "concave-rot45-searchpair"
+                                            && obstacleShape != "concave-rot225-searchpair"))
+                                    && next.str()
+                                        == LbfSamplerFixtureField(
+                                            contents, "next_rng_u64=")
+                                    && LbfSamplerBitsText(
+                                           result.Value()->loss.Cost())
+                                        == LbfSamplerFixtureField(
+                                            contents, "result_cost="),
+                                output,
+                                "Rust/C++ feasible LBF local trace, final loss and RNG state must match");
+    if (matches && rotationMode == jaguar::RotationMode::Continuous)
+    {
+        output << "LBF continuous obstacle trace: rotated uniform/local candidates="
+               << uniformRotated << '/' << localRotated
+               << ", Rust collision classifications unobserved after loss pruning="
+               << rustCollisionUnobserved
+               << ", C++ reported invalid among them="
+               << cppInvalidWithUnobservedCollision << '\n';
+    }
+    return matches;
+}
+
+bool TestLbfSearchFeasibleRectLocalRustReference(std::ostream& output)
+{
+    std::vector<LbfUnobservedSearchEvent> plainNoObstacleUnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularNoneUnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularDiscreteUnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularDiscreteThreeAngleUnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> triangleDiscreteThreeAngleUnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularSeed17UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularSeed42UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rectangularSeed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> triangleSeed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveOriginSeed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveOffsetSeed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveOffsetSeed17Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveRot90Seed17Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveRot90Seed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveRot90OriginSeed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> concaveRot45Seed42Samples96UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rotated45UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> rotated225UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> notchRotated45UnobservedEvents;
+    std::vector<LbfUnobservedSearchEvent> notchRotated225UnobservedEvents;
+    return RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectFeasibleRustTrace.tsv",
+               0.0,
+               0.0,
+               jaguar::RotationMode::None,
+               17U,
+               80U,
+               56U,
+               "rect",
+               &plainNoObstacleUnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasibleRustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::None,
+               17U,
+               80U,
+               56U,
+               "rect",
+               &rectangularNoneUnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-DiscreteRustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Discrete,
+               17U,
+               80U,
+               56U,
+               "rect",
+               &rectangularDiscreteUnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Discrete-0-45-90RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Discrete,
+               17U,
+               80U,
+               56U,
+               "rect",
+               &rectangularDiscreteThreeAngleUnobservedEvents,
+               true)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Discrete-0-45-90-TriangleRustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Discrete,
+               17U,
+               80U,
+               56U,
+               "triangle",
+               &triangleDiscreteThreeAngleUnobservedEvents,
+               true)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-ContinuousRustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               17U,
+               80U,
+               56U,
+               "rect",
+               &rectangularSeed17UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-Seed42RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               80U,
+               56U,
+               "rect",
+               &rectangularSeed42UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "rect",
+               &rectangularSeed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-Triangle-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "triangle",
+               &triangleSeed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-Concave-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave",
+               &concaveOriginSeed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-offset",
+               &concaveOffsetSeed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveOffset-Seed17-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               17U,
+               96U,
+               68U,
+                "concave-offset",
+                &concaveOffsetSeed17Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-rot90",
+               &concaveRot90Seed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90-Seed17-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               17U,
+               96U,
+               68U,
+                "concave-rot90",
+                &concaveRot90Seed17Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot90Origin-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-rot90-origin",
+               &concaveRot90OriginSeed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-rot45",
+               &concaveRot45Seed42Samples96UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot45SearchPair-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+                "concave-rot45-searchpair",
+                &rotated45UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveRot225SearchPair-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+                "concave-rot225-searchpair",
+                &rotated225UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot45SearchPair-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-notch-rot45-searchpair",
+               &notchRotated45UnobservedEvents)
+        && RunLbfSearchFeasibleRectLocalFixture(
+               output,
+               "LbfSearchRectObstacleFeasible-Continuous-ConcaveNotchRot225SearchPair-Seed42-Samples96RustTrace.tsv",
+               10.0,
+               10.0,
+               jaguar::RotationMode::Continuous,
+               42U,
+               96U,
+               68U,
+               "concave-notch-rot225-searchpair",
+               &notchRotated225UnobservedEvents)
+        && TestConcaveNotchSearchPairFixturesMatch(output)
+         && TestLossPrunedSearchEventsMatchForcedProbes(
+             output,
+             plainNoObstacleUnobservedEvents,
+             rectangularNoneUnobservedEvents,
+             rectangularDiscreteUnobservedEvents,
+             rectangularDiscreteThreeAngleUnobservedEvents,
+             triangleDiscreteThreeAngleUnobservedEvents,
+             rectangularSeed17UnobservedEvents,
+             rectangularSeed42UnobservedEvents,
+             rectangularSeed42Samples96UnobservedEvents,
+             triangleSeed42Samples96UnobservedEvents,
+             concaveOriginSeed42Samples96UnobservedEvents,
+             concaveOffsetSeed42Samples96UnobservedEvents,
+              concaveOffsetSeed17Samples96UnobservedEvents,
+              concaveRot90Seed17Samples96UnobservedEvents,
+              concaveRot90Seed42Samples96UnobservedEvents,
+              concaveRot90OriginSeed42Samples96UnobservedEvents,
+              concaveRot45Seed42Samples96UnobservedEvents,
+             rotated45UnobservedEvents,
+             rotated225UnobservedEvents,
+             notchRotated45UnobservedEvents,
+             notchRotated225UnobservedEvents);
+}
 }
 
 bool RunSamplingTests(std::ostream& output)
@@ -3399,6 +5751,11 @@ bool RunSamplingTests(std::ostream& output)
         && TestUniformSamplerContinuousGridRustReference(output)
         && TestUniformSamplerSingletonAxisRustReference(output)
         && TestUniformSamplerDegenerateBboxRustReference(output)
+        && TestLbfUniformSamplerNarrowBoundsRustReference(output)
+        && TestLbfUniformSamplerInvalidBoundsMapping(output)
+        && TestLbfSearchTighteningErrorAgainstRustReference(output)
+        && TestLbfSearchSkipsLocalWithoutUniformPlacementRustReference(output)
+        && TestLbfSearchFeasibleRectLocalRustReference(output)
         && TestRustSamplingCoordinateDescentTrace(output)
         && TestLocalSearchSampler(output)
         && TestCoordinateDescentAxesAndBudget(output)
@@ -3418,6 +5775,7 @@ bool RunSamplingTests(std::ostream& output)
         && TestLbfEvaluatorBasicCollisionAndLoss(output)
         && TestLbfEvaluatorUsesPointOfInaccessibility(output)
         && TestLbfEvaluatorHoleAndQualityFilter(output)
+        && TestLbfQualityZoneFilterMatchesRustReference(output)
         && TestLbfEvaluatorSurrogatePath(output)
         && TestLbfRuntimeBudgetSplit(output)
         && TestLbfSearch(output);
@@ -3434,11 +5792,19 @@ bool RunLbfBudgetSplitRuntimeTest(std::ostream& output)
     return passed;
 }
 
-bool RunLbfPinnedSearchTraceProbe(std::ostream& output)
+namespace
+{
+bool RunLbfPinnedSearchTraceProbeWithRotation(
+    jaguar::RotationRange allowedRotation,
+    const char* rotationName,
+    std::ostream& output)
 {
     const jaguar::Container container = MakePlainEvaluatorContainer();
     const jaguar::Item item = MakeEvaluatorItem({
-        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}});
+        {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}},
+        std::nullopt,
+        {},
+        std::move(allowedRotation));
     const jaguar::NoFilter noFilter;
     const jaguar::Layout layout(container);
 
@@ -3490,8 +5856,9 @@ bool RunLbfPinnedSearchTraceProbe(std::ostream& output)
     };
 
     output << "# generator=Sparrow SearchLbfWithTrace seed=42 n_samples=64 "
-              "ls_frac=0.25 fixture=plain-square-30x30\n"
-              "# phase ordinal rotation_bits x_bits y_bits kind "
+              "ls_frac=0.25 fixture=plain-square-30x30 rotation="
+           << rotationName << '\n'
+           << "# phase ordinal rotation_bits x_bits y_bits kind "
               "bbox_cost_bits accepted before_x_min_bits before_y_min_bits "
               "before_x_max_bits before_y_max_bits after_x_min_bits "
               "after_y_min_bits after_x_max_bits after_y_max_bits\n";
@@ -3576,6 +5943,26 @@ bool RunLbfPinnedSearchTraceProbe(std::ostream& output)
                       && localOrdinal == 16U,
                   output,
                   "fixed-seed LBF trace probe must emit 48 uniform and 16 local rows");
+}
+}
+
+bool RunLbfPinnedSearchTraceProbe(std::ostream& output)
+{
+    return RunLbfPinnedSearchTraceProbeWithRotation(
+        {jaguar::RotationMode::None, {}}, "none", output);
+}
+
+bool RunLbfPinnedContinuousSearchTraceProbe(std::ostream& output)
+{
+    return RunLbfPinnedSearchTraceProbeWithRotation(
+        {jaguar::RotationMode::Continuous, {}}, "continuous", output);
+}
+
+bool RunLbfPinnedDiscreteSearchTraceProbe(std::ostream& output)
+{
+    const double halfPi = std::acos(-1.0) / 2.0;
+    return RunLbfPinnedSearchTraceProbeWithRotation(
+        {jaguar::RotationMode::Discrete, {0.0, halfPi}}, "discrete", output);
 }
 
 bool RunLbfPinnedNormalComponentProbe(std::ostream& output)

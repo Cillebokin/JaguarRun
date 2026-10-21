@@ -45,7 +45,10 @@ impl ScopedCompressionClockSequence {
         );
         COMPRESSION_CLOCK_SEQUENCE.with(|sequence| {
             let mut sequence = sequence.borrow_mut();
-            assert!(sequence.is_none(), "compression clock sequence is already active");
+            assert!(
+                sequence.is_none(),
+                "compression clock sequence is already active"
+            );
             *sequence = Some(ClockSequenceState {
                 samples,
                 next_sample: 0,

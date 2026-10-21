@@ -381,7 +381,8 @@ Result<void> Separator::ChangeStripWidth(
     for (const jaguar::LayoutPlacementSnapshot& placement
          : previous.layoutSnapshot.placements)
     {
-        if (placement.placedItem.CollisionShape().Centroid().x <= split)
+        // Match Rust's strict-greater filter; NaN centroids are not right of the split.
+        if (!(placement.placedItem.CollisionShape().Centroid().x > split))
         {
             continue;
         }

@@ -1,7 +1,7 @@
 # S08. mod.rs 逐文件逻辑比对
 **Rust**: `CodeResource/sparrow/src/optimizer/mod.rs`（127 行）
 **C++**: `Include/SparrowCore/Optimizer/SparrowOptimizer.h`（30 行）+ `Source/Optimizer/SparrowOptimizer.cpp`（261 行）+ `SppLbfOptimizer.h/.cpp`（22+174 行）+ `BppLbfOptimizer.h/.cpp`（22+192 行）+ `SparrowLbfBuilder.h/.cpp`（12+240 行）—— 一组内分节
-**判定**: 基本等价（seed=3 单件 warm-start、seed=42 受控三件 cold-start 和默认阶段配置 cold-start Rust reference 均通过；另有 Explore→Compress 状态交接、初始探索报告后立即 phase stop、零时限两阶段退出、FailureBased 与 TimeBased 正时限 deadline crossing、冷启动构造失败等 Rust reference。正时限用例验证 deadline 到期后已开始的压缩尝试仍完成收尾，并比较最终布局；TimeBased 用例不发 stop 请求，使用固定 callback 等待确保计时器到期。构造失败用例核对 item index 和零回调；停止用例核对 phase reset 与对应阶段结果。deadline 相等瞬间、其他终止时点、错误/退化输入和未经回调等待的完整时限搜索仍未覆盖。PhaseReference.tsv 仍是 C++ 回归基线；SppLbfOptimizer 与 SparrowLbfBuilder 的配置/入口差异、BppLbfOptimizer 的 C++ 额外行为另列）
+**判定**: 基本等价（seed=3 单件 warm-start、seed=42 受控三件 cold-start 和默认阶段配置 cold-start Rust reference 均通过；另有 Explore→Compress 状态交接、初始探索报告后立即 phase stop、零时限两阶段退出、FailureBased 与 TimeBased 正时限 deadline crossing、冷启动构造失败等 Rust reference。正时限用例验证 deadline 到期后已开始的压缩尝试仍完成收尾，并比较最终布局；TimeBased 用例不发 stop 请求，使用固定 callback 等待确保计时器到期。构造失败用例核对 item index 和零回调；停止用例核对 phase reset 与对应阶段结果。deadline相等瞬间运行时fixture仍未覆盖（源码严格比较已对齐）；其他终止时点、错误/退化输入和未经回调等待的完整时限搜索仍未覆盖。PhaseReference.tsv 仍是 C++ 回归基线；SppLbfOptimizer 与 SparrowLbfBuilder 的配置/入口差异、BppLbfOptimizer 的 C++ 额外行为另列）
 
 ## 第一节. `optimize`（mod.rs:28-81）vs `SparrowOptimizer.cpp Optimize/OptimizeWithTerminator`（94-249）
 
@@ -82,7 +82,7 @@
 | 10 | 无终止器入口重载 Optimize(...)（自建 terminator） | C++额外 | API 便利层；Terminator trait→具体类（S20） | mod.rs:31-32 vs SparrowOptimizer.cpp:242-251 |
 
 ## 结论
-三阶段控制流与子 seed 取得顺序从源码可对应，且有 seed=3 warm-start、seed=42 默认 LBF 预算下的受控 cold-start、默认探索/压缩配置 cold-start、seed=43/42 的 Explore→Compress 状态交接、两阶段零时限立即退出、250 ms FailureBased deadline crossing、2 s TimeBased deadline crossing，以及构造失败和探索初始报告后立即停止的 Rust reference。TimeBased 到期用例在首个 progress callback 等待 2100 ms 且不发 stop 请求；计时器到期后已开始的一个 attempt 仍完成，separator 为 success/0 eval/move/iteration，最终可行宽度约 3.68，并逐项比较 phase/report/step/separation/placement trace。另一个正时限 TimeBased 曲线用例采集五个步长与各自回调时间，核对 Rust/C++ 起点及线性斜率；它由 listener 在第五个步长处停止，不等价于 deadline 到期。默认配置 cold-start 核对阶段参数、报告/阶段顺序、分离计数和最终摆放，listener 在探索与压缩各自首个 separation result 后请求 phase stop；它不运行完整 9 分钟/60 秒自然阶段时限。零时限 fixture 证明两阶段均跳过 separator 并保留同一构造布局；250 ms 正时限 fixture 证明探索在延迟回调后不进入 separator，压缩则在等待越过期限后仍完成当前尝试收尾，最终布局由宽度 4.0 压缩到 3.96。minimum-width boundary fixtures 分别验证 Compression 单件方形输入下的 Rust f32/f64 运算顺序和 `< min_width` 门槛、Explore 在所有离散角均不适配容器高度时保留 Rust 的 `INFINITY` 下界，以及合法 0° 初始解下离散旋转高度容差两侧的最小宽度位模式；后两项不覆盖一般旋转/上游几何差异。上述 TimeBased 测试的等待是可重复触发期限的方法，不代表未经等待的完整限时搜索。deadline 相等瞬间轮询、完整默认时限运行仍未覆盖。其他退出 fixture 证明在列明实例与触发点下，构造失败先于 phase callback，phase stop 可在下一阶段重置，压缩会在成功一次后到达最小宽度边界；不能据此外推其他错误输入或全部退化域。PhaseReference.tsv 仍只是 C++ 自回归数据。handoff fixture 已证明 Rust 在 exploration 失败报告后的 disrupt 会让 separatorState 与 best solution 不同，并验证 C++ 分别传入压缩。Explore 的已确认全离散角 `INFINITY` 下界差异现已按上述 reference 修复，合法初始输入的相邻 f32 高度阈值也已对齐；两侧上游几何数值的一般性仍未覆盖。SparrowLbfBuilder 的另一 Rust fixture 使用 64/0/1 配置且以容差比较宽度/密度。SppLbfOptimizer 是独立入口（排序二态、增长比 1.1、无宽度上限）；BppLbfOptimizer 是 Rust sparrow 不存在的 BPP 额外变体。
+三阶段控制流与子 seed 取得顺序从源码可对应，且有 seed=3 warm-start、seed=42 默认 LBF 预算下的受控 cold-start、默认探索/压缩配置 cold-start、seed=43/42 的 Explore→Compress 状态交接、两阶段零时限立即退出、250 ms FailureBased deadline crossing、2 s TimeBased deadline crossing，以及构造失败和探索初始报告后立即停止的 Rust reference。TimeBased 到期用例在首个 progress callback 等待 2100 ms 且不发 stop 请求；计时器到期后已开始的一个 attempt 仍完成，separator 为 success/0 eval/move/iteration，最终可行宽度约 3.68，并逐项比较 phase/report/step/separation/placement trace。另一个正时限 TimeBased 曲线用例采集五个步长与各自回调时间，核对 Rust/C++ 起点及线性斜率；它由 listener 在第五个步长处停止，不等价于 deadline 到期。默认配置 cold-start 核对阶段参数、报告/阶段顺序、分离计数和最终摆放，listener 在探索与压缩各自首个 separation result 后请求 phase stop；它不运行完整 9 分钟/60 秒自然阶段时限。零时限 fixture 证明两阶段均跳过 separator 并保留同一构造布局；250 ms 正时限 fixture 证明探索在延迟回调后不进入 separator，压缩则在等待越过期限后仍完成当前尝试收尾，最终布局由宽度 4.0 压缩到 3.96。minimum-width boundary fixtures 分别验证 Compression 单件方形输入下的 Rust f32/f64 运算顺序和 `< min_width` 门槛、Explore 在所有离散角均不适配容器高度时保留 Rust 的 `INFINITY` 下界，以及合法 0° 初始解下离散旋转高度容差两侧的最小宽度位模式；后两项不覆盖一般旋转/上游几何差异。上述 TimeBased 测试的等待是可重复触发期限的方法，不代表未经等待的完整限时搜索。deadline相等瞬间轮询没有固定运行fixture（两侧源码均用严格now > deadline，等刻继续）；完整默认时限运行仍未覆盖。其他退出 fixture 证明在列明实例与触发点下，构造失败先于 phase callback，phase stop 可在下一阶段重置，压缩会在成功一次后到达最小宽度边界；不能据此外推其他错误输入或全部退化域。PhaseReference.tsv 仍只是 C++ 自回归数据。handoff fixture 已证明 Rust 在 exploration 失败报告后的 disrupt 会让 separatorState 与 best solution 不同，并验证 C++ 分别传入压缩。Explore 的已确认全离散角 `INFINITY` 下界差异现已按上述 reference 修复，合法初始输入的相邻 f32 高度阈值也已对齐；两侧上游几何数值的一般性仍未覆盖。SparrowLbfBuilder 的另一 Rust fixture 使用 64/0/1 配置且以容差比较宽度/密度。SppLbfOptimizer 是独立入口（排序二态、增长比 1.1、无宽度上限）；BppLbfOptimizer 是 Rust sparrow 不存在的 BPP 额外变体。
 
 ### 补充审计（2026-09-29）
 1. **【核对确认：127 行逐项覆盖】** mod.rs 全量复核：optimize（:28-81）、minimum_strip_width（:85-122）、5 个模块声明（compress/explore/lbf/separator/worker）及 oracle trace wrapper（:125-127）——主文第一节+差异表全覆盖；`next_rng` 闭包与相位报告/超时序已逐项记。
@@ -98,5 +98,46 @@
 
 1. **清单残留的 sample/search.rs 分支核对已由 S13 覆盖**：Rust search_placement_impl 的 reference placement、focused sampling、container sampling、pre-refine、final-refine 五阶段分别映射至 C++ FindBestSeparatorMoveImpl；无 reference placement 的 LBF 三阶段映射至 SearchLbfImpl。S13 固定 trace 比较了列明 seed/config 的事件、阶段、结果和后续 RNG；零预算 fixture 另核对空 LBF 与保留 reference placement 的 Separator 路径。一般预算、sampler 创建失败与 Search-level CD 回退仍按 S13 记录的边界管理。因此不再把 sample/search.rs 列为 S08 尚未逐分支核对。
 2. **顶层调用链复核**：重新对照 optimizer/mod.rs:28-80 与 SparrowOptimizer.cpp:112-245，当前记录覆盖 construction→exploration→compression 的 seed/phase 顺序、best solution 与 separator state 双状态交接、阶段 stop/timeout reset、FINAL report 顺序，以及已有构造失败和两阶段退出 fixture；未发现新的合法输入行为分叉，本轮不改生产代码。
-3. **剩余状态**：S08 维持“部分”。自然完整时限与 deadline 同刻轮询没有固定 Rust/C++ trace；通用错误域未逐项证明。最终 C++ 的两次快照 Restore 是内部防线，尚无合法输入可确定性触发其错误出口的证据；损坏内部终态注入仍未覆盖。
+3. **剩余状态**：S08 维持“部分”。自然完整时限和通用错误域未逐项证明；deadline同刻的Rust/C++源码比较器已对齐，但没有固定同一Instant的运行fixture。最终 C++ 的两次快照 Restore 是内部防线，尚无合法输入可确定性触发其错误出口的证据；损坏内部终态注入仍未覆盖。
 4. **本轮验证**：SparrowCore Debug 全量 runner 退出码 0；RustReference 锁定验证脚本（格式/工具链检查及 Debug/Release 全套测试）退出码 0。Release C++ 全量 runner 本轮未运行。
+
+### 补充审计（2026-10-21，deadline同刻比较器）
+
+1. Rust `BasicTerminator::kill` 使用`Instant::now() > timeout`；C++ `OptimizationTerminator::ShouldTerminate`对phase deadline使用`steady_clock::now() > *m_PhaseDeadline`。两边同刻均不终止，下一次时钟读数严格晚于deadline才终止。
+2. Rust `new_timeout`与C++ `StartPhase`都在各自入口采样当前时钟并加时长；现有接口没有可注入的统一时钟，不能稳定制造“now恰好等于deadline”的运行fixture。C++零时限测试等待1ms是为越过严格比较点，不能作为等刻运行证据。
+3. **裁决**：比较器的源码语义一致；动态同一瞬间证据缺失不构成已观察到的行为差异，不新增测试时钟抽象。S08继续为“部分”，仍需保留一般错误触发条件映射和未经回调等待的完整时限输入域。
+
+### 补充审计（2026-10-21，顶层错误出口分层盘点）
+
+1. **配置入口**：C++ `OptimizeWithTerminator` 先调用 `SparrowConfig::Validate()`，失败时以 `InvalidInput` 返回，且发生在 seed 派生和任何 listener/observer 回调之前；Rust `optimize` 接收两个裸配置引用，没有对应的顶层统一验证。Rust config 是值结构，部分错误值会在被消费时触发断言、panic或下层失败。该入口差异归 `ERR-CONFIG`；现有正常配置 reference 只证明列出的有效配置，不构成逐字段拒绝行为对齐。
+2. **构造与warm-start**：冷启动Rust `LBFBuilder::construct()?` 返回`ConstructionError { item_idx }`，C++转发构造`Result`错误；已有固定构造失败reference核对item index和失败前零回调，语义证据只限该构造夹具。warm-start的Rust `SPProblem::new(...).expect`/`restore`与C++ `MakeWarmStart` 的`Result`及可能抛出的异常形态不同；15组Rust/C++ Restore配对和三项C++表示防线见S06，不能外推到未列明的损坏snapshot。
+3. **阶段错误通道**：Rust `exploration_phase` 返回`Vec<SPSolution>`，`compression_phase` 返回`SPSolution`，两者都没有`Result`出口；C++ `Explore`与`Compress`返回`Result<...>`，Optimize会立即向上传递阶段错误。Rust侧具体失败可能由正常分支处理、断言或panic表达，C++侧则可能返回结构化错误或抛异常。现有S06探索错误及S07 Compression几何错误fixture只映射已固定的触发条件、失败前状态和回调边界；其余C++ `Result`错误点与Rust panic/断言/正常退化分支没有逐项对应证据。
+4. **终态出口**：Rust完成压缩后直接FINAL报告并返回；C++额外执行`SPProblem::Restore`和独立`Layout::Restore`，两个`Result`失败都转为`Infeasible`，并且FINAL回调异常会阻止正常返回。现有记录已说明它们是内部产物的防御出口，没有合法输入可确定性触发证据；不把损坏内部状态当作公开warm-start契约。
+5. **裁决与范围**：本轮完成S08顶层错误路线的源码分层，未改变生产代码、未运行测试。已固定的构造、S06 Restore和S07几何错误用例继续按其各自工作项计证；之后补充的公开配置入口矩阵已完成共享有效域层面的静态核对，域外值的一般运行行为不作为parity承诺。一般阶段下层错误触发映射仍开放，因此S08仍为“部分”，不把“已盘点源码”表述为“通用错误等价”；后续只在出现新的具体差异、支持输入域变化或上游算法改动时扩展触发fixture。
+
+### 补充审计（2026-10-21，探索池标准差为零）
+
+1. **Rust配置接受行为**：锁定的`Cargo.lock`使用`rand_distr 0.6.0`。`Normal::new(mean, std_dev)`只检查`std_dev.is_finite()`；有限`0.0`和负值均可构造。`Normal::sample`仍抽取`StandardNormal`再经`from_zscore`计算，stddev为0时结果为均值0。`optimizer/mod.rs::optimize`没有统一配置验证；`exploration_phase`只有失败池抽样分支才调用`Normal::new(...).unwrap()`，因此零值配置不会在入口拒绝，是否走到该分支取决于搜索轨迹。
+2. **C++配置拒绝行为**：`SparrowConfig::Validate()`先调用`ExplorationConfig::Validate()`；后者对`solutionPoolDistributionStddev <= 0.0`返回`InvalidInput`。`OptimizeWithTerminator`在seed派生和任何回调前验证整份配置；直接`Explore`也在计算初始metrics/发布报告前验证。现有`TestExploration.cpp`配置检查只断言C++ Validate拒绝0，没有Rust配对。
+3. **类别裁决**：这是C++额外配置前置拒绝，与Rust对有限零/负标准差的库级接受范围不同；Rust不是在对应位置返回另一个错误类型，所以不归入panic→Result载体映射。S01现行有效配置域已明确要求标准差有限且大于0，因此零值及负值均为域外输入；C++的提前拒绝不构成支持域内parity缺口，也不需要作为算法差异修复。
+4. **范围**：本轮只根据锁定Rust依赖源码、S01有效配置域、Rust调用位置、C++校验顺序和现有C++单侧断言完成静态对照；未运行Rust/C++轨迹、未新增测试、未改生产代码。若未来将配置契约扩展到零/负标准差，再用失败池可达的固定布局比较phase/report边界、池抽样结果与后续RNG；当前S08不为该域外配置新增运行fixture。
+
+### 补充审计（2026-10-21，Explore错误向Optimize传播）
+
+1. **已覆盖的阶段内触发**：`ERR-EXPLORE-EMPTY-LARGE`由有效实例`ExplorationEmptyLarge.json`触发；S06的Rust/C++直接阶段reference比较了初始/失败report、pool和RNG trace、失败布局及没有disruption move。Rust `choose().expect(...)` panic；C++ `Explore`返回`Infeasible`，此前状态与错误文本已按该fixture核对。
+2. **顶层源码路径**：Rust `optimize`先报告Exploration phase，再调用`exploration_phase`；该panic不在`mod.rs`捕获，因此不会进入后续compression或FINAL report。C++ `OptimizeWithTerminator`先报告Exploration phase并启动deadline，`Explore`返回错误后在`explored.HasValue()`分支直接返回原错误，也不会进入Compression或FINAL report。
+3. **证据边界**：两边阶段内错误前置状态已有reference，顶层无Compression/FINAL的行为可由直接传播源码确认；新增`OptimizeExploreEmptyLargeRustReference.tsv`与`optimize_forwards_empty_large_panic_after_the_matching_callback_prefix`，使用同一ExplorationEmptyLarge partial warm-start比较Optimize wrapper层完整listener前缀：phase为Exploration，随后为ExplFeas、一次成功分离progress/result、一次失败分离progress/result、ExplInfeas；之后不进入Compression或FINAL。Rust panic与C++ `ErrorCode::Infeasible`错误文案相同。RustReference Debug/Release和MSVC C++ Debug/Release的定向用例均通过，C++入口为`--optimize-empty-large-error`。该证据只闭合此固定触发路径，不代表其他阶段错误或配置入口已普遍等价。
+
+### 补充审计（2026-10-21，配置校验公开入口矩阵）
+
+1. **共享有效域**：沿用S01已声明的搜索配置契约：探索`shrinkStep`有限且在`[0,1]`、池标准差有限且大于0、面积百分位有限且在`[0,1]`、探索时限非负；压缩`shrinkMin/shrinkMax`有限且满足`0 <= min <= max <= 1`、`failureDecay`有限且在`[0,1]`、压缩时限非负；两阶段worker数均大于0。采样数为0及探索`maxConsecutiveFailures=0`的边界已有各自语义，不属于非法配置。Rust `Duration`本身不表达负时限。C++ constructor与`OptimizationTerminator`子配置还包含Rust `optimize`签名中没有的扩展字段，不能把这些扩展的拒绝规则伪装为共享字段的差异。
+2. **入口矩阵**：
+
+   | C++公开入口 | 配置校验顺序 | 错误前副作用/回调边界 | Rust对应 |
+   |---|---|---|---|
+   | `Optimize(instance, config, listener, observer)` | 构造本地terminator并`Start()`，随后由`OptimizeWithTerminator`调用完整`SparrowConfig::Validate()`；聚合校验按constructor→exploration→compression→terminator顺序 | 校验先于有效seed生成、构造、listener/observer回调；本地terminator的`Start()`不可由调用方观察 | `optimize`没有聚合`Validate`，直接使用调用方传入的两个phase config |
+   | `Optimize(instance, config, terminator, listener, observer)` | 同一完整`SparrowConfig::Validate()` | 校验先于seed、构造、listener/observer回调；函数不启动或改写调用方terminator | 同上；Rust terminator由调用方实现，phase config在各自阶段被消费 |
+   | `Explore(...)` | 只校验`ExplorationConfig` | 早于初始metrics计算及报告/分离回调，不调用`StartPhase` | `exploration_phase`不返回`Result`也不做聚合配置校验；输入值在算法路径中被直接消费 |
+   | `Compress(..., initialSolution, ...)`及双状态重载 | 单状态重载委托到双状态重载；后者只校验`CompressionConfig` | 早于初始metrics、snapshot restore及报告/分离回调 | `compression_phase`直接消费`CompressionConfig`，没有`Result`校验出口 |
+
+3. **范围裁决**：入口顺序与可观察回调边界由当前C++源码静态核对；S01固定reference验证了共享有效域的闭端点及零采样/零失败上限语义。独立构造器与LBF求解器的配置入口分别归S03/L1，本矩阵只覆盖顶层Optimize及其直接阶段API。本轮没有发现共享有效域内的配置拒绝差异，因此不添加域外配置的运行时对拍，也不声称Rust对非法值与C++ `InvalidInput`具有通用等价。空离散旋转等由内部构造、但Importer拒绝的状态同样不纳入有效输入域。S08仍为“部分”，剩余缺口是未逐项定位的有效输入阶段错误触发条件及一般阶段错误传播，不是配置字段的共享有效域接受矩阵。

@@ -7,9 +7,12 @@ use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
 use sparrow::config::DEFAULT_SPARROW_CONFIG;
 use sparrow::optimizer::explore::{ExplorationTraceEvent, exploration_phase_with_trace};
+use sparrow::optimizer::optimize;
 use sparrow::optimizer::separator::Separator;
 use sparrow::sample::search::SampleConfig;
-use sparrow::util::listener::{ReportType, SolutionListener};
+use sparrow::util::listener::{
+    OptimizationPhase, ReportType, SeparationProgress, SeparationResult, SolutionListener,
+};
 use sparrow::util::terminator::Terminator;
 use std::cell::Cell;
 use std::fmt::Write as _;
@@ -191,5 +194,134 @@ fn unplaced_cutoff_item_leaves_empty_large_pool_and_panics_before_moves() {
         poses,
         vec![(1, 0.0, 1.5, 2.5), (2, 0.0, 2.5, 2.5)],
         "the caught panic must leave the separator at its final failed snapshot"
+    );
+}
+
+#[derive(Default)]
+struct OptimizeTraceListener {
+    events: Vec<String>,
+}
+
+impl SolutionListener for OptimizeTraceListener {
+    fn report(&mut self, report: ReportType, solution: &SPSolution) {
+        let label = match report {
+            ReportType::ExplFeas => "expl_feas",
+            ReportType::ExplInfeas => "expl_infeas",
+            ReportType::ExplImproving => "expl_improving",
+            ReportType::CmprFeas => "cmpr_feas",
+            ReportType::Final => "final",
+        };
+        self.events.push(format!(
+            "report\t{label}\t{}",
+            solution.layout_snapshot.placed_items.len()
+        ));
+    }
+
+    fn report_phase(&mut self, phase: OptimizationPhase) {
+        let label = match phase {
+            OptimizationPhase::Exploration => "exploration",
+            OptimizationPhase::Compression => "compression",
+        };
+        self.events.push(format!("phase\t{label}"));
+    }
+
+    fn report_separation_progress(&mut self, _progress: SeparationProgress) {
+        self.events.push("separation_progress".to_owned());
+    }
+
+    fn report_separation_result(&mut self, result: SeparationResult) {
+        self.events.push(format!(
+            "separation\t{}\t{}\t{}\t{}",
+            u8::from(result.success),
+            result.total_evals,
+            result.total_moves,
+            result.iterations
+        ));
+    }
+
+    fn report_compression_progress(&mut self, _shrink_step: f32) {
+        self.events.push("compression_progress".to_owned());
+    }
+}
+
+#[test]
+fn optimize_forwards_empty_large_panic_after_the_matching_callback_prefix() {
+    let (external, _) =
+        sparrow::util::io::read_spp_input(Path::new("../Fixtures/ExplorationEmptyLarge.json"))
+            .expect("read empty-large fixture");
+    let defaults = DEFAULT_SPARROW_CONFIG;
+    let importer = Importer::new(
+        defaults.cde_config,
+        defaults.poly_simpl_tolerance,
+        defaults.narrow_concavity_cutoff_ratio,
+    );
+    let instance = import_instance(&importer, &external).expect("import fixture");
+    let mut problem = SPProblem::new(instance.clone()).expect("create warm-start problem");
+    problem.change_strip_width(8.0).expect("set initial width");
+    problem.place_item(SPPlacement {
+        item_idx: 1,
+        d_transf: DTransformation::new(0.0, (1.5, 2.5)),
+    });
+    problem.place_item(SPPlacement {
+        item_idx: 2,
+        d_transf: DTransformation::new(0.0, (6.5, 2.5)),
+    });
+    let initial = problem.save();
+
+    let mut config = defaults;
+    config.expl_cfg.shrink_step = 0.5;
+    config.expl_cfg.large_item_ch_area_cutoff_percentile = 0.75;
+    config.expl_cfg.max_conseq_failed_attempts = None;
+    config.expl_cfg.separator_config.strike_limit = 0;
+    config.expl_cfg.separator_config.n_workers = 1;
+    config.expl_cfg.separator_config.sample_config = SampleConfig {
+        n_container_samples: 0,
+        n_focussed_samples: 0,
+        n_coord_descents: 0,
+    };
+
+    let mut listener = OptimizeTraceListener::default();
+    let mut terminator = StopAfterIterations {
+        calls: Cell::new(0),
+        limit: 2,
+    };
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        optimize(
+            instance,
+            Xoshiro256PlusPlus::seed_from_u64(42),
+            &mut listener,
+            &mut terminator,
+            &config.expl_cfg,
+            &config.cmpr_cfg,
+            Some(&initial),
+        )
+    }));
+
+    let payload = outcome.expect_err("Rust Optimize must propagate the Explore panic");
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .expect("empty-large panic payload must be a string");
+    assert_eq!(message, "[DSRP] failed to choose first item");
+
+    if std::env::var_os("SPARROW_PRINT_OPTIMIZE_EMPTY_LARGE_REFERENCE").is_some() {
+        for event in &listener.events {
+            println!("{event}");
+        }
+        return;
+    }
+    let expected = include_str!("../../Fixtures/OptimizeExploreEmptyLargeRustReference.tsv")
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listener
+            .events
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        expected,
+        "Rust Optimize callback prefix before the caught Explore panic changed"
     );
 }

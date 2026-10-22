@@ -4208,6 +4208,35 @@ bool TestTopLevelSeedOptimizeCompressMatchesRustReference(
          static_cast<double>(config.compression.separator.noImprovementLimit)}});
     listener.RecordSolution("initial", initialSolution);
 
+#ifndef NDEBUG
+    if (seed == 4U && compressionWorkerCount == 1U)
+    {
+        try
+        {
+            static_cast<void>(sparrow::Optimize(
+                instance, config, terminator, &listener));
+        }
+        catch (const std::exception& error)
+        {
+            const bool matchesRustAssertion =
+                std::string{error.what()}.find(
+                    "weighted loss should never increase")
+                != std::string::npos;
+            if (!matchesRustAssertion)
+            {
+                output << "Unexpected seed-4 Debug exception: "
+                       << error.what() << '\n';
+            }
+            return Expect(matchesRustAssertion,
+                          output,
+                          "seed-4 Debug worker must surface Rust's weighted-loss assertion");
+        }
+        return Expect(false,
+                      output,
+                      "seed-4 Debug worker must surface Rust's weighted-loss assertion");
+    }
+#endif
+
     const auto actual = sparrow::Optimize(instance, config, terminator, &listener);
     if (!Expect(actual.HasValue(),
                 output,

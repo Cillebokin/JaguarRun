@@ -5,6 +5,7 @@
 
 #ifndef NDEBUG
 #include <cassert>
+#include <stdexcept>
 #endif
 
 #include <algorithm>
@@ -262,6 +263,18 @@ sparrow::Result<WorkerRoundResult> RunWorkerRound(
         }
 #ifndef NDEBUG
         tracker.DebugAssertMatchesLayout(layout.Value());
+        const float oldLoss = tracker.ItemLoss(index);
+        if (!(oldLoss > 0.0F))
+        {
+            throw std::domain_error(
+                "Item should be colliding, but has no loss");
+        }
+        const float oldWeightedLoss = tracker.WeightedItemLoss(index);
+        if (!(oldWeightedLoss > 0.0F))
+        {
+            throw std::domain_error(
+                "Item should be colliding, but has no weighted loss");
+        }
 #endif
         ++moveCount;
 
@@ -295,6 +308,15 @@ sparrow::Result<WorkerRoundResult> RunWorkerRound(
             return sparrow::Result<WorkerRoundResult>::FromError(
                 trackerUpdated.GetError());
         }
+#ifndef NDEBUG
+        const float newWeightedLoss = tracker.WeightedItemLoss(index);
+        if (!(newWeightedLoss <= oldWeightedLoss * 1.001F))
+        {
+            throw std::domain_error(
+                "weighted loss should never increase");
+        }
+        tracker.DebugAssertMatchesLayout(layout.Value());
+#endif
     }
 
     WorkerRoundResult result{

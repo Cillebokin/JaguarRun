@@ -1931,6 +1931,22 @@ fn run_offset_boundary_oracle() {
         ShapeModifyMode::Inflate,
         0.25,
     );
+    let narrow_notch = polygon(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (6.0, 10.0),
+        (6.0, 9.9),
+        (4.0, 9.9),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ]);
+    print_offset_shape_values(
+        "offset.finite.narrow_notch_inflate_quarter",
+        &narrow_notch,
+        ShapeModifyMode::Inflate,
+        0.25,
+    );
     let oblique_pentagon = polygon(&[(0.0, 0.0), (8.0, 0.0), (10.0, 5.0), (5.0, 9.0), (-1.0, 5.0)]);
     print_offset_shape_values(
         "offset.finite.oblique_pentagon_inflate",

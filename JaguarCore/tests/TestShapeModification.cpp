@@ -119,8 +119,11 @@ void runShapeModificationTests()
     const auto rustNotchInflated = jaguar::OffsetShape(
         narrowNotch.Value(), jaguar::ShapeModifyMode::Inflate, 0.25);
     assert(rustNotchInflated.HasValue());
-    assert(rustNotchInflated.Value().VertexCount() == 104);
-    assert(std::abs(rustNotchInflated.Value().Area() - 110.019035339355) <
+    // Rust 真理见 offset.finite.narrow_notch_inflate_quarter（pinned
+    // jagua-rs f5e2b5f：90 顶点、面积 110.023910522）；旧期望 104/
+    // 110.019035339355 来自过时参考，已按差分矩阵键更新。
+    assert(rustNotchInflated.Value().VertexCount() == 90);
+    assert(std::abs(rustNotchInflated.Value().Area() - 110.023910522) <
            1.0e-3);
     const auto closed = jaguar::CloseNarrowConcavities(
         narrowNotch.Value(), jaguar::ShapeModifyMode::Inflate, {0.2, 0.01});

@@ -1470,6 +1470,17 @@ void runOffsetBoundaryDifferentialTests()
         reference, "offset.finite.collinear_vertex_square_inflate",
         collinearVertexSquareFirst.Value());
 
+    const auto narrowNotch = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {6.0, 10.0},
+        {6.0, 9.9}, {4.0, 9.9}, {4.0, 10.0}, {0.0, 10.0}});
+    assert(narrowNotch.HasValue());
+    const auto narrowNotchFirst = jaguar::OffsetShape(
+        narrowNotch.Value(), jaguar::ShapeModifyMode::Inflate, 0.25);
+    assert(narrowNotchFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.narrow_notch_inflate_quarter",
+        narrowNotchFirst.Value());
+
     expectOffsetError(
         "offset.boundary.positive_infinity",
         jaguar::OffsetShape(
@@ -1793,9 +1804,9 @@ void runOffsetBoundaryDifferentialTests()
     const auto narrowBridgeFirst = jaguar::OffsetShape(
         narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 0.6);
     assert(narrowBridgeFirst.HasValue());
-    expectRustOffsetPolygon(reference,
-                            "offset.finite.narrow_bridge_deflate.component0",
-                            narrowBridgeFirst.Value());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.narrow_bridge_first_deflate",
+        narrowBridgeFirst.Value());
     const auto narrowBridgeTouching = jaguar::OffsetShapes(
         narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 1.0);
     assert(narrowBridgeTouching.HasValue());
@@ -1887,7 +1898,7 @@ void runOffsetBoundaryDifferentialTests()
     const auto combFirst = jaguar::OffsetShape(
         comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.1);
     assert(combFirst.HasValue());
-    expectRustOffsetPolygon(reference, "offset.finite.comb_deflate.component0",
+    expectRustOffsetPolygon(reference, "offset.finite.comb_first_deflate",
                             combFirst.Value());
     const auto combExactCollapse = jaguar::OffsetShapes(
         comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);

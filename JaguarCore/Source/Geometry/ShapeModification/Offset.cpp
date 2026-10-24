@@ -2,9 +2,13 @@
 
 #include "StraightSkeleton.h"
 
+#include "JaguarCore/Geometry/ShapeModification/OverlayExtract.h"
+#include "JaguarCore/Geometry/ShapeModification/OverlaySplit.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -1318,6 +1322,19 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
         sections.push_back({a, b, *aTop, *bTop, direction});
     }
 
+    // Segment soup mirroring i_overlay's OutlineBuilder::build output
+    // (section top segments, bevel/arc join segments, inner-corner spokes),
+    // i.e. the directed segment set the real graph extraction consumes.
+    std::vector<std::pair<OverlayPoint, OverlayPoint>> soup;
+    soup.reserve(sections.size() * 4U);
+    const auto appendSoupSegment = [&soup](const OverlayPoint& from,
+                                           const OverlayPoint& to) {
+        if (from != to)
+            soup.push_back({from, to});
+    };
+    for (const OverlaySection& section : sections)
+        appendSoupSegment(section.aTop, section.bTop);
+
     std::vector<OverlayPoint> outline;
     outline.reserve(source.size() * 18U);
     const auto appendOutlinePoint = [&outline](const OverlayPoint& point) {
@@ -1353,6 +1370,8 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
         {
             // i_overlay closes an inner corner through the source vertex;
             // intersecting the offset sections here changes the segment set.
+            appendSoupSegment(previous.b, previous.bTop);
+            appendSoupSegment(next.a, next.aTop);
             if (previous.bTop != previous.b)
                 appendOutlinePoint(previous.b);
             if (next.aTop != next.a)
@@ -1367,6 +1386,7 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
                            previous.direction.y * next.direction.y;
         if (limitDotProduct < dot)
         {
+            appendSoupSegment(previous.bTop, next.aTop);
             appendOutlinePoint(next.aTop);
             continue;
         }
@@ -1402,12 +1422,16 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
                 return std::nullopt;
             if (last != *converted)
             {
+                appendSoupSegment(last, *converted);
                 appendOutlinePoint(*converted);
                 last = *converted;
             }
         }
         if (last != next.aTop)
+        {
+            appendSoupSegment(last, next.aTop);
             appendOutlinePoint(next.aTop);
+        }
     }
 
     if (outline.size() < 3U)
@@ -1509,6 +1533,67 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
     const auto polygon = detail::createRustImportedOffsetPolygon(std::move(points));
     if (polygon.HasValue())
         return std::vector<SimplePolygon>{polygon.Value()};
+
+    // The direct ring import failed: run the faithful segment-soup graph
+    // extraction (i_overlay build/split/extract chain) on the same directed
+    // segment set the Rust pipeline consumes. The CCW source ring here
+    // corresponds to the branch OutlineSolver::build_overlay takes with a
+    // negative int path area (mesh/outline/offset.rs:294-299): FillRule
+    // Positive with CCW output, OverlayRule::Subject.
+    {
+        std::vector<overlay::OverlaySegment> segments;
+        segments.reserve(soup.size());
+        for (const auto& soupSegment : soup)
+        {
+            segments.push_back({{soupSegment.first.x, soupSegment.first.y},
+                                {soupSegment.second.x, soupSegment.second.y},
+                                overlay::packShapeCount(1, 0)});
+        }
+        try
+        {
+        overlay::splitSegments(segments);
+        std::fprintf(stderr, "[engine] split ok: %zu segments\n",
+                     segments.size());
+        const auto extracted = overlay::extractSubjectContours(
+            std::move(segments), true, false, false, 0U);
+        std::fprintf(stderr, "[engine] extract ok: %zu contours\n",
+                     extracted.size());
+        if (!extracted.empty())
+        {
+            std::vector<SimplePolygon> components;
+            components.reserve(extracted.size());
+            for (const overlay::ExtractedContour& contour : extracted)
+            {
+                if (contour.is_hole)
+                    continue;
+                std::vector<Point2d> contourPoints;
+                contourPoints.reserve(contour.points.size());
+                for (const overlay::IntPoint& point : contour.points)
+                {
+                    contourPoints.push_back(adapter->toFloat(
+                        OverlayPoint{point.x, point.y}));
+                }
+                const auto imported = detail::createRustImportedOffsetPolygon(
+                    std::move(contourPoints));
+                if (!imported.HasValue())
+                    return std::nullopt;
+                components.push_back(imported.Value());
+            }
+            if (!components.empty())
+                return components;
+        }
+        }
+        catch (const std::exception& error)
+        {
+            std::fprintf(stderr, "[engine] exception: %s (soup=%zu)\n",
+                         error.what(), soup.size());
+        }
+        catch (...)
+        {
+            std::fprintf(stderr, "[engine] unknown exception (soup=%zu)\n",
+                         soup.size());
+        }
+    }
 
     const auto contours = resolveSelfIntersectingOutline(
         outline, sourceHasCollinearVertex);

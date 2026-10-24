@@ -84,6 +84,8 @@ SOURCES += \
     $$PWD/Source/Geometry/OriginalShape/OriginalShape.cpp \
     $$PWD/Source/Geometry/ShapeModification/Simplify.cpp \
     $$PWD/Source/Geometry/ShapeModification/Offset.cpp \
+    $$PWD/Source/Geometry/ShapeModification/OverlaySplit.cpp \
+    $$PWD/Source/Geometry/ShapeModification/OverlayExtract.cpp \
     $$PWD/Source/Geometry/ShapeModification/StraightSkeleton.cpp \
     $$PWD/Source/Geometry/ShapeModification/NarrowConcavity.cpp \
     $$PWD/Source/Entities/Item.cpp \

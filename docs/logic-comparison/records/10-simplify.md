@@ -167,3 +167,26 @@ simplify 算法（角点分类→候选生成→按面积增量稳定排序→�
 - 全文件 550 行无 `#[cfg(test)]`（RustOracle 工具承担 oracle 职责）。判定：不适用。
 
 补充结论：10 记录覆盖完整。三段记录（10/11/12）对 550 行的行段分配核查完毕：**无缝隙遗漏**；ShapeModifyMode/Config 的 derive 契约与 affected 判定的 Point 相等语义、稳定排序联动均已确认一致。
+
+### E1 RustF32调用点与实际验收预算复核（2026-10-22）
+
+本节针对JaguarCore调用点偏差预算，参考Rust源取自`JaguarCore/Tools/RustOracle/Cargo.lock`锁定的jagua-rs revision`f5e2b5ffd14931f17a20ce283a2122e877953ceb`，没有用本地fork推断pinned行为。
+
+**算法内的数值判定并不使用统一的`AlmostEqualRustF32`容差：**
+
+- `cornerKind`先把点收窄为f32，再以叉积`<0`、`>0`分类，等于零才归为Collinear；没有epsilon/ULP带。
+- 交点参数`t/u`以f32计算，分母只按`==0`处理，交点资格用严格`<0`判断。
+- 候选面积增量、原始面积、简化后面积和面积变化率都在f32域计算；候选按Rust`OrderedFloat`稳定排序，C++按同值稳定的`std::stable_sort`排序，选取首个有效候选。相同面积键不会通过FPA容差折叠成同一键。
+- 面积守卫是`area_delta <= max_area_change_ratio`的严格f32比较；`ShapeModificationValid`另以`diameter * 1e-6F`为边界并使用严格距离`<`，边交叉/包含最终输出布尔值。它们是算法阈值和谓词规则，不是最终多边形坐标的容差预算。
+- 若中间f32运算产生非有限值，候选排序键及终局面积守卫仍需单独核对；本节的固定输入记录不能证明所有有限坐标的中间运算都保持有限。
+
+**当前测试实际覆盖：**
+
+| 测试入口 | 当前断言 | Rust数值预算判定 |
+|---|---|---|
+| `CompareGeometry.cpp::runB2ShapeModificationDifferentialTests` | 通过`shape_modification_b2.txt`对比三组`CloseNarrowConcavities`和六组`SimplifyShape`固定输出；Simplify覆盖窄凹口及凸bevel的Inflate/Deflate，以及冗余共线点在零阈值和负最小次正规阈值下的输出 | Simplify向量长度精确相等，顶点数、面积和有序坐标使用`AlmostEqualRustF32`；该六行矩阵是pinned逐输出证据，但不覆盖其他形状、阈值、候选排序并列组合和错误出口。 |
+| `CompareGeometry.cpp::runGeometryDifferentialTests` | Inflate/Deflate各检查`HasValue`、顶点数不增加、`ShapeModificationValid`为true | 只有结构和不变式，无Rust期望几何坐标/面积预算。 |
+| `TestShapeModification.cpp`冗余点、NaN/Inf/负阈值用例 | 冗余点结果顶点数为4；NaN阈值只断言顶点数不变；Inf阈值只断言成功；负阈值比较原形面积差`<1e-12` | 这些是C++局部契约断言；除源码注释说明Rust不拒绝负值外，没有同revision数值fixture作逐项对比。 |
+| `TestShapeModification.cpp`bevel固定期望 | 顶点坐标绝对差`<1e-5`、面积绝对差`<1e-4`，顶点数量精确相等 | 这是当前最明确的Simplify坐标/面积阈值，但测试代码没有标注其pinned Rust revision或fixture生成证据，故只能登记为固定期望阈值，不能视为完整Rust差分预算。 |
+
+**结论**：Simplify的源级f32决策路径已有逐函数映射，且排序/面积门槛并非近似比较。新增的六行pinned Rust fixture覆盖了上述固定形状与阈值，并由B2差分入口消费；它为这些样例建立了`AlmostEqualRustF32`输出预算，不代表其他简化分支、错误出口或全部输入域已核。因此Simplify仍是局部输出预算已建立、完整范围未闭合，E1保持部分状态。

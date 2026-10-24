@@ -284,4 +284,50 @@ void runIoTests()
     assert(!rejectedNonFiniteTransform.HasValue());
     assert(rejectedNonFiniteTransform.GetError().code ==
            jaguar::ErrorCode::SnapshotMismatch);
+
+    jaguar::ExternalSPSolution f32OverflowTransformSolution =
+        nonFiniteTransformSolution;
+    f32OverflowTransformSolution.layout.placedItems[0]
+        .transformation.translation.x = 3.5e38;
+    const auto rejectedF32OverflowTransform = makeImporter().ImportSPSolution(
+        solutionInstance.Value(), f32OverflowTransformSolution);
+    assert(!rejectedF32OverflowTransform.HasValue());
+    assert(rejectedF32OverflowTransform.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
+
+    jaguar::ExternalSPSolution f32OverflowRotationSolution =
+        nonFiniteTransformSolution;
+    f32OverflowRotationSolution.layout.placedItems[0]
+        .transformation.translation.x = 2.0;
+    f32OverflowRotationSolution.layout.placedItems[0]
+        .transformation.rotationDegrees = 3.5e38;
+    const auto rejectedF32OverflowRotation = makeImporter().ImportSPSolution(
+        solutionInstance.Value(), f32OverflowRotationSolution);
+    assert(!rejectedF32OverflowRotation.HasValue());
+    assert(rejectedF32OverflowRotation.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
+
+    jaguar::ExternalSPSolution negativeF32OverflowTranslationSolution =
+        nonFiniteTransformSolution;
+    negativeF32OverflowTranslationSolution.layout.placedItems[0]
+        .transformation.translation.x = -3.5e38;
+    const auto rejectedNegativeF32OverflowTranslation =
+        makeImporter().ImportSPSolution(
+            solutionInstance.Value(), negativeF32OverflowTranslationSolution);
+    assert(!rejectedNegativeF32OverflowTranslation.HasValue());
+    assert(rejectedNegativeF32OverflowTranslation.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
+
+    jaguar::ExternalSPSolution negativeF32OverflowRotationSolution =
+        nonFiniteTransformSolution;
+    negativeF32OverflowRotationSolution.layout.placedItems[0]
+        .transformation.translation.x = 2.0;
+    negativeF32OverflowRotationSolution.layout.placedItems[0]
+        .transformation.rotationDegrees = -3.5e38;
+    const auto rejectedNegativeF32OverflowRotation =
+        makeImporter().ImportSPSolution(
+            solutionInstance.Value(), negativeF32OverflowRotationSolution);
+    assert(!rejectedNegativeF32OverflowRotation.HasValue());
+    assert(rejectedNegativeF32OverflowRotation.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
 }

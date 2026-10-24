@@ -56,14 +56,14 @@
   - **度→弧度**：Rust `f32::to_radians()`（= `self * (π/180)` f32 域）↔ C++ `degrees * (pi / 180.0F)` 后升 double（cpp:98-102）。一致。
 
 ### `import_simple_polygon`（Rust 247-260 行）
-- C++ 对应：`Importer::ImportSimplePolygon`（Importer.cpp:238-266）。
-- 判定：输入接受边界一致；显式检查位置和错误诊断不同。
+- C++ 对应：`Importer::ImportSimplePolygon`（Importer.cpp:223-251）。
+- 判定：有限输入下的去闭合、连续重复点消除和后续构造路径一致；非有限顶点的整体接受/失败契约未证。
 - 证据：共同的步骤：
-  1. 首尾相同去尾点：`points.len() > 1 && points[0] == points[len-1]` → pop（import.rs:250-252）↔ `points.size() > 1 && points.front() == points.back()` → pop_back（cpp:247-248）。
-  2. 连续重复顶点消除：`eliminate_degenerate_vertices(&mut points)`（import.rs:254）↔ cpp:250-263 内联同算法（rustFpaEqual 判等、倒序删除）。
-  3. `SPolygon::new(points)` ↔ `SimplePolygon::Create(std::move(points))`（cpp:265）。
-  - Rust 在第 2 步后用 `unique()` 显式拒绝非连续重复，并返回 `Simple polygon has non-consecutive duplicate vertices`（import.rs:256-258）。C++ 没有同一层检查，但随后 `SimplePolygon::Create` 会在自交检查前逐对比较所有顶点（SimplePolygon.cpp:217-223），所以同一重复顶点也会被拒绝。对 `[A,B,A,C]` 等输入，两侧都是失败；差异是失败位置和诊断（Rust `anyhow` 文案 vs C++ `InvalidPolygon` / `simple polygon contains duplicate points`），不是接受边界。Rust oracle 与 C++ `ImportItem` 回归用例确认这一点。
-  - 另：C++ 入口先把每个坐标 `double→float→double` 收窄（cpp:242-246），模拟 Rust f32 输入域；Rust 天然 f32。一致。
+  1. 首尾相同去尾点：`points.len() > 1 && points[0] == points[len-1]` → pop（import.rs:250-252）↔ `points.size() > 1 && points.front() == points.back()` → pop_back（cpp:232-233）。
+  2. 连续重复顶点消除：`eliminate_degenerate_vertices(&mut points)`（import.rs:254）↔ cpp:235-248 内联同算法（rustFpaEqual 判等、倒序删除）。
+  3. `SPolygon::new(points)` ↔ `SimplePolygon::Create(std::move(points))`（cpp:250）。
+  - Rust 在第 2 步后用 `unique()` 显式拒绝非连续重复，并返回 `Simple polygon has non-consecutive duplicate vertices`（import.rs:256-258）。C++ 没有同一层检查，但随后 `SimplePolygon::Create` 会在自交检查前逐对比较所有顶点（SimplePolygon.cpp:217-223），所以同一重复顶点也会被拒绝。对 `[A,B,A,C]` 等已核输入，两侧都是失败；差异是失败位置和诊断（Rust `anyhow` 文案 vs C++ `InvalidPolygon` / `simple polygon contains duplicate points`），不是该重复点场景的接受边界。Rust oracle 与 C++ `ImportItem` 回归用例确认这一点。
+  - 另：C++ 入口先把每个坐标 `double→float→double` 收窄（cpp:227-231），模拟 Rust f32 输入域；Rust 天然 f32。一致。
 
 ### `centering_transformation`（Rust 262-267 行）
 - C++ 对应：`ImportItem` 内联 `Transform2d::FromRotationTranslation(0.0, {-center.x, -center.y})`（Importer.cpp:417-420）。
@@ -79,33 +79,38 @@ Transformation::empty()
     .transform_from_decomposed(ext_transf)
     .decompose()
 ```
-（import.rs:281-285，注释"1. undo pre-transform, 2. do the absolute transformation"）↔ C++ `original.preTransform.InverseRustF32().FollowedByRustF32(externalTransform)`（cpp:150）。矩阵语义：`T_ext ∘ T_pre⁻¹`（先逆预变换再施加外部变换），双侧一致。C++ 检查非有限输入并返回 `SnapshotMismatch`（cpp:137-143）；Rust 不做同层校验，但 `DTransformation` 的 `NotNan` 构造或后续矩阵运算会 panic。定向 oracle 对 NaN/Infinity 变换在 Rust Debug 和 Release 均观察到 panic；因此两侧都不产生成功结果，差异是 C++ `Result` 错误通道与 Rust panic 通道。
+（import.rs:281-285，注释"1. undo pre-transform, 2. do the absolute transformation"）↔ C++ `original.preTransform.InverseRustF32().FollowedByRustF32(externalTransform)`（cpp:150）。矩阵语义：`T_ext ∘ T_pre⁻¹`（先逆预变换再施加外部变换），有限输入下公式相同。类型化C++ `ImportSPSolution`检查f32收窄后的非有限角度/平移并返回 `SnapshotMismatch`（cpp:116-135）；Rust不做同层校验：NaN在`DTransformation::new`触发panic，Inf旋转在矩阵构造中触发panic。对Inf平移，静态追到`ImportSPSolution`的完整类型化调用链：`DTransformation::new`允许Inf通过；随后`ext_to_int_transformation`调用`transform_from_decomposed`/`rotate_translate`，`dot_prod`计算旋转矩阵时包含`Inf * 0`，结果NaN由`NotNan`运算拒绝并触发panic，发生在`prob.place_item`之前。因此类型化Rust `import_solution`不会将该情况作为`Result`错误返回。该边界也可由JSON输入触发：当前锁定依赖未启用`serde_json/float_roundtrip`，有限JSON数值`3.5e38`先解析为有限f64，再经serde的f32 visitor窄化为`+Inf`并进入Rust导入panic路径；C++ `strtod`虽读到有限double，但`numberValue`随即收窄为f32并检查有限性，JSON入口在Importer之前返回`SerializationFailure`（JsonCodec.cpp:460-467,716-727,1270-1287；Importer.cpp:563-569）。因此同一JSON输入两侧失败阶段与错误通道不同；若通过类型化C++ `ExternalSPSolution`直接传入该有限double，则Importer返回`SnapshotMismatch`。Rust panic点、JSON可达性和C++解析出口已有本轮定向运行证据，详细结果见测试记录；既有NaN/Inf角度与形状fixture仍不能外推为所有非有限输入的统一结果。
 
 ### `eliminate_degenerate_vertices`（Rust 287-311 行）
-- C++ 对应：`Importer::ImportSimplePolygon` 内联段（Importer.cpp:250-263）。
+- C++ 对应：`Importer::ImportSimplePolygon` 内联段（Importer.cpp:235-248）。
 - 判定：一致。
-- 证据：双侧算法：遍历 i，j=(i+1)%n，`approx_eq!(f32, p_i.0, p_j.0) && approx_eq!(f32, p_i.1, p_j.1)` 标记 i（import.rs:290-297）↔ `rustFpaEqual(points[i], points[next])`（cpp:254-256，分量级 rustFpaEqual，即 float_cmp approx_eq 的复刻，见记录 38）；倒序排序索引后逐个 `points.remove(index)`（import.rs:300-310）↔ `std::sort(duplicateVertices.rbegin()...)` + `points.erase(...)`（cpp:258-263）。C++ 缺 Rust 的 `debug!` 日志输出（cpp 无日志设施差异）。Rust `index < points.len()` 守卫 ↔ C++ `if (index < points.size())`（cpp:261）。
+- 证据：双侧算法：遍历 i，j=(i+1)%n，`approx_eq!(f32, p_i.0, p_j.0) && approx_eq!(f32, p_i.1, p_j.1)` 标记 i（import.rs:290-297）↔ `rustFpaEqual(points[i], points[next])`（cpp:237-241，分量级包装，直接委托公共比较器；非有限边界见记录38）；倒序排序索引后逐个 `points.remove(index)`（import.rs:300-310）↔ `std::sort(duplicateVertices.rbegin()...)` + `points.erase(...)`（cpp:243-248）。C++ 缺 Rust 的 `debug!` 日志输出（cpp 无日志设施差异）。Rust `index < points.len()` 守卫 ↔ C++ `if (index < points.size())`（cpp:246）。
 
 ## 差异汇总表
 
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
-| 1 | 非连续重复顶点检查 | 接受边界一致，诊断不同 | 两侧均拒绝；Rust 在 importer 层给出专用错误，C++ 由 `SimplePolygon::Create` 返回 `InvalidPolygon` | import.rs:256-258 vs Importer.cpp:250-265 + SimplePolygon.cpp:217-223 |
+| 1 | 非连续重复顶点检查 | 接受边界一致，诊断不同 | 两侧均拒绝；Rust 在 importer 层给出专用错误，C++ 由 `SimplePolygon::Create` 返回 `InvalidPolygon` | import.rs:256-258 vs Importer.cpp:235-250 + SimplePolygon.cpp:217-223 |
 | 2 | `assert!`（zone 质量上限）→ `Result` 错误 | 基本等价 | C++ 所有构建下返回 `InvalidInput`；Rust 仅 debug 构建中止。`N_QUALITIES=10` ↔ `MAX_QUALITIES=10` 值一致但常量来源不同 | import.rs:108-111 vs Importer.cpp:19,457-461 |
 | 3 | `unimplemented!`（zone Polygon/MultiPolygon、container MultiPolygon）→ `UnsupportedShape` 错误 | 基本等价 | panic 通道改 Result 通道；消息文案不同 | import.rs:145,165,168 vs Importer.cpp:315,320-325 |
 | 4 | `with_min_item_separation` 形态：链式 builder vs 入口 scoped 导入器 | 一致 | 校验（有限非负）与 offset=separation/2 公式双侧一致；C++ `ShapeConfig()` 在 separation==0 时保留调用方 offset，Rust 总是置 None（C++ 额外自由度） | import.rs:45-54 vs Importer.cpp:114-122,230-236 |
 | 5 | Container 外部 id | C++ 额外 | Rust `Container::new` 无 id；C++ `Container::Create(external.id, ...)` 保留（供 BPP 导出用） | import.rs:196 vs Importer.cpp:495-496 |
-| 6 | `ext_to_int_transformation` 非有限变换 | 失败边界一致，失败通道不同 | C++ 返回 `SnapshotMismatch`；Rust `DTransformation` / 矩阵中的 `NotNan` 运算会 panic。NaN/Infinity 没有静默成为成功解 | import.rs:274-285 + d_transformation.rs:20-26 + transformation.rs:146-153 vs Importer.cpp:131-151；Debug/Release oracle |
+| 6 | `ext_to_int_transformation` 非有限变换 | 定向运行确认同一JSON输入Rust解析后panic、C++解析时返回`SerializationFailure`；类型化入口出口也不同 | C++ JSON的`numberValue`将有限double窄化为f32并在非有限时拒绝；类型化C++ Importer返回 `SnapshotMismatch`。Rust serde默认解析`3.5e38`为f32 Inf，再于矩阵乘法中由`Inf * 0 → NaN`触发`NotNan` panic，早于放置项 | import.rs:274-285、spp/io/import.rs:63-79、ext_repr.rs:171-184、transformation.rs:56-57,146-193、serde_json 1.0.151 vs JsonCodec.cpp:460-467,716-727,1270-1287、Importer.cpp:116-135,519-551；Rust Debug/Release oracle exit 0；MSVC14.29 C++ Release全量runner exit 0，覆盖`TestIo`/`TestJsonCodec` |
 | 7 | `import_rotation` 全流程（65536 上限、stepped 展开、[0.0]→None、rem_euclid 归一化、f32 弧度换算） | 一致 | 错误消息文案逐一相同；`rem_euclid(360)%360` ↔ `fmod+fmod` 三步等价 | import.rs:200-245 vs Importer.cpp:327-397 |
 | 8 | item/container 形状四分支 + Inflate/Deflate + 中心化 pre_transform | 一致 | Rectangle f32 域校验、holes 拒绝（item）/忽略（container outer）、MultiPolygon 拒绝均一致 | import.rs:60-133 vs Importer.cpp:268-316 |
 | 9 | holes→quality 0 合并 | 一致 | `shapes_inferior_qzones[0].extend(holes)` ↔ `grouped[0].push_back` | import.rs:175-176 vs Importer.cpp:468-469 |
-| 10 | `eliminate_degenerate_vertices` | 一致 | rustFpaEqual 判等 + 倒序删除，含 `index < len` 守卫；C++ 无 debug 日志 | import.rs:287-311 vs Importer.cpp:250-263 |
+| 10 | `eliminate_degenerate_vertices` | 一致 | rustFpaEqual 判等 + 倒序删除，含 `index < len` 守卫；C++ 无 debug 日志 | import.rs:287-311 vs Importer.cpp:235-248 |
 | 11 | min_item_separation 校验时点 | 差异（轻微） | C++ 在 `ImportItem`/`ImportContainer`/各 instance 入口重复校验；Rust 只在 builder。直接 API 调用时 C++ 更严格 | import.rs:47-51 vs Importer.cpp:403-408,431-436 |
 | 12 | JSON 直入口（`ImportItemJson` 等） | C++ 额外 | 组合 `ParseExternalItemJson` + `ImportItem`；Rust 侧由 serde+调用方组合承担 | importer.h:39-44 vs 无 |
+| 13 | 非有限多边形整体构造契约 | 部分实测；整体契约未证 | Rust 1.98.1 Debug/Release对现有NaN/+Inf fixture均panic；2026-10-22以MSVC14.29重建当前JaguarCore Debug/Release库及runner，Release全量runner exit 0。Debug全量runner exit 3已定位到`runCollisionTests()`注册`coveringShape`（`TestCollision.cpp:61-64`）时触发`Quadtree.cpp:423-426`的“无Partial子项”断言；该形状覆盖整个根节点，子象限均为`Entire`。单独运行现有`runIoTests()`的Debug runner exit 0，两个`InvalidInput`断言通过；未覆盖所有NaN/Inf输入 | SimplePolygon.cpp:203-213 vs simple_polygon.rs:41-74,120-141；Quadtree.cpp:423-426；TestCollision.cpp:61-64；TestIo.cpp:249-264 |
+| 14 | JSON rotation f32溢出（`rotation: 3.5e38`） | 定向运行确认Rust Debug/Release解析为f32 Inf后在`cos(Inf)→NaN`处panic；C++ JSON入口返回`SerializationFailure`；C++类型化`rotationDegrees=3.5e38`入口返回`SnapshotMismatch` | Rust `DTransformation::new`允许Inf，旋转矩阵构造时`NotNan`拒绝NaN；C++ JSON `numberValue`在Importer前拒绝f32溢出，类型化入口在`externalToInternal`拒绝非有限值 | d_transformation.rs:20-26、transformation.rs:146-193、serde_json 1.0.151、JsonCodec.cpp:460-467,716-727,1270-1287、Importer.cpp:116-135；Rust Debug/Release oracle exit 0；MSVC14.29 C++ Release全量runner exit 0，覆盖`TestIo`/`TestJsonCodec` |
+| 15 | JSON负向f32溢出（rotation/translation=`-3.5e38`） | Rust Debug/Release解析为`-Inf`并在导入中panic；C++ JSON入口返回`SerializationFailure`；类型化C++入口返回`SnapshotMismatch` | Rust用例同时断言负号保留；平移在矩阵乘法中产生NaN，旋转在`cos(-Inf)`产生NaN | RustOracle `--import-boundary-parity-only`、TestIo.cpp、TestJsonCodec.cpp；Rust Debug/Release exit 0；MSVC14.29 C++ Release全量runner exit 0 |
+| 16 | JSON最大有限f32边界（`3.4028234663852886e38`） | Rust将rotation和translation解析为`f32::MAX`；C++ JSON解析成功，两个字段收窄后等于`float::max()` | 只证明serde/JsonCodec的解析与f32窄化边界；不证明该变换进入完整Importer后一定可放置 | RustOracle `--import-boundary-parity-only`、TestJsonCodec.cpp；Rust Debug/Release exit 0；MSVC14.29 C++ Release全量runner exit 0 |
+| 17 | f32最大有限值到Inf的舍入临界点 | 中点前一个f64值`340282356779733623858607532500980858880`解析为±`f32::MAX`；中点`340282356779733661637539395458142568448`解析为±Inf。C++接受前值，正负中点均返回`SerializationFailure`。正向前驱的完整Importer结果另按rotation/translation x分别核对 | 中点解析仍只覆盖JSON解析和f64→f32舍入；完整Importer仅覆盖正向前驱及本记录固定的2×2 SPP实例，不外推负向前驱或其他几何 | Rust serde raw bits：前值`7f7fffff`/`ff7fffff`，中点`7f800000`/`ff800000`；Rust Debug/Release `--import-boundary-parity-only` exit 0；MSVC14.29 C++ Release全量runner exit 0；rotation几何raw bits一致，translation x分别为Rust panic/C++ `InvalidInput` |
 
 ## 结论
 
-导入管线的转换语义（形状四分支、Inflate/Deflate 修改模式、中心化预变换、旋转展开与 65536 上限、stepped 容差判定、`[0.0]→None` 归一、连续重复顶点消除、holes 合并 quality 0、preTransform 逆变换合成公式）双侧一致。此前把"非连续重复顶点"列为接受边界缺口不准确：C++ 下游 `SimplePolygon::Create` 已拒绝该输入；两侧只在错误诊断上不同。非有限多边形/变换输入的定向 oracle 在 Rust Debug 与 Release 都失败（panic），C++ 对应入口返回 `Result` 错误，符合保留 C++ `Result` 的约定。其余差异为错误通道、C++ 保留容器外部 id 和额外 API 能力。
+有限输入下导入管线的转换语义（形状四分支、Inflate/Deflate修改模式、中心化预变换、旋转展开与65536上限、stepped容差判定、`[0.0]→None`归一、连续重复顶点消除、holes合并quality 0、preTransform逆变换合成公式）在已核路径上保持一致。此前把“非连续重复顶点”列为接受边界缺口不准确：C++下游`SimplePolygon::Create`已拒绝已核重复顶点输入；两侧在该场景只差错误诊断。Rust 1.98.1、锁定jagua-rs revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`的`--import-boundary-parity-only`在Debug/Release均对现有`nan_coordinate`和`infinite_coordinate` fixture输出panic：前者落在直径的`NotNan` unwrap，后者落在包围盒`Rect::try_new` unwrap。2026-10-22以MSVC14.29重建当前JaguarCore Debug/Release库及runner；Release全量runner exit 0，Debug全量runner exit 3已定位到Importer测试之前的`runCollisionTests()`：注册覆盖根节点的`coveringShape`时命中Quadtree“无Partial子项”Debug断言（`TestCollision.cpp:61-64`、`Quadtree.cpp:423-426`），并非Importer失败。单独运行现有`runIoTests()`的Debug runner exit 0，确认`TestIo.cpp:249-264`两个坐标输入均返回`InvalidInput`。RustReference Debug测试在另一边界fixture上捕获了`qt_hazard.rs:113`同类断言；这只确认共享断言条件，不证明与C++覆盖根节点输入逐点相同。本轮新增同一JSON数值`3.5e38`的Rust/C++定向比较：Rust Debug/Release将其解析成f32 Inf并在导入中panic；C++ Release JSON入口在解析阶段返回`SerializationFailure`；类型化C++ Importer入口返回`SnapshotMismatch`。现有fixture仍不能代表全部NaN/Inf输入，完整多边形契约仍未证。非有限多边形构造契约和非有限变换失败通道是两个独立边界：前者源码可确认C++拒绝残留非有限顶点，后者此处新增了单值运行证据；其余差异为错误通道、C++保留容器外部id和额外API能力。
 
 ### 补充审计（2026-09-29）
 
@@ -131,3 +136,10 @@ Transformation::empty()
 | S3 | `withSeparation` 为匿名命名空间私有 | 差异（API 可达性） | 外部调用方无法构造派生配置，必须走 instance 入口 | import.rs:47-54 vs Importer.cpp:114-122 |
 | S4 | `unique()` 全对去重语义（非相邻） | 补齐说明 | Rust 显式 O(n²) 检查 ↔ C++ SimplePolygon::Create 逐对比较 | import.rs:256 vs SimplePolygon.cpp:217-223 |
 | S5 | Rectangle 分支 f32 域加法 | 一致（补齐证据） | `x_min + width` 双侧均在 f32 域计算 | import.rs:68 vs Importer.cpp:73-74 |
+
+### E1 补充复核（2026-10-22）
+
+- `eliminate_degenerate_vertices` 的 C++ 分量比较已移除非有限输入拦截，直接委托 `AlmostEqualRustF32`；因此 `f32::MAX/+Inf`、邻近 NaN 位模式等边界与 pinned `approx_eq!` 使用同一谓词。此处只说明连续顶点消除，不代表多边形对非有限值的整体接受/失败契约一致。
+- C++ 随后的 `SimplePolygon::Create` 在重复点检查前拒绝残留非有限点；Rust `SPolygon::new` 没有同位置的 finite 扫描，后续几何计算仍可能报错或触发 panic。完整多边形构造边界继续单列，不从相邻比较一致推断端到端成功/失败等价。
+- f64溢出中点前驱现已通过匹配的完整SPP实例进入`ImportSPSolutionJson`：巨大有限rotation在Rust/C++生成相同的变换与碰撞形状raw bits；相同值放入translation x后，f32精度使2×2形状的x包围盒折叠，Rust于`SPolygon::transform` panic，C++在`Rect2d::Create`返回`InvalidInput`。这是完整导入链的失败出口差异，详见[SPP solution IO记录](37-prob-io.md)和[Transformation记录](06-transformation.md)。
+- `PlacedItem`有限几何补充对拍使用同一SPP实例（item id 201、2×2矩形、strip height 4），外部rotation=`37.25°`、translation=`[4.25,-1.75]`。Rust 1.98.1 / jagua-rs `f5e2b5ffd14931f17a20ce283a2122e877953ceb` Debug与Release输出逐raw-bit相同；C++ `TestJsonCodec`对完整Importer结果逐raw-bit断言，MSVC14.29 Debug隔离runner与Release全量runner均通过。变换=`3f266f42,408e1a48,beb28958`；顶点依序为`40880000,bfe00000`、`40baf1b2,bf0a16e9`、`40943490,3f86bb54`、`404285bb,be21c9bc`；bbox=`404285bb,bfe00000,40baf1b2,3f86bb54`；(collision area, diameter, centroid x/y, original Item area)=`40800000,403504f3,408e1a47,beb28953,40800000`；POI=`408e1a48,beb28958,3f800000`。surrogate存在，包含2个pole、0个pier、hull indices `[0,1,2,3]`、hull area `40800000`；pole依序为`408e1a48,beb28958,3f800000`及`4093280b,3f4fce76,3e2f40c8`。本结果只闭合一个有限输入和默认空配置生成的surrogate形态，不外推到其他变换、形状或surrogate配置。

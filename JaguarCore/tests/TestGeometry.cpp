@@ -1,5 +1,6 @@
 #include "JaguarCore/Geometry/circle.h"
 #include "JaguarCore/Geometry/Edge.h"
+#include "JaguarCore/Geometry/RustF32.h"
 #include "JaguarCore/Geometry/SimplePolygon.h"
 #include "JaguarCore/Geometry/Transformation.h"
 #include "JaguarCore/NumericPolicy.h"
@@ -427,6 +428,32 @@ void runGeometryTests()
     assert(std::abs(largeAngleInverse.rotationRad - 3.052349091) < 1.0e-6);
     assert(std::abs(largeAngleInverse.translation.x - 0.547462106) < 1.0e-6);
     assert(std::abs(largeAngleInverse.translation.y - (-7.733891487)) < 1.0e-6);
+
+    constexpr float pi = 3.14159265358979323846F;
+    const jaguar::Transform2d centeredPreTransform =
+        jaguar::Transform2d::FromRotationTranslation(0.0, {-0.25, 1.0});
+    const jaguar::Transform2d importedPlacement =
+        jaguar::Transform2d::FromRotationTranslation(
+            180.0F * (pi / 180.0F), {1.0, 1000.0});
+    const jaguar::Transform2d importedTransform =
+        centeredPreTransform.InverseRustF32().FollowedByRustF32(
+            importedPlacement);
+    const jaguar::Point2d importedPoint =
+        importedTransform.ApplyRustF32({0.0, 16.0});
+    assert(jaguar::detail::AlmostEqualRustF32(
+        static_cast<float>(importedPoint.x), 0.750001251697540283203125F));
+    assert(jaguar::detail::AlmostEqualRustF32(
+        static_cast<float>(importedPoint.y), 985.0F));
+
+    jaguar::Transform2d mutableImportedTransform = importedTransform;
+    mutableImportedTransform.rotationRad = 0.0;
+    mutableImportedTransform.translation = {3.0, -4.0};
+    const jaguar::Point2d afterPublicMutation =
+        mutableImportedTransform.ApplyRustF32({5.0, 7.0});
+    assert(jaguar::detail::AlmostEqualRustF32(
+        static_cast<float>(afterPublicMutation.x), 8.0F));
+    assert(jaguar::detail::AlmostEqualRustF32(
+        static_cast<float>(afterPublicMutation.y), 3.0F));
 
     const auto polygon = jaguar::SimplePolygon::Create({
         {0.0, 0.0}, {2.0, 0.0}, {0.0, 2.0}});

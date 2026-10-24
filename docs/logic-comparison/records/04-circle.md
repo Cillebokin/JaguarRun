@@ -14,7 +14,7 @@
 ### bounding_circle（circle.rs:36-58）
 - C++ 对应：`Circle2d::BoundingCircleRustF32`（Circle.cpp:31-81）。
 - 判定：【差异】（半径计算路径不同：Rust 用"先extend后length/2"，C++ 复刻了 extend 逻辑但半径求值顺序需逐式核对——实际逐式一致；差异在于空输入的失败通道：Rust panic vs C++ Result）
-- 证据与说明：Rust circle.rs:38 `circles.next().expect("no circles provided")`——空集合 panic；C++ Circle.cpp:34-36 返回 `InvalidInput` 错误（Result 包装）。主循环：Rust circle.rs:41-56：距离判断 `bounding.radius < distance_between_centers + circle.radius`（注意距离是 sqrt 后的距离），然后 `Edge{start: bc.center, end: c.center}.extend_at_front(bc.radius).extend_at_back(c.radius)`，再取 `diameter.centroid()`（f32::midpoint）与 `diameter.length()/2.0`。C++ Circle.cpp:42-77：centerDistance = sqrt(dx²+dy²)（f32，Circle.cpp:50）↔ Rust `distance_to`（sqrt 后）；条件 `startRadius < centerDistance + endRadius`（Circle.cpp:51）↔ circle.rs:42；extend_at_front 复刻：`extendedStartX -= dx * (startRadius / edgeLength)`（Circle.cpp:58-60，其中 edgeLength 初值 = centerDistance，即原 edge 的 length——Rust extend_at_front 用的也是原长度 `self.length()`，edge.rs:25）——**一致**（除法先、乘后，同序）；extend_at_back 复刻：C++ Circle.cpp:62-66 重新计算了 dx/dy/edgeLength（延伸后的）再做 `endX += dx * (endRadius / edgeLength)`——Rust extend_at_back 亦用**延伸后**的长度（第二次调用的 self 已被第一次修改，`self.length()` 是新长度）——一致。centroid 用 `MidpointRustF32`（Circle.cpp:69-71）↔ Rust `diameter.centroid()`（edge.rs:124 f32::midpoint）——与 03-edge.md 同一 1 ULP 级差异。半径：C++ Circle.cpp:72-74 `radius = sqrt(dx²+dy²)*0.5F`（dx/dy 为最终两端差）；Rust circle.rs:53 `diameter.length() / 2.0` = `sqrt(dx²+dy²) / 2.0`。`x * 0.5F` 与 `x / 2.0` 在 f32 位级相同（2 的幂）。**一致**。综合：数值路径一致（除 midpoint 1ULP 项已单列），失败通道 panic vs Result 为差异。
+- 证据与说明：Rust circle.rs:38 `circles.next().expect("no circles provided")`——空集合 panic；C++ Circle.cpp:34-36 返回 `InvalidInput` 错误（Result 包装）。主循环：Rust circle.rs:41-56：距离判断 `bounding.radius < distance_between_centers + circle.radius`（注意距离是 sqrt 后的距离），然后 `Edge{start: bc.center, end: c.center}.extend_at_front(bc.radius).extend_at_back(c.radius)`，再取 `diameter.centroid()`（f32::midpoint）与 `diameter.length()/2.0`。C++ Circle.cpp:42-77：centerDistance = sqrt(dx²+dy²)（f32，Circle.cpp:50）↔ Rust `distance_to`（sqrt 后）；条件 `startRadius < centerDistance + endRadius`（Circle.cpp:51）↔ circle.rs:42；extend_at_front 复刻：`extendedStartX -= dx * (startRadius / edgeLength)`（Circle.cpp:58-60，其中 edgeLength 初值 = centerDistance，即原 edge 的 length——Rust extend_at_front 用的也是原长度 `self.length()`，edge.rs:25）——**一致**（除法先、乘后，同序）；extend_at_back 复刻：C++ Circle.cpp:62-66 重新计算了 dx/dy/edgeLength（延伸后的）再做 `endX += dx * (endRadius / edgeLength)`——Rust extend_at_back 亦用**延伸后**的长度（第二次调用的 self 已被第一次修改，`self.length()` 是新长度）——一致。centroid 用`MidpointRustF32`（Circle.cpp:69-71）↔ Rust `diameter.centroid()`（edge.rs:124 `f32::midpoint`）；共享helper的10,012组有限输入位模式与Rust 1.98.1逐位一致，但现有Circle fixture使用4-ULP断言且未复现历史1 ULP输入。半径：C++ Circle.cpp:72-74 `radius = sqrt(dx²+dy²)*0.5F`（dx/dy 为最终两端差）；Rust circle.rs:53 `diameter.length() / 2.0` = `sqrt(dx²+dy²) / 2.0`。`x * 0.5F` 与 `x / 2.0` 在 f32 位级相同（2 的幂）。**一致**。综合：半径与扩展数值路径一致；midpoint helper级已逐位复核，历史调用点1 ULP输入仍待复现；失败通道 panic vs Result 为差异。
 
 ### area（circle.rs:61-63）
 - C++ 对应：`AreaRustF32`（Circle.cpp:88-92）。
@@ -96,7 +96,7 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|----|------|------|------|
 | 1 | bounding_circle 空输入失败：Rust panic vs C++ Result | 差异 | 空集合时 Rust 崩溃、C++ 返回错误码；正常路径数值一致 | circle.rs:38 `.expect("no circles provided")` vs Circle.cpp:34-36 `FromError` |
-| 2 | bounding_circle 内 centroid 用 MidpointRustF32（分支回退模拟） | 差异 | 与 Rust f32::midpoint（x86_64 double 中转）特定输入差 1 ULP | Circle.cpp:69-71 + RustF32.h:19-28 vs circle.rs:52（经 edge.rs:124） |
+| 2 | bounding_circle 内 centroid 用 MidpointRustF32 | helper级位模式一致；历史调用点向量待复验 | 共享x86_64 helper与pinned Rust 1.98.1在10,012组有限输入上逐位一致；Release全量runner通过，但Circle调用点fixture采用4-ULP比较且未复现历史1 ULP输入 | Circle.cpp:69-71 + RustF32.h:19-31 vs circle.rs:52（经edge.rs:124） + 2026-10-22 helper probe |
 | 3 | bounding_circle 返回类型：Circle vs Result<Circle> | 差异（形态） | 见 #1 | circle.h:24-25 vs circle.rs:36 |
 | 4 | separation_distance(Point) NaN 时 unwrap panic vs C++ 静默 Exterior | 一致（理论差异，实际不可达） | NaN 半径已被 Create/try_new 拒绝 | circle.rs:162 `.unwrap()` vs Circle.cpp:181 |
 | 5 | Circle-Circle/Edge 相切不对称（collides ≤ vs separation <） | 一致（两侧刻意复刻同一不对称） | 相切时 collides=true 而 separation=(Exterior,0)；行为对齐 | circle.rs:108 vs circle.rs:191；Circle.cpp:143 vs Circle.cpp:199 |
@@ -105,7 +105,7 @@
 
 ## 结论
 
-circle.rs 全部方法（含三组 CollidesWith、三组 DistanceTo/SeparationDistance 及其平方版）在 C++ RustF32 族中逐式复刻，分支方向（< vs ≤）与求值次序（先开方后相减、先 distance 后平方）均一致，甚至保留了 Rust"相切时 collides 与 separation 判据不对称"的原始行为。实质差异仅两处：bounding_circle 的空输入失败通道（panic vs Result）与其内部 centroid 的 1 ULP 级 midpoint 模拟差；另有 C++ 自有 double API 族不参与对齐。
+circle.rs全部方法（含三组CollidesWith、三组DistanceTo/SeparationDistance及其平方版）在C++ RustF32族中逐式复刻，分支方向（< vs ≤）与求值次序（先开方后相减、先distance后平方）均一致，甚至保留了Rust“相切时collides与separation判据不对称”的原始行为。已确认差异是bounding_circle的空输入失败通道（panic vs Result）；centroid共用helper已在10,012组有限输入上与pinned Rust 1.98.1逐位一致，Release调用路径fixture通过，但历史1 ULP调用点向量尚未复现。另有C++自有double API族不参与对齐。
 
 ## 补充审计（2026-09-29）
 
@@ -114,7 +114,7 @@ circle.rs 全部方法（含三组 CollidesWith、三组 DistanceTo/SeparationDi
 ### 【浅覆盖→补齐】bounding_circle 内 extend_at_front/back 的 edgeLength 复用差异（深入核对）
 - 主记录称 C++ Circle.cpp:58 的 `edgeLength 初值 = centerDistance` 与 Rust `self.length()` 一致。补充核对一个细节：Rust circle.rs:44-49 构造 `Edge{bc.center, c.center}.extend_at_front(bc.radius).extend_at_back(c.radius)`——**Rust 的 Edge 字面量未经 try_new**（直接结构体构造），两端点为两个圆心，长度即 centerDistance。C++ 同（不调 Edge2d::Create）。一致。
 - extend_at_back 的第二次长度：Rust 第二次调用作用于**已延伸 front 的 edge**（edge.rs:34-35 重算 dx/dy/l）；C++ Circle.cpp:62-66 同样重算延伸后的 dx/dy/edgeLength。一致（主记录已述，此处确认 dx/dy 重算而非复用）。
-- 判定：【一致】（bounding_circle 数值路径，除已单列的 midpoint 1ULP）。
+- 判定：【一致】（bounding_circle其余数值路径；midpoint helper级已逐位复核，历史调用点向量待复现）。
 - 证据：circle.rs:44-53 vs Circle.cpp:53-74。
 
 ### 【浅覆盖→补齐】PI 常量位级一致性的最终确认

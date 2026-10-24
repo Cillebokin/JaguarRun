@@ -86,7 +86,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 `simplify_shape`（`shape_modification.rs:52-152`）逐步删除顶点。每轮先把顶点分为凹、凸、共线三类（`CornerType::from`，`shape_modification.rs:320-336`，依据叉积符号）。Inflate 模式下，删除凹顶点相当于用弦填补凹袋，形状变大；删除共线顶点不改变面积；相邻两个凸顶点可以用两条外延线段的交点替换（`calculate_intersection_in_front`，`shape_modification.rs:257-287`）。Deflate 模式通过 `corners.reverse()` 与 `Corner::flip` 翻转角的方向（`shape_modification.rs:80-86`），使同一套分类对收缩成立。候选按面积变化排序，取第一个通过 `candidate_is_valid` 的候选（`shape_modification.rs:184-216`），该检查要求新边与所有不涉及被删顶点的原边都不相交。面积变化相对 `original_area` 累计计算（`shape_modification.rs:121-122`），超过 `max_area_change_ratio` 即停止。`execute_candidate`（`shape_modification.rs:232-239`）中对索引的修正处理了环绕情形，我用 n=5 的例子手工核对过 i=0 与 i=1 两种情况。该算法最坏复杂度约为 O(n³)。
 
-`offset_shape`（`shape_modification.rs:340-379`）借助 `geo_buffer::buffer_polygon_rounded` 做圆角偏移，计算在 f64 下进行，结果经 `import_simple_polygon` 重建。Inflate 为正偏移，Deflate 为负偏移。若结果有多个连通分量，代码只取第一个并打印警告（`shape_modification.rs:358-367`），这意味着悄悄丢弃了其余部分，属于语义损失。
+锁定D5 revision的`offset_shape`（`shape_modification.rs:342-383`）使用`geo::Buffer`与`BufferStyle::line_join(LineJoin::Round(0.1))`，结果经`import_simple_polygon`重建；若`MultiPolygon`非空，只取首个外轮廓。JaguarCore现有`Offset.cpp`已增加分阶段C++ outline路径：对可直接导入的简单轮廓按f32距离、int32适配器和Round(0.1)生成Inflate/Deflate结果，splitCandidate首轮廓已逐点对齐D5。自交消解、拓扑变化或量化退化路径仍可能走旧straight-skeleton/fallback，因此当前不能视作完整`geo::Buffer`移植。
 
 `close_narrow_concavities`（`shape_modification.rs:384-519`）枚举所有非相邻顶点对 `(i, j)`，把连接二者的弦缩短为 0.9999 倍作为候选。过滤条件包括：弦长不超过 `cutoff_distance_ratio · diameter`；Inflate 时两端都不在形状内、Deflate 时两端都在形状内；弦与任何原边不相交；被跳过的子多边形面积符号与绝对值满足约束。最后选择删除顶点最多的候选，循环直到无候选。这里有两处我认为需要核实的疑点。
 
@@ -140,7 +140,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 ## 九、疑点与建议核实事项
 
-本轮阅读中，以下几点值得团队核实或修复，按我判断的重要性排列。第一，`close_narrow_concavities` 的 Deflate 分支面积符号与注释不一致，可能导致形状变大；第二，同一函数中子多边形取 `i..j` 而非 `i..=j`，疑似 off-by-one；第三，`Edge::collides_with` 对共线重叠返回不相交，导致 `find_self_intersection` 无法检出折返自相交；第四，`piers` 的 `forfeit_distance` 量纲错误；第五，`piers` 参数随 `debug_assertions` 变化，结果不可跨 profile 比较；第六，`generate_surrogate_poles` 在缺少 `(n, 0.0)` 兜底约束时会在 1000 个 pole 处 panic；第七，`offset_shape` 静默丢弃多连通分量；第八，`Circle::bounding_circle` 在同心较大圆输入下产生 NaN；第九，`SPolygon::transform_from` 对 reference 缺少 surrogate 时 panic，而 `transform` 不会；第十，`Point` 的 `Hash` 与 `Eq` 对 `±0.0` 不一致；第十一，凸包仅按 x 排序。
+本轮阅读中，以下几点值得团队核实或修复，按我判断的重要性排列。第一，`close_narrow_concavities` 的 Deflate 分支面积符号与注释不一致，可能导致形状变大；第二，同一函数中子多边形取 `i..j` 而非 `i..=j`，疑似 off-by-one；第三，`Edge::collides_with` 对共线重叠返回不相交，导致 `find_self_intersection` 无法检出折返自相交；第四，`piers` 的 `forfeit_distance` 量纲错误；第五，`piers` 参数随 `debug_assertions` 变化，结果不可跨 profile 比较；第六，`generate_surrogate_poles` 在缺少 `(n, 0.0)` 兜底约束时会在 1000 个 pole 处 panic；第七，D5 `offset_shape` 只返回首个连通分量并记录warning；第八，`Circle::bounding_circle` 在同心较大圆输入下产生 NaN；第九，`SPolygon::transform_from` 对 reference 缺少 surrogate 时 panic，而 `transform` 不会；第十，`Point` 的 `Hash` 与 `Eq` 对 `±0.0` 不一致；第十一，凸包仅按 x 排序。
 
 以上多数结论来自源码阅读与推断，尚未通过运行验证。建议优先为 `close_narrow_concavities` 的 Deflate 分支、`Circle::bounding_circle` 的同心情形以及 `Edge::collides_with` 的共线情形各写一个最小用例，三者都可以在较短时间内被确认或排除。
 
@@ -475,9 +475,9 @@ piers 的生成分为两步。`generateCandidatePiers`（186-241）沿若干射�
 
 形状修改模块分为四个部分：偏移（Offset）、简化（Simplify）、直骨架（StraightSkeleton）与窄凹陷处理（NarrowConcavity），统一接口声明在 `include/JaguarCore/geometry/ShapeModification.h`。
 
-偏移的主路径在 `Source/Geometry/ShapeModification/Offset.cpp` 中，它先把输入量化为 int32 并调用叠加（overlay）快速路径，失败时才进入直骨架计算。在 `OffsetShape` 的末尾（737 行附近），函数只返回第一条轮廓，因此对于带孔或多轮廓的结果，调用方会丢失信息。直骨架计算抛出异常时，代码会在 727-740 行静默回退到 `fallbackOffsetShape`，该回退使用带圆角连接的偏移策略。静默回退的好处是可用性高，代价是调用方无法判断当前结果来自哪条路径，也无法统计失败率。`normalizeOffsetRustF32`（86-96）负责根据模式翻转符号，以对齐 Rust 的约定。
+偏移的主路径在`Source/Geometry/ShapeModification/Offset.cpp`中。当前按D5 `Round(0.1)`构造并量化outline；简单轮廓直接导入，导入失败时由最多2048点的有界整数平面图resolver尝试消解单条outline自交并重建组件。splitCandidate、窄桥2组件和comb 3组件的固定fixture已逐组件匹配D5；`OffsetShape`取首组件，`OffsetShapes`是C++额外的多结果API。该resolver不是通用overlay移植，其他自交/量化退化、多环/洞和未覆盖拓扑仍可能进入旧straight-skeleton/fallback。
 
-Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `geo_buffer::buffer_polygon_rounded`，没有 C++ 中的多级回退链。`geo_buffer` 的源码不在本仓库树内，因此无法逐行核对其数值行为，两者的几何结果在复杂输入上可能存在差异。
+RustOracle锁定的D5 `offset_shape`（`geometry/shape_modification.rs` 342-383）使用`geo::Buffer`和`Round(0.1)`；它与本地fork中的`geo_buffer::buffer_polygon_rounded`不同。C++当前25个固定有限输入配置已通过D5矩阵（包括梳形Inflate 2.25同步闭合两凹槽）；Stage22另覆盖四组平移大矩形、半宽前连续5个`f32`值共20个错误出口，单组件`OffsetShape`与Rust消息一致，额外的`OffsetShapes`仍返回空vector。LLVM-MinGW及VS2022 MSVC14.44的直接全源码Offset Debug/Release runner通过。复杂拓扑仍保留straight-skeleton/fallback过渡路径；Offset尚未整体等价。
 
 直骨架的事件队列在 `StraightSkeleton.cpp` 中实现。`findSplit` 的排序比较器（712-723）使用带容差的 `eq` 判断相等，这意味着相近的事件可能被排序为不稳定顺序，属于中等严重程度的问题。事件循环 `while(true)`（589-599）没有迭代上限，理论上当法向量退化为零时可能不收敛。文件开头的绝对容差 `1e-9`（`StraightSkeleton.cpp` 27 行）以及 Offset 中的 `1e-9`、`1e-12`（`Offset.cpp` 502、516 行）都是与尺度无关的绝对阈值，对于大坐标或微小形状都可能误判。`acos` 的参数若因舍入超出 [-1, 1]，会产生 NaN（`Offset.cpp` 412-414），需要做钳制。
 
@@ -570,7 +570,7 @@ export.h 在 Windows 下根据 JAGUARCORE_BUILD 选择 dllexport 或 dllimport�
 
 差分测试位于 JaguarCore/Tests/Differential，JaguarCore/Tests/differential 两个大小写不同的目录都存在，JaguarCoreTests.pro 当前引用大写 Differential/ 路径。因此“区分大小写系统必然找不到该目录”的结论不成立；需要检查两份目录的内容是否一致，并明确权威副本。测试本身比较 C++ 结果与字面量及快照，不会在每次运行时调用 Rust oracle。CompareGeometry 面积使用 1e-3 与 1e-9 两档，CompareOptimizer 的密度容差为 5e-3。CompareProblem.cpp 的 Windows 反斜杠路径仍是独立的跨平台风险；tests/differential/README.md 的运行说明也需与实际工程核对。
 
-`tools/RustOracle/src/main.rs`（2666 行）是一个依赖 `../../../CodeResource/jagua-rs/jagua-rs`（启用 spp、bpp、mspp 特性）的 Rust 二进制。`main()` 位于约第 557 行，根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt`（53 行）是陈旧且不完整的输出，不能作为当前基准。`tools/rust_oracle/` 目录仅包含 `target/`，属于构建残留。因此，当前的差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行 oracle 并更新 fixtures。
+`JaguarCore/Tools/RustOracle/src/main.rs` 是Rust差分oracle；其 `Cargo.toml` 通过Git revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 直接依赖 jagua-rs，并启用 spp、bpp、mspp 特性。Manifest还单独声明 `geo-buffer = "0.2"` 用于原始buffer组件诊断；锁定jagua-rs revision中的 `offset_shape` 则使用 `geo::Buffer`。`main()` 根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt` 是陈旧且不完整的输出，不能作为当前基准。因此，当前差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行oracle并更新fixtures。
 
 ## 八、Rust 差异、可疑点与陷阱汇总
 

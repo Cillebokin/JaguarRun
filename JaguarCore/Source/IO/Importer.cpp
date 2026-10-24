@@ -1,12 +1,12 @@
 #include "JaguarCore/IO/Importer.h"
 
+#include "JaguarCore/Geometry/RustF32.h"
 #include "JaguarCore/IO/JsonCodec.h"
 #include "JaguarCore/NumericPolicy.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <set>
 #include <utility>
@@ -18,30 +18,9 @@ namespace
 constexpr std::size_t MAX_ANGLES = 65536;
 constexpr std::size_t MAX_QUALITIES = 10;
 
-std::uint32_t orderedFloatBits(float value) noexcept
-{
-    std::uint32_t bits = 0U;
-    std::memcpy(&bits, &value, sizeof(bits));
-    if ((bits & 0x80000000U) != 0U)
-        return ~bits + 1U;
-    return bits | 0x80000000U;
-}
-
 bool rustFpaEqual(float first, float second) noexcept
 {
-    if (first == second)
-        return true;
-    if (!std::isfinite(first) || !std::isfinite(second))
-        return false;
-    if (std::abs(first - second) <= std::numeric_limits<float>::epsilon())
-        return true;
-
-    const std::uint32_t firstBits = orderedFloatBits(first);
-    const std::uint32_t secondBits = orderedFloatBits(second);
-    const std::uint32_t difference = firstBits > secondBits
-        ? firstBits - secondBits
-        : secondBits - firstBits;
-    return difference <= 4U;
+    return detail::AlmostEqualRustF32(first, second);
 }
 
 bool rustFpaEqual(const Point2d& first, const Point2d& second) noexcept

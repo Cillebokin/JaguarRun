@@ -31,7 +31,7 @@
 |---|---|---|---|
 | 09 | `geometry/original_shape.rs` | `Geometry/OriginalShape.h` + `Source/Geometry/OriginalShape/OriginalShape.cpp` | [x] |
 | 10 | `geometry/shape_modification.rs`（simplify 部分） | `Geometry/ShapeModification.h` + `Source/Geometry/ShapeModification/Simplify.cpp` | [x] |
-| 11 | `geometry/shape_modification.rs`（offset 部分，对照 geo-buffer 0.2） | `Source/Geometry/ShapeModification/Offset.cpp` + `StraightSkeleton.cpp/.h` | [x] |
+| 11 | `geometry/shape_modification.rs`（D5 `offset_shape`，使用`geo::Buffer`） | `Source/Geometry/ShapeModification/Offset.cpp` + `StraightSkeleton.cpp/.h` | [x] |
 | 12 | `geometry/shape_modification.rs`（narrow concavity 部分） | `Source/Geometry/ShapeModification/NarrowConcavity.cpp` | [x] |
 | 13 | `geometry/fail_fast/pole.rs` | `Geometry/PointOfInaccessibility.h` + `Source/Geometry/Primitives/PointOfInaccessibility.cpp` + `Source/FailFast/Surrogate.cpp`（generate poles） | [x] |
 | 14 | `geometry/fail_fast/piers.rs` | `Source/FailFast/Surrogate.cpp`（piers 部分） | [x] |
@@ -83,7 +83,7 @@
 
 | # | Rust | C++ | 进度 |
 |---|---|---|---|
-| 38 | `util/fpa.rs` | `Geometry/RustF32.h`（私有 rustFpaEqual） | [x] |
+| 38 | `util/fpa.rs` | `Geometry/RustF32.h`（Importer比较直接委托公共比较器） | [x] |
 | 39 | `util/assertions.rs` | `Assertions.h` + `Source/Support/Assertions.cpp` | [x] |
 | 40 | `lib.rs`（公共配置、features） | `NumericPolicy.h`、`Result.h`、`Version.h` 等 | [x] |
 
@@ -98,12 +98,12 @@
 | 03 | [records/03-edge.md](records/03-edge.md) | 基本等价 | 5 |
 | 04 | [records/04-circle.md](records/04-circle.md) | 基本等价 | 5 |
 | 05 | [records/05-simple-polygon.md](records/05-simple-polygon.md) | 基本等价 | 9 |
-| 06 | [records/06-transformation.md](records/06-transformation.md) | **不等价**（表示模型：3×3 矩阵 vs 分解式；合成/求逆 atan2 往返 1ULP 累积） | 8 |
+| 06 | [records/06-transformation.md](records/06-transformation.md) | **部分等价**（已增加私有f32旋转矩阵状态并通过有限输入定向复核；一般仿射与完整角度/非有限域仍未覆盖） | 8 |
 | 07 | [records/07-convex-hull.md](records/07-convex-hull.md) | 基本等价 | 4 |
 | 08 | [records/08-geo-enums-traits.md](records/08-geo-enums-traits.md) | 基本等价 | 7 |
 | 09 | [records/09-original-shape.md](records/09-original-shape.md) | 基本等价 | 7 |
 | 10 | [records/10-simplify.md](records/10-simplify.md) | 基本等价 | 11 |
-| 11 | [records/11-offset.md](records/11-offset.md) | 基本等价（2026-09-29 与 geo-buffer 0.2.0 逐函数审计 + cleanup 分叉修复；fixture 12/12 通过；未覆盖输入不宣称等价） | 11 |
+| 11 | [records/11-offset.md](records/11-offset.md) | 部分对齐（D5锁定基线下25个固定有限配置；通用overlay与fallback仍未收口） | 11 |
 | 12 | [records/12-narrow-concavity.md](records/12-narrow-concavity.md) | 基本等价 | 12 |
 | 13 | [records/13-pole.md](records/13-pole.md) | 基本等价 | 12 |
 | 14 | [records/14-piers.md](records/14-piers.md) | 基本等价（空候选报错 eef0830 已对齐；缺"端点在形外"断言） | 15 |
@@ -124,11 +124,11 @@
 | 29 | [records/29-bpp.md](records/29-bpp.md) | 基本等价（LayoutTargetKind 注释写反为文档错误） | 12 |
 | 31 | [records/31-mspp.md](records/31-mspp.md) | 基本等价（Restore strip 校验已删除对齐 Rust） | 13 |
 | 33 | [records/33-ext-repr.md](records/33-ext-repr.md) | wire 基本一致 | 7 |
-| 34 | [records/34-import.md](records/34-import.md) | 基本等价（非连续重复顶点检查缺失） | 12 |
+| 34 | [records/34-import.md](records/34-import.md) | 基本等价（非连续重复顶点由下游构造拒绝，诊断不同） | 12 |
 | 35 | [records/35-export.md](records/35-export.md) | wire 基本一致（SPP container_id 双侧实际均为 0；min_item_separation 零值差异仍在） | 7 |
 | 36 | [records/36-svg.md](records/36-svg.md) | **不等价**（有意重写：y-flip/viewBox/图层公式；quality_zones 已补，quadtree/可见标签/开关仍缺） | 15 |
 | 37 | [records/37-prob-io.md](records/37-prob-io.md) | 基本等价 | 14 |
-| 38 | [records/38-fpa.md](records/38-fpa.md) | 行为等价（AlmostEqualRustF32 与 rustFpaEqual 为双份拷贝，NaN 相邻位行为不一致） | 7 |
+| 38 | [records/38-fpa.md](records/38-fpa.md) | 核心算法及Importer相邻顶点比较对齐pinned float-cmp 0.10.0；整体多边形非有限契约另核 | 7 |
 | 39 | [records/39-assertions.md](records/39-assertions.md) | 基本等价 | 9 |
 | 40 | [records/40-lib-config.md](records/40-lib-config.md) | **不等价**（结构层：CDEConfig 默认值 4/32 vs Rust 无默认/sparrow 用 4/64；无 feature 门控/Instant） | 9 |
 
@@ -138,8 +138,8 @@
 
 1. **正确性风险**（结果可能分叉，3 项）：
    - **offset（#11，唯一算法本体替换）**：geo-buffer → 私有 straight-skeleton，C++ 额外的保持性强校验 + fallback + Deflate POI 半径判定使失败边界不同（Rust warn 取首组件 vs C++ 可能 OffsetFailed）。
-   - **Transformation（#06）**：表示模型根本不同（矩阵 vs 分解式），多次 FollowedBy 组合经 atan2 往返有 1ULP 级累积；刚体域内单次变换逐项一致。当前差分 checksum 未显形，但长变换链（如 Separator 多轮 remove/place）是潜在分叉点。
-   - **cd-engine（#22，两条已定位的判定分歧）**：HazardCollides(Exterior, depth>0) 全顶点检查比 Rust POI 捷径更严（病态凹形判定相反）；surrogate pole 完全在容器外且不贴边时 Rust 报碰撞、C++ 报不碰撞（上层 poly 检测兜底使端到端仍一致）。Edge::try_new 双 NaN 端点（#03）与 FPA 双拷贝的 NaN 相邻位行为（#38）为边缘输入分歧。
+   - **Transformation（#06）**：Rust公开3×3矩阵API与C++旋转+平移API仍有形态差异；C++现以私有四系数f32状态传播刚体变换的合成/求逆结果，修复了定向有限输入探针观察到的点应用超容差。Importer、SVG和JSON的生产调用深度已静态核对；完整外部角度域、非有限输入和所有调用点的偏差预算仍未收口。
+   - **cd-engine（#22，两条已定位的判定分歧）**：HazardCollides(Exterior, depth>0) 全顶点检查比 Rust POI 捷径更严（病态凹形判定相反）；surrogate pole 完全在容器外且不贴边时 Rust 报碰撞、C++ 报不碰撞（上层 poly 检测兜底使端到端仍一致）。Edge::try_new 双 NaN 端点（#03）及多边形构造器对非有限坐标的失败路径（#34）是边缘输入风险；Importer相邻点比较谓词本身已与Rust一致（#38）。
 2. **性能风险**（结果同、复杂度不同）：四叉树全量重建 vs 增量 constrict（#19/#20），每步 place/remove O(N)；DetectPolygonCollision collect-any 非短路（#22）；Restore 全量重建（#22）。
 3. **wire/输出格式差异**：min_item_separation 零值序列化（#35，Rust 总是输出 vs C++ 省略零值）；SVG 整体（#36，非兼容重写）；Solution time_stamp 缺失与无 feature 门控（#40）。
 4. **架构豁免的检查缺失**：quadtree 4 项自检（#21，重建式架构下部分不适用）、密度/成本一致性断言（#28/31，被结构匹配校验覆盖）、非连续重复顶点检查（#34）。
@@ -148,12 +148,12 @@
 
 **对全局比对结论的修正**（逐文件验证发现的新事实）：
 
-- 证伪了两条旧结论：Rect centroid 的"double 中转 1ULP 差"不存在（与 Rust 同路径）；SimplePolygon ±0.0/NaN 重复点判定"相反"不成立（itertools::unique 走 PartialEq，与 C++ `==` 同语义）——1ULP 差实际在 Edge/Circle centroid，NaN 分歧实际在 Edge::try_new 与面积零容差。
-- 新发现：CDEConfig 默认值与 sparrow 参考用法不一致（4/32 vs 4/64）；AlmostEqualRustF32 与 rustFpaEqual 双份拷贝且 NaN 相邻位行为相反；LayoutTargetKind 注释与实现相反（文档错误，行为一致）。
+- 证伪了两条旧结论：Rect centroid的“double中转1ULP差”不存在（与Rust同路径）；SimplePolygon ±0.0/NaN重复点判定“相反”不成立（itertools::unique走PartialEq，与C++ `==`同语义）。Edge/Circle centroid曾登记1ULP差；调整后的x86_64 helper已与pinned Rust 1.98.1在10,012组有限输入上逐位一致，当前Release调用路径fixture也通过。但fixture只用4-ULP比较，旧的具体1ULP调用点向量未复现，仍保留为待复验项；NaN分歧仍见Edge::try_new与面积零容差。
+- 新发现：CDEConfig 默认值与 sparrow 参考用法不一致（4/32 vs 4/64）；`AlmostEqualRustF32` 已按 pinned float-cmp 0.10.0 对齐非有限 ULP行为，Importer相邻点比较现对所有值直接委托该公共函数；非有限多边形整体失败路径仍单独核对；LayoutTargetKind注释与实现相反（文档错误，行为一致）。
 
 **建议的收敛顺序**（按风险×成本）：
 
-1. Transformation 合成路径的 1ULP 累积——在长变换链差分（Separator 多轮）中实测；若显形，FollowedByRustF32 改为保角度链合成即可消除。
+1. Transformation 的完整调用点偏差预算、外部角度域与非有限输入契约；有限矩阵及Importer形态定向探针已验证私有矩阵状态修复，后续按E1逐项收口剩余输入域。
 2. min_item_separation 零值序列化——一处改动 + round-trip 测试。
 3. offset 失败边界——补真实 CAD 病态轮廓的差分 fixture（等 Dxf00 回归一起做）。
 4. cd-engine 两条判定分歧——均有上层兜底，可作为低优先修缮。

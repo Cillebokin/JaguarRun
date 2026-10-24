@@ -50,11 +50,11 @@ JSON 语法、字段缺失、类型错误、重复键、未知旋转模式和不
 
 ## Offset 实现边界
 
-`OffsetShape` 的私有 rounded straight-skeleton 实现按 geo-buffer 0.2.0 的 shrink/split event 语义重实现；当内缩产生多个外轮廓时，单多边形 API 按 jagua-rs importer 行为返回第一个外轮廓。`OffsetShapes` 同时提供全部外部组件，空结果返回成功的空 vector；实现不链接 Rust，也不暴露 skeleton 内部类型。参考项目为 [geo-buffer](https://github.com/1011-git/geo-buffer)，其 Apache-2.0 许可和来源说明保留在 `JaguarCore/Source/Geometry/ShapeModification/StraightSkeleton.cpp` 文件头。
+旧`OffsetShape` straight-skeleton实现对应本地jagua-rs fork曾使用的geo-buffer 0.2.0 shrink/split event语义；当前锁定Rust revision改用`geo::Buffer`。C++按D5 `Round(0.1)`规则构造outline，并新增限于单条量化outline的整数自交分割与组件重建；目前25个固定有限结果输入配置（含普通方形Inflate/Deflate、斜边五边形Inflate 0.5、凹L形Inflate/Deflate 0.5及Deflate 1.0近消失、短边为2^7和2^20的矩形近半宽Deflate、窄桥/comb分裂边界、梳形Inflate 2.25同步闭合两个凹槽、T/H/U/C/十字形Deflate 2.0和两种sub-grid舍入）匹配D5。另测凹L消失阈值相邻`f32`值及0.5×、2×、10×缩放：低侧Rust报简单多边形少于3点，而C++ 10层POI估值较低、提前返回空结果；两侧错误码相同但消息不同，阈值值两侧消息一致。旁路POI短路会在0.5×与2×的阈值值产生Rust已判空的22顶点多边形，因此未删除该保护。resolver有点数与坐标范围限制，且不支持通用多环/洞或全部overlay边界；无法解析时仍可能走旧路径，不能描述为完整等价移植。Stage22的20个平移大矩形近半宽输入中，C++ fallback导入候选同样少于3点；单组件`OffsetShape`现返回与Rust一致的错误消息，额外的`OffsetShapes`仍成功返回空vector。极小矩形Deflate输入（短边2^-21）半宽前连续5个f32值均进入fallback；修正交点行列式的尺度相关平行判定后，C++与锁定Rust均在导入去重点后因少于3点报错，活动fixture覆盖该错误出口。`OffsetShape`取首个外轮廓，`OffsetShapes`是C++额外的多结果API，空结果返回成功的空vector；实现不链接Rust，也不暴露skeleton内部类型。旧参考项目为[geo-buffer](https://github.com/1011-git/geo-buffer)，其Apache-2.0许可和来源说明保留在`JaguarCore/Source/Geometry/ShapeModification/StraightSkeleton.cpp`文件头。当前矩阵及剩余差异见`docs/logic-comparison/records/11-offset.md`。
 
-当前仅承诺上述固定多结果/空结果 fixture 的行为；尚未承诺所有事件拓扑、复杂多区域
-或带孔洞 `SimplePolygon` 输入的完整公共 API 等价，这些场景仍需继续通过 Rust
-fixture 扩展验证后才能作为稳定能力使用。
+当前仅对登记的固定fixture作出行为承诺；尚未承诺所有事件拓扑、复杂多区域
+或带孔洞 `SimplePolygon` 输入的完整公共 API 等价。resolver无法处理的输入仍可能进入历史路径，
+这些场景仍需继续移植并通过Rust fixture扩展验证。
 
 2026-09-18 已补充凹形内缩分裂的逐组件数值断言：两个组件均为三角形，面积约
 `1.419689345789`，并分别校验 `x_min/y_min/x_max/y_max`，容差为 `1e-6`。
@@ -169,18 +169,18 @@ Debug 与 Release 分别对应 Rust 的低/高分辨率搜索参数。
 
 ## 核心逻辑等价验收状态（2026-09-29）
 
-当前不能宣称 JaguarCore 与 `jagua-rs/jagua-rs` 核心 crate 已完全等价，但 2026-09-29 差分对齐轮已把功能逻辑差异清单收敛到 Debug panic 形态一类。本轮完成的闭合项：
+当前不能宣称 JaguarCore 与 `jagua-rs/jagua-rs` 核心 crate 已完全等价。以下为2026-09-29状态快照，按当时RustOracle的本地fork基线整理；2026-10-22已确认RustOracle锁定D5 revision，Offset等项目应以相应当前记录复核，不能将这份旧快照直接视为当前等价状态。本轮完成的闭合项：
 
 - **四叉树已改为 jagua-rs quadtree 的逐行结构移植**（per-node hazard 边子集、懒扩展 constrict、`cd_threshold` 查询时语义、`QTNode::collides/collect_collisions_until` 短路查询、Circle 象限优先顺序、Edge 半段相交象限分类）。碰撞/矩阵/oracle 用例 Debug/Release 双侧一致。
 - **SPP/MSPP `Restore` 接受边界已对齐 Rust**：不再前置拒绝配置/宽度不一致的快照，快照 strip 值直接生效；三个导出函数不再前置 `Validate*Solution`（jagua-rs export 是纯函数）。
-- **Offset 与 geo-buffer 0.2.0 逐函数审计完成**并修复主循环 cleanup 分叉（Rust 在每次迭代末尾、含 continue 路径清理队列）。全量 fixture（sub_ulp、collapse、square_inflate、negative_inflate、epsilon、zero_near_edge、concave split、L、comb first、非有限距离）Debug/Release 12/12 对照通过。comb 第二原始组件不属于 jagua-rs 核心 API 返回值，维持不验收。
+- **Offset 的历史本地fork基线审计（2026-09-29）**曾与 geo-buffer 0.2.0 逐函数核对并修复cleanup分叉，当时本地fork对应的12项fixture在Debug/Release通过。2026-10-22核实RustOracle已锁定D5 Git revision，其 `offset_shape` 改用 `geo::Buffer`；旧12项通过结果不代表当前D5基线。当前状态及已确认分叉见11号Offset记录，E1仍未收口。
 - **float 存储保持 double + RustF32 双轨**，为既定接口差异（含 C++ 额外的 `Intersects(tolerance)` 容差语义）。
 
-仍开放的差异（均为既定或待决事项，不影响 Release 求解语义）：
+仍开放的差异（下列项目是2026-09-29快照中的记录；应按当前锁定revision和具体调用路径复核，不能概括为均不影响Release求解语义）：
 
 - Rust Debug panic 与 C++ `Result` 错误的形态差异：`total_item_qty()` 溢出（Rust Debug panic、Release 回绕；C++ 两配置均回绕）；BPP/MSPP Debug 超需求放置（Rust 先改状态再 panic，C++ 原子 `Infeasible`）。panic 后状态不属于验收契约，是否补齐 Debug 对照待用户口径决定。
 - SVG 输出为有意重写（非格式兼容）；`time_stamp`/feature 门控等诊断与结构层差异维持排除。
-- 全输入 offset 等价不宣称：固定 fixture 集合内无已知分叉，未覆盖的病态输入以真实 CAD 回归为准。
+- 当前D5 Offset部分对齐：25个有限结果输入配置（44条有限fixture行，含普通方形Inflate/Deflate、斜边五边形Inflate 0.5、凹L形Inflate/Deflate 0.5及Deflate 1.0近消失、U形凹口闭合Inflate 2.25、斜向U形凹口闭合Inflate 2.25、splitCandidate完整25顶点首结果、短边为2^7和2^20的矩形近半宽Deflate、窄桥/comb分裂边界、梳形Inflate 2.25同步闭合两个凹槽、T/H/U/C/十字形Deflate 2.0及sub-grid舍入）通过；Rust Debug/Release各98个profile-active fixture项与Oracle输出匹配（44条有限结果、53条稳定错误、1条活动NaN；完整fixture共99个唯一键）。活动差分入口核对±Inf、方形Deflate 2.0、凹L消失阈值原始及0.5×/2×/10×缩放值、tiny Deflate fallback前5个相邻f32值及半宽临界控制值、NaN；凹L消失阈值低侧C++与Rust均返回`OffsetFailed`但消息不同，阈值值消息相同；tiny Deflate半宽前连续5个f32值在Stage24修正后均与Rust一致报少于3点错误，Stage25又以短边2^-24、2^-30、2^-38、2^-40、2^-42复核同一出口，Stage26在这些尺度补测恰好半宽与后继值：C++ `OffsetShapes`为空成功结果，`OffsetShape`保留相同错误；恰好半宽及其后继两侧`OffsetShape`均返回相同空多边形错误。另有20个大尺度近半宽矩形平移组合（短边2^7/2^20、起点2^0/2^20，各取半宽前连续5个f32距离）均进入C++ fallback并得到空组件；Rust返回“少于3点”错误，C++ OffsetShape则返回空多边形错误。旁路POI短路会在0.5×与2×阈值值产生Rust已判空的22顶点多边形，故保留当前短路；C++ NaN结果匹配Rust Release错误出口，并与Rust Debug panic不同。临时探针确认comb Deflate 2.0触发两次、H/U/C形Deflate 2.0各触发一次正长度共线重叠处理。T形回归覆盖量化重复点导致的零长度段回退，C形回归覆盖并列最小x时的组件顺序及首组件，十字形临界收缩覆盖1个64顶点分量。当前25组有限结果矩阵及53条稳定错误用例经LLVM-MinGW scalar-fallback Debug/Release定向全源码runner验证；其他自交/退化outline、fallback和通用overlay仍按11号Offset记录待移植或裁决。
 
 可重复证据与具体输出见 [parity closure plan](superpowers/plans/2026-09-28-jaguarcore-parity-closure.md) 和 [Differential README](../JaguarCore/Tests/Differential/README.md)。
 

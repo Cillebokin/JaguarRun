@@ -3,6 +3,7 @@
 #include "JaguarCore/Geometry/Point.h"
 #include "JaguarCore/Export.h"
 
+#include <array>
 #include <cmath>
 
 namespace jaguar
@@ -15,6 +16,12 @@ struct Transform2d
 {
     double rotationRad = 0.0; // 旋转角度，单位为弧度
     Point2d translation{};    // 平移量
+
+    Transform2d() noexcept = default;
+    Transform2d(double rotation, Point2d offset) noexcept
+        : rotationRad(rotation), translation(offset)
+    {
+    }
 
     // 创建单位变换
     inline static Transform2d Identity() noexcept { return {}; }
@@ -47,5 +54,14 @@ struct Transform2d
     // 以 f32 精度执行与 jagua-rs Transformation::transform 等价的组合
     JAGUARCORE_API Transform2d FollowedByRustF32(
         const Transform2d& next) const noexcept;
+
+private:
+    std::array<float, 4> RustF32RotationMatrix() const noexcept;
+    void StoreRustF32RotationMatrix(
+        const std::array<float, 4>& matrix) noexcept;
+
+    std::array<float, 4> m_RustF32RotationMatrix{1.0F, 0.0F, 0.0F, 1.0F};
+    float m_RustF32SourceRotation = 0.0F;
+    bool m_HasRustF32RotationMatrix = false;
 };
 }

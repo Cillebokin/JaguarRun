@@ -166,3 +166,31 @@ rect.rs 的全部数值方法在 `*RustF32` 族中逐操作复刻成功，包括
 - 判定：不适用。
 
 补充结论：02 记录覆盖完整。新增两项库级语义核实（ordered-float 5.5.0 的 NaN-Equal Ord、float-cmp 的 Inf 短路）均确认主记录判定不变。
+
+## E1偏差预算复核（2026-10-22）
+
+- 当前几何差分器的`expectRustNumbers`（`JaguarCore/Tests/Differential/CompareGeometry.cpp:181-211`）先把Rust与C++结果都转为`float`，再调用`AlmostEqualRustF32`；该helper允许绝对差不超过`f32::EPSILON`，或ULP距离不超过4。Rect数值字段因此共用这一验收阈值。
+- 该阈值是通过/失败门槛，不是Rect每个方法的实测最大误差；当前差分输出不记录逐字段ULP距离，也没有按`Width/Area/Distance/Separation`分别配置预算。关系枚举、位置枚举和布尔结果则逐值精确比较。
+- E1裁决：不能仅凭共享比较器通过就声称每个调用点的偏差预算已单独登记。本轮已为下方191个既有fixture数值字段采集位模式；其他Rect方法与输入域仍未做同等级统计。所有实测误差须与`epsilon/4 ULP`放行门槛分开记录；`AlmostRelationToRustF32`中的FPA阈值属于算法语义，不应混作输出误差预算。
+
+### E1逐字段位级采样（2026-10-22）
+
+| Fixture键 | 数值字段数 | 最大ULP差 | 最大绝对差 |
+|---|---:|---:|---:|
+| `rect.operations` | 20 | 0 | 0 |
+| `rect.combination` | 16 | 0 | 0 |
+| `rect.edges` | 16 | 0 | 0 |
+| `rect.distance` | 7 | 0 | 0 |
+| `geometry.rect_basics` | 20 | 0 | 0 |
+| `geometry.rect_degenerate_metrics` | 12 | 0 | 0 |
+| `geometry.rect_degenerate_boundary_shapes` | 48 | 0 | 0 |
+| `geometry.rect_degenerate_sides` | 32 | 0 | 0 |
+| `geometry.rect_degenerate_bounding_rects` | 12 | 0 | 0 |
+| `geometry.rect_degenerate_resize_recovery` | 8 | 0 | 0 |
+| **合计** | **191** | **0** | **0** |
+
+- 采样方法：MSVC 2019 14.29 Release（`/O2 /fp:precise`）直接执行当前Rect方法；Rust期望位模式从同一fixture十进制值round-trip到f32后取得。每个字段的索引、Rust位模式、C++位模式、ULP差和绝对差保存在[逐字段TSV](02-rect-f32-raw-bits.tsv)。
+- 采样结果：191/191项的Rust与C++位模式完全相同。`geometry.rect_basics`实际包含20项（中心2、象限16、宽高2）；首轮37项记录漏掉宽高2项，现已由本轮完整表更正。
+- 位模式示例：`√13`的距离/分离距离为`0x4066c15a`，`√20`的直径为`0x408f1bbd`，平方距离13为`0x41500000`；负2、负1、0、0.5、1、1.5、2、3、3.5、4、5、8等值的原始模式也逐字段记录于TSV。
+- 证据边界：本结果只覆盖以上10个既有fixture键及对应输入，不代表所有Rect公开方法、所有浮点编译选项或整个输入域都逐位一致。
+- 与验收门槛的关系：本组实测误差为0 ULP；差分器仍统一使用`abs差≤f32::EPSILON`或`ULP≤4`的通过阈值。实测误差与放行条件是不同证据，不能混为一谈。

@@ -88,8 +88,8 @@ if (!ShapeModificationValid(preSimplified, internal, modifyMode))
 逐行复核 original_shape.rs 全部 73 行（struct 定义 + convert_to_internal + 4 个访问器），确认主记录已覆盖全部条目。以下为补充核对项：
 
 ### 【浅覆盖→补齐】offset 守卫的 NaN 语义（`*offset != 0.0` 对 NaN 的行为）
-- Rust original_shape.rs:29 `if offset != 0.0`：**NaN != 0.0 为 true → NaN 偏移会执行 offset_shape**（随后 geo-buffer 对 NaN 距离的行为 → Rust oracle 已验证返回空多边形错误）。C++ OriginalShape.cpp:12 `*modifyConfig.offset != 0.0`：NaN 同样为 true → 走 OffsetShape → normalizeOffsetRustF32 后 `!isfinite` 检查（Offset.cpp:266-270）报错。**两侧对 NaN 偏移最终都报错**（Rust 经 geo-buffer 空结果 bail，C++ 经显式 isfinite 检查），失败通道内容不同（消息不同）但方向一致——11 号记录差异表 #10 已覆盖此边界，此处确认 OriginalShape 层的守卫不产生额外分叉。
-- 判定：【一致】（NaN 边界最终同为失败；通道差异已记录于 11 号）。
+- D5锁定Rust的 `original_shape.rs` 中 `NaN != 0.0` 为 true，因此会进入 `offset_shape`。当前Debug下该Rust调用panic，Release下返回空多边形错误；C++同样通过守卫进入 `OffsetShape`，由 `normalizeOffsetRustF32` 的 `!isfinite` 检查返回 `OffsetFailed`。两侧最终均不产生形状，但错误出口/profile行为不同；11号记录补充了当前基线和证据。OriginalShape层的守卫本身没有额外分叉。
+- 判定：【有界一致】（均进入偏移并失败；Rust Debug panic、Rust Release error、C++ Result error 不同）。
 - 证据：original_shape.rs:27-32 vs OriginalShape.cpp:12-18 + Offset.cpp:266-270。
 
 ### 【浅覆盖→补齐】simplify_tolerance 守卫的嵌套结构（narrow_concavity 依赖 simplify 存在）

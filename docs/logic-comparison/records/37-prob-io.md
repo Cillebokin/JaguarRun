@@ -31,9 +31,12 @@
 
 ### `import_solution`（spp/import.rs:63-80）
 - C++ 对应：`Importer::ImportSPSolution`（Importer.cpp:537-570）。
-- 判定：基本等价。
+- 判定：普通有限输入主流程基本等价；非有限变换及f32极值量化引发几何退化时，失败通道有差异。
 - 证据：`SPProblem::new(instance)` + `change_strip_width`（import.rs:64-65）↔ `SPProblem::Create` + `ChangeStripWidth`（cpp:545-551）；逐放置项查 item（`instance.item_idx(id).ok_or(unknown item ID)` import.rs:68-70 ↔ `findItemByExternalId` 失败报 `"SP solution references an unknown item ID"` cpp:552-560）；`ext_to_int_transformation`（import.rs:71-75）↔ `externalToInternal`（cpp:561-564，公式见记录 34）；`prob.place_item` ↔ `value.PlaceItem`（cpp:565-567）；`prob.save()` ↔ `value.Save()`（cpp:569）。
-- 差异：C++ 额外校验 `strip_width` 有限且 >0（cpp:540-544，`SnapshotMismatch`）；Rust 依赖 `change_strip_width` 内部校验。错误路径等价。
+- 差异：C++ 额外校验 `strip_width` 有限且 >0（cpp:540-544，`SnapshotMismatch`）；Rust 依赖`change_strip_width`内部校验。对有限变换，逐项映射如上；对类型化Inf平移，Rust在`ext_to_int_transformation`矩阵乘法中由`Inf * 0 → NaN`触发`NotNan` panic，C++ `externalToInternal`返回`SnapshotMismatch`。同一JSON数值`3.5e38`在Rust反序列化为f32 Inf后panic；C++ `numberValue`在JSON入口收窄并拒绝，返回`SerializationFailure`。Rust Debug/Release `--import-boundary-parity-only`均exit 0；MSVC14.29 C++ Release全量runner exit 0，新增`TestIo`类型化与`TestJsonCodec` JSON用例，详见[记录34](34-import.md)与[Transformation记录](06-transformation.md)。
+- rotation字段也已按同值补测：`rotation: 3.5e38`在Rust解析为Inf后由`cos(Inf)→NaN`触发panic；C++ JSON入口返回`SerializationFailure`，类型化`rotationDegrees=3.5e38`入口返回`SnapshotMismatch`。该结果只覆盖这一有限JSON数值和锁定实现路径。
+- 负向溢出与最大有限值也已补测：rotation/translation的`-3.5e38`在Rust解析为`-Inf`后panic，C++ JSON/类型化入口分别返回`SerializationFailure`/`SnapshotMismatch`；`3.4028234663852886e38`在两侧解析并收窄为最大有限f32。最大有限值断言止于解析边界，不代表该值可在完整布局中成功放置。
+- 临界舍入点配对：f64中点前一个值`340282356779733623858607532500980858880`在Rust收窄为±f32最大有限值，C++ JSON解析成功；中点`340282356779733661637539395458142568448`正负两侧在Rust收窄为±Inf，C++均返回`SerializationFailure`。正向前驱随后已进入完整`ImportSPSolutionJson`：rotation分支两侧成功且最终变换、4个顶点和包围盒raw bits完全一致；translation x分支Rust在布局构造时因退化包围盒panic，C++从Importer返回`InvalidInput: invalid rectangle`。详见[Transformation记录](06-transformation.md)。
 
 ### `export`（spp/export.rs:8-15）
 - C++ 对应：`ExternalSPSolutionFromSolution`（JsonCodec.cpp:1779-1804）。

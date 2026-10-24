@@ -64,9 +64,9 @@ piers 的生成分为两步。`generateCandidatePiers`（186-241）沿若干射�
 
 形状修改模块分为四个部分：偏移（Offset）、简化（Simplify）、直骨架（StraightSkeleton）与窄凹陷处理（NarrowConcavity），统一接口声明在 `include/JaguarCore/geometry/ShapeModification.h`。
 
-偏移的主路径在 `Source/Geometry/ShapeModification/Offset.cpp` 中，它先把输入量化为 int32 并调用叠加（overlay）快速路径，失败时才进入直骨架计算。在 `OffsetShape` 的末尾（737 行附近），函数只返回第一条轮廓，因此对于带孔或多轮廓的结果，调用方会丢失信息。直骨架计算抛出异常时，代码会在 727-740 行静默回退到 `fallbackOffsetShape`，该回退使用带圆角连接的偏移策略。静默回退的好处是可用性高，代价是调用方无法判断当前结果来自哪条路径，也无法统计失败率。`normalizeOffsetRustF32`（86-96）负责根据模式翻转符号，以对齐 Rust 的约定。
+偏移的主路径在`Source/Geometry/ShapeModification/Offset.cpp`中。当前先尝试共用outline路径：按归一化方向偏移边、构造miter或Round(0.1)连接并按int32网格量化；简单outline直接导入，导入失败时由有界整数平面图resolver切分自交段、传播winding并重建填充边界。Deflate距离达到最大内切圆半径时返回空组件。已登记的splitCandidate、窄桥和comb输出逐点匹配D5；窄桥为2组件、comb为3组件。resolver只支持单条outline，最多2048点，且要求x/y坐标跨度不超过`INT32_MAX`以保证int64叉积安全，不能代表通用`i_overlay`；超出子集时仍进入旧straight-skeleton，并可能使用`fallbackOffsetShape`。`OffsetShape`只返回首个外轮廓，`OffsetShapes`是C++额外的多结果API。
 
-Rust 版 `offset_shape`（`geometry/shape_modification.rs` 340-379）只使用 `geo_buffer::buffer_polygon_rounded`，没有 C++ 中的多级回退链。`geo_buffer` 的源码不在本仓库树内，因此无法逐行核对其数值行为，两者的几何结果在复杂输入上可能存在差异。
+RustOracle锁定的D5 `offset_shape`（`geometry/shape_modification.rs` 342-383）使用`geo::Buffer`和`Round(0.1)`，不使用`CodeResource/jagua-rs`本地fork中的`geo_buffer::buffer_polygon_rounded`。C++仍保留straight-skeleton/fallback过渡路径；当前25个固定有限输入配置通过D5矩阵，其中窄桥/comb各有两档分裂阈值，另有sub-grid舍入用例。Stage22四组平移矩形的半宽前5个`f32`值共20个错误出口已由活动fixture覆盖，单组件`OffsetShape`保留Rust的少于3点错误，`OffsetShapes`仍返回空vector。通用多环/洞、更多overlay拓扑、其他量化退化和非有限距离出口仍未收口。LLVM-MinGW及VS2022 MSVC14.44直接构建的全源码Offset Debug/Release runner均通过；该证据不等同于qmake整套工程构建。
 
 直骨架的事件队列在 `StraightSkeleton.cpp` 中实现。`findSplit` 的排序比较器（712-723）使用带容差的 `eq` 判断相等，这意味着相近的事件可能被排序为不稳定顺序，属于中等严重程度的问题。事件循环 `while(true)`（589-599）没有迭代上限，理论上当法向量退化为零时可能不收敛。文件开头的绝对容差 `1e-9`（`StraightSkeleton.cpp` 27 行）以及 Offset 中的 `1e-9`、`1e-12`（`Offset.cpp` 502、516 行）都是与尺度无关的绝对阈值，对于大坐标或微小形状都可能误判。`acos` 的参数若因舍入超出 [-1, 1]，会产生 NaN（`Offset.cpp` 412-414），需要做钳制。
 

@@ -53,8 +53,8 @@
 
 ### centroid（edge.rs:121-127）
 - C++ 对应：`Edge2d::CentroidRustF32`（Edge.cpp:155-164）。
-- 判定：【差异】（midpoint 实现路径与 Rust std 在 x86_64 上的实际路径不同——C++ 用分支回退模拟，可能差 1 ULP；需逐值核对）
-- 证据与说明：Rust edge.rs:124-125 `f32::midpoint(a, b)`；x86_64 上 Rust std 实现是 `((a as f64 + b as f64) / 2.0) as f32`（std f32.rs:998-1008，正确舍入）。C++ `detail::MidpointRustF32`（RustF32.h:19-28）模拟的是 std 的**回退分支版**：异号或双 <= halfMax 时 `(a+b)*0.5F`，否则 `a*0.5F + b*0.5F`。两者在绝大多数值上同结果，但 `(a+b)*0.5f` 当 a+b 溢出到 Inf 时（a、b 同号且接近 f32::MAX，> halfMax 分支已排除这种情况……实际上 halfMax 检查保证了 |a+b| ≤ f32::MAX*…）：异号时 a+b 不溢出，双 ≤ halfMax 时和 ≤ f32::MAX，`(a+b)*0.5f` 与正确舍入一致（加法一次舍入 + 乘 0.5 精确，二者合计与"先精确和再舍入一次"可能差 1 ULP——例：a+b 本身舍入后乘 0.5，vs double 精确和除 2 后一次舍入）。构造反例需 a+b 不精确可表示：如 a=2^24-0.5 不可表示…… f32 中 a,b 均可精确表示，其和若需 >24bit 尾数则 f32 加法舍入，double 中转则无此舍入，除 2 后再舍回 f32——两种路径可差 1 ULP（经典 midpoint 差异）。因此 Edge 的 centroid 在特定输入下与 Rust（x86_64）可差 1 ULP。判【差异】（1 ULP 级，仅影响 centroid 精度不影响拓扑）。
+- 判定：【helper级逐位复核通过；生产调用点的历史向量待复验】
+- 证据与说明：锁定的Rust 1.98.1（rustc commit `48a229ceaefd4985c50990b14116b6d856af0985`）在x86_64的`f32::midpoint`分支执行`((self as f64 + other as f64) * 0.5) as f32`（`library/core/src/num/f32.rs:1093-1109`）。C++ `detail::MidpointRustF32`现对`_M_X64`/`__x86_64__`使用相同提升、相加、乘0.5、回转路径；非x86_64构建仍走分支回退实现。2026-10-22以Clang 23.1.3 x86_64编译当前helper，并与锁定Rust 1.98.1对比12组固定边界值及10,000组确定性有限输入；10,012组输出位模式全部一致。当前Release JaguarCore全量runner退出0，包含活动Edge/Circle几何差分fixture，但该fixture经`AlmostEqualRustF32`最多允许4 ULP；因此它没有复现或否定旧记录中的特定1 ULP样例，生产调用点的历史向量仍待复验。
 
 ### bbox（edge.rs:129-137）
 - C++ 对应：`Edge2d::BoundingBox()`（Edge.cpp:106-117）。
@@ -105,7 +105,7 @@
 | # | 项 | 判定 | 影响 | 证据 |
 |---|----|------|------|------|
 | 1 | try_new 对 NaN 输入的判定 | 差异 | 两端同为 NaN 时：Rust 拒绝（NaN != NaN → ensure 失败）、C++ 接受（NaN == NaN 为 false → 通过） | edge.rs:17 `start != end` vs Edge.cpp:97 `startX == endX && startY == endY` |
-| 2 | centroid 的 midpoint 实现路径 | 差异 | C++ MidpointRustF32 用分支回退模拟（f32 加法+乘0.5），Rust x86_64 用 double 中转正确舍入；特定输入差 1 ULP | edge.rs:124-125 vs Edge.cpp:162 + RustF32.h:19-28 |
+| 2 | centroid 的 midpoint 实现路径 | helper级位模式一致；历史调用点向量待复验 | x86_64 helper与pinned Rust 1.98.1在10,012组有限输入上逐位一致；Release全量runner通过，但调用点fixture使用4-ULP比较且未复现历史1 ULP输入 | edge.rs:124-125 vs Edge.cpp:162 + RustF32.h:19-31 + 2026-10-22 helper probe |
 | 3 | Intersects(other, tolerance) 共线重叠语义 | C++额外 | 部分共线重叠（端点搭在对方段上）判 true，Rust 一律 No；属 C++ 自有 API 族 | Edge.cpp:292-329（尤其 312-314 与 325-328）vs edge.rs:226-229 |
 | 4 | TransformableFrom::transform_from | C++缺失 | 内存优化 trait 形态缺失，数值由 ApplyRustF32 覆盖 | edge.rs:150-158 vs edge.h 无对应 |
 | 5 | 无后缀族：Length / ClosestPoint | C++额外 | double 精度自有 API | Edge.cpp:119-122, 232-244 |
@@ -113,7 +113,7 @@
 
 ## 结论
 
-edge.rs 的核心几何（线段判交、交点计算、最近点、距离）在 C++ `IntersectsRustF32`/`IntersectionPointRustF32`/`ClosestPointRustF32` 中逐公式、逐舍入点复刻，包括平行列早退与 [0,1] 闭区间边界，行为等价。剩余差异为两点边缘行为（NaN 端点的创建判定相反；centroid 的 midpoint 模拟最多 1 ULP）加一套 C++ 自有的容差判交 API——后者对共线重叠的判定与 Rust 相反，使用时必须与 RustF32 族区分。
+edge.rs 的核心几何（线段判交、交点计算、最近点、距离）在C++ `IntersectsRustF32`/`IntersectionPointRustF32`/`ClosestPointRustF32`中逐公式、逐舍入点复刻，包括平行列早退与[0,1]闭区间边界，行为等价。剩余差异为NaN端点创建判定相反，以及一套C++自有的容差判交API（共线重叠语义不同）；centroid helper已按pinned Rust x86_64路径调整，差分行为尚待复验。
 
 ## 补充审计（2026-09-29）
 

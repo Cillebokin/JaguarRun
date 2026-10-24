@@ -6,9 +6,11 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 
 namespace
@@ -436,6 +438,331 @@ void runJsonCodecTests()
         })json");
     assert(importedSppSolution.HasValue());
     assert(importedSppSolution.Value().layoutSnapshot.placements.size() == 1);
+    const auto f32OverflowTranslation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {"rotation": 0, "translation": [3.5e38, 2]}
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!f32OverflowTranslation.HasValue());
+    assert(f32OverflowTranslation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto f32OverflowRotation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {"rotation": 3.5e38, "translation": [2, 2]}
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!f32OverflowRotation.HasValue());
+    assert(f32OverflowRotation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto negativeF32OverflowTranslation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {"rotation": 0, "translation": [-3.5e38, 2]}
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!negativeF32OverflowTranslation.HasValue());
+    assert(negativeF32OverflowTranslation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto negativeF32OverflowRotation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {"rotation": -3.5e38, "translation": [2, 2]}
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!negativeF32OverflowRotation.HasValue());
+    assert(negativeF32OverflowRotation.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto maxFiniteF32Transform = jaguar::ParseExternalSPSolutionJson(
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 3.4028234663852886e38,
+                    "translation": [3.4028234663852886e38, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(maxFiniteF32Transform.HasValue());
+    const auto& maxFiniteF32Placement =
+        maxFiniteF32Transform.Value().layout.placedItems[0].transformation;
+    assert(std::isfinite(static_cast<float>(maxFiniteF32Placement.rotationDegrees)));
+    assert(static_cast<float>(maxFiniteF32Placement.rotationDegrees) ==
+           std::numeric_limits<float>::max());
+    assert(std::isfinite(static_cast<float>(maxFiniteF32Placement.translation.x)));
+    assert(static_cast<float>(maxFiniteF32Placement.translation.x) ==
+           std::numeric_limits<float>::max());
+    const auto f32OverflowPredecessor = jaguar::ParseExternalSPSolutionJson(
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 340282356779733623858607532500980858880,
+                    "translation": [-340282356779733623858607532500980858880, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(f32OverflowPredecessor.HasValue());
+    const auto& predecessorTransform =
+        f32OverflowPredecessor.Value().layout.placedItems[0].transformation;
+    assert(static_cast<float>(predecessorTransform.rotationDegrees) ==
+           std::numeric_limits<float>::max());
+    assert(static_cast<float>(predecessorTransform.translation.x) ==
+           -std::numeric_limits<float>::max());
+    const auto roundedF32MaxRotation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 340282356779733623858607532500980858880,
+                    "translation": [2, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    if (roundedF32MaxRotation.HasValue())
+    {
+        assert(roundedF32MaxRotation.Value().layoutSnapshot.placements.size() == 1);
+        const auto& placed = roundedF32MaxRotation.Value()
+                                 .layoutSnapshot.placements.front()
+                                 .placedItem;
+        const float rotation = static_cast<float>(placed.Transform().rotationRad);
+        const float tx = static_cast<float>(placed.Transform().translation.x);
+        const float ty = static_cast<float>(placed.Transform().translation.y);
+        std::uint32_t rotationBits = 0;
+        std::uint32_t txBits = 0;
+        std::uint32_t tyBits = 0;
+        std::memcpy(&rotationBits, &rotation, sizeof(rotationBits));
+        std::memcpy(&txBits, &tx, sizeof(txBits));
+        std::memcpy(&tyBits, &ty, sizeof(tyBits));
+        const auto& shape = placed.CollisionShape();
+        const auto& bounds = shape.BoundingBox();
+        const auto toF32Bits = [](double value) {
+            const float normalized = static_cast<float>(value);
+            std::uint32_t bits = 0;
+            std::memcpy(&bits, &normalized, sizeof(bits));
+            return bits;
+        };
+        std::fprintf(stderr,
+                     "E1 rounded_f32_max_rotation=ok transform=%08x,%08x,%08x vertices=%zu area=%.9g bbox=%.9g,%.9g,%.9g,%.9g\n",
+                     rotationBits, txBits, tyBits, shape.VertexCount(),
+                     shape.Area(), bounds.xMin, bounds.yMin, bounds.xMax,
+                     bounds.yMax);
+        assert(rotationBits == 0xbf45abe3U);
+        assert(txBits == 0x405a8071U);
+        assert(tyBits == 0x400132ddU);
+        assert(shape.Area() == 4.0);
+        assert(toF32Bits(bounds.xMin) == 0x3fffffffU);
+        assert(toF32Bits(bounds.yMin) == 0x3f1ac9aeU);
+        assert(toF32Bits(bounds.xMax) == 0x409a8071U);
+        assert(toF32Bits(bounds.yMax) == 0x405bb34eU);
+        const std::uint32_t expectedVertices[][2] = {
+            {0x3fffffffU, 0x40000000U},
+            {0x405bb34eU, 0x3f1ac9aeU},
+            {0x409a8071U, 0x400265baU},
+            {0x40594d94U, 0x405bb34eU},
+        };
+        assert(shape.VertexCount() == 4);
+        for (std::size_t i = 0; i < shape.VertexCount(); ++i)
+        {
+            assert(toF32Bits(shape.Vertices()[i].x) == expectedVertices[i][0]);
+            assert(toF32Bits(shape.Vertices()[i].y) == expectedVertices[i][1]);
+        }
+        std::fprintf(stderr,
+                     "E1 rounded_f32_max_rotation.bbox_bits=%08x,%08x,%08x,%08x\n",
+                     toF32Bits(bounds.xMin), toF32Bits(bounds.yMin),
+                     toF32Bits(bounds.xMax), toF32Bits(bounds.yMax));
+        for (std::size_t i = 0; i < shape.Vertices().size(); ++i)
+        {
+            const float x = static_cast<float>(shape.Vertices()[i].x);
+            const float y = static_cast<float>(shape.Vertices()[i].y);
+            std::uint32_t xBits = 0;
+            std::uint32_t yBits = 0;
+            std::memcpy(&xBits, &x, sizeof(xBits));
+            std::memcpy(&yBits, &y, sizeof(yBits));
+            std::fprintf(stderr, "E1 rounded_f32_max_rotation.vertex%zu=%08x,%08x\n",
+                         i, xBits, yBits);
+        }
+    }
+    else
+    {
+        std::fprintf(stderr, "E1 rounded_f32_max_rotation=err:%s\n",
+                     roundedF32MaxRotation.GetError().message.c_str());
+    }
+    assert(roundedF32MaxRotation.HasValue());
+    const auto finitePlacedGeometry = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 37.25,
+                    "translation": [4.25, -1.75]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(finitePlacedGeometry.HasValue());
+    assert(finitePlacedGeometry.Value().layoutSnapshot.placements.size() == 1);
+    const auto& finitePlaced = finitePlacedGeometry.Value()
+                                   .layoutSnapshot.placements.front()
+                                   .placedItem;
+    const auto& finiteShape = finitePlaced.CollisionShape();
+    const auto f32Bits = [](double value) {
+        const float normalized = static_cast<float>(value);
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &normalized, sizeof(bits));
+        return bits;
+    };
+    assert(f32Bits(finitePlaced.Transform().rotationRad) == 0x3f266f42U);
+    assert(f32Bits(finitePlaced.Transform().translation.x) == 0x408e1a48U);
+    assert(f32Bits(finitePlaced.Transform().translation.y) == 0xbeb28958U);
+    assert(finiteShape.VertexCount() == 4);
+    const std::uint32_t expectedFiniteVertices[][2] = {
+        {0x40880000U, 0xbfe00000U},
+        {0x40baf1b2U, 0xbf0a16e9U},
+        {0x40943490U, 0x3f86bb54U},
+        {0x404285bbU, 0xbe21c9bcU},
+    };
+    for (std::size_t index = 0; index < finiteShape.VertexCount(); ++index)
+    {
+        assert(f32Bits(finiteShape.Vertices()[index].x) ==
+               expectedFiniteVertices[index][0]);
+        assert(f32Bits(finiteShape.Vertices()[index].y) ==
+               expectedFiniteVertices[index][1]);
+    }
+    const auto& finiteBounds = finiteShape.BoundingBox();
+    assert(f32Bits(finiteBounds.xMin) == 0x404285bbU);
+    assert(f32Bits(finiteBounds.yMin) == 0xbfe00000U);
+    assert(f32Bits(finiteBounds.xMax) == 0x40baf1b2U);
+    assert(f32Bits(finiteBounds.yMax) == 0x3f86bb54U);
+    const auto finiteCentroid = finiteShape.Centroid();
+    assert(f32Bits(finiteShape.Area()) == 0x40800000U);
+    assert(f32Bits(finiteShape.Diameter()) == 0x403504f3U);
+    assert(f32Bits(finiteCentroid.x) == 0x408e1a47U);
+    assert(f32Bits(finiteCentroid.y) == 0xbeb28953U);
+    assert(f32Bits(finitePlaced.Area()) == 0x40800000U);
+    const auto& finitePoi = finiteShape.PointOfInaccessibility();
+    assert(f32Bits(finitePoi.center.x) == 0x408e1a48U);
+    assert(f32Bits(finitePoi.center.y) == 0xbeb28958U);
+    assert(f32Bits(finitePoi.radius) == 0x3f800000U);
+    const auto* finiteSurrogate = finiteShape.GetSurrogate();
+    assert(finiteSurrogate != nullptr);
+    assert(finiteSurrogate->Poles().size() == 2);
+    assert(finiteSurrogate->Piers().empty());
+    assert(finiteSurrogate->FailFastPoleCount() == 0);
+    assert(f32Bits(finiteSurrogate->ConvexHullArea()) == 0x40800000U);
+    assert((finiteSurrogate->ConvexHullIndices() ==
+            std::vector<std::size_t>{0, 1, 2, 3}));
+    const std::uint32_t expectedFinitePoles[][3] = {
+        {0x408e1a48U, 0xbeb28958U, 0x3f800000U},
+        {0x4093280bU, 0x3f4fce76U, 0x3e2f40c8U},
+    };
+    for (std::size_t index = 0; index < finiteSurrogate->Poles().size(); ++index)
+    {
+        const auto& pole = finiteSurrogate->Poles()[index];
+        assert(f32Bits(pole.center.x) == expectedFinitePoles[index][0]);
+        assert(f32Bits(pole.center.y) == expectedFinitePoles[index][1]);
+        assert(f32Bits(pole.radius) == expectedFinitePoles[index][2]);
+    }
+    const auto roundedF32MaxTranslation = importer.ImportSPSolutionJson(
+        importedSpp.Value(),
+        R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 0,
+                    "translation": [340282356779733623858607532500980858880, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    if (roundedF32MaxTranslation.HasValue())
+    {
+        const auto& placed = roundedF32MaxTranslation.Value()
+                                 .layoutSnapshot.placements.front()
+                                 .placedItem;
+        const auto& shape = placed.CollisionShape();
+        const auto& bounds = shape.BoundingBox();
+        std::fprintf(stderr,
+                     "E1 rounded_f32_max_translation=ok vertices=%zu area=%.9g bbox=%.9g,%.9g,%.9g,%.9g\n",
+                     shape.VertexCount(), shape.Area(), bounds.xMin,
+                     bounds.yMin, bounds.xMax, bounds.yMax);
+    }
+    else
+    {
+        std::fprintf(stderr, "E1 rounded_f32_max_translation=err:%s\n",
+                     roundedF32MaxTranslation.GetError().message.c_str());
+    }
+    assert(!roundedF32MaxTranslation.HasValue());
+    assert(roundedF32MaxTranslation.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    const auto positiveF32OverflowMidpoint =
+        jaguar::ParseExternalSPSolutionJson(R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 340282356779733661637539395458142568448,
+                    "translation": [2, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!positiveF32OverflowMidpoint.HasValue());
+    assert(positiveF32OverflowMidpoint.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
+    const auto negativeF32OverflowMidpoint =
+        jaguar::ParseExternalSPSolutionJson(R"json({
+            "strip_width": 4,
+            "layout": {"container_id": 0, "placed_items": [{
+                "item_id": 201,
+                "transformation": {
+                    "rotation": 0,
+                    "translation": [-340282356779733661637539395458142568448, 2]
+                }
+            }], "density": 0},
+            "density": 0,
+            "run_time_sec": 0
+        })json");
+    assert(!negativeF32OverflowMidpoint.HasValue());
+    assert(negativeF32OverflowMidpoint.GetError().code ==
+           jaguar::ErrorCode::SerializationFailure);
     const auto exportedSpp = jaguar::ExternalSPSolutionFromSolution(
         importedSpp.Value(), importedSppSolution.Value());
     assert(exportedSpp.HasValue());

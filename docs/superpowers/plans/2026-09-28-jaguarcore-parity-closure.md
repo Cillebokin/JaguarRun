@@ -70,7 +70,9 @@
 - 对照：`JaguarCore/tools/RustOracle/src/main.rs` 和 RustReference fixtures
 
 **已完成子项：**
-- [x] 非有限距离边界：Rust Debug/Release oracle 对 NaN、+Infinity、-Infinity 均返回 `Offset resulted in an empty polygon`；C++ `OffsetShape`/`OffsetShapes` 统一映射为 `OffsetFailed` 与相同消息。C++ Debug/Release 全量测试通过。
+
+> **基线范围说明（2026-10-22）**：以下B4历史验收基于当时RustOracle使用的 `CodeResource/jagua-rs` 本地fork。当前Oracle直接锁定D5 revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`，其Offset实现改为 `geo::Buffer`；因此下面Offset的fixture通过记录只说明历史本地fork基线，不能作为当前D5等价证明。当前复核见 `docs/logic-comparison/records/11-offset.md`。
+- [x] **历史本地fork基线**：Rust Debug/Release oracle 对 NaN、+Infinity、-Infinity 均返回 `Offset resulted in an empty polygon`；C++ `OffsetShape`/`OffsetShapes` 统一映射为 `OffsetFailed` 与相同消息。C++ Debug/Release 全量测试通过。当前D5的NaN profile出口不同，见11号Offset记录。
 - [x] 圆角方向：C++ 改为按 Rust `Skeleton::get_orientation()` 从首个骨架顶点判定环方向；梳形 deflate 的 raw loop 顶点数、面积与边界和 Rust raw oracle 一致。Rust 核心只选择首组件，因此该 fixture 的额外第二组件不作为核心 API 返回值验收。
 - [x] 分裂事件回放：在 split 后、生成两个新环的 shrink 事件前补上 Rust `VertexQueue::cleanup()`。
 
@@ -114,7 +116,7 @@ MSPP restore 的宽度不一致快照也需单列：现有 C++ `sameStripContain
 1. **Restore 接受边界（原任务 5 未关闭项）**：已闭合，见任务 5 的 2026-09-29 记录。
 2. **四叉树增量式移植**：`Quadtree.h/.cpp` 重写为 jagua-rs quadtree 的逐行结构移植——`Node` 持有按 presence 降序的 `NodeHazard`（含 `PartialHazard` 边子集 + `ffBbox`），注册走懒扩展 + `Constrict`（含 `QUADRANT_NEIGHBOR_LAYOUT` 邻居 presence 传播与质心包含回退），注销走递归移除 + 无 Partial 时折叠子节点；`activeEdges` 缓存使 `cd_threshold` 恢复为 Rust 的查询时语义。`CollisionEngine` 的 `DetectPolygonCollision`/`CollectPolygonCollisionsUntil` 改为 Rust 的短路边遍历 + `detect_containment_collision`（POI 单点 + scope 解释）路径；`DetectSurrogateCollision`/`CollectSurrogateCollisionsUntil` 改为 `QTNode::collides/collect_collisions_until` 移植（含 Circle 象限优先顺序与 Edge 半段相交象限分类 `edge_intersection_half`/`half_intersect`）。根节点一律 Partial（对齐 `QTHazard::from_root`）。notch 高/低阈值与 pier-only oracle 用例逐项一致；Debug/Release 全量测试退出码 0。
 3. **float 重存储**：按决策保持 double + RustF32 双轨，作为既定接口差异记录（不改动）。
-4. **geo-buffer 逐行对齐**：对 `StraightSkeleton.cpp` 与 geo-buffer 0.2.0 源码（cargo registry）逐函数审计——VertexQueue/Index/Node、Ray（bisector/intersect/parallel/orientation/rotate_by）、Timeline 全序比较、find_split_vertex 双向过滤、apply_event、`apply_vertex_queue_rounded`（0.1 弧度圆角、orientation 判定）均已逐行对应。修复一处真实分叉：Rust skeleton 主循环在每次迭代末尾（含所有 continue 路径）调用 `vertex_queue.cleanup()`，C++ 原先只在 split 分支清理——已补齐到每条路径。全量 fixture 对照（sub_ulp、deflate_collapse、square_inflate 68 顶点/面积 6.196029663086、negative_inflate、epsilon_before_event、zero_near_edge、concave split 1.419689416885、L 22 顶点 14.263492548395、comb first 14.040000915527、NaN/±Inf 距离）Debug/Release 双侧 12/12 通过。comb 的第二原始组件（40 顶点）不属于 jagua-rs 核心 API 返回值（Rust 只取首组件），维持计划既定的不验收范围。
+4. **geo-buffer 逐行对齐（历史本地fork基线）**：当时对 `StraightSkeleton.cpp` 与 geo-buffer 0.2.0 源码（cargo registry）逐函数审计——VertexQueue/Index/Node、Ray、Timeline、事件回放和圆角路径均已逐项核对；修复一处本地fork基线的cleanup分叉。所列12项结果只描述本地fork，不是当前D5 `geo::Buffer` 输出或验收结果。当前基线见11号Offset记录。
 
 - [x] 为 1–7 项逐条登记状态：未验收、已复现、已修复、Debug/Release 通过或明确保留的接口差异；每个“通过”关联测试/fixture。
 - [x] 运行 Rust oracle 与 JaguarCore 完整 Debug、Release 测试；确认本计划新增的每个 fixture 在两侧均消费。

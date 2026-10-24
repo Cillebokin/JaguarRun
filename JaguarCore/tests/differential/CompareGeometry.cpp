@@ -223,6 +223,66 @@ std::vector<double> shapeModificationValues(const jaguar::SimplePolygon& shape)
     return values;
 }
 
+void expectRustOffsetPolygon(const ReferenceMap& reference,
+                             const char* key,
+                             const jaguar::SimplePolygon& actual,
+                             float additionalAreaTolerance = 0.0F)
+{
+    const std::vector<double> expected = numericValues(referenceValue(reference, key));
+    const std::size_t expectedCount = static_cast<std::size_t>(expected.front());
+    if (expectedCount != actual.VertexCount() ||
+        expected.size() != 2U + expectedCount * 2U)
+    {
+        std::fprintf(stderr,
+                     "Rust reference %s vertex count: Rust %zu, C++ %zu\n",
+                     key,
+                     expectedCount,
+                     actual.VertexCount());
+    }
+    assert(expectedCount == actual.VertexCount());
+    assert(expected.size() == 2U + expectedCount * 2U);
+
+    const float expectedArea = static_cast<float>(expected[1]);
+    const float actualArea = static_cast<float>(actual.Area());
+    const bool areaMatches = jaguar::detail::AlmostEqualRustF32(
+                                 expectedArea, actualArea) ||
+                             std::abs(expectedArea - actualArea) <=
+                                 additionalAreaTolerance;
+    if (!areaMatches)
+    {
+        std::fprintf(stderr,
+                     "Rust reference %s area: Rust %.9g, C++ %.9g\n",
+                     key,
+                     static_cast<float>(expected[1]),
+                     static_cast<float>(actual.Area()));
+    }
+    assert(areaMatches);
+
+    bool cycleMatches = false;
+    for (std::size_t shift = 0U; shift < expectedCount && !cycleMatches; ++shift)
+    {
+        cycleMatches = true;
+        for (std::size_t index = 0U; index < expectedCount; ++index)
+        {
+            const jaguar::Point2d& actualPoint =
+                actual.Vertices()[(index + shift) % expectedCount];
+            const float expectedX = static_cast<float>(expected[2U + index * 2U]);
+            const float expectedY = static_cast<float>(expected[3U + index * 2U]);
+            if (!jaguar::detail::AlmostEqualRustF32(
+                    expectedX, static_cast<float>(actualPoint.x)) ||
+                !jaguar::detail::AlmostEqualRustF32(
+                    expectedY, static_cast<float>(actualPoint.y)))
+            {
+                cycleMatches = false;
+                break;
+            }
+        }
+    }
+    if (!cycleMatches)
+        std::fprintf(stderr, "Rust reference %s ordered vertex cycle differs\n", key);
+    assert(cycleMatches);
+}
+
 void expectRustBooleans(const ReferenceMap& reference,
                         const char* key,
                         const std::vector<bool>& actual)
@@ -1314,11 +1374,940 @@ void runB2ShapeModificationDifferentialTests()
         convexBump.Value(), jaguar::ShapeModifyMode::Deflate, {0.2, 0.01});
     expectRustNumbers(b2Reference, "b2.convex_bump.deflate",
                       shapeModificationValues(bumpDeflated));
+
+    const auto narrowSimplifiedInflate = jaguar::SimplifyShape(
+        narrowNotch.Value(), jaguar::ShapeModifyMode::Inflate, 0.02);
+    assert(narrowSimplifiedInflate.HasValue());
+    expectRustNumbers(b2Reference, "b2.simplify.narrow_notch.inflate",
+                      shapeModificationValues(narrowSimplifiedInflate.Value()));
+    const auto narrowSimplifiedDeflate = jaguar::SimplifyShape(
+        narrowNotch.Value(), jaguar::ShapeModifyMode::Deflate, 0.02);
+    assert(narrowSimplifiedDeflate.HasValue());
+    expectRustNumbers(b2Reference, "b2.simplify.narrow_notch.deflate",
+                      shapeModificationValues(narrowSimplifiedDeflate.Value()));
+
+    const auto convexBevel = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {4.0, 0.0}, {4.1, 2.0}, {4.0, 4.0},
+        {2.0, 4.1}, {0.0, 4.0}, {-0.1, 2.0}});
+    assert(convexBevel.HasValue());
+    const auto bevelSimplifiedInflate = jaguar::SimplifyShape(
+        convexBevel.Value(), jaguar::ShapeModifyMode::Inflate, 0.05);
+    assert(bevelSimplifiedInflate.HasValue());
+    expectRustNumbers(b2Reference, "b2.simplify.convex_bevel.inflate",
+                      shapeModificationValues(bevelSimplifiedInflate.Value()));
+    const auto bevelSimplifiedDeflate = jaguar::SimplifyShape(
+        convexBevel.Value(), jaguar::ShapeModifyMode::Deflate, 0.05);
+    assert(bevelSimplifiedDeflate.HasValue());
+    expectRustNumbers(b2Reference, "b2.simplify.convex_bevel.deflate",
+                      shapeModificationValues(bevelSimplifiedDeflate.Value()));
+
+    const auto redundantCollinear = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {1.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}});
+    assert(redundantCollinear.HasValue());
+    const auto zeroToleranceSimplified = jaguar::SimplifyShape(
+        redundantCollinear.Value(), jaguar::ShapeModifyMode::Inflate, 0.0);
+    assert(zeroToleranceSimplified.HasValue());
+    expectRustNumbers(b2Reference, "b2.simplify.collinear.zero_tolerance",
+                      shapeModificationValues(zeroToleranceSimplified.Value()));
+    const double negativeMinSubnormal = -static_cast<double>(
+        std::numeric_limits<float>::denorm_min());
+    const auto negativeToleranceSimplified = jaguar::SimplifyShape(
+        redundantCollinear.Value(), jaguar::ShapeModifyMode::Inflate,
+        negativeMinSubnormal);
+    assert(negativeToleranceSimplified.HasValue());
+    expectRustNumbers(b2Reference,
+                      "b2.simplify.collinear.negative_min_subnormal",
+                      shapeModificationValues(negativeToleranceSimplified.Value()));
+}
+
+void runOffsetBoundaryDifferentialTests()
+{
+    const ReferenceMap reference = loadReferenceMap("offset_boundary.txt");
+
+    const auto square = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}});
+    assert(square.HasValue());
+    const auto concaveL = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {6.0, 0.0}, {6.0, 2.0},
+        {2.0, 2.0}, {2.0, 6.0}, {0.0, 6.0}});
+    assert(concaveL.HasValue());
+
+    const auto expectOffsetError = [&reference](
+                                        const char* key,
+                                        const auto& result) {
+        const std::string& expected = referenceValue(reference, key);
+        assert(expected.compare(0U, 6U, "error:") == 0);
+        assert(!result.HasValue());
+        assert(result.GetError().code == jaguar::ErrorCode::OffsetFailed);
+        assert(result.GetError().message == expected.substr(6U));
+    };
+    const auto expectConcaveLPoiUnderestimate = [&reference](
+                                                   const char* key,
+                                                   const auto& result) {
+        assert(referenceValue(reference, key) ==
+               "error:Simple polygon must have at least 3 points");
+        assert(!result.HasValue());
+        assert(result.GetError().code == jaguar::ErrorCode::OffsetFailed);
+        assert(result.GetError().message ==
+               "Offset resulted in an empty polygon");
+    };
+    const auto collinearVertexSquare = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}, {0.0, 1.0}});
+    assert(collinearVertexSquare.HasValue());
+    const auto collinearVertexSquareComponents = jaguar::OffsetShapes(
+        collinearVertexSquare.Value(), jaguar::ShapeModifyMode::Inflate,
+        0.25);
+    assert(collinearVertexSquareComponents.HasValue());
+    assert(collinearVertexSquareComponents.Value().size() == 1U);
+    expectRustOffsetPolygon(
+        reference, "offset.finite.collinear_vertex_square_inflate",
+        collinearVertexSquareComponents.Value().front());
+    const auto collinearVertexSquareFirst = jaguar::OffsetShape(
+        collinearVertexSquare.Value(), jaguar::ShapeModifyMode::Inflate,
+        0.25);
+    assert(collinearVertexSquareFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.collinear_vertex_square_inflate",
+        collinearVertexSquareFirst.Value());
+
+    expectOffsetError(
+        "offset.boundary.positive_infinity",
+        jaguar::OffsetShape(
+            square.Value(), jaguar::ShapeModifyMode::Inflate,
+            std::numeric_limits<float>::infinity()));
+    expectOffsetError(
+        "offset.boundary.negative_infinity",
+        jaguar::OffsetShape(
+            square.Value(), jaguar::ShapeModifyMode::Inflate,
+            -std::numeric_limits<float>::infinity()));
+    expectOffsetError(
+        "offset.boundary.collapse",
+        jaguar::OffsetShape(
+            square.Value(), jaguar::ShapeModifyMode::Deflate, 2.0));
+    const auto concaveLNearCollapseComponents = jaguar::OffsetShapes(
+        concaveL.Value(), jaguar::ShapeModifyMode::Deflate, 1.0);
+    assert(concaveLNearCollapseComponents.HasValue());
+    assert(concaveLNearCollapseComponents.Value().size() == 1U);
+    expectRustOffsetPolygon(
+        reference, "offset.finite.concave_l_deflate_1_0",
+        concaveLNearCollapseComponents.Value().front());
+    const auto concaveLNearCollapseFirst = jaguar::OffsetShape(
+        concaveL.Value(), jaguar::ShapeModifyMode::Deflate, 1.0);
+    assert(concaveLNearCollapseFirst.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.concave_l_deflate_1_0",
+                            concaveLNearCollapseFirst.Value());
+    const float concaveLDeflateRadiusBelow = std::nextafter(
+        1.1715729236602783F, 0.0F);
+    const auto concaveLRadiusBelow = jaguar::OffsetShape(
+        concaveL.Value(), jaguar::ShapeModifyMode::Deflate,
+        static_cast<double>(concaveLDeflateRadiusBelow));
+    // The current 10-level C++ POI estimate is below D5's collapse boundary
+    // for this input, so C++ reports an empty offset instead of a degenerate ring.
+    expectConcaveLPoiUnderestimate(
+        "offset.boundary.concave_l_deflate_radius_below",
+        concaveLRadiusBelow);
+    expectOffsetError(
+        "offset.boundary.concave_l_deflate_radius_above",
+        jaguar::OffsetShape(
+            concaveL.Value(), jaguar::ShapeModifyMode::Deflate,
+            1.1715729236602783F));
+    struct ScaledConcaveLBoundary
+    {
+        const char* scaleName;
+        double scale;
+        float nearestThreshold;
+    };
+    for (const ScaledConcaveLBoundary& boundary : {
+             ScaledConcaveLBoundary{"0_5", 0.5, 0.58578646F},
+             ScaledConcaveLBoundary{"2", 2.0, 2.3431458F},
+             ScaledConcaveLBoundary{"10", 10.0, 11.715729F}})
+    {
+        const double scale = boundary.scale;
+        const auto scaledConcaveL = jaguar::SimplePolygon::Create({
+            {0.0, 0.0}, {6.0 * scale, 0.0}, {6.0 * scale, 2.0 * scale},
+            {2.0 * scale, 2.0 * scale}, {2.0 * scale, 6.0 * scale},
+            {0.0, 6.0 * scale}});
+        assert(scaledConcaveL.HasValue());
+        const std::string belowKey =
+            std::string("offset.boundary.concave_l_scale_") +
+            boundary.scaleName + "_below";
+        const std::string nearestKey =
+            std::string("offset.boundary.concave_l_scale_") +
+            boundary.scaleName + "_nearest";
+        expectConcaveLPoiUnderestimate(
+            belowKey.c_str(),
+            jaguar::OffsetShape(
+                scaledConcaveL.Value(), jaguar::ShapeModifyMode::Deflate,
+                static_cast<double>(std::nextafter(
+                    boundary.nearestThreshold, 0.0F))));
+        expectOffsetError(
+            nearestKey.c_str(),
+            jaguar::OffsetShape(
+                scaledConcaveL.Value(), jaguar::ShapeModifyMode::Deflate,
+                boundary.nearestThreshold));
+    }
+    assert(referenceValue(reference, "offset.boundary.nan.debug") == "panic");
+    expectOffsetError(
+        "offset.boundary.nan.release",
+        jaguar::OffsetShape(
+            square.Value(), jaguar::ShapeModifyMode::Inflate,
+            std::numeric_limits<float>::quiet_NaN()));
+
+    const float tinyDeflateWidth = std::ldexp(1.0F, -21);
+    const float tinyDeflateOrigin = std::ldexp(1.0F, -20);
+    const auto tinyDeflateShape = jaguar::SimplePolygon::Create({
+        {tinyDeflateOrigin, tinyDeflateOrigin},
+        {tinyDeflateOrigin + tinyDeflateWidth * 2.0F, tinyDeflateOrigin},
+        {tinyDeflateOrigin + tinyDeflateWidth * 2.0F,
+         tinyDeflateOrigin + tinyDeflateWidth},
+        {tinyDeflateOrigin, tinyDeflateOrigin + tinyDeflateWidth}});
+    assert(tinyDeflateShape.HasValue());
+    const float tinyDeflateDistance =
+        std::nextafter(tinyDeflateWidth * 0.5F, 0.0F);
+    const auto expectTinyDeflateFallbackCollapse =
+        [&expectOffsetError, &tinyDeflateShape](const char* key,
+                                                float distance) {
+            const auto offsets = jaguar::OffsetShapes(
+                tinyDeflateShape.Value(), jaguar::ShapeModifyMode::Deflate,
+                distance);
+            assert(offsets.HasValue());
+            assert(offsets.Value().empty());
+            expectOffsetError(
+                key, jaguar::OffsetShape(
+                         tinyDeflateShape.Value(),
+                         jaguar::ShapeModifyMode::Deflate, distance));
+        };
+    expectTinyDeflateFallbackCollapse(
+        "offset.boundary.tiny_deflate_fallback", tinyDeflateDistance);
+    float tinyDeflateNeighbor = tinyDeflateDistance;
+    for (unsigned int predecessor = 1U; predecessor <= 4U; ++predecessor)
+    {
+        tinyDeflateNeighbor = std::nextafter(tinyDeflateNeighbor, 0.0F);
+        const std::string key =
+            "offset.boundary.tiny_deflate_fallback_pred" +
+            std::to_string(predecessor);
+        expectTinyDeflateFallbackCollapse(key.c_str(),
+                                          tinyDeflateNeighbor);
+    }
+
+    const auto expectTinyDeflateCollapse =
+        [&expectOffsetError, &tinyDeflateShape](const char* key,
+                                                float distance) {
+            expectOffsetError(
+                key, jaguar::OffsetShape(tinyDeflateShape.Value(),
+                                         jaguar::ShapeModifyMode::Deflate,
+                                         distance));
+            const auto offsets = jaguar::OffsetShapes(
+                tinyDeflateShape.Value(), jaguar::ShapeModifyMode::Deflate,
+                distance);
+            assert(offsets.HasValue());
+            assert(offsets.Value().empty());
+        };
+    const float tinyDeflateHalf = tinyDeflateWidth * 0.5F;
+    expectTinyDeflateCollapse("offset.boundary.tiny_deflate_half",
+                              tinyDeflateHalf);
+    expectTinyDeflateCollapse(
+        "offset.boundary.tiny_deflate_above_half",
+        std::nextafter(tinyDeflateHalf,
+                       std::numeric_limits<float>::infinity()));
+
+    for (const int exponent : {-24, -30, -38, -40, -42})
+    {
+        const float width = std::ldexp(1.0F, exponent);
+        const float origin = width * 2.0F;
+        const auto scaledShape = jaguar::SimplePolygon::Create({
+            {origin, origin},
+            {origin + width * 2.0F, origin},
+            {origin + width * 2.0F, origin + width},
+            {origin, origin + width}});
+        assert(scaledShape.HasValue());
+        const float distance = std::nextafter(width * 0.5F, 0.0F);
+        const std::string key = "offset.boundary.tiny_scale_exp" +
+                                std::to_string(-exponent);
+        const auto offsets = jaguar::OffsetShapes(
+            scaledShape.Value(), jaguar::ShapeModifyMode::Deflate,
+            distance);
+        assert(offsets.HasValue());
+        assert(offsets.Value().empty());
+        expectOffsetError(
+            key.c_str(), jaguar::OffsetShape(
+                             scaledShape.Value(),
+                             jaguar::ShapeModifyMode::Deflate, distance));
+
+        const float halfWidth = width * 0.5F;
+        const float aboveHalf = std::nextafter(
+            halfWidth, std::numeric_limits<float>::infinity());
+        for (const auto& control : {
+                 std::make_pair("half", halfWidth),
+                 std::make_pair("above_half", aboveHalf)})
+        {
+            const std::string controlKey = key + "_" + control.first;
+            const auto controlOffsets = jaguar::OffsetShapes(
+                scaledShape.Value(), jaguar::ShapeModifyMode::Deflate,
+                control.second);
+            assert(controlOffsets.HasValue());
+            assert(controlOffsets.Value().empty());
+            expectOffsetError(
+                controlKey.c_str(), jaguar::OffsetShape(
+                                        scaledShape.Value(),
+                                        jaguar::ShapeModifyMode::Deflate,
+                                        control.second));
+        }
+    }
+
+    for (const int exponent : {7, 20})
+    {
+        const float width = std::ldexp(1.0F, exponent);
+        const float origin = std::ldexp(1.0F, -20);
+        const auto largeDeflateShape = jaguar::SimplePolygon::Create({
+            {origin, origin},
+            {origin + width * 2.0F, origin},
+            {origin + width * 2.0F, origin + width},
+            {origin, origin + width}});
+        assert(largeDeflateShape.HasValue());
+        float distance = std::ldexp(1.0F, exponent - 1);
+        for (unsigned int predecessor = 0U; predecessor < 5U; ++predecessor)
+            distance = std::nextafter(distance, 0.0F);
+        const std::string key =
+            "offset.boundary.large_deflate_fallback_exp" +
+            std::to_string(exponent);
+        const auto offsets = jaguar::OffsetShapes(
+            largeDeflateShape.Value(), jaguar::ShapeModifyMode::Deflate,
+            distance);
+        assert(offsets.HasValue());
+        assert(offsets.Value().size() == 1U);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                offsets.Value().front());
+        const auto first = jaguar::OffsetShape(
+            largeDeflateShape.Value(), jaguar::ShapeModifyMode::Deflate,
+            distance);
+        assert(first.HasValue());
+        expectRustOffsetPolygon(reference, key.c_str(), first.Value());
+    }
+
+    for (const int exponent : {7, 20})
+    {
+        const float width = std::ldexp(1.0F, exponent);
+        const float distanceBase = std::ldexp(1.0F, exponent - 1);
+        for (const int originExponent : {0, 20})
+        {
+            const float origin = std::ldexp(1.0F, originExponent);
+            const auto translatedShape = jaguar::SimplePolygon::Create({
+                {origin, origin},
+                {origin + width * 2.0F, origin},
+                {origin + width * 2.0F, origin + width},
+                {origin, origin + width}});
+            assert(translatedShape.HasValue());
+            float distance = distanceBase;
+            for (unsigned int predecessor = 1U; predecessor <= 5U;
+                 ++predecessor)
+            {
+                distance = std::nextafter(distance, 0.0F);
+                std::string key =
+                    "offset.boundary.large_deflate_translated_exp" +
+                    std::to_string(exponent) + "_origin" +
+                    std::to_string(originExponent);
+                if (predecessor < 5U)
+                    key += "_pred" + std::to_string(predecessor);
+                assert(referenceValue(reference, key.c_str()) ==
+                       "error:Simple polygon must have at least 3 points");
+                const auto offsets = jaguar::OffsetShapes(
+                    translatedShape.Value(), jaguar::ShapeModifyMode::Deflate,
+                    distance);
+                assert(offsets.HasValue());
+                assert(offsets.Value().empty());
+                const auto first = jaguar::OffsetShape(
+                    translatedShape.Value(), jaguar::ShapeModifyMode::Deflate,
+                    distance);
+                expectOffsetError(key.c_str(), first);
+            }
+        }
+    }
+
+    const auto subGridDeflated = jaguar::OffsetShape(
+        square.Value(), jaguar::ShapeModifyMode::Deflate, 1.0e-9);
+    assert(subGridDeflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.square_subgrid_deflate",
+                            subGridDeflated.Value());
+    const auto squareDeflated = jaguar::OffsetShape(
+        square.Value(), jaguar::ShapeModifyMode::Deflate, 0.25);
+    assert(squareDeflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.square_deflate",
+                            squareDeflated.Value());
+    const auto squareInflated = jaguar::OffsetShape(
+        square.Value(), jaguar::ShapeModifyMode::Inflate, 0.25);
+    assert(squareInflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.square_inflate",
+                            squareInflated.Value());
+
+    const auto obliquePentagon = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {8.0, 0.0}, {10.0, 5.0}, {5.0, 9.0}, {-1.0, 5.0}});
+    assert(obliquePentagon.HasValue());
+    const auto obliquePentagonInflated = jaguar::OffsetShape(
+        obliquePentagon.Value(), jaguar::ShapeModifyMode::Inflate, 0.5);
+    assert(obliquePentagonInflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.oblique_pentagon_inflate",
+                            obliquePentagonInflated.Value());
+
+    const auto concaveLInflated = jaguar::OffsetShape(
+        concaveL.Value(), jaguar::ShapeModifyMode::Inflate, 0.5);
+    assert(concaveLInflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.concave_l_inflate",
+                            concaveLInflated.Value());
+    const auto concaveLDeflated = jaguar::OffsetShape(
+        concaveL.Value(), jaguar::ShapeModifyMode::Deflate, 0.5);
+    assert(concaveLDeflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.concave_l_deflate",
+                            concaveLDeflated.Value());
+
+    const auto splitCandidate = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {2.0, 1.0}, {0.0, 4.0}});
+    assert(splitCandidate.HasValue());
+    const auto splitDeflated = jaguar::OffsetShape(
+        splitCandidate.Value(), jaguar::ShapeModifyMode::Deflate, 0.45);
+    assert(splitDeflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.split_first_deflate",
+                            splitDeflated.Value());
+
+    const auto narrowBridge = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {5.0, 0.0}, {5.0, 2.0}, {7.0, 2.0},
+        {7.0, 0.0}, {12.0, 0.0}, {12.0, 5.0}, {7.0, 5.0},
+        {7.0, 3.0}, {5.0, 3.0}, {5.0, 5.0}, {0.0, 5.0}});
+    assert(narrowBridge.HasValue());
+    const auto narrowBridgeComponents = jaguar::OffsetShapes(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 0.6);
+    assert(narrowBridgeComponents.HasValue());
+    const std::vector<double> expectedComponentCount =
+        numericValues(referenceValue(
+            reference, "offset.finite.narrow_bridge_deflate.components"));
+    assert(expectedComponentCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedComponentCount.front()) ==
+           narrowBridgeComponents.Value().size());
+    assert(narrowBridgeComponents.Value().size() == 2U);
+    expectRustOffsetPolygon(reference,
+                            "offset.finite.narrow_bridge_deflate.component0",
+                            narrowBridgeComponents.Value()[0]);
+    expectRustOffsetPolygon(reference,
+                            "offset.finite.narrow_bridge_deflate.component1",
+                            narrowBridgeComponents.Value()[1]);
+    const auto narrowBridgeFirst = jaguar::OffsetShape(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 0.6);
+    assert(narrowBridgeFirst.HasValue());
+    expectRustOffsetPolygon(reference,
+                            "offset.finite.narrow_bridge_deflate.component0",
+                            narrowBridgeFirst.Value());
+    const auto narrowBridgeTouching = jaguar::OffsetShapes(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 1.0);
+    assert(narrowBridgeTouching.HasValue());
+    assert(narrowBridgeTouching.Value().size() == 2U);
+    for (std::size_t index = 0U;
+         index < narrowBridgeTouching.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.narrow_bridge_touching_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                narrowBridgeTouching.Value()[index]);
+    }
+    const std::vector<double> narrowBridgeTouchingCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.narrow_bridge_touching_deflate.components"));
+    assert(narrowBridgeTouchingCount.size() == 1U);
+    assert(static_cast<std::size_t>(narrowBridgeTouchingCount.front()) ==
+           narrowBridgeTouching.Value().size());
+    const auto narrowBridgeTouchingFirst = jaguar::OffsetShape(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 1.0);
+    assert(narrowBridgeTouchingFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.narrow_bridge_touching_deflate.component0",
+        narrowBridgeTouchingFirst.Value());
+
+    const auto comb = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {22.0, 0.0}, {22.0, 12.0}, {16.0, 12.0},
+        {16.0, 4.0}, {14.0, 4.0}, {14.0, 12.0}, {8.0, 12.0},
+        {8.0, 4.0}, {6.0, 4.0}, {6.0, 12.0}, {0.0, 12.0}});
+    assert(comb.HasValue());
+    std::vector<jaguar::Point2d> scaledTranslatedCombPoints;
+    scaledTranslatedCombPoints.reserve(comb.Value().VertexCount());
+    for (const jaguar::Point2d& point : comb.Value().Vertices())
+    {
+        scaledTranslatedCombPoints.push_back(
+            {point.x * 1024.0 - 13427.0,
+             point.y * 1024.0 - 2150.375});
+    }
+    const auto scaledTranslatedComb = jaguar::SimplePolygon::Create(
+        std::move(scaledTranslatedCombPoints));
+    assert(scaledTranslatedComb.HasValue());
+    const auto scaledTranslatedCombComponents = jaguar::OffsetShapes(
+        scaledTranslatedComb.Value(), jaguar::ShapeModifyMode::Deflate,
+        2150.4);
+    assert(scaledTranslatedCombComponents.HasValue());
+    const std::vector<double> scaledTranslatedCombComponentCount =
+        numericValues(referenceValue(
+            reference,
+            "offset.finite.comb_deflate_scaled_translated.components"));
+    assert(scaledTranslatedCombComponentCount.size() == 1U);
+    assert(static_cast<std::size_t>(scaledTranslatedCombComponentCount.front()) ==
+           scaledTranslatedCombComponents.Value().size());
+    assert(scaledTranslatedCombComponents.Value().size() == 3U);
+    for (std::size_t index = 0U;
+         index < scaledTranslatedCombComponents.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.comb_deflate_scaled_translated.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(
+            reference, key.c_str(),
+            scaledTranslatedCombComponents.Value()[index]);
+    }
+    const auto scaledTranslatedCombFirst = jaguar::OffsetShape(
+        scaledTranslatedComb.Value(), jaguar::ShapeModifyMode::Deflate,
+        2150.4);
+    assert(scaledTranslatedCombFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference,
+        "offset.finite.comb_deflate_scaled_translated_first",
+        scaledTranslatedCombFirst.Value());
+    const auto combComponents = jaguar::OffsetShapes(
+        comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.1);
+    assert(combComponents.HasValue());
+    const std::vector<double> expectedCombComponentCount = numericValues(
+        referenceValue(reference, "offset.finite.comb_deflate.components"));
+    assert(expectedCombComponentCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedCombComponentCount.front()) ==
+           combComponents.Value().size());
+    assert(combComponents.Value().size() == 3U);
+    for (std::size_t index = 0U; index < combComponents.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.comb_deflate.component" + std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                combComponents.Value()[index]);
+    }
+    const auto combFirst = jaguar::OffsetShape(
+        comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.1);
+    assert(combFirst.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.comb_deflate.component0",
+                            combFirst.Value());
+    const auto combExactCollapse = jaguar::OffsetShapes(
+        comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(combExactCollapse.HasValue());
+    assert(combExactCollapse.Value().size() == 3U);
+    const std::vector<double> combExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.comb_exact_collapse_deflate.components"));
+    assert(combExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(combExactCollapseCount.front()) ==
+           combExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < combExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.comb_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                combExactCollapse.Value()[index]);
+    }
+
+    const auto combCollinearTop = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {22.0, 0.0}, {22.0, 12.0}, {19.0, 12.0},
+        {16.0, 12.0}, {16.0, 4.0}, {14.0, 4.0}, {14.0, 12.0},
+        {8.0, 12.0}, {8.0, 4.0}, {6.0, 4.0}, {6.0, 12.0},
+        {0.0, 12.0}});
+    assert(combCollinearTop.HasValue());
+    const auto combCollinearTopComponents = jaguar::OffsetShapes(
+        combCollinearTop.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(combCollinearTopComponents.HasValue());
+    const std::vector<double> combCollinearTopCount = numericValues(
+        referenceValue(
+            reference,
+            "offset.finite.comb_collinear_top_exact_collapse_deflate.components"));
+    assert(combCollinearTopCount.size() == 1U);
+    assert(static_cast<std::size_t>(combCollinearTopCount.front()) ==
+           combCollinearTopComponents.Value().size());
+    for (std::size_t index = 0U;
+         index < combCollinearTopComponents.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.comb_collinear_top_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(
+            reference, key.c_str(), combCollinearTopComponents.Value()[index]);
+    }
+    const auto combCollinearTopFirst = jaguar::OffsetShape(
+        combCollinearTop.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(combCollinearTopFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference,
+        "offset.finite.comb_collinear_top_exact_collapse_deflate.component0",
+        combCollinearTopFirst.Value());
+
+    const auto makeDenseToothGearPoints = [](std::size_t toothCount) {
+        const double side = 4.0 * static_cast<double>(toothCount);
+        std::vector<jaguar::Point2d> points;
+        points.reserve(12U * toothCount + 4U);
+        points.push_back({0.0, 0.0});
+        for (std::size_t tooth = 0U; tooth < toothCount; ++tooth)
+        {
+            const double start = 4.0 * static_cast<double>(tooth);
+            points.push_back({start + 1.0, 0.0});
+            points.push_back({start + 2.0, -3.0});
+            points.push_back({start + 3.0, 0.0});
+        }
+        points.push_back({side, 0.0});
+        for (std::size_t tooth = 0U; tooth < toothCount; ++tooth)
+        {
+            const double start = 4.0 * static_cast<double>(tooth);
+            points.push_back({side, start + 1.0});
+            points.push_back({side + 3.0, start + 2.0});
+            points.push_back({side, start + 3.0});
+        }
+        points.push_back({side, side});
+        for (std::size_t tooth = 0U; tooth < toothCount; ++tooth)
+        {
+            const double start = side - 4.0 * static_cast<double>(tooth);
+            points.push_back({start - 1.0, side});
+            points.push_back({start - 2.0, side + 3.0});
+            points.push_back({start - 3.0, side});
+        }
+        points.push_back({0.0, side});
+        for (std::size_t tooth = 0U; tooth < toothCount; ++tooth)
+        {
+            const double start = side - 4.0 * static_cast<double>(tooth);
+            points.push_back({0.0, start - 1.0});
+            points.push_back({-3.0, start - 2.0});
+            points.push_back({0.0, start - 3.0});
+        }
+        return points;
+    };
+    const auto denseToothGearPoints = makeDenseToothGearPoints(25U);
+    assert(denseToothGearPoints.size() == 304U);
+    const auto denseToothGear =
+        jaguar::SimplePolygon::Create(denseToothGearPoints);
+    assert(denseToothGear.HasValue());
+    const auto denseToothGearComponents = jaguar::OffsetShapes(
+        denseToothGear.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGearComponents.HasValue());
+    const std::vector<double> denseToothGearCount = numericValues(
+        referenceValue(
+            reference,
+            "offset.finite.dense_tooth_gear_deflate.components"));
+    assert(denseToothGearCount.size() == 1U);
+    assert(static_cast<std::size_t>(denseToothGearCount.front()) ==
+           denseToothGearComponents.Value().size());
+    for (std::size_t index = 0U;
+         index < denseToothGearComponents.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.dense_tooth_gear_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                denseToothGearComponents.Value()[index]);
+    }
+    const auto denseToothGearFirst = jaguar::OffsetShape(
+        denseToothGear.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGearFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference,
+        "offset.finite.dense_tooth_gear_deflate.component0",
+        denseToothGearFirst.Value());
+
+    const auto denseToothGear30Points = makeDenseToothGearPoints(30U);
+    assert(denseToothGear30Points.size() == 364U);
+    const auto denseToothGear30 =
+        jaguar::SimplePolygon::Create(denseToothGear30Points);
+    assert(denseToothGear30.HasValue());
+    const auto denseToothGear30Components = jaguar::OffsetShapes(
+        denseToothGear30.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGear30Components.HasValue());
+    const std::vector<double> denseToothGear30Count = numericValues(
+        referenceValue(
+            reference,
+            "offset.finite.dense_tooth_gear_30_deflate.components"));
+    assert(denseToothGear30Count.size() == 1U);
+    assert(static_cast<std::size_t>(denseToothGear30Count.front()) ==
+           denseToothGear30Components.Value().size());
+    for (std::size_t index = 0U;
+         index < denseToothGear30Components.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.dense_tooth_gear_30_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                denseToothGear30Components.Value()[index]);
+    }
+    const auto denseToothGear30First = jaguar::OffsetShape(
+        denseToothGear30.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGear30First.HasValue());
+    expectRustOffsetPolygon(
+        reference,
+        "offset.finite.dense_tooth_gear_30_deflate.component0",
+        denseToothGear30First.Value());
+
+    const auto denseToothGear37Points = makeDenseToothGearPoints(37U);
+    assert(denseToothGear37Points.size() == 448U);
+    const auto denseToothGear37 =
+        jaguar::SimplePolygon::Create(denseToothGear37Points);
+    assert(denseToothGear37.HasValue());
+    const auto denseToothGear37Components = jaguar::OffsetShapes(
+        denseToothGear37.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGear37Components.HasValue());
+    // This 1264-vertex ring has a six-ULP area difference from the different
+    // f32 area reductions. Coordinates retain the standard comparison tolerance.
+    const std::vector<double> denseToothGear37Count = numericValues(
+        referenceValue(
+            reference,
+            "offset.finite.dense_tooth_gear_37_deflate.components"));
+    assert(denseToothGear37Count.size() == 1U);
+    assert(static_cast<std::size_t>(denseToothGear37Count.front()) ==
+           denseToothGear37Components.Value().size());
+    for (std::size_t index = 0U;
+         index < denseToothGear37Components.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.dense_tooth_gear_37_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                denseToothGear37Components.Value()[index],
+                                0.02F);
+    }
+    const auto denseToothGear37First = jaguar::OffsetShape(
+        denseToothGear37.Value(), jaguar::ShapeModifyMode::Deflate, 3.1);
+    assert(denseToothGear37First.HasValue());
+    expectRustOffsetPolygon(
+        reference,
+        "offset.finite.dense_tooth_gear_37_deflate.component0",
+        denseToothGear37First.Value(), 0.02F);
+
+    const auto combInflated = jaguar::OffsetShapes(
+        comb.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(combInflated.HasValue());
+    const std::vector<double> combInflatedCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.comb_inflate_close_gaps.components"));
+    assert(combInflatedCount.size() == 1U);
+    assert(static_cast<std::size_t>(combInflatedCount.front()) ==
+           combInflated.Value().size());
+    assert(combInflated.Value().size() == 1U);
+    expectRustOffsetPolygon(
+        reference, "offset.finite.comb_inflate_close_gaps.component0",
+        combInflated.Value().front());
+    const auto combInflatedFirst = jaguar::OffsetShape(
+        comb.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(combInflatedFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.comb_inflate_close_gaps.component0",
+        combInflatedFirst.Value());
+
+    const auto triangleNotch = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {20.0, 0.0}, {20.0, 20.0}, {12.0, 20.0},
+        {10.0, 14.0}, {8.0, 20.0}, {0.0, 20.0}});
+    assert(triangleNotch.HasValue());
+    const auto triangleNotchInflated = jaguar::OffsetShape(
+        triangleNotch.Value(), jaguar::ShapeModifyMode::Inflate, 3.0);
+    assert(triangleNotchInflated.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.triangle_notch_inflate_round_fix",
+        triangleNotchInflated.Value());
+
+    const auto tShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {12.0, 0.0}, {12.0, 4.0}, {8.0, 4.0},
+        {8.0, 12.0}, {4.0, 12.0}, {4.0, 4.0}, {0.0, 4.0}});
+    assert(tShape.HasValue());
+    const auto tExactCollapse = jaguar::OffsetShapes(
+        tShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(tExactCollapse.HasValue());
+    const std::vector<double> expectedTExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.t_exact_collapse_deflate.components"));
+    assert(expectedTExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedTExactCollapseCount.front()) ==
+           tExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < tExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.t_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                tExactCollapse.Value()[index]);
+    }
+
+    const auto hShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {8.0, 4.0},
+        {8.0, 0.0}, {12.0, 0.0}, {12.0, 12.0}, {8.0, 12.0},
+        {8.0, 8.0}, {4.0, 8.0}, {4.0, 12.0}, {0.0, 12.0}});
+    assert(hShape.HasValue());
+    const auto hExactCollapse = jaguar::OffsetShapes(
+        hShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(hExactCollapse.HasValue());
+    const std::vector<double> expectedHExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.h_exact_collapse_deflate.components"));
+    assert(expectedHExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedHExactCollapseCount.front()) ==
+           hExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < hExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.h_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                hExactCollapse.Value()[index]);
+    }
+    const auto hFirst = jaguar::OffsetShape(
+        hShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(hFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.h_exact_collapse_deflate.component0",
+        hFirst.Value());
+
+    const auto uShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {12.0, 0.0}, {12.0, 10.0}, {8.0, 10.0},
+        {8.0, 4.0}, {4.0, 4.0}, {4.0, 10.0}, {0.0, 10.0}});
+    assert(uShape.HasValue());
+    const auto uNotchClosedInflate = jaguar::OffsetShapes(
+        uShape.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(uNotchClosedInflate.HasValue());
+    assert(uNotchClosedInflate.Value().size() == 1U);
+    expectRustOffsetPolygon(reference,
+                            "offset.finite.u_notch_closes_inflate",
+                            uNotchClosedInflate.Value().front());
+    const auto uNotchClosedInflateFirst = jaguar::OffsetShape(
+        uShape.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(uNotchClosedInflateFirst.HasValue());
+    expectRustOffsetPolygon(reference,
+                            "offset.finite.u_notch_closes_inflate",
+                            uNotchClosedInflateFirst.Value());
+
+    const auto obliqueUShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {9.6, 7.2}, {3.6, 15.2}, {0.4, 12.8},
+        {4.0, 8.0}, {0.8, 5.6}, {-2.8, 10.4}, {-6.0, 8.0}});
+    assert(obliqueUShape.HasValue());
+    const auto obliqueUNotchClosedInflate = jaguar::OffsetShapes(
+        obliqueUShape.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(obliqueUNotchClosedInflate.HasValue());
+    assert(obliqueUNotchClosedInflate.Value().size() == 1U);
+    expectRustOffsetPolygon(
+        reference, "offset.finite.oblique_u_notch_closes_inflate",
+        obliqueUNotchClosedInflate.Value().front());
+    const auto obliqueUNotchClosedInflateFirst = jaguar::OffsetShape(
+        obliqueUShape.Value(), jaguar::ShapeModifyMode::Inflate, 2.25);
+    assert(obliqueUNotchClosedInflateFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.oblique_u_notch_closes_inflate",
+        obliqueUNotchClosedInflateFirst.Value());
+
+    const auto uExactCollapse = jaguar::OffsetShapes(
+        uShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(uExactCollapse.HasValue());
+    const std::vector<double> expectedUExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.u_exact_collapse_deflate.components"));
+    assert(expectedUExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedUExactCollapseCount.front()) ==
+           uExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < uExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.u_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                uExactCollapse.Value()[index]);
+    }
+    const auto uFirst = jaguar::OffsetShape(
+        uShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(uFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.u_exact_collapse_deflate.component0",
+        uFirst.Value());
+
+    const auto cShape = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {12.0, 0.0}, {12.0, 4.0}, {4.0, 4.0},
+        {4.0, 8.0}, {12.0, 8.0}, {12.0, 12.0}, {0.0, 12.0}});
+    assert(cShape.HasValue());
+    const auto cExactCollapse = jaguar::OffsetShapes(
+        cShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(cExactCollapse.HasValue());
+    const std::vector<double> expectedCExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.c_exact_collapse_deflate.components"));
+    assert(expectedCExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedCExactCollapseCount.front()) ==
+           cExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < cExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.c_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                cExactCollapse.Value()[index]);
+    }
+    const auto cFirst = jaguar::OffsetShape(
+        cShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(cFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.c_exact_collapse_deflate.component0",
+        cFirst.Value());
+
+    const auto plusShape = jaguar::SimplePolygon::Create({
+        {4.0, 0.0}, {8.0, 0.0}, {8.0, 4.0}, {12.0, 4.0},
+        {12.0, 8.0}, {8.0, 8.0}, {8.0, 12.0}, {4.0, 12.0},
+        {4.0, 8.0}, {0.0, 8.0}, {0.0, 4.0}, {4.0, 4.0}});
+    assert(plusShape.HasValue());
+    const auto plusExactCollapse = jaguar::OffsetShapes(
+        plusShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(plusExactCollapse.HasValue());
+    const std::vector<double> expectedPlusExactCollapseCount = numericValues(
+        referenceValue(reference,
+                       "offset.finite.plus_exact_collapse_deflate.components"));
+    assert(expectedPlusExactCollapseCount.size() == 1U);
+    assert(static_cast<std::size_t>(expectedPlusExactCollapseCount.front()) ==
+           plusExactCollapse.Value().size());
+    for (std::size_t index = 0U;
+         index < plusExactCollapse.Value().size(); ++index)
+    {
+        const std::string key =
+            "offset.finite.plus_exact_collapse_deflate.component" +
+            std::to_string(index);
+        expectRustOffsetPolygon(reference, key.c_str(),
+                                plusExactCollapse.Value()[index]);
+    }
+    const auto plusFirst = jaguar::OffsetShape(
+        plusShape.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);
+    assert(plusFirst.HasValue());
+    expectRustOffsetPolygon(
+        reference, "offset.finite.plus_exact_collapse_deflate.component0",
+        plusFirst.Value());
+
+    const auto largeSquare = jaguar::SimplePolygon::Create({
+        {1000000.0, 1000000.0}, {2000000.0, 1000000.0},
+        {2000000.0, 2000000.0}, {1000000.0, 2000000.0}});
+    assert(largeSquare.HasValue());
+    const auto subUlpInflated = jaguar::OffsetShape(
+        largeSquare.Value(), jaguar::ShapeModifyMode::Inflate, 0.01);
+    assert(subUlpInflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.sub_ulp_inflate",
+                            subUlpInflated.Value());
+    const auto subUlpDeflated = jaguar::OffsetShape(
+        largeSquare.Value(), jaguar::ShapeModifyMode::Deflate, 0.01);
+    assert(subUlpDeflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.sub_ulp_deflate",
+                            subUlpDeflated.Value());
+    const auto subGridInflated = jaguar::OffsetShape(
+        largeSquare.Value(), jaguar::ShapeModifyMode::Inflate, 0.00001);
+    assert(subGridInflated.HasValue());
+    expectRustOffsetPolygon(reference, "offset.finite.subgrid_inflate",
+                            subGridInflated.Value());
 }
 
 void runGeometryDifferentialTests()
 {
     runB2ShapeModificationDifferentialTests();
+    runOffsetBoundaryDifferentialTests();
 
     const auto rectangle = jaguar::Rect2d::Create(-2.0, -1.0, 3.0, 4.0);
     assert(rectangle.HasValue());

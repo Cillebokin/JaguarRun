@@ -14,7 +14,7 @@
 - **container_id 语义**：Rust 签名即"caller supplies the external bin/sheet ID"（export.rs:6 注释），`ExtLayout { container_id, ... }` 直接使用参数（export.rs:25-26）。C++ `containerId.value_or(layout.GetContainer().Id())`（cpp:1751）：调用方未传时用容器自身保留的 id（import 时写入的外部 id，见记录 34 差异 5）。 probs 层调用形态见记录 37（SPP 传 `solution.layoutSnapshot.container.Id()`，即 Rust 硬编码 0 ↔ C++ 容器 id——SPP 路径 `Strip::CreateContainer` 默认 `id=0`（Strip.cpp:40，spp.h:35 默认参数），故双侧实际输出都是 0；差异仅在"显式 0 vs 默认 0 的容器 id"这一取值路径）。
 - **placed_items 枚举**：Rust `layout.placed_items.values().map(...)`（export.rs:9-23，按 SlotMap 插入序）↔ C++ `snapshot.placements`（cpp:1754-1756，快照数组序）。放置项顺序双侧都由插入顺序决定（Rust SlotMap 值迭代序 = 插入槽序；C++ `Layout::Save` 按放置顺序生成 placements），一致（细节见记录 26）。
 - **每项变换**：`int_to_ext_transformation(&pi.d_transf, &item.shape_orig.pre_transform)` → `ExtPlacedItem { item_id: item.external_id, transformation: abs_transf.into() }`（export.rs:15-21）↔ C++ cpp:1759-1774：`preTransform.FollowedByRustF32(placedItem.Transform())`、`{placedItem.GetItem().ExternalId(), {ToDegreesRustF32(...), transform.translation}}`。一致（公式见下条）。
-- **非有限拒绝**：C++ 在变换非有限时返回 `SerializationFailure`（cpp:1762-1768）；Rust 无校验。C++ 额外（panic→Result 系）。
+- **非有限拒绝**：C++ 在变换非有限时返回 `SerializationFailure`（cpp:1762-1768）；Rust `export_layout_snapshot` 无对应显式校验。若非有限f32到达锁定的`serde_json 1.0.151`序列化器，该字段写为JSON `null`，不会在此处报错。因此这是异常数据的出口差异；本记录未证明非有限值经过完整Rust布局导出链的可达性。
 - **density**：`layout.density()`（export.rs:28）↔ `layout.Density()`（cpp:1752）。一致（计算见记录 26）。
 
 ### `int_to_ext_transformation(int_transf, pre_transf)`（Rust 37-48 行）
@@ -46,13 +46,13 @@ Transformation::empty()
 | 2 | placed_items 顺序 | 一致 | 双侧均按放置顺序（SlotMap 槽序 ↔ placements 数组序，见记录 26） | export.rs:9 vs JsonCodec.cpp:1754-1756 |
 | 3 | pre_transform 合成公式 `T_int ∘ T_pre` | 一致 | 与 import 侧逆公式互逆，双侧对称 | export.rs:44-47 vs JsonCodec.cpp:1759-1761 |
 | 4 | 度数换算 f32 域 | 一致 | `ToDegreesRustF32` 复刻 `to_degrees()` | ext_repr.rs:174 vs RustF32.h:12-17 |
-| 5 | 非有限变换拒绝 | C++ 额外 | C++ 返回 `SerializationFailure`；Rust 无校验（NaN 序列化为 JSON 时才由 serde 报错或输出 null） | 无 vs JsonCodec.cpp:1762-1768 |
+| 5 | 非有限变换拒绝 | C++ 额外 | C++导出入口返回`SerializationFailure`；Rust转换无显式拒绝，若非有限f32到达serde_json 1.0.151则序列化为`null`。完整Rust导出链可达性未证 | export.rs:15-21 vs JsonCodec.cpp:1782-1797；serde_json 1.0.151 ser.rs:155-165 |
 | 6 | 返回类型 `ExtLayout` vs `Result<ExternalLayout>` | 基本等价 | panic→Result 约定的体现；Rust `#[must_use]` 直接返回 | export.rs:8 vs JsonCodec.cpp:1747 |
 | 7 | min_item_separation 零值序列化 | 差异（实例层，关联项） | Rust 实例序列化总是输出 `min_item_separation`（无 skip 属性，probs/*/io/ext_repr.rs `#[serde(default)]` 只管读侧）；C++ `commonInstanceJson` 仅在 `separation != 0.0` 时输出（JsonCodec.cpp:1431-1432）。本条属 probs 实例导出（记录 37），因跨记录高频提及在此交叉引用 | spp/io/ext_repr.rs:12-13 vs JsonCodec.cpp:1425-1435 |
 
 ## 结论
 
-导出侧核心逻辑（放置项枚举、`T_int ∘ T_pre` 合成、度数换算、density、item_id）双侧一致，SPP container_id 经"传参 0 ↔ 默认 id=0 的容器"两条路径实际输出相同。C++ 的快照桥接、非有限拒绝与 Result 化为 panic→Result 系约定的常规附加。`min_item_separation` 零值序列化差异位于实例层，详见记录 37。
+导出侧核心逻辑（放置项枚举、`T_int ∘ T_pre` 合成、度数换算、density、item_id）对有限布局双侧一致，SPP container_id 经"传参 0 ↔ 默认 id=0 的容器"两条路径实际输出相同。C++的非有限保护仅在异常变换出口体现；若非有限f32直接进入Rust serde_json序列化，则输出`null`。C++快照桥接与Result化属于接口形态差异。`min_item_separation`零值序列化差异位于实例层，详见记录37；数值文本格式不构成字节级对拍结论，详见记录38。
 
 ### 补充审计（2026-09-29）
 

@@ -2,15 +2,15 @@
 
 **Rust 基线**：`jagua-rs` revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb`  
 **C++ 对应**：`JaguarCore/Include/JaguarCore/Geometry/RustF32.h`、`Assertions.h`、`NumericPolicy.h`；`JaguarCore/Source/Support/Assertions.cpp`  
-**判定**：B9 的静态比较规则、断言映射、相邻源码归属和最小边界 fixture 矩阵已登记；未运行边界对拍，不能据此标为数值或断言行为等价
+**判定**：B9 的静态比较规则、断言映射、相邻源码归属和最小边界 fixture 矩阵已登记；完整矩阵尚未对拍，不能据此标为数值或断言行为等价
 
 ## `util/fpa.rs`
 
 Rust `FPA(pub f32)`、泛型 `From<T: Into<f32>>`、`PartialEq`、`PartialOrd` 与 `Display` 位于 pinned 源码 7–37 行。`PartialEq` 用锁定的 `float-cmp 0.10.0` 默认 `F32Margin`：`epsilon = f32::EPSILON` 或 ordered-bit ULP 距离不超过 4；`PartialOrd` 先将近似相等值视为 `Equal`，否则调用 `f32::partial_cmp`。因此非有限值通常比较为 `None`，但 ULP 分支会把相邻编码视为近似相等：例如 `f32::MAX` 与 `+∞`、相邻 NaN payload，均可能返回 true/`Some(Equal)`。该 wrapper 不实现 `Eq`。
 
-C++ 最近的算法落点是 `Geometry/RustF32.h` 的 `AlmostEqualRustF32`（49–64 行）及 `LessEqualRustF32`、`LessRustF32`、`GreaterRustF32`（66–79 行），已被 `Rect.h`、`SimplePolygon.cpp` 和 `Surrogate.cpp` 使用。有限值分支采用 epsilon 或 4 ULP，与 Rust 默认 margin 的数值阈值相符；C++ 对不同的非有限值会在 ULP 比较前返回 false，而 Rust 可能因 ULP 邻近把有限/无穷或无穷/NaN 视为近似相等，这是已确认的静态边界差异，是否落入有效几何输入域由 B9/B1 核验。C++ 没有 `FPA` 类型、`From` 转换或 `Display` 对应物。`NumericPolicy::NearlyEqual` 是 double、默认 1e-9（`NumericPolicy.h:10-48`），属于另一套比较策略，不能拿它代表 FPA。
+C++ 公共比较器 `Geometry/RustF32.h::AlmostEqualRustF32`（49–64 行）与关系谓词（66–79 行）按 pinned `float-cmp 0.10.0` 的 ordered-bit、i32 wrapping ULP 距离及 saturating absolute value 实现；有限/无穷邻界及特定NaN payload也参与ULP比较。Importer连续顶点比较直接委托公共比较器；后续 `SimplePolygon::Create` 仍拒绝残留的非有限坐标。C++ 没有 `FPA` 类型、`From` 转换或 `Display` 对应物。`NumericPolicy::NearlyEqual` 是double、默认1e-9（`NumericPolicy.h:10-48`），属于另一套比较策略，不能拿它代表FPA。
 
-除 `FPA` 外，pinned `io/import.rs:294` 直接以 `approx_eq!(f32, ...)` 比较相邻顶点坐标；它使用相同的 `float-cmp 0.10.0` 默认 margin。C++ 导入器没有对应的近似删除函数，而是把点交给 `SimplePolygon::Create`；该函数先量化为 f32，再按精确 `Point2d::operator==` 拒绝重复点（`Importer.cpp:265`、`SimplePolygon.cpp:192-223`）。这与 Rust“相邻点近似相等则删除”的行为不是同一规则，边界输入归 B8/B9 对拍。
+除 `FPA` 外，pinned `io/import.rs:294` 直接以 `approx_eq!(f32, ...)` 比较相邻顶点坐标；它使用相同的 `float-cmp 0.10.0` 默认 margin。C++ `Importer::ImportSimplePolygon`也会用`rustFpaEqual`标记并删除相邻近似重复顶点，所有坐标经 f32 量化后直接委托公共比较器。此谓词覆盖非有限编码；剩余非有限坐标之后由C++形状构造器拒绝，Rust整体构造路径需另行评估。
 
 ## B9 数值策略归类
 
@@ -24,7 +24,7 @@ C++ 最近的算法落点是 `Geometry/RustF32.h` 的 `AlmostEqualRustF32`（49�
 | `NumericPolicy::areaTolerance` | `double`，默认 `0` | `SimplePolygon::Create` 用它判断 `abs(rawArea) <= areaTolerance` | 面积退化门槛；不是相等谓词 |
 | `NumericPolicy::arcChordTolerance` | `double`，默认 `1e-3` | 当前生产代码只通过 `IsValid()` 校验该字段；未发现圆弧计算读取该值 | 已声明但未见生产算法消费者 |
 
-`NumericPolicy::IsValid()` 要求四个容差有限且非负；`NearlyEqual()` 只实现绝对差 `abs(lhs-rhs) <= equalityTolerance`，没有相对误差或 ULP 项。`+0/-0` 结果为 true；`NaN/NaN` 和 `+Inf/+Inf` 因差值为 NaN 而返回 false。`AlmostEqualRustF32` 则先做 `first == second`，所以相同正无穷返回 true；NaN 仍进入 ULP 前即被有限值检查拒绝。
+`NumericPolicy::IsValid()` 要求四个容差有限且非负；`NearlyEqual()` 只实现绝对差 `abs(lhs-rhs) <= equalityTolerance`，没有相对误差或ULP项。`+0/-0`结果为true；`NaN/NaN`和`+Inf/+Inf`因差值为NaN而返回false。公共`AlmostEqualRustF32`先做`first == second`，随后不做finite过滤，按pinned float-cmp完成ULP比较；Importer连续顶点比较现在直接使用此helper。
 
 ### 最小边界 fixture 矩阵（待执行）
 
@@ -35,11 +35,12 @@ C++ 最近的算法落点是 `Geometry/RustF32.h` 的 `AlmostEqualRustF32`（49�
 | FPA-EPS | `0` 与 `f32::EPSILON`；再与 `next_up(f32::EPSILON)` | 前者近似相等，后者不相等 | `AlmostEqualRustF32` 同结果 | B9 |
 | FPA-ULP | `1.0` 与第 4、5 个相邻可表示值 | 4 ULP 相等；5 ULP 不相等 | 有限值分支预期同结果 | B9 |
 | FPA-ZERO | `+0/-0`；最小负/正 subnormal | 均近似相等 | 精确相等/epsilon 分支预期相同 | B9 |
-| FPA-NONFINITE | `f32::MAX/+Inf`；相同及相邻 NaN payload | ULP 距离不超过 4 时相等；`PartialOrd` 返回 `Some(Equal)` | 非有限 guard 返回 false | B9；合法输入域由 B1/B8 确认 |
-| FPA-ORDER | `f32::MAX` 与 `+Inf`，以及 `+Inf` 与相邻 NaN payload | 近似相等，`<` 为 false、`<=` 为 true | 第一组 `LessRustF32` 为 true；第二组 `LessEqualRustF32` 为 false | B9 |
+| FPA-NONFINITE | `f32::MAX/+Inf`；`+Inf`与相邻NaN payload；相同及相邻 NaN payload | ULP 距离不超过 4 时相等；`PartialOrd` 返回 `Some(Equal)` | 公共helper与Importer邻接谓词均按同一ULP边界比较 | B9；整体多边形契约单独核对 |
+| FPA-ORDER | `f32::MAX` 与 `+Inf`，以及 `+Inf` 与紧邻编码 `0x7f800001` | 近似相等，`<` 为 false、`<=` 为 true | 公共helper与Importer邻接谓词共享该边界 | B9 |
 | NUMERIC-ABS | double `0` 与 `1e-9`；再与 `nextafter(1e-9,+Inf)` | 不适用 | `NearlyEqual` 分别 true、false | B9 |
 | NUMERIC-NONFINITE | `+0/-0`、`NaN/NaN`、`+Inf/+Inf` | 不适用 | 分别 true、false、false | B9 |
-| IMPORT-NEAR-DUP | 相邻顶点坐标分别差 `f32::EPSILON`、4 ULP、5 ULP、NaN/Inf | `approx_eq!` 命中时删除顶点 | `SimplePolygon::Create` 路径不做近似删除；其拒绝/接受结果另行核对 | B8/B9 |
+| IMPORT-NEAR-DUP | 相邻顶点坐标分别差 `f32::EPSILON`、4 ULP、5 ULP、NaN/Inf | `approx_eq!` 命中时删除顶点 | 直接共享helper，谓词预期一致；若删除后仍有非有限坐标，后续形状构造另做失败处理 | B8/B9 |
+| IMPORT-FPA-NONFINITE | `f32::MAX/+Inf`及不同NaN payload | ULP距离≤4时相等并可能删点 | 邻接谓词与Rust一致；完整多边形是否失败由剩余点和下游构造决定 | B8/B9 |
 
 ### 邻接映射与范围归属
 
@@ -52,7 +53,7 @@ C++ 最近的算法落点是 `Geometry/RustF32.h` 的 `AlmostEqualRustF32`（49�
 
 上述四项原先在 B0/B13 分别有静态落点；本表完成 B9 所需的跨项登记，算法/输出等价仍由对应工作项验证。
 
-上述 `FPA-EPS` 至 `FPA-ORDER` fixture 已把 NaN payload、有限值/无穷相邻编码、ULP 阈值、正负零及 `PartialOrd` 的 `None`/`Some(Equal)` 与 C++ 布尔 helper 差异逐项登记；尚未运行。有限值阈值结构相符仍不能推成完整等价。
+上述 FPA fixture 登记了NaN payload、有限值/无穷相邻编码、ULP阈值、正负零及`PartialOrd`的`None`/`Some(Equal)`；完整矩阵尚未运行。Importer邻接比较已改为直接复用公共helper，但这不认证所有调用点，也不证明非有限多边形整体构造成功/失败边界相同。
 
 ## `util/assertions.rs`
 
@@ -108,8 +109,14 @@ Rust 文件只在 `debug_assertions` 或 `test` 条件下编译，位置见 `qua
 - Rust 文件位置与行号来自 pinned `jagua-rs` revision；C++ 位置来自当前工作区静态源码。
 - 本轮对 pinned checkout 与 `CodeResource/jagua-rs` 做换行归一化核对：`fpa.rs`、通用/SPP/BPP/MSPP assertion 源、quadtree assertion/trait、`geo_traits.rs`、`geo_enums.rs`、`svg_util.rs`、`io/import.rs` 均相同。Pinned SPP/MSPP `entities/problem.rs` 与镜像不同，但断言调用点已按 pinned 文件复核（SPP 96/121、BPP 97/166、MSPP 115/177）。
 - `float-cmp` 版本与 checksum 见 `JaguarCore/tools/RustOracle/Cargo.lock`；`F32Margin::default` 的 epsilon/ULP 值来自锁定版本 0.10.0。
-- 已有 C++ 覆盖：`Tests/TestSupport.cpp::testNumericPolicy` 检查默认值、无效容差、`0.5e-9` 与 `1e-3` 两个比较点；`TestBoundary.cpp` 检查无效 policy 与非有限几何输入。源码搜索未发现针对 `FPA`/`AlmostEqualRustF32` 的直接边界测试；Rust `FPA` 也没有本地专用单测。
+- 已有 C++ 覆盖：`Tests/TestSupport.cpp::testNumericPolicy` 检查默认值、无效容差、`0.5e-9` 与 `1e-3` 两个比较点；`testRustF32ApproximateComparison` 新增`max/+Inf`、`-Inf/-max`、比较谓词及指定交叉符号NaN位模式断言；`TestBoundary.cpp`检查无效policy与非有限几何输入。Rust `FPA` 没有本地专用单测。
 - 源码启用条件：Rust `util/assertions` 与 SPP/BPP/MSPP assertion modules 无条件公开；常规调用点包在 `debug_assert!` 中，直接调用 helper 仍会执行内部 `assert!`。Quadtree assertion module 为 `cfg(any(debug_assertions, test))`；`qt_traits` 的检查使用 `debug_assert!`。
 - C++ `Validate*` 始终可直接调用并返回 `Result<void>`；`DebugAssert*` 仅在 `#ifndef NDEBUG` 下执行 `assert`。`JaguarCoreTests.pro` 的 Release 测试目标通过移除 `NDEBUG`、`/UNDEBUG` 与 `TestReleaseAsserts.h` 保持测试程序断言启用，但注释明确 DLL 仍使用常规 Release 配置，因此这不证明 Release DLL 内部 `DebugAssert*` 会执行。
-- 上述均为静态源码/工程配置核对；本次没有运行 C++、Rust 测试或构建。实际 profile、DLL 宏与边界 fixture 运行仍归 B1/B4/B8/E8/B11，不能在本记录下宣称行为等价。
+- B9 初始登记是静态源码/工程配置核对，当时没有运行 C++/Rust测试或构建。后续E1实施与构建状态见下。
+
+## E1 补充复核（2026-10-22）
+
+- 锁定的 `float-cmp 0.10.0` 源码及Rust probe确认：`f32::MAX/+Inf`、`-Inf/-f32::MAX`、交叉符号NaN编码`0xffffffff/0x7fffffff`均近似相等；ULP边界4/5分别相等/不等。
+- `RustF32.h::AlmostEqualRustF32`已改为Rust的ordered-bit、i32 wrapping距离与saturating absolute value；`Importer.cpp::rustFpaEqual`删除旧位序副本和finite guard，对所有值委托公共helper。`SampleEval.h::RustApproxEqualF32`也委托同一helper，先计算近似相等再决定NaN是否进入异常出口。
+- MSVC14.29下JaguarCore和SparrowCore Debug/Release生产库目标均构建成功。当前Importer与SampleEval委托变更后的JaguarCore Release全量runner exit 0；Debug全量runner exit 3已定位到`runCollisionTests()`注册`coveringShape`时触发Quadtree“无Partial子项”Debug断言，发生在Importer/FPA定向测试所覆盖的路径之外。Importer `runIoTests()` 与RustF32比较器Debug定向runner均exit 0。B9完整fixture矩阵仍未执行，不能标为全量行为等价。
 

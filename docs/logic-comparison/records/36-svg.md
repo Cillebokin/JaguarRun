@@ -101,7 +101,7 @@
 
 ### `transform_to_svg`（layout_to_svg.rs:481-487）
 - C++ 对应：`transformAttribute`（SvgExport.cpp:85-91）。
-- 判定：一致（`translate({tx} {ty}), rotate({deg})` 格式；C++ 用 `ToDegreesRustF32` 对齐 f32 度数换算）。
+- 判定：变换语义基本等价、数字文本不等价（`translate({tx} {ty}), rotate({deg})` 的指令与顺序一致，C++用`ToDegreesRustF32`对齐f32度数换算；Rust直接显示f32，C++将f32结果提升为double后用`setprecision(17)`输出，字符串形态不同，见补充审计8/S7）。
 
 ### `data_to_path` / `point` / `circle` / `edge_data` / `aa_rect_data`（svg_util.rs:250-291）
 - C++ 对应：`circleElement`（cpp:99-112）、`linePath`（cpp:93-97）按需实现。

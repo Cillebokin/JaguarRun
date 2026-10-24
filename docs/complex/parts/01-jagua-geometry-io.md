@@ -40,7 +40,7 @@
 
 `simplify_shape`（`shape_modification.rs:52-152`）逐步删除顶点。每轮先把顶点分为凹、凸、共线三类（`CornerType::from`，`shape_modification.rs:320-336`，依据叉积符号）。Inflate 模式下，删除凹顶点相当于用弦填补凹袋，形状变大；删除共线顶点不改变面积；相邻两个凸顶点可以用两条外延线段的交点替换（`calculate_intersection_in_front`，`shape_modification.rs:257-287`）。Deflate 模式通过 `corners.reverse()` 与 `Corner::flip` 翻转角的方向（`shape_modification.rs:80-86`），使同一套分类对收缩成立。候选按面积变化排序，取第一个通过 `candidate_is_valid` 的候选（`shape_modification.rs:184-216`），该检查要求新边与所有不涉及被删顶点的原边都不相交。面积变化相对 `original_area` 累计计算（`shape_modification.rs:121-122`），超过 `max_area_change_ratio` 即停止。`execute_candidate`（`shape_modification.rs:232-239`）中对索引的修正处理了环绕情形，我用 n=5 的例子手工核对过 i=0 与 i=1 两种情况。该算法最坏复杂度约为 O(n³)。
 
-`offset_shape`（`shape_modification.rs:340-379`）借助 `geo_buffer::buffer_polygon_rounded` 做圆角偏移，计算在 f64 下进行，结果经 `import_simple_polygon` 重建。Inflate 为正偏移，Deflate 为负偏移。若结果有多个连通分量，代码只取第一个并打印警告（`shape_modification.rs:358-367`），这意味着悄悄丢弃了其余部分，属于语义损失。
+锁定D5 revision的`offset_shape`（`shape_modification.rs:342-383`）使用`geo::Buffer`与`BufferStyle::line_join(LineJoin::Round(0.1))`，结果经`import_simple_polygon`重建；`MultiPolygon`非空时只返回首个外轮廓，并记录warning。JaguarCore `Offset.cpp`现有简单outline路径及有界整数自交resolver，已对齐splitCandidate、窄桥2组件和comb 3组件的固定fixture（`OffsetShapes`比较全部组件，`OffsetShape`比较首个）；其他自交/量化退化、通用多环overlay和legacy路径仍未对齐，见11号Offset记录。
 
 `close_narrow_concavities`（`shape_modification.rs:384-519`）枚举所有非相邻顶点对 `(i, j)`，把连接二者的弦缩短为 0.9999 倍作为候选。过滤条件包括：弦长不超过 `cutoff_distance_ratio · diameter`；Inflate 时两端都不在形状内、Deflate 时两端都在形状内；弦与任何原边不相交；被跳过的子多边形面积符号与绝对值满足约束。最后选择删除顶点最多的候选，循环直到无候选。这里有两处我认为需要核实的疑点。
 

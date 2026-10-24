@@ -2,7 +2,7 @@
 
 **Rust**: `CodeResource/jagua-rs/jagua-rs/src/geometry/primitives/simple_polygon.rs`（368 行）
 **C++**: `JaguarCore/Include/JaguarCore/Geometry/SimplePolygon.h`（103 行）+ `JaguarCore/Source/Geometry/Primitives/SimplePolygon.cpp`（570 行）
-**判定**: 基本等价（Create 主链路与 RustF32 判定族逐式复刻；关键差异：重复点判定对 ±0.0/NaN 的语义相反、面积零判定（== 0.0 vs 容差）、transform 不重校验 vs 全量重校验、From<Rect> 缺失）
+**判定**: 基本等价（Create 主链路与 RustF32 判定族逐式复刻；关键差异：重复点查重对 ±0.0 的语义相反、面积零判定（== 0.0 vs 容差）、transform 不重校验 vs 全量重校验、From<Rect> 缺失）
 
 ## 方法逐条比对
 
@@ -11,8 +11,8 @@
 - 判定：【差异】（多处，逐项列出）
 - 证据与说明：
   1. **顶点数下限**：simple_polygon.rs:42-44 `< 3` bail ↔ SimplePolygon.cpp:199-201 `< 3` → InvalidPolygon。一致。
-  2. **重复点判定**：Rust simple_polygon.rs:45 `points.iter().unique().count() != points.len()`——itertools `unique` 依赖 `PartialEq`（f32 `==`：+0.0 == -0.0 视为相等 → 会被去重拒绝；NaN != NaN → 两个 NaN 互不相等，**不会被去重**，即"两个 NaN 顶点"可通过查重）。C++ SimplePolygon.cpp:219 `if (points[i] == points[j])` 用 Point2d operator==（point.h:42，逐分量 `==`）：+0.0 与 -0.0 相等 → 拒绝（**与 Rust unique 一致**）；NaN==NaN false → 不拒绝（**与 Rust 一致**）。核对背景候选"Rust Hash to_bits vs C++ =="：Rust `unique()` 实际用的是 `Vec` + `contains`（PartialEq 路径，非 Hash），因此 ±0.0/NaN 语义两侧**均一致**——背景候选中的"判定相反"在当前源码版本不成立（若 Rust 侧曾用 HashSet/Hash 路径则相反，现存实现不是）。判定：【一致】（就重复点查重而言）。
-  3. **非有限值校验位置**：C++ SimplePolygon.cpp:203-213 在入口直接返回 `Result` 错误；Rust 没有同层 finite 检查，但 NaN 会在直径计算的 `NotNan::new(...).unwrap()` 失败，无效/退化 bbox 会在 `Rect::try_new(...).unwrap()` 失败。输入的接受边界同为失败，通道是 C++ `Result` vs Rust panic。超出 f32 范围的 C++ double 输入收窄为 infinity 后也失败；Rust 外部几何类型本身就是 f32。
+  2. **重复点判定**：Rust simple_polygon.rs:45 `points.iter().unique().count() != points.len()`；锁定的 itertools `unique` 用 `HashMap` 保存已见值，而 jagua-rs `Point` 手写 `Eq`（基于 f32 `PartialEq`）和 `Hash`（按 `to_bits()`）。因此 `( +0.0, y )` 与 `( -0.0, y )` 虽然 `Eq` 相等，却因不同哈希进入不同桶，Rust 查重会保留；C++ SimplePolygon.cpp:219 的逐分量 `==` 直接拒绝这对顶点，属于差异。NaN 与自身不相等，Rust 与 C++ 均不把两个 NaN 顶点判为重复。判定：【±0.0 差异；NaN 一致】。
+  3. **非有限值校验位置**：C++ `normalizeRustF32(points)`（SimplePolygon.cpp:22-32）先将double坐标收窄为f32再转回double，随后Create在203-213行拒绝所有残留的非有限顶点并返回 `InvalidInput`；Rust `SPolygon::new` 没有同层finite扫描。锁定RustOracle在Debug/Release下对当前`nan_coordinate` fixture均观测到直径计算的`NotNan::new(...).unwrap()` panic；对`infinite_coordinate` fixture均观测到`Rect::try_new(...).unwrap()` panic。`+Inf`本身可由`NotNan`接受，故这两个定向结果不能推出每种NaN/Inf输入都会以同一方式失败；一般非有限输入的整体接受/失败边界尚未确证。C++ double输入收窄为f32后溢出成infinity也会由入口检查拒绝；Rust外部几何类型本身就是f32。
   4. **面积零判定**：Rust simple_polygon.rs:52-53 `match ... { 0.0 => bail!(...) }`——**严格 == 0.0**（极小非零面积通过）；C++ SimplePolygon.cpp:233 `if (std::abs(rawArea) <= policy.areaTolerance)`——默认 areaTolerance = 0.0（NumericPolicy.h:19-20）时与 `== 0.0`（对绝对值）等价；但 policy 可配非零容差 → 允许被 Rust 拒绝的退化多边形。判【差异】（可配置容差放宽了 Rust 的严格判定；默认值下等价）。
   5. **负面积反转**：simple_polygon.rs:54-58 `area < 0.0 → points.reverse(); -area` ↔ SimplePolygon.cpp:237-240 `rawArea < 0.0F → std::reverse; area = abs(rawArea)`。一致（-area 与 abs 对负数同值）。
   6. **直径/包围盒/POI 的计算次序**：Rust 先 diameter（含凸包）→ bbox → poi（simple_polygon.rs:62-64）；C++ bbox → centroid → diameter → poi（SimplePolygon.cpp:241-256）——计算次序无相互依赖，结果相同。
@@ -109,25 +109,23 @@
 | 5 | TransformableFrom::transform_from | C++缺失 | 同前各记录 | simple_polygon.rs:250-277 |
 | 6 | surrogate() 空时 panic vs GetSurrogate 返回 nullptr | 差异（形态） | 失败通道不同 | simple_polygon.rs:111 vs SimplePolygon.cpp:392 |
 | 7 | Edges() 静默丢弃退化边（Edge2d::Create 失败跳过） | 差异（不可达） | 上游查重已排除退化，实际不可触发 | SimplePolygon.cpp:301-304 vs simple_polygon.rs:91-98 |
-| 8 | 非有限值/超 f32 范围检查位置 | 失败边界一致，通道不同 | C++ 在入口返回 `InvalidInput`；Rust 在后续 `NotNan`/bbox 构造处 panic；Rust 输入类型天然为 f32 | SimplePolygon.cpp:203-213 vs simple_polygon.rs:120-141,124 + 定向 oracle |
+| 8 | 非有限值/超 f32 范围检查位置 | 部分实测；整体契约未证 | Rust 1.98.1 Debug/Release中NaN与+Inf两个固定fixture均panic；2026-10-22当前C++ Debug单独`runIoTests()`、Release全量runner均exit 0，对应`InvalidInput`断言通过。Debug全量runner exit 3已定位到更早的`runCollisionTests()`：注册覆盖根节点的`coveringShape`时触发Quadtree“无Partial子项”断言；该失败不来自Importer，整体非有限输入契约仍未证 | SimplePolygon.cpp:203-213 vs simple_polygon.rs:41-74,120-141 + RustOracle `--import-boundary-parity-only` + TestIo.cpp:249-264 + TestCollision.cpp:61-64 + Quadtree.cpp:423-426 |
 | 9 | Contains(point, tolerance)（PnPN 容差版）与 Intersects(Edge, tolerance) | C++额外 | 与 Rust 不同的算法族，含边界带语义 | SimplePolygon.cpp:395-428, 476-487 |
-| 10 | 重复点查重的 ±0.0/NaN 语义 | 一致（核对后） | Rust unique 走 PartialEq 而非 Hash，与 C++ == 同语义；背景候选"判定相反"不成立 | simple_polygon.rs:45（itertools unique/PartialEq）vs SimplePolygon.cpp:219 + point.h:40-43 |
+| 10 | 重复点查重的 ±0.0/NaN 语义 | ±0.0 差异；NaN 一致 | Rust `Point` 的 `Eq` 与 `to_bits()` 哈希使不同符号零落入不同桶；C++ `==` 将±0视为相等并拒绝。NaN对两侧均不相等 | simple_polygon.rs:45 + point.rs:57-65 + itertools 0.13.0 `unique_impl.rs:100-117` vs SimplePolygon.cpp:219 + point.h:40-43 |
 
 ## 结论
 
-simple_polygon.rs 的构造主链路（查重、自交检测、面积反转、Shoelace、质心、直径经凸包）与 ContainsRustF32 射线法（含 FPA 顶点穿透分支的 AlmostEqual/Greater/Less 复刻）在 C++ 中逐式等价，重复点 ±0.0/NaN 语义经核实两侧一致（Rust unique 实为 PartialEq 路径）。实质差异集中在三处：面积零判定引入可配置容差、Transformed 双版本中 double 版全量重算偏离 Rust 的"保留派生量"语义、以及 From<Rect>/TransformableFrom 两项 API 缺失；另有一套 C++ 自有的容差算法族（Contains/Intersects）语义与 Rust 射线法不同。
+simple_polygon.rs 的构造主链路（查重、自交检测、面积反转、Shoelace、质心、直径经凸包）与 ContainsRustF32 射线法（含 FPA 顶点穿透分支的 AlmostEqual/Greater/Less 复刻）在 C++ 中逐式等价；重复点查重存在一个边界差异：Rust `Point` 的位模式哈希让±0.0对顶点通过 `unique()`，C++ `==`会拒绝，而NaN对顶点两侧都不视为重复。其他实质差异包括：面积零判定引入可配置容差、Transformed 双版本中 double 版全量重算偏离 Rust 的"保留派生量"语义、以及 From<Rect>/TransformableFrom 两项 API 缺失；另有一套 C++ 自有的容差算法族（Contains/Intersects）语义与 Rust 射线法不同。
 
 ## 补充审计（2026-09-29）——含一处对主记录结论的修正
 
 逐行复核 simple_polygon.rs 全部 368 行（new/generate_surrogate/vertex/edge/edge_iter/n_vertices/surrogate/calculate_diameter/generate_bounding_box/calculate_area/calculate_poi/centroid/find_self_intersection + 2 个 Transformable + 3 个 trait 实现 + From<Rect>），确认主记录已覆盖全部函数。以下为补充核对项，其中第 1 项**修正主记录的一个结论**：
 
-### 【修正】重复点查重的实现路径：itertools unique 走 HashMap（Hash+Eq），非 PartialEq 线性查找
-- 主记录（new 条第 2 点与差异表 #10）断言："Rust `unique()` 实际用的是 `Vec` + `contains`（PartialEq 路径，非 Hash），因此 ±0.0/NaN 语义两侧均一致"。**该断言经源码核对不成立**：itertools 0.13.0（Cargo.lock 锁定版本）`unique_impl.rs:100-117` 的 `Unique` 迭代器约束 `Item: Eq + Hash + Clone`，`next()` 用 `used.entry(v)`（**HashMap entry，走 Point 的 Hash 即 to_bits 位级哈希**）判重。
-- 由此产生真实的语义差异：**+0.0 与 -0.0**——Rust `unique` 经 Hash（to_bits：+0.0 bits=0x0，-0.0 bits=0x80000000）+ HashMap 查找：HashMap 查找先用 Hash 定位再用 `Eq`（即 PartialEq，f32 `==`：+0.0 == -0.0 为 true）**最终判等**——itertools unique 的去重以 `PartialEq`/`Eq` 的判等结果为准（HashMap 的 get 在 hash 桶内逐个 eq 比较），故 **+0.0/-0.0 在 Rust unique 中仍被判为重复而拒绝**（hash 不同但 eq 相同 → HashMap entry 以 eq 相等视为已存在）。修正后结论：±0.0 语义两侧一致（都被拒绝）。
-  - 关键机制：HashMap 判存在 = 同 hash 桶内 `key == entry_key`（PartialEq）。Point 的 Hash（to_bits）把 +0.0/-0.0 放入**不同桶**（hash 值不同），此时 eq 虽为 true 但**两元素分属不同桶 → 互相不可见 → 不判重**！——重新推导：`used.entry(v)` 的 entry API 以 (hash, eq) 双重判定：+0.0 与 -0.0 hash 不同 → 不同桶 → 即便 eq 为 true 也不命中 → **两者都被保留**。因此 Rust 侧 +0.0/-0.0 顶点**不会被判为重复**（通过查重），而 C++ `points[i] == points[j]`（f32 `==`：+0.0 == -0.0 为 true）**判为重复并拒绝**。
-  - **最终判定：【差异】**——(0.0, y) 与 (-0.0, y) 两顶点：Rust `unique` 保留两者（hash 桶隔离，unique 计数 = 2 == len 通过）→ 继续后续构造；C++ Create 直接报 `InvalidPolygon "duplicate points"`。NaN 顶点对（NaN != NaN）：Rust unique——NaN 的 hash（to_bits，同为 0x7FC00000 位模式时 hash 相同，eq 为 false）→ 保留；C++ == 为 false → 保留。NaN 两侧一致（都保留，与主记录一致）；**±0.0 两侧相反（主记录判"一致"错误）**。
-  - 影响评估：低——几何输入经 f32 量化后 +0.0/-0.0 同现且分量为负零的顶点极罕见；且 Rust 侧保留 ±0.0 对顶点后，后续 bbox（f32::min/max 对 ±0.0 敏感）、Shoelace（-0.0 参与乘加可产生 -0.0/0.0 差异）数值路径仍逐位对齐（C++ 路径因提前拒绝不可达，该分支整体无对照意义）。差异表 #10 需按本条修正。
-- 证据：simple_polygon.rs:45；itertools-0.13.0/src/unique_impl.rs:107-116（HashMap entry）；point.rs:59-66（to_bits hash）；point.rs:7（derive PartialEq：±0.0 相等）vs SimplePolygon.cpp:219 + point.h:42（==：±0.0 相等 → 拒绝）。
+### 【修正】重复点查重的实现路径：itertools unique 使用 HashMap（Hash+Eq）
+- 锁定的 itertools 0.13.0 `unique_impl.rs:100-117` 要求 `Item: Eq + Hash + Clone`，并以 `used.entry(v)` 记录已见值；jagua-rs `Point` 在 `point.rs:57-65` 手写 `Eq` 和 `Hash`，哈希两个坐标的 `to_bits()`。
+- `+0.0 == -0.0`，但两者的位模式和哈希不同，因此进入不同 HashMap 桶；Rust `unique()`保留±0.0对顶点，C++逐分量 `==` 则拒绝。NaN不等于自身，两个NaN顶点在两侧都不会被查重移除。
+- 影响限于这个重复点边界：Rust后续构造仍可能因其他几何检查失败；此处只确认查重阶段的差异，不推断完整多边形构造结果。
+- 证据：`simple_polygon.rs:45`；`itertools-0.13.0/src/unique_impl.rs:100-117`；`point.rs:57-65`；C++ `SimplePolygon.cpp:217-223` 与 `point.h:40-43`。
 
 ### 【浅覆盖→补齐】calculate_poi 的 diameter 参数为死参数（未参与计算）
 - simple_polygon.rs:162-181 的 `calculate_poi(points, diameter)`：`diameter` 仅被写入 dummy_sp.diameter 字段，而 `compute_pole(&dummy_sp, &[])`（pole.rs:54-79）**从不读取 shape.diameter**（pole.rs 全文仅 bbox.diameter()——Rect 的方法）。即该参数是**无效透传**。C++ Create（SimplePolygon.cpp:241-256）直接传本体调 ComputePointOfInaccessibility，无对应参数——两侧均不消费 diameter，等价。
@@ -147,4 +145,4 @@ simple_polygon.rs 的构造主链路（查重、自交检测、面积反转、Sh
 ### 【遗漏→补齐】cfg(test)——simple_polygon.rs 无测试模块
 - simple_polygon.rs 368 行无 `#[cfg(test)]`。判定：不适用。
 
-补充结论：05 记录函数级覆盖完整。**一处结论修正**：重复点查重的 ±0.0 语义两侧相反（Rust unique 经 HashMap 桶隔离保留 ±0.0 对顶点、C++ == 判重拒绝），主记录的"PartialEq 路径、两侧一致"论断错误，差异表 #10 应据此更新；NaN 语义两侧一致的结论维持。
+补充结论：05 记录函数级覆盖完整。重复点查重的±0.0边界两侧不同：Rust `unique()`受`Point`的位模式哈希影响，会保留±0.0对顶点；C++ `==`会拒绝。NaN对两侧均不判为重复。

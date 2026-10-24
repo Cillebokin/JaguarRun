@@ -1,3 +1,4 @@
+use geo::algorithm::buffer::{Buffer, BufferStyle, LineJoin};
 use geo_buffer::buffer_polygon_rounded;
 use geo_types::{LineString, Polygon};
 use jagua_rs::collision_detection::hazards::collector::BasicHazardCollector;
@@ -16,7 +17,7 @@ use jagua_rs::geometry::geo_traits::{
 use jagua_rs::geometry::primitives::{Circle, Edge, Point, Rect, SPolygon};
 use jagua_rs::geometry::shape_modification::{
     ShapeModifyConfig, ShapeModifyMode, close_narrow_concavities, offset_shape,
-    shape_modification_valid,
+    shape_modification_valid, simplify_shape,
 };
 use jagua_rs::geometry::{DTransformation, OriginalShape};
 use jagua_rs::io::export::int_to_ext_transformation;
@@ -123,6 +124,73 @@ fn print_buffer_components(name: &str, points: &[(f32, f32)], distance: f64) {
             y_max
         );
     }
+}
+
+fn print_pinned_offset_components(name: &str, points: &[(f32, f32)], distance: f32) {
+    let input = Polygon::new(
+        LineString::from(
+            points
+                .iter()
+                .map(|(x, y)| (f64::from(*x), f64::from(*y)))
+                .collect::<Vec<_>>(),
+        ),
+        vec![],
+    );
+    let buffered = input
+        .buffer_with_style(BufferStyle::new(-f64::from(distance)).line_join(LineJoin::Round(0.1)));
+    println!("{name}.components={}", buffered.0.len());
+    for (index, component) in buffered.0.iter().enumerate() {
+        let exterior = ExtSPolygon(
+            component
+                .exterior()
+                .points()
+                .map(|point| (point.x() as f32, point.y() as f32))
+                .collect(),
+        );
+        let imported = import_simple_polygon(&exterior).unwrap();
+        let mut values = vec![
+            imported.n_vertices().to_string(),
+            format!("{:.9}", imported.area),
+        ];
+        for point in &imported.vertices {
+            values.push(format!("{:.9}", point.0));
+            values.push(format!("{:.9}", point.1));
+        }
+        println!("{name}.component{index}={}", values.join(","));
+    }
+}
+
+fn dense_tooth_gear_points(tooth_count: usize) -> Vec<(f32, f32)> {
+    let side = 4.0 * tooth_count as f32;
+    let mut points = vec![(0.0, 0.0)];
+    for tooth in 0..tooth_count {
+        let start = 4.0 * tooth as f32;
+        points.push((start + 1.0, 0.0));
+        points.push((start + 2.0, -3.0));
+        points.push((start + 3.0, 0.0));
+    }
+    points.push((side, 0.0));
+    for tooth in 0..tooth_count {
+        let start = 4.0 * tooth as f32;
+        points.push((side, start + 1.0));
+        points.push((side + 3.0, start + 2.0));
+        points.push((side, start + 3.0));
+    }
+    points.push((side, side));
+    for tooth in 0..tooth_count {
+        let start = side - 4.0 * tooth as f32;
+        points.push((start - 1.0, side));
+        points.push((start - 2.0, side + 3.0));
+        points.push((start - 3.0, side));
+    }
+    points.push((0.0, side));
+    for tooth in 0..tooth_count {
+        let start = side - 4.0 * tooth as f32;
+        points.push((0.0, start - 1.0));
+        points.push((-3.0, start - 2.0));
+        points.push((0.0, start - 3.0));
+    }
+    points
 }
 
 fn b11_cde_config() -> CDEConfig {
@@ -1329,6 +1397,394 @@ fn run_import_boundary_oracle() {
             Err(_) => println!("import.boundary.solution.{name}=panic"),
         }
     }
+
+    let json_solution: ExtSPSolution = serde_json::from_str(
+        r#"{
+            "strip_width": 10.0,
+            "layout": {
+                "container_id": 0,
+                "placed_items": [{
+                    "item_id": 1000,
+                    "transformation": {
+                        "rotation": 0.0,
+                        "translation": [3.5e38, 2.0]
+                    }
+                }],
+                "density": 0.0
+            },
+            "density": 0.0,
+            "run_time_sec": 0
+        }"#,
+    )
+    .expect("finite JSON value above f32 range should deserialize as f32 infinity");
+    assert!(
+        json_solution.layout.placed_items[0]
+            .transformation
+            .translation
+            .0
+            .is_infinite()
+    );
+    match catch_unwind(AssertUnwindSafe(|| {
+        import_spp_solution(&instance, &json_solution)
+    })) {
+        Err(_) => println!("import.boundary.solution.json_infinite_translation=panic"),
+        Ok(Ok(_)) => panic!("JSON infinite translation unexpectedly imported"),
+        Ok(Err(error)) => panic!("JSON infinite translation returned Result error: {error}"),
+    }
+
+    let json_rotation_solution: ExtSPSolution = serde_json::from_str(
+        r#"{
+            "strip_width": 10.0,
+            "layout": {
+                "container_id": 0,
+                "placed_items": [{
+                    "item_id": 1000,
+                    "transformation": {
+                        "rotation": 3.5e38,
+                        "translation": [2.0, 2.0]
+                    }
+                }],
+                "density": 0.0
+            },
+            "density": 0.0,
+            "run_time_sec": 0
+        }"#,
+    )
+    .expect("finite JSON value above f32 range should deserialize as f32 infinity");
+    assert!(
+        json_rotation_solution.layout.placed_items[0]
+            .transformation
+            .rotation
+            .is_infinite()
+    );
+    match catch_unwind(AssertUnwindSafe(|| {
+        import_spp_solution(&instance, &json_rotation_solution)
+    })) {
+        Err(_) => println!("import.boundary.solution.json_infinite_rotation=panic"),
+        Ok(Ok(_)) => panic!("JSON infinite rotation unexpectedly imported"),
+        Ok(Err(error)) => panic!("JSON infinite rotation returned Result error: {error}"),
+    }
+
+    for (name, json, rotation_infinite, translation_infinite) in [
+        (
+            "negative_infinite_translation",
+            r#"{"strip_width":10.0,"layout":{"container_id":0,"placed_items":[{"item_id":1000,"transformation":{"rotation":0.0,"translation":[-3.5e38,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+            false,
+            true,
+        ),
+        (
+            "negative_infinite_rotation",
+            r#"{"strip_width":10.0,"layout":{"container_id":0,"placed_items":[{"item_id":1000,"transformation":{"rotation":-3.5e38,"translation":[2.0,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+            true,
+            false,
+        ),
+    ] {
+        let solution: ExtSPSolution = serde_json::from_str(json)
+            .expect("negative f32 overflow should deserialize as -infinity");
+        let transformation = &solution.layout.placed_items[0].transformation;
+        assert_eq!(transformation.rotation.is_infinite(), rotation_infinite);
+        assert_eq!(
+            transformation.translation.0.is_infinite(),
+            translation_infinite
+        );
+        assert!(
+            if rotation_infinite {
+                transformation.rotation.is_sign_negative()
+            } else {
+                transformation.translation.0.is_sign_negative()
+            },
+            "negative overflow should preserve its sign"
+        );
+        match catch_unwind(AssertUnwindSafe(|| {
+            import_spp_solution(&instance, &solution)
+        })) {
+            Err(_) => println!("import.boundary.solution.json_{name}=panic"),
+            Ok(Ok(_)) => panic!("JSON {name} unexpectedly imported"),
+            Ok(Err(error)) => panic!("JSON {name} returned Result error: {error}"),
+        }
+    }
+
+    let json_max_finite_solution: ExtSPSolution = serde_json::from_str(
+        r#"{"strip_width":10.0,"layout":{"container_id":0,"placed_items":[{"item_id":1000,"transformation":{"rotation":3.4028234663852886e38,"translation":[3.4028234663852886e38,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+    )
+    .expect("f32::MAX JSON values should deserialize as finite f32 values");
+    let max_finite_transformation = &json_max_finite_solution.layout.placed_items[0].transformation;
+    assert_eq!(max_finite_transformation.rotation, f32::MAX);
+    assert_eq!(max_finite_transformation.translation.0, f32::MAX);
+    println!("import.boundary.solution.json_max_finite_transform_fields=finite");
+
+    let json_rounding_predecessor_solution: ExtSPSolution = serde_json::from_str(
+        r#"{"strip_width":10.0,"layout":{"container_id":0,"placed_items":[{"item_id":1000,"transformation":{"rotation":340282356779733623858607532500980858880,"translation":[-340282356779733623858607532500980858880,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+    )
+    .expect("the f64 immediately below the f32 overflow midpoint should round finite");
+    let predecessor_transformation =
+        &json_rounding_predecessor_solution.layout.placed_items[0].transformation;
+    assert_eq!(predecessor_transformation.rotation, f32::MAX);
+    assert_eq!(predecessor_transformation.translation.0, -f32::MAX);
+    println!(
+        "import.boundary.solution.json_f32_overflow_predecessor={:08x},{:08x}",
+        predecessor_transformation.rotation.to_bits(),
+        predecessor_transformation.translation.0.to_bits()
+    );
+
+    let fixture_instance_external: ExtSPInstance = serde_json::from_str(
+        r#"{"name":"one-spp","items":[{"id":201,"demand":1,"orientation":{"rotation":{"mode":"discrete","angles":[0]}},"shape":{"type":"rectangle","data":{"x_min":0,"y_min":0,"width":2,"height":2}}}],"strip_height":4}"#,
+    )
+    .expect("matching C++ importer fixture should deserialize");
+    let fixture_importer = Importer::new(cde_config, None, None);
+    let fixture_instance = import_spp_instance(&fixture_importer, &fixture_instance_external)
+        .expect("matching C++ importer fixture should import");
+    for (name, json) in [
+        (
+            "rounded_f32_max_rotation",
+            r#"{"strip_width":4.0,"layout":{"container_id":0,"placed_items":[{"item_id":201,"transformation":{"rotation":340282356779733623858607532500980858880,"translation":[2.0,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+        ),
+        (
+            "rounded_f32_max_translation",
+            r#"{"strip_width":4.0,"layout":{"container_id":0,"placed_items":[{"item_id":201,"transformation":{"rotation":0.0,"translation":[340282356779733623858607532500980858880,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+        ),
+    ] {
+        let solution: ExtSPSolution = serde_json::from_str(json)
+            .expect("f64 predecessor should deserialize as finite f32::MAX");
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            import_spp_solution(&fixture_instance, &solution)
+        }));
+        match result {
+            Err(_) => {
+                println!("import.boundary.solution.{name}=panic");
+                assert_eq!(name, "rounded_f32_max_translation");
+            }
+            Ok(Err(error)) => panic!(
+                "{name} unexpectedly returned a Result error after finite narrowing: {error}"
+            ),
+            Ok(Ok(imported)) => {
+                assert_eq!(name, "rounded_f32_max_rotation");
+                let placed = imported
+                    .layout_snapshot
+                    .placed_items
+                    .values()
+                    .next()
+                    .expect("successful import should contain the placed item");
+                let (tx, ty) = placed.d_transf.translation();
+                println!("import.boundary.solution.{name}=ok");
+                println!(
+                    "import.boundary.solution.{name}.transform_bits={:08x},{:08x},{:08x}",
+                    placed.d_transf.rotation().to_bits(),
+                    tx.to_bits(),
+                    ty.to_bits()
+                );
+                assert_eq!(placed.d_transf.rotation().to_bits(), 0xbf45_abe3);
+                assert_eq!(tx.to_bits(), 0x405a_8071);
+                assert_eq!(ty.to_bits(), 0x4001_32dd);
+                assert_eq!(placed.shape.area, 4.0);
+                assert_eq!(placed.shape.bbox.x_min.to_bits(), 0x3fff_ffff);
+                assert_eq!(placed.shape.bbox.y_min.to_bits(), 0x3f1a_c9ae);
+                assert_eq!(placed.shape.bbox.x_max.to_bits(), 0x409a_8071);
+                assert_eq!(placed.shape.bbox.y_max.to_bits(), 0x405b_b34e);
+                let expected_vertices = [
+                    (0x3fff_ffff, 0x4000_0000),
+                    (0x405b_b34e, 0x3f1a_c9ae),
+                    (0x409a_8071, 0x4002_65ba),
+                    (0x4059_4d94, 0x405b_b34e),
+                ];
+                assert_eq!(placed.shape.vertices.len(), expected_vertices.len());
+                for (vertex, (expected_x, expected_y)) in
+                    placed.shape.vertices.iter().zip(expected_vertices)
+                {
+                    assert_eq!(vertex.0.to_bits(), expected_x);
+                    assert_eq!(vertex.1.to_bits(), expected_y);
+                }
+                print_polygon(
+                    &format!("import.boundary.solution.{name}.shape"),
+                    &placed.shape,
+                );
+                for (index, vertex) in placed.shape.vertices.iter().enumerate() {
+                    println!(
+                        "import.boundary.solution.{name}.vertex{index}={:08x},{:08x}",
+                        vertex.0.to_bits(),
+                        vertex.1.to_bits()
+                    );
+                }
+            }
+        }
+    }
+
+    let finite_placed_solution: ExtSPSolution = serde_json::from_str(
+        r#"{"strip_width":4.0,"layout":{"container_id":0,"placed_items":[{"item_id":201,"transformation":{"rotation":37.25,"translation":[4.25,-1.75]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+    )
+    .expect("finite PlacedItem geometry fixture should deserialize");
+    let finite_placed_import = import_spp_solution(&fixture_instance, &finite_placed_solution)
+        .expect("finite PlacedItem geometry fixture should import");
+    let finite_placed = finite_placed_import
+        .layout_snapshot
+        .placed_items
+        .values()
+        .next()
+        .expect("finite PlacedItem fixture should contain one placement");
+    let shape = &finite_placed.shape;
+    let centroid = shape.centroid();
+    assert_eq!(
+        [
+            finite_placed.d_transf.rotation().to_bits(),
+            finite_placed.d_transf.translation().0.to_bits(),
+            finite_placed.d_transf.translation().1.to_bits(),
+        ],
+        [0x3f26_6f42, 0x408e_1a48, 0xbeb2_8958]
+    );
+    let expected_vertices = [
+        (0x4088_0000, 0xbfe0_0000),
+        (0x40ba_f1b2, 0xbf0a_16e9),
+        (0x4094_3490, 0x3f86_bb54),
+        (0x4042_85bb, 0xbe21_c9bc),
+    ];
+    assert_eq!(shape.vertices.len(), expected_vertices.len());
+    for (vertex, (expected_x, expected_y)) in shape.vertices.iter().zip(expected_vertices) {
+        assert_eq!(vertex.0.to_bits(), expected_x);
+        assert_eq!(vertex.1.to_bits(), expected_y);
+    }
+    assert_eq!(
+        [
+            shape.bbox.x_min.to_bits(),
+            shape.bbox.y_min.to_bits(),
+            shape.bbox.x_max.to_bits(),
+            shape.bbox.y_max.to_bits(),
+            shape.area.to_bits(),
+            shape.diameter.to_bits(),
+            centroid.0.to_bits(),
+            centroid.1.to_bits(),
+            finite_placed.item.area().to_bits(),
+            shape.poi.center.0.to_bits(),
+            shape.poi.center.1.to_bits(),
+            shape.poi.radius.to_bits(),
+        ],
+        [
+            0x4042_85bb,
+            0xbfe0_0000,
+            0x40ba_f1b2,
+            0x3f86_bb54,
+            0x4080_0000,
+            0x4035_04f3,
+            0x408e_1a47,
+            0xbeb2_8953,
+            0x4080_0000,
+            0x408e_1a48,
+            0xbeb2_8958,
+            0x3f80_0000,
+        ]
+    );
+    let surrogate = shape
+        .surrogate
+        .as_ref()
+        .expect("the none-configured surrogate is represented by an empty surrogate");
+    assert_eq!(surrogate.poles.len(), 2);
+    assert!(surrogate.piers.is_empty());
+    assert_eq!(surrogate.convex_hull_area.to_bits(), 0x4080_0000);
+    assert_eq!(surrogate.convex_hull_indices, [0, 1, 2, 3]);
+    assert_eq!(
+        surrogate
+            .poles
+            .iter()
+            .map(|pole| (
+                pole.center.0.to_bits(),
+                pole.center.1.to_bits(),
+                pole.radius.to_bits()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (0x408e_1a48, 0xbeb2_8958, 0x3f80_0000),
+            (0x4093_280b, 0x3f4f_ce76, 0x3e2f_40c8),
+        ]
+    );
+    println!(
+        "import.placed_item.finite.transform={:08x},{:08x},{:08x}",
+        finite_placed.d_transf.rotation().to_bits(),
+        finite_placed.d_transf.translation().0.to_bits(),
+        finite_placed.d_transf.translation().1.to_bits()
+    );
+    println!(
+        "import.placed_item.finite.vertex_count={}",
+        shape.n_vertices()
+    );
+    for (index, vertex) in shape.vertices.iter().enumerate() {
+        println!(
+            "import.placed_item.finite.vertex{index}={:08x},{:08x}",
+            vertex.0.to_bits(),
+            vertex.1.to_bits()
+        );
+    }
+    println!(
+        "import.placed_item.finite.bbox={:08x},{:08x},{:08x},{:08x}",
+        shape.bbox.x_min.to_bits(),
+        shape.bbox.y_min.to_bits(),
+        shape.bbox.x_max.to_bits(),
+        shape.bbox.y_max.to_bits()
+    );
+    println!(
+        "import.placed_item.finite.metrics={:08x},{:08x},{:08x},{:08x},{:08x}",
+        shape.area.to_bits(),
+        shape.diameter.to_bits(),
+        centroid.0.to_bits(),
+        centroid.1.to_bits(),
+        finite_placed.item.area().to_bits()
+    );
+    println!(
+        "import.placed_item.finite.poi={:08x},{:08x},{:08x}",
+        shape.poi.center.0.to_bits(),
+        shape.poi.center.1.to_bits(),
+        shape.poi.radius.to_bits()
+    );
+    println!(
+        "import.placed_item.finite.surrogate={}",
+        shape.surrogate.is_some()
+    );
+    if let Some(surrogate) = &shape.surrogate {
+        println!(
+            "import.placed_item.finite.surrogate_summary={},{},{:08x}",
+            surrogate.poles.len(),
+            surrogate.piers.len(),
+            surrogate.convex_hull_area.to_bits()
+        );
+        println!(
+            "import.placed_item.finite.surrogate_hull_indices={}",
+            surrogate
+                .convex_hull_indices
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for (index, pole) in surrogate.poles.iter().enumerate() {
+            println!(
+                "import.placed_item.finite.surrogate_pole{index}={:08x},{:08x},{:08x}",
+                pole.center.0.to_bits(),
+                pole.center.1.to_bits(),
+                pole.radius.to_bits()
+            );
+        }
+        for (index, pier) in surrogate.piers.iter().enumerate() {
+            println!(
+                "import.placed_item.finite.surrogate_pier{index}={:08x},{:08x},{:08x},{:08x}",
+                pier.start.0.to_bits(),
+                pier.start.1.to_bits(),
+                pier.end.0.to_bits(),
+                pier.end.1.to_bits()
+            );
+        }
+    }
+
+    let json_rounding_midpoint_solution: ExtSPSolution = serde_json::from_str(
+        r#"{"strip_width":10.0,"layout":{"container_id":0,"placed_items":[{"item_id":1000,"transformation":{"rotation":340282356779733661637539395458142568448,"translation":[-340282356779733661637539395458142568448,2.0]}}],"density":0.0},"density":0.0,"run_time_sec":0}"#,
+    )
+    .expect("the exact overflow midpoint should round to signed infinity");
+    let midpoint_transformation =
+        &json_rounding_midpoint_solution.layout.placed_items[0].transformation;
+    assert_eq!(midpoint_transformation.rotation, f32::INFINITY);
+    assert_eq!(midpoint_transformation.translation.0, f32::NEG_INFINITY);
+    println!(
+        "import.boundary.solution.json_f32_overflow_midpoint={:08x},{:08x}",
+        midpoint_transformation.rotation.to_bits(),
+        midpoint_transformation.translation.0.to_bits()
+    );
 }
 
 fn run_offset_boundary_oracle() {
@@ -1340,19 +1796,514 @@ fn run_offset_boundary_oracle() {
         ("positive_infinity", f32::INFINITY),
         ("negative_infinity", f32::NEG_INFINITY),
     ] {
+        let output_key = if name == "nan" {
+            if cfg!(debug_assertions) {
+                "offset.boundary.nan.debug"
+            } else {
+                "offset.boundary.nan.release"
+            }
+        } else {
+            match name {
+                "positive_infinity" => "offset.boundary.positive_infinity",
+                "negative_infinity" => "offset.boundary.negative_infinity",
+                _ => unreachable!("unexpected offset boundary case"),
+            }
+        };
         let result = catch_unwind(AssertUnwindSafe(|| {
             offset_shape(&square, ShapeModifyMode::Inflate, distance)
         }));
         match result {
-            Ok(Ok(shape)) => print_polygon(&format!("offset.boundary.{name}"), &shape),
-            Ok(Err(error)) => println!("offset.boundary.{name}=error:{error}"),
-            Err(_) => println!("offset.boundary.{name}=panic"),
+            Ok(Ok(shape)) => print_polygon(output_key, &shape),
+            Ok(Err(error)) => println!("{output_key}=error:{error}"),
+            Err(_) => println!("{output_key}=panic"),
         }
     }
 
     match offset_shape(&square, ShapeModifyMode::Deflate, 2.0) {
         Ok(shape) => print_polygon("offset.boundary.collapse", &shape),
         Err(error) => println!("offset.boundary.collapse=error:{error}"),
+    }
+
+    let tiny_deflate_width = f32::from_bits(0x3500_0000);
+    let tiny_deflate_origin = f32::from_bits(0x3580_0000);
+    let tiny_deflate_shape = rectangle(
+        tiny_deflate_origin,
+        tiny_deflate_origin,
+        tiny_deflate_origin + tiny_deflate_width * 2.0,
+        tiny_deflate_origin + tiny_deflate_width,
+    );
+    print_offset_shape_values(
+        "offset.boundary.tiny_deflate_fallback",
+        &tiny_deflate_shape,
+        ShapeModifyMode::Deflate,
+        f32::from_bits(0x347f_ffff),
+    );
+    for (name, bits) in [
+        ("fallback_pred1", 0x347f_fffe),
+        ("fallback_pred2", 0x347f_fffd),
+        ("fallback_pred3", 0x347f_fffc),
+        ("fallback_pred4", 0x347f_fffb),
+        ("half", 0x3480_0000),
+        ("above_half", 0x3480_0001),
+    ] {
+        let output_key = format!("offset.boundary.tiny_deflate_{name}");
+        print_offset_shape_values(
+            &output_key,
+            &tiny_deflate_shape,
+            ShapeModifyMode::Deflate,
+            f32::from_bits(bits),
+        );
+    }
+    for exponent in [-24, -30, -38, -40, -42] {
+        let width = f32::from_bits(((exponent + 127) as u32) << 23);
+        let origin = width * 2.0;
+        let scaled_shape = rectangle(origin, origin, origin + width * 2.0, origin + width);
+        let distance = f32::from_bits((width * 0.5).to_bits() - 1);
+        let key = format!("offset.boundary.tiny_scale_exp{}", -exponent);
+        print_offset_shape_values(&key, &scaled_shape, ShapeModifyMode::Deflate, distance);
+        for (suffix, control_distance) in [
+            ("half", width * 0.5),
+            ("above_half", f32::from_bits((width * 0.5).to_bits() + 1)),
+        ] {
+            let control_key = format!("{key}_{suffix}");
+            print_offset_shape_values(
+                &control_key,
+                &scaled_shape,
+                ShapeModifyMode::Deflate,
+                control_distance,
+            );
+        }
+    }
+    for (exponent, distance_bits) in [(7, 0x427f_fffb), (20, 0x48ff_fffb)] {
+        let width = f32::from_bits(((exponent + 127) as u32) << 23);
+        let origin = f32::from_bits(0x3580_0000);
+        let large_deflate_shape = rectangle(origin, origin, origin + width * 2.0, origin + width);
+        let output_key = format!("offset.boundary.large_deflate_fallback_exp{exponent}");
+        print_offset_shape_values(
+            &output_key,
+            &large_deflate_shape,
+            ShapeModifyMode::Deflate,
+            f32::from_bits(distance_bits),
+        );
+    }
+    for (exponent, distance_bits) in [(7, 0x427f_fffb), (20, 0x48ff_fffb)] {
+        let width = f32::from_bits(((exponent + 127) as u32) << 23);
+        for (origin_exponent, origin_bits) in [(0, 0x3f80_0000), (20, 0x4980_0000)] {
+            let origin = f32::from_bits(origin_bits);
+            let translated_shape = rectangle(origin, origin, origin + width * 2.0, origin + width);
+            for predecessor in 1..=5 {
+                let output_key = if predecessor == 5 {
+                    format!(
+                        "offset.boundary.large_deflate_translated_exp{exponent}_origin{origin_exponent}"
+                    )
+                } else {
+                    format!(
+                        "offset.boundary.large_deflate_translated_exp{exponent}_origin{origin_exponent}_pred{predecessor}"
+                    )
+                };
+                print_offset_shape_values(
+                    &output_key,
+                    &translated_shape,
+                    ShapeModifyMode::Deflate,
+                    f32::from_bits(distance_bits + (5 - predecessor)),
+                );
+            }
+        }
+    }
+
+    print_offset_shape_values(
+        "offset.finite.square_deflate",
+        &square,
+        ShapeModifyMode::Deflate,
+        0.25,
+    );
+    print_offset_shape_values(
+        "offset.finite.square_inflate",
+        &square,
+        ShapeModifyMode::Inflate,
+        0.25,
+    );
+    let collinear_vertex_square =
+        polygon(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 1.0)]);
+    print_offset_shape_values(
+        "offset.finite.collinear_vertex_square_inflate",
+        &collinear_vertex_square,
+        ShapeModifyMode::Inflate,
+        0.25,
+    );
+    let oblique_pentagon = polygon(&[(0.0, 0.0), (8.0, 0.0), (10.0, 5.0), (5.0, 9.0), (-1.0, 5.0)]);
+    print_offset_shape_values(
+        "offset.finite.oblique_pentagon_inflate",
+        &oblique_pentagon,
+        ShapeModifyMode::Inflate,
+        0.5,
+    );
+
+    let concave_l = polygon(&[
+        (0.0, 0.0),
+        (6.0, 0.0),
+        (6.0, 2.0),
+        (2.0, 2.0),
+        (2.0, 6.0),
+        (0.0, 6.0),
+    ]);
+    print_offset_shape_values(
+        "offset.finite.concave_l_inflate",
+        &concave_l,
+        ShapeModifyMode::Inflate,
+        0.5,
+    );
+    print_offset_shape_values(
+        "offset.finite.concave_l_deflate",
+        &concave_l,
+        ShapeModifyMode::Deflate,
+        0.5,
+    );
+    print_offset_shape_values(
+        "offset.finite.concave_l_deflate_1_0",
+        &concave_l,
+        ShapeModifyMode::Deflate,
+        1.0,
+    );
+    for (name, bits) in [
+        (
+            "offset.boundary.concave_l_deflate_radius_below",
+            0x3f95_f619,
+        ),
+        (
+            "offset.boundary.concave_l_deflate_radius_above",
+            0x3f95_f61a,
+        ),
+    ] {
+        print_offset_shape_values(
+            name,
+            &concave_l,
+            ShapeModifyMode::Deflate,
+            f32::from_bits(bits),
+        );
+    }
+    for (scale_name, scale, threshold_bits) in [
+        ("0_5", 0.5_f32, 0x3f15_f61a),
+        ("2", 2.0_f32, 0x4015_f61a),
+        ("10", 10.0_f32, 0x413b_73a0),
+    ] {
+        let scaled_concave_l = polygon(&[
+            (0.0, 0.0),
+            (6.0 * scale, 0.0),
+            (6.0 * scale, 2.0 * scale),
+            (2.0 * scale, 2.0 * scale),
+            (2.0 * scale, 6.0 * scale),
+            (0.0, 6.0 * scale),
+        ]);
+        for (side, bits) in [("below", threshold_bits - 1), ("nearest", threshold_bits)] {
+            let name = format!("offset.boundary.concave_l_scale_{scale_name}_{side}");
+            print_offset_shape_values(
+                &name,
+                &scaled_concave_l,
+                ShapeModifyMode::Deflate,
+                f32::from_bits(bits),
+            );
+        }
+    }
+
+    let split_candidate = polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 1.0), (0.0, 4.0)]);
+    print_offset_shape_values(
+        "offset.finite.split_first_deflate",
+        &split_candidate,
+        ShapeModifyMode::Deflate,
+        0.45,
+    );
+
+    let narrow_bridge = polygon(&[
+        (0.0, 0.0),
+        (5.0, 0.0),
+        (5.0, 2.0),
+        (7.0, 2.0),
+        (7.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 5.0),
+        (7.0, 5.0),
+        (7.0, 3.0),
+        (5.0, 3.0),
+        (5.0, 5.0),
+        (0.0, 5.0),
+    ]);
+    print_pinned_offset_components(
+        "offset.finite.narrow_bridge_deflate",
+        &[
+            (0.0, 0.0),
+            (5.0, 0.0),
+            (5.0, 2.0),
+            (7.0, 2.0),
+            (7.0, 0.0),
+            (12.0, 0.0),
+            (12.0, 5.0),
+            (7.0, 5.0),
+            (7.0, 3.0),
+            (5.0, 3.0),
+            (5.0, 5.0),
+            (0.0, 5.0),
+        ],
+        0.6,
+    );
+    print_offset_shape_values(
+        "offset.finite.narrow_bridge_first_deflate",
+        &narrow_bridge,
+        ShapeModifyMode::Deflate,
+        0.6,
+    );
+    print_pinned_offset_components(
+        "offset.finite.narrow_bridge_touching_deflate",
+        &[
+            (0.0, 0.0),
+            (5.0, 0.0),
+            (5.0, 2.0),
+            (7.0, 2.0),
+            (7.0, 0.0),
+            (12.0, 0.0),
+            (12.0, 5.0),
+            (7.0, 5.0),
+            (7.0, 3.0),
+            (5.0, 3.0),
+            (5.0, 5.0),
+            (0.0, 5.0),
+        ],
+        1.0,
+    );
+
+    let comb = [
+        (0.0, 0.0),
+        (22.0, 0.0),
+        (22.0, 12.0),
+        (16.0, 12.0),
+        (16.0, 4.0),
+        (14.0, 4.0),
+        (14.0, 12.0),
+        (8.0, 12.0),
+        (8.0, 4.0),
+        (6.0, 4.0),
+        (6.0, 12.0),
+        (0.0, 12.0),
+    ];
+    let comb_collinear_top = [
+        (0.0, 0.0),
+        (22.0, 0.0),
+        (22.0, 12.0),
+        (19.0, 12.0),
+        (16.0, 12.0),
+        (16.0, 4.0),
+        (14.0, 4.0),
+        (14.0, 12.0),
+        (8.0, 12.0),
+        (8.0, 4.0),
+        (6.0, 4.0),
+        (6.0, 12.0),
+        (0.0, 12.0),
+    ];
+    let dense_tooth_gear = dense_tooth_gear_points(25);
+    assert_eq!(dense_tooth_gear.len(), 304);
+    let dense_tooth_gear_30 = dense_tooth_gear_points(30);
+    assert_eq!(dense_tooth_gear_30.len(), 364);
+    let dense_tooth_gear_37 = dense_tooth_gear_points(37);
+    assert_eq!(dense_tooth_gear_37.len(), 448);
+    let triangle_notch = polygon(&[
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (12.0, 20.0),
+        (10.0, 14.0),
+        (8.0, 20.0),
+        (0.0, 20.0),
+    ]);
+    print_offset_shape_values(
+        "offset.finite.triangle_notch_inflate_round_fix",
+        &triangle_notch,
+        ShapeModifyMode::Inflate,
+        3.0,
+    );
+    print_pinned_offset_components("offset.finite.comb_deflate", &comb, 2.1);
+    print_pinned_offset_components("offset.finite.comb_exact_collapse_deflate", &comb, 2.0);
+    print_pinned_offset_components(
+        "offset.finite.comb_collinear_top_exact_collapse_deflate",
+        &comb_collinear_top,
+        2.0,
+    );
+    print_pinned_offset_components(
+        "offset.finite.dense_tooth_gear_deflate",
+        &dense_tooth_gear,
+        3.1,
+    );
+    print_pinned_offset_components(
+        "offset.finite.dense_tooth_gear_30_deflate",
+        &dense_tooth_gear_30,
+        3.1,
+    );
+    print_pinned_offset_components(
+        "offset.finite.dense_tooth_gear_37_deflate",
+        &dense_tooth_gear_37,
+        3.1,
+    );
+    print_pinned_offset_components("offset.finite.comb_inflate_close_gaps", &comb, -2.25);
+    let scaled_translated_comb = comb
+        .iter()
+        .map(|(x, y)| (x * 1024.0 - 13427.0, y * 1024.0 - 2150.375))
+        .collect::<Vec<_>>();
+    print_pinned_offset_components(
+        "offset.finite.comb_deflate_scaled_translated",
+        &scaled_translated_comb,
+        2150.4,
+    );
+    let scaled_translated_comb_shape = polygon(&scaled_translated_comb);
+    print_offset_shape_values(
+        "offset.finite.comb_deflate_scaled_translated_first",
+        &scaled_translated_comb_shape,
+        ShapeModifyMode::Deflate,
+        2150.4,
+    );
+    let t_shape = [
+        (0.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 4.0),
+        (8.0, 4.0),
+        (8.0, 12.0),
+        (4.0, 12.0),
+        (4.0, 4.0),
+        (0.0, 4.0),
+    ];
+    print_pinned_offset_components("offset.finite.t_exact_collapse_deflate", &t_shape, 2.0);
+    let h_shape = [
+        (0.0, 0.0),
+        (4.0, 0.0),
+        (4.0, 4.0),
+        (8.0, 4.0),
+        (8.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 12.0),
+        (8.0, 12.0),
+        (8.0, 8.0),
+        (4.0, 8.0),
+        (4.0, 12.0),
+        (0.0, 12.0),
+    ];
+    print_pinned_offset_components("offset.finite.h_exact_collapse_deflate", &h_shape, 2.0);
+    let u_shape = [
+        (0.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 10.0),
+        (8.0, 10.0),
+        (8.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 10.0),
+        (0.0, 10.0),
+    ];
+    let u_shape_polygon = polygon(&u_shape);
+    print_offset_shape_values(
+        "offset.finite.u_notch_closes_inflate",
+        &u_shape_polygon,
+        ShapeModifyMode::Inflate,
+        2.25,
+    );
+    let oblique_u_shape = [
+        (0.0, 0.0),
+        (9.6, 7.2),
+        (3.6, 15.2),
+        (0.4, 12.8),
+        (4.0, 8.0),
+        (0.8, 5.6),
+        (-2.8, 10.4),
+        (-6.0, 8.0),
+    ];
+    let oblique_u_shape_polygon = polygon(&oblique_u_shape);
+    print_offset_shape_values(
+        "offset.finite.oblique_u_notch_closes_inflate",
+        &oblique_u_shape_polygon,
+        ShapeModifyMode::Inflate,
+        2.25,
+    );
+    print_pinned_offset_components("offset.finite.u_exact_collapse_deflate", &u_shape, 2.0);
+    let c_shape = [
+        (0.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 8.0),
+        (12.0, 8.0),
+        (12.0, 12.0),
+        (0.0, 12.0),
+    ];
+    print_pinned_offset_components("offset.finite.c_exact_collapse_deflate", &c_shape, 2.0);
+    let plus_shape = [
+        (4.0, 0.0),
+        (8.0, 0.0),
+        (8.0, 4.0),
+        (12.0, 4.0),
+        (12.0, 8.0),
+        (8.0, 8.0),
+        (8.0, 12.0),
+        (4.0, 12.0),
+        (4.0, 8.0),
+        (0.0, 8.0),
+        (0.0, 4.0),
+        (4.0, 4.0),
+    ];
+    print_pinned_offset_components(
+        "offset.finite.plus_exact_collapse_deflate",
+        &plus_shape,
+        2.0,
+    );
+    print_offset_shape_values(
+        "offset.finite.comb_first_deflate",
+        &polygon(&comb),
+        ShapeModifyMode::Deflate,
+        2.1,
+    );
+    print_offset_shape_values(
+        "offset.finite.square_subgrid_deflate",
+        &square,
+        ShapeModifyMode::Deflate,
+        0.000000001,
+    );
+
+    let large_square = polygon(&[
+        (1_000_000.0, 1_000_000.0),
+        (2_000_000.0, 1_000_000.0),
+        (2_000_000.0, 2_000_000.0),
+        (1_000_000.0, 2_000_000.0),
+    ]);
+    print_offset_shape_values(
+        "offset.finite.sub_ulp_inflate",
+        &large_square,
+        ShapeModifyMode::Inflate,
+        0.01,
+    );
+    print_offset_shape_values(
+        "offset.finite.sub_ulp_deflate",
+        &large_square,
+        ShapeModifyMode::Deflate,
+        0.01,
+    );
+    print_offset_shape_values(
+        "offset.finite.subgrid_inflate",
+        &large_square,
+        ShapeModifyMode::Inflate,
+        0.00001,
+    );
+}
+
+fn print_offset_shape_values(name: &str, shape: &SPolygon, mode: ShapeModifyMode, distance: f32) {
+    match offset_shape(shape, mode, distance) {
+        Ok(offset) => {
+            let mut values = vec![
+                offset.n_vertices().to_string(),
+                format!("{:.9}", offset.area),
+            ];
+            for point in &offset.vertices {
+                values.push(format!("{:.9}", point.0));
+                values.push(format!("{:.9}", point.1));
+            }
+            println!("{name}={}", values.join(","));
+        }
+        Err(error) => println!("{name}=error:{error}"),
     }
 }
 
@@ -1369,6 +2320,20 @@ fn print_b2_shape_modification(
         format!("{:.9}", modified.area),
     ];
     for point in &modified.vertices {
+        values.push(format!("{:.9}", point.0));
+        values.push(format!("{:.9}", point.1));
+    }
+    println!("{name}={}", values.join(","));
+}
+
+fn print_b2_simplify(name: &str, points: &[(f32, f32)], mode: ShapeModifyMode, tolerance: f32) {
+    let original = polygon(points);
+    let simplified = simplify_shape(&original, mode, tolerance);
+    let mut values = vec![
+        simplified.n_vertices().to_string(),
+        format!("{:.9}", simplified.area),
+    ];
+    for point in &simplified.vertices {
         values.push(format!("{:.9}", point.0));
         values.push(format!("{:.9}", point.1));
     }
@@ -1424,6 +2389,55 @@ fn run_b2_shape_modification_oracle() {
         &convex_bump,
         ShapeModifyMode::Deflate,
         (0.2, 0.01),
+    );
+
+    print_b2_simplify(
+        "b2.simplify.narrow_notch.inflate",
+        &narrow_notch,
+        ShapeModifyMode::Inflate,
+        0.02,
+    );
+    print_b2_simplify(
+        "b2.simplify.narrow_notch.deflate",
+        &narrow_notch,
+        ShapeModifyMode::Deflate,
+        0.02,
+    );
+
+    let convex_bevel = [
+        (0.0, 0.0),
+        (4.0, 0.0),
+        (4.1, 2.0),
+        (4.0, 4.0),
+        (2.0, 4.1),
+        (0.0, 4.0),
+        (-0.1, 2.0),
+    ];
+    print_b2_simplify(
+        "b2.simplify.convex_bevel.inflate",
+        &convex_bevel,
+        ShapeModifyMode::Inflate,
+        0.05,
+    );
+    print_b2_simplify(
+        "b2.simplify.convex_bevel.deflate",
+        &convex_bevel,
+        ShapeModifyMode::Deflate,
+        0.05,
+    );
+
+    let redundant_collinear = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)];
+    print_b2_simplify(
+        "b2.simplify.collinear.zero_tolerance",
+        &redundant_collinear,
+        ShapeModifyMode::Inflate,
+        0.0,
+    );
+    print_b2_simplify(
+        "b2.simplify.collinear.negative_min_subnormal",
+        &redundant_collinear,
+        ShapeModifyMode::Inflate,
+        f32::from_bits(0x8000_0001),
     );
 }
 

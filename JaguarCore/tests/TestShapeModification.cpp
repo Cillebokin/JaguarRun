@@ -109,7 +109,7 @@ void runShapeModificationTests()
     const auto subUlpDeflate = jaguar::OffsetShape(
         largeSquare.Value(), jaguar::ShapeModifyMode::Deflate, 0.01);
     assert(subUlpDeflate.HasValue());
-    assert(subUlpDeflate.Value().Vertices() == largeSquare.Value().Vertices());
+    assert(subUlpDeflate.Value().Vertices() == expectedSubUlpVertices);
     assert(subUlpDeflate.Value().Area() == largeSquare.Value().Area());
 
     const auto narrowNotch = jaguar::SimplePolygon::Create({
@@ -215,50 +215,59 @@ void runShapeModificationTests()
     const auto splitOffset = jaguar::OffsetShape(
         splitCandidate.Value(), jaguar::ShapeModifyMode::Deflate, 0.45);
     assert(splitOffset.HasValue());
-    // Rust geo-buffer straight-skeleton oracle: this inward offset splits
-    // into two components and jagua-rs keeps the first outer component.
-    assert(splitOffset.Value().VertexCount() == 3);
-    assert(std::abs(splitOffset.Value().Area() - 1.419689416885) < 1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[0].x - 0.449999988079) <
-           1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[0].y - 0.449999988079) <
-           1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[1].x - 1.825834035873) <
-           1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[1].y - 0.449999988079) <
-           1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[2].x - 0.449999988079) <
-           1.0e-6);
-    assert(std::abs(splitOffset.Value().Vertices()[2].y - 2.513751029968) <
-           1.0e-6);
+    assert(splitOffset.Value().VertexCount() == 25);
+    assert(std::abs(splitOffset.Value().Area() - 2.898932695) < 1.0e-6);
+    const std::vector<jaguar::Point2d> expectedSplitOffsetVertices{
+        {0.449999988, 2.513751030}, {0.449999988, 0.449999988},
+        {3.549999952, 0.449999988}, {3.549999952, 2.513751030},
+        {2.374422550, 0.750384927}, {2.348123312, 0.714850664},
+        {2.318464279, 0.682068348}, {2.285731554, 0.652354419},
+        {2.250241280, 0.625995636}, {2.212336063, 0.603246450},
+        {2.172381401, 0.584326327}, {2.130763292, 0.569417894},
+        {2.087882996, 0.558665037}, {2.044154644, 0.552171469},
+        {2.000000000, 0.550000012}, {1.955845475, 0.552171469},
+        {1.912117004, 0.558665037}, {1.869236827, 0.569417894},
+        {1.827618480, 0.584326327}, {1.787663937, 0.603246450},
+        {1.749758601, 0.625995636}, {1.714268446, 0.652354419},
+        {1.681535840, 0.682068348}, {1.651876688, 0.714850664},
+        {1.625577331, 0.750384927}};
+    assert(splitOffset.Value().Vertices().size() ==
+           expectedSplitOffsetVertices.size());
+    for (std::size_t i = 0; i < expectedSplitOffsetVertices.size(); ++i)
+    {
+        assert(std::abs(splitOffset.Value().Vertices()[i].x -
+                        expectedSplitOffsetVertices[i].x) < 1.0e-6);
+        assert(std::abs(splitOffset.Value().Vertices()[i].y -
+                        expectedSplitOffsetVertices[i].y) < 1.0e-6);
+    }
 
     const auto splitComponents = jaguar::OffsetShapes(
         splitCandidate.Value(), jaguar::ShapeModifyMode::Deflate, 0.45);
     assert(splitComponents.HasValue());
-    assert(splitComponents.Value().size() == 2);
+    assert(splitComponents.Value().size() == 1);
     const auto& firstSplitComponent = splitComponents.Value()[0];
-    assert(firstSplitComponent.VertexCount() == 3);
-    assert(std::abs(firstSplitComponent.Area() - 1.419689345789) < 1.0e-6);
-    assert(std::abs(firstSplitComponent.BoundingBox().xMin - 0.45) <
-           1.0e-6);
-    assert(std::abs(firstSplitComponent.BoundingBox().yMin - 0.45) <
-           1.0e-6);
-    assert(std::abs(firstSplitComponent.BoundingBox().xMax -
-                    1.825833975347) < 1.0e-6);
-    assert(std::abs(firstSplitComponent.BoundingBox().yMax -
-                    2.513750963021) < 1.0e-6);
+    assert(firstSplitComponent.Vertices() == splitOffset.Value().Vertices());
 
-    const auto& secondSplitComponent = splitComponents.Value()[1];
-    assert(secondSplitComponent.VertexCount() == 3);
-    assert(std::abs(secondSplitComponent.Area() - 1.419689345789) < 1.0e-6);
-    assert(std::abs(secondSplitComponent.BoundingBox().xMin -
-                    2.174166024653) < 1.0e-6);
-    assert(std::abs(secondSplitComponent.BoundingBox().yMin - 0.45) <
-           1.0e-6);
-    assert(std::abs(secondSplitComponent.BoundingBox().xMax - 3.55) <
-           1.0e-6);
-    assert(std::abs(secondSplitComponent.BoundingBox().yMax -
-                    2.513750963021) < 1.0e-6);
+    const auto narrowBridge = jaguar::SimplePolygon::Create({
+        {0.0, 0.0}, {5.0, 0.0}, {5.0, 2.0}, {7.0, 2.0},
+        {7.0, 0.0}, {12.0, 0.0}, {12.0, 5.0}, {7.0, 5.0},
+        {7.0, 3.0}, {5.0, 3.0}, {5.0, 5.0}, {0.0, 5.0}});
+    assert(narrowBridge.HasValue());
+    const auto narrowBridgeComponents = jaguar::OffsetShapes(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 0.6);
+    assert(narrowBridgeComponents.HasValue());
+    assert(narrowBridgeComponents.Value().size() == 2);
+    assert(narrowBridgeComponents.Value()[0].VertexCount() == 27);
+    assert(std::abs(narrowBridgeComponents.Value()[0].Area() -
+                    14.520097733) < 1.0e-5);
+    assert(narrowBridgeComponents.Value()[1].VertexCount() == 27);
+    assert(std::abs(narrowBridgeComponents.Value()[1].Area() -
+                    14.520095825) < 1.0e-5);
+    const auto narrowBridgeFirst = jaguar::OffsetShape(
+        narrowBridge.Value(), jaguar::ShapeModifyMode::Deflate, 0.6);
+    assert(narrowBridgeFirst.HasValue());
+    assert(narrowBridgeFirst.Value().Vertices() ==
+           narrowBridgeComponents.Value()[0].Vertices());
 
     const auto comb = jaguar::SimplePolygon::Create({
         {0.0, 0.0}, {22.0, 0.0}, {22.0, 12.0}, {16.0, 12.0},
@@ -268,16 +277,30 @@ void runShapeModificationTests()
     const auto combOffset = jaguar::OffsetShape(
         comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.1);
     assert(combOffset.HasValue());
-    assert(combOffset.Value().VertexCount() == 4);
-    assert(std::abs(combOffset.Value().Area() - 14.040000915527) < 1.0e-5);
+    assert(combOffset.Value().VertexCount() == 16);
+    assert(std::abs(combOffset.Value().Area() - 14.690850258) < 1.0e-5);
     assert(std::abs(combOffset.Value().BoundingBox().xMin - 2.099999904633) <
            1.0e-6);
     assert(std::abs(combOffset.Value().BoundingBox().yMin - 2.099999904633) <
            1.0e-6);
-    assert(std::abs(combOffset.Value().BoundingBox().xMax - 3.900000095367) <
+    assert(std::abs(combOffset.Value().BoundingBox().xMax - 5.111481667) <
            1.0e-6);
     assert(std::abs(combOffset.Value().BoundingBox().yMax - 9.899999618530) <
            1.0e-6);
+    const auto combComponents = jaguar::OffsetShapes(
+        comb.Value(), jaguar::ShapeModifyMode::Deflate, 2.1);
+    assert(combComponents.HasValue());
+    assert(combComponents.Value().size() == 3);
+    assert(combComponents.Value()[0].VertexCount() == 16);
+    assert(std::abs(combComponents.Value()[0].Area() - 14.690850258) <
+           1.0e-5);
+    assert(combComponents.Value()[1].VertexCount() == 28);
+    assert(std::abs(combComponents.Value()[1].Area() - 15.341698647) <
+           1.0e-5);
+    assert(combComponents.Value()[2].VertexCount() == 16);
+    assert(std::abs(combComponents.Value()[2].Area() - 14.690842628) <
+           1.0e-5);
+    assert(combOffset.Value().Vertices() == combComponents.Value()[0].Vertices());
 
     const auto emptyComponents = jaguar::OffsetShapes(
         source.Value(), jaguar::ShapeModifyMode::Deflate, 2.0);

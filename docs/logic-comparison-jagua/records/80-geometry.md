@@ -274,3 +274,86 @@ trait 实现方法在 Rust impl 中没有 `pub` 修饰，不计入上面的 78 �
 - pinned Rust：`geometry/{convex_hull,d_transformation,geo_enums,geo_traits,original_shape,shape_modification,transformation}.rs`、`geometry/fail_fast/{piers,pole,sp_surrogate}.rs`、`geometry/primitives/{circle,edge,point,rect,simple_polygon}.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Geometry/*`、`JaguarCore/Source/Geometry/{ConvexHull,OriginalShape,Primitives,ShapeModification,Transformation}/*`、`JaguarCore/Source/FailFast/Surrogate.cpp`。
 - 运行对拍：`JaguarCore/Tests/Differential/CompareGeometry.cpp`、`JaguarCore/Tests/Differential/CompareSurrogate.cpp`、`JaguarCore/Tests/Fixtures/RustReference/{geometry_primitives,surrogate_b3_debug,surrogate_b3_release}.txt`、`JaguarCore/Tools/RustOracle/src/main.rs`。
+
+## E1逐字段位级采样：Edge与Point（2026-10-22）
+
+| Fixture字段 | 采样项数 | 最大ULP差 | 最大绝对差 |
+|---|---:|---:|---:|
+| `edge.operations` | 19 | 0 | 0 |
+| `geometry.edge_closest` | 4 | 0 | 0 |
+| `geometry.edge_zero_length_operations` | 10 | 0 | 0 |
+| `geometry.edge_zero_length_scale_reverse` | 8 | 0 | 0 |
+| `geometry.edge_nan_bbox_values` | 4 | 0 | 0 |
+| `edge.intersection` | 4 | 0 | 0 |
+| `geometry.edge_collides_at_points` | 6 | 0 | 0 |
+| `edge.transform` | 4 | 0 | 0 |
+| `geometry.independent_accessors`（Point与Edge bbox切片） | 6 | 0 | 0 |
+| `geometry.transform_from`（Point与Edge切片） | 6 | 0 | 0 |
+| `point.distance` | 3 | 0 | 0 |
+| **合计** | **74** | **0** | **0** |
+
+- MSVC 2019 14.29 Release（`/O2 /fp:precise`）逐项调用当前C++方法，并将同一Rust fixture中的十进制期望值round-trip为f32恢复位模式；74/74项raw bits一致。逐字段索引及Rust/C++位模式、ULP与绝对差见[Edge/Point raw-bit TSV](80-edge-point-f32-raw-bits.tsv)。
+- `geometry.independent_accessors`和`geometry.transform_from`是混合类型fixture，本表只采Point与Edge对应切片；`geometry.independent_accessors`中的16个Rect side数值由相同`Rect(0,0,4,2)`输入产生，C++ `SidesRustF32()`直接复用`EdgesRustF32()`，故由`02-rect-f32-raw-bits.tsv`中的`rect.edges`覆盖且不重复计数；Circle和SimplePolygon字段不计入本表。
+- 代表值：Edge最近点坐标`0x3fa8f5c2`/`0x3fe147ae`，Edge点距平方`0x3e23d708`，Point距离`0x40bed46c`、平方距离`0x420e4000`；所有采样字段两侧位模式相同。
+- 本结果限于列出的固定fixture调用点，不外推到所有Edge/Point输入、编译配置或失败域；公共比较器的`f32::EPSILON/4 ULP`仍是验收阈值，与本组实测0 ULP分开记录。
+
+## E1逐字段位级采样：Circle（2026-10-22）
+
+| Fixture字段 | 采样项数 | 最大ULP差 | 最大绝对差 |
+|---|---:|---:|---:|
+| `geometry.circle_basics` | 6 | 0 | 0 |
+| `circle.distance` | 8 | 0 | 0 |
+| `circle.separation` | 4 | 0 | 0 |
+| `circle.squared_separation` | 4 | 0 | 0 |
+| `circle.bounding_circle` | 4 | 0 | 0 |
+| `geometry.circle_bounding_circle_finite_values` | 9 | 0 | 0 |
+| `circle.transform` | 3 | 0 | 0 |
+| `geometry.transform_from`（Circle切片，字段索引2–4） | 3 | 0 | 0 |
+| **合计** | **41** | **0** | **0** |
+
+- 首次采样发现旧Release DLL早于2026-10-22的Transformation源码；随后按JaguarCore工程Release参数（`/O2 /fp:strict`）增量重建DLL，再用（`/O2 /fp:precise`）编译的临时探针直接调用当前`Circle2d`方法。Rust fixture十进制值round-trip为f32后，Circle表41/41项raw bits一致，其中`geometry.transform_from`采样字段索引2–4。逐字段位模式、ULP与绝对差见[Circle raw-bit TSV](80-circle-f32-raw-bits.tsv)。
+- 本轮后累计完成Rect（191项）、Edge/Point（74项）与Circle（41项）共306个固定fixture数值字段的raw-bit采样，均为0 ULP；范围仍限于各表列出的调用点。
+- `geometry.circle_bounding_circle_finite_values`仅包含有限数值字段；同心嵌套圆产生NaN的合同仍由原fixture布尔字段记录，不纳入ULP统计。
+- 本结果限于列出的固定fixture调用点，不外推到所有Circle输入、编译配置或失败域；公共比较器的容差仍与本组实测0 ULP分开记录。
+
+## E1逐字段位级采样：SimplePolygon与ConvexHull（2026-10-22）
+
+| Fixture字段 | 采样范围 | 采样项数 | 最大ULP差 | 最大绝对差 |
+|---|---|---:|---:|---:|
+| `polygon.distance` | Polygon距离、平方距离与分离距离 | 8 | 0 | 0 |
+| `geometry.simple_polygon_basics` | 顶点数、面积、直径、bbox、质心、POI、边端点 | 28 | 0 | 0 |
+| `geometry.simple_polygon_clockwise_vertices` | 顺时针输入归一后的顶点序 | 8 | 0 | 0 |
+| `geometry.simple_polygon_transform` | 变换后顶点、bbox、质心、面积、直径 | 16 | 0 | 0 |
+| `geometry.simple_polygon_helpers` | 有效多边形派生指标 | 9 | 0 | 0 |
+| `geometry.original_shape` | Polygon原始与内部转换指标 | 19 | 0 | 0 |
+| `geometry.transform_from`（Polygon切片） | 字段索引9–27 | 19 | 0 | 0 |
+| `geometry.convex_hull_tied_x` | 同x坐标点的凸包顺序 | 8 | 0 | 0 |
+| `geometry.convex_hull_singleton_count` | 单点凸包数量 | 1 | 0 | 0 |
+| `geometry.convex_hull_finite_degenerates_counts` | 6组退化点集的凸包数量 | 6 | 0 | 0 |
+| `geometry.convex_hull_finite_degenerates_points` | 退化凸包顶点坐标 | 18 | 0 | 0 |
+| **合计** | | **140** | **0** | **0** |
+
+- MSVC 2019 14.29 Release探针直接调用当前SimplePolygon、OriginalShape和ConvexHull方法；JaguarCore Release DLL在2026-10-22按工程参数（`/O2 /fp:strict`）重建，临时探针以（`/O2 /fp:precise`）编译。Rust fixture十进制值round-trip为f32后，140/140项raw bits一致。逐字段结果见[SimplePolygon raw-bit TSV](80-simple-polygon-f32-raw-bits.tsv)。
+- `geometry.transform_from`在本表只采Polygon的第9–27项；Point与Edge切片见前表，Circle的第2–4项切片已记入Circle部分。
+- `geometry.simple_polygon_degenerate_metrics`中的12项是Rust-only原始退化helper输出，没有同形C++公开入口，故不计入位级对拍；这是已登记的API映射差异。`geometry.transform_from_surrogate_debug`与`geometry.transform_from_surrogate_release`属于B3代理生成/profile结果，不纳入本表。
+- 本轮后累计完成Rect（191项）、Edge/Point（74项）、Circle（41项）与SimplePolygon/ConvexHull（140项）共446个固定fixture数值字段的raw-bit采样，均为0 ULP；范围仍限于各表列出的调用点。
+- 本结果不外推到所有多边形、凸包输入、编译配置或失败域；公共比较器容差与这些固定调用点实测0 ULP分开记录。
+
+## E1逐字段位级采样：Transformation与DTransformation（2026-10-22）
+
+| Fixture字段 | 采样项数 | 最大ULP差 | 最大绝对差 |
+|---|---:|---:|---:|
+| `geometry.normalize_rotation` | 4 | 0 | 0 |
+| `geometry.dtransformation` | 9 | 0 | 0 |
+| `geometry.transformation_apply` | 2 | 0 | 0 |
+| `geometry.transformation_order` | 6 | 0 | 0 |
+| `geometry.transformation_matrix_probes` | 60 | 0 | 0 |
+| `geometry.transformation_decompositions` | 30 | 1 | 2.980232239e-08 |
+| `geometry.transform_followed_by` | 3 | 0 | 0 |
+| `geometry.transform_inverse` | 3 | 0 | 0 |
+| **合计** | **117** | **1** | **2.980232239e-08** |
+
+- MSVC 2019 14.29 Release临时探针复用差分fixture中的输入与调用顺序，直接执行角度归一化、变换构造/组合/求逆、Apply、基向量探针和分解输出；Rust fixture十进制期望值round-trip为f32后，117项中116项raw bits一致。
+- 唯一差异为`geometry.transformation_decompositions[6]`：Rust `0x3ec00001`、C++ `0x3ec00000`，相差1 ULP、绝对差`2.980232239e-08`。该项是仅旋转路径`rotation=0.375`的分解角；Rust从旋转矩阵经`atan2(sin,cos)`取回角度，C++的分解表示直接保留输入角度。该差异低于现有比较器容差，但不能称为raw-bit一致；这里只裁定这个固定输入点。
+- 逐字段位模式、ULP与绝对差见[Transformation raw-bit TSV](80-transform-f32-raw-bits.tsv)。当前记录累计完成Rect（191项）、Edge/Point（74项）、Circle（41项）、SimplePolygon/ConvexHull（140项）与Transformation/DTransformation（117项）共563个固定fixture数值字段的raw-bit采样；除上述1项外均为0 ULP，结果只适用于各表列出的固定调用点。
+- 按`geometry_primitives.txt`逐key核对后，本批次所有纳入的有限数值fixture字段均已进入raw-bit表；`geometry.transform_from`索引0–27各记录一次，`geometry.independent_accessors`的16个Rect side字段已由`rect.edges`覆盖且不重复计数。Rust-only的`geometry.simple_polygon_degenerate_metrics`与归B3记录的surrogate profile数值保持在本批次之外。

@@ -68,7 +68,7 @@ export.h 在 Windows 下根据 JAGUARCORE_BUILD 选择 dllexport 或 dllimport�
 
 差分测试位于 JaguarCore/Tests/Differential 与 JaguarCore/Tests/differential 两个大小写不同的目录中；JaguarCoreTests.pro 当前引用大写 Differential/ 路径，且该目录存在。目录大小写本身不足以证明 Linux 构建失败，需核对两份副本内容并指定权威目录。测试比较 C++ 结果与字面量及 tests/fixtures/RustReference 下的快照，不会在每次运行时调用 Rust oracle。CompareGeometry 面积使用 1e-3 与 1e-9 两档，CompareOptimizer 密度容差为 5e-3。CompareProblem.cpp 第 17–31 行的 Windows 反斜杠路径仍可能阻碍 Linux 读取 fixtures；tests/differential/README.md 的运行说明需与工程当前状态复核。
 
-`tools/RustOracle/src/main.rs`（2666 行）是一个依赖 `../../../CodeResource/jagua-rs/jagua-rs`（启用 spp、bpp、mspp 特性）的 Rust 二进制。`main()` 位于约第 557 行，根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt`（53 行）是陈旧且不完整的输出，不能作为当前基准。`tools/rust_oracle/` 目录仅包含 `target/`，属于构建残留。因此，当前的差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行 oracle 并更新 fixtures。
+`JaguarCore/Tools/RustOracle/src/main.rs` 是Rust差分oracle；其 `Cargo.toml` 通过Git revision `f5e2b5ffd14931f17a20ce283a2122e877953ceb` 直接依赖 jagua-rs，并启用 spp、bpp、mspp 特性。Manifest还单独声明 `geo-buffer = "0.2"`，用于原始buffer组件诊断；这不等同于锁定jagua-rs revision的 `offset_shape` 实现。`main()` 根据命令行标志分派：`--restore-boundary-parity-only`、`--model-boundary-parity-only`、`--offset-boundary-parity-only`、`--import-boundary-parity-only`、`--zero-separation-parity-only`、`--collision-parity-only`，若均不匹配则输出固定场景的 key=value 文本。`tools/RustOracle/last_oracle_output.txt` 是陈旧且不完整的输出，不能作为当前基准。因此，当前差分机制是"人工生成的快照 + 字面量"，并不是在线对比，Rust 与 C++ 行为一旦分叉，测试不会自动发现，除非有人重新运行oracle并更新fixtures。
 
 ## 八、Rust 差异、可疑点与陷阱汇总
 

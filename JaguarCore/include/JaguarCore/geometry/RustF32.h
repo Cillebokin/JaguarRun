@@ -18,6 +18,11 @@ inline float ToDegreesRustF32(double radians) noexcept
 
 inline float MidpointRustF32(float first, float second) noexcept
 {
+#if defined(_M_X64) || defined(__x86_64__)
+    // Match Rust's native x86_64 f32::midpoint path and its single f32 rounding.
+    return static_cast<float>(
+        (static_cast<double>(first) + static_cast<double>(second)) * 0.5);
+#else
     const float halfMax = std::numeric_limits<float>::max() * 0.5F;
     if (std::signbit(first) != std::signbit(second) ||
         (std::fabs(first) <= halfMax && std::fabs(second) <= halfMax))
@@ -25,6 +30,7 @@ inline float MidpointRustF32(float first, float second) noexcept
         return (first + second) * 0.5F;
     }
     return first * 0.5F + second * 0.5F;
+#endif
 }
 
 inline float MinRustF32(float first, float second) noexcept
@@ -42,8 +48,8 @@ inline std::uint32_t OrderedRustF32Bits(float value) noexcept
     std::uint32_t bits = 0U;
     std::memcpy(&bits, &value, sizeof(bits));
     if ((bits & 0x80000000U) != 0U)
-        return ~bits + 1U;
-    return bits | 0x80000000U;
+        return ~bits;
+    return bits ^ 0x80000000U;
 }
 
 inline bool AlmostEqualRustF32(float first, float second) noexcept
@@ -52,15 +58,17 @@ inline bool AlmostEqualRustF32(float first, float second) noexcept
         return true;
     if (std::fabs(first - second) <= std::numeric_limits<float>::epsilon())
         return true;
-    if (!std::isfinite(first) || !std::isfinite(second))
-        return false;
 
     const std::uint32_t firstBits = OrderedRustF32Bits(first);
     const std::uint32_t secondBits = OrderedRustF32Bits(second);
-    const std::uint32_t difference = firstBits > secondBits
-        ? firstBits - secondBits
-        : secondBits - firstBits;
-    return difference <= 4U;
+    const std::uint32_t wrappedDifference = firstBits - secondBits;
+    const std::uint32_t absoluteDifference =
+        (wrappedDifference & 0x80000000U) == 0U
+        ? wrappedDifference
+        : (wrappedDifference == 0x80000000U
+               ? 0x7fffffffU
+               : ~wrappedDifference + 1U);
+    return absoluteDifference <= 4U;
 }
 
 inline bool LessEqualRustF32(float first, float second) noexcept

@@ -1,4 +1,5 @@
 #include "JaguarCore/Version.h"
+#include "JaguarCore/Geometry/RustF32.h"
 #include "JaguarCore/Geometry/Point.h"
 #include "JaguarCore/Geometry/Rect.h"
 #include "JaguarCore/NumericPolicy.h"
@@ -6,7 +7,9 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -92,6 +95,25 @@ void testNumericPolicy()
     assert(!policy.NearlyEqual(1.0, 1.0 + 1.0e-3));
 }
 
+void testRustF32ApproximateComparison()
+{
+    const float maximum = std::numeric_limits<float>::max();
+    const float infinity = std::numeric_limits<float>::infinity();
+    assert(jaguar::detail::AlmostEqualRustF32(maximum, infinity));
+    assert(jaguar::detail::AlmostEqualRustF32(-infinity, -maximum));
+    assert(jaguar::detail::LessEqualRustF32(infinity, maximum));
+    assert(!jaguar::detail::LessRustF32(maximum, infinity));
+    assert(!jaguar::detail::GreaterRustF32(infinity, maximum));
+
+    const std::uint32_t negativeNanBits = 0xffffffffU;
+    const std::uint32_t positiveNanBits = 0x7fffffffU;
+    float negativeNan = 0.0F;
+    float positiveNan = 0.0F;
+    std::memcpy(&negativeNan, &negativeNanBits, sizeof(negativeNan));
+    std::memcpy(&positiveNan, &positiveNanBits, sizeof(positiveNan));
+    assert(jaguar::detail::AlmostEqualRustF32(negativeNan, positiveNan));
+}
+
 void testPoint()
 {
     const jaguar::Point2d first{0.0, 0.0};
@@ -133,6 +155,7 @@ int main()
     testVersion();
     testResult();
     testNumericPolicy();
+    testRustF32ApproximateComparison();
     testPoint();
     testRect();
     runGeometryTests();

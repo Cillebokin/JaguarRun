@@ -23,7 +23,7 @@
 - 判定：C++ 额外（模拟层）。语义即"把 double 配置收敛到 Rust f32 可表示值"，与 Rust 直接持有 f32 等价；`==` 运算符（h:25-41）比较时同样先 float 化，自洽。
 
 **凸包计算**（Rust 40-45：`convex_hull::convex_hull_indices(simple_poly)` → 取点 → `SPolygon::calculate_area`）
-- C++ cpp:615-636：`convexHullRustF32(shape.Vertices())`（cpp:507-539，Andrew monotone chain：stable_sort by f32 x、下链/上链 cross ≤ 0 弹出、去尾拼接——与 Rust `convex_hull.rs` 的实现对应，见记录 07）→ 逐 hull 点**在原顶点表中线性查找** f32 坐标相等者回索引（cpp:618-635），找不到报 `InvalidPolygon "convex hull point is not present in the polygon"`；`polygonAreaRustF32(hull)`（cpp:541-557，`(yi+yj)*(xi-xj)` 累加公式）。
+- C++ cpp:615-636：`convexHullRustF32(shape.Vertices())`（cpp:507-539，Andrew monotone chain：stable_sort by f32 x、下链/上链`hullCrossRustF32`以f32差值和叉积计算，`cross ≤ 0`时弹出、去尾拼接——与Rust `convex_hull.rs`的实现对应，见记录07）→ 逐hull点**在原顶点表中线性查找**f32坐标相等者回索引（cpp:618-635），找不到报`InvalidPolygon "convex hull point is not present in the polygon"`；`polygonAreaRustF32(hull)`（cpp:541-557，`(yi+yj)*(xi-xj)`累加公式）。
 - 判定：一致（语义：hull 顶点 → 原多边形索引 + hull 面积）。实现机制差异：Rust `convex_hull_indices` 在算法内直接产出索引；C++ 先算 hull 点再反查索引。反查用 f32 相等匹配，正常输入（hull 点来自原顶点集）必命中；重复坐标顶点时 Rust 取算法自然序、C++ 线性查找取**首个**匹配——在重合顶点场景下索引可不同（记录 07 已记录该点）。
 
 **poles 生成**（Rust 46：`pole::generate_surrogate_poles(simple_poly, &config.n_pole_limits)?`）

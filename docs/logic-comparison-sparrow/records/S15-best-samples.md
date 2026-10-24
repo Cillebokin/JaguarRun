@@ -20,7 +20,7 @@ C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search tr
   3. **无相似样本**：Rust（:34-38）在满容量时先 pop 尾部，再 push 并按 sort_by_key 稳定排序（:58-60）；C++（cpp:110-130）先 push，再执行稳定插入排序并按容量截断。操作次序不同；S10 七组×六排列、四样本链×24排列，以及 S15 32 项混合插入序列的真实 BestSamples fixture 均逐步匹配锁定 Rust 输出。由于比较器非传递，不能据此推断其他输入序列也得到相同结果。【列明 fixture 一致；普遍行为未证明】
   4. **有相似样本**：Rust（:40-53）要求候选严格优于所有相似样本，否则拒绝；满足时淘汰全部相似项。C++（cpp:83-108）执行同样的全量比较和过滤替换。IsBetterSample 的有限值容差对应 Rust FPA 比较；NaN 失败机制见第 6 项。【一致（列明有效输入）】
   5. **push + 排序**：Rust（:58-60）使用稳定 sort_by_key；C++（cpp:110-130）使用稳定插入排序，避免把违反严格弱序前置条件的比较器传入 std::sort。S10 的七组三样本输入/全排列、四项非传递链/24 种排列，以及 S15 的 32 项混合插入序列均由真实 BestSamples 路径匹配锁定 Rust 1.98.1 Debug/Release fixture。两侧排序算法不同，且 Rust Ord 合同本身违反；证据不覆盖其他非传递序列。【固定 fixture 一致，普遍行为未证明】
-  6. **输入边界与 NaN**：两边都不预过滤非有限 loss，±Inf 按比较器正常排序。Rust 的 Invalid 在 Invalid < Invalid 时不通过接受条件。新增固定轨迹分别验证：满容量 upper-bound 同 kind 比较 panic 且集合不变；相似项比较 panic 且集合不变；候选已 push、排序比较 panic 后集合含两项；Clear NaN 与 Collision loss 比较只按 kind rank、不 panic。Rust `partial_cmp(...).unwrap()` panic，C++ `IsBetterSample` 抛 `std::domain_error`（SampleEval.h:85-87）；C++/Rust 对应状态逐行核对。零容量时 Rust `upper_bound()` 计算 `size - 1`：Debug 下溢 panic；Release wrapping 后索引越界返回 Invalid，非 Invalid 候选通过容量上界比较，后续是否接受仍取决于相似度规则。互不相似且被接受的报告会继续累积并突破容量。C++ Debug 在 `UpperBound()` 抛 `std::underflow_error`；Release 对零容量返回 Invalid 并跳过容量淘汰/截断，复现相同集合结果。LBF/Separator 搜索现在原样传递零容量配置，S13 有真实搜索入口的 profile reference。
+  6. **输入边界与NaN**：±Inf按比较器正常排序。Rust同kind NaN loss先经FPA近似比较；ULP距离≤4（包括相同payload）时为Equal，否则partial_cmp返回None并在unwrap处panic。C++ IsBetterSample先用共享helper判断近似相等，只有不相等且含NaN才抛std::domain_error（SampleEval.h:59-64）。不同kind仍按rank比较，不触发loss比较。已有固定轨迹覆盖NaN对finite失败、push后排序失败及跨kind情况，未覆盖相同/相邻NaN payload。零容量profile行为见下文。
 - 判定：【列明输入上对应；边界差异与一般排序限制另列】
 - 证据：best_samples.rs:26-75 vs BestSamples.cpp:53-133；既有 accepted/retained fixtures 见 TestSampling.cpp:1296-1348、TestSeparator.cpp:901-958；S10 排序与 S15 边界/长序列/NaN fixture 由 TestLbfLoss.cpp 经真实 BestSamples 路径核对。Rust reference 直接编译当前 `best_samples.rs` / `sample_eval.rs` 源文件，Rust Debug/Release 逐行核对 32 项插入和四种 NaN 路径；C++ Debug/Release 全量测试程序也执行相同 fixture。边界、排序和失败后的集合状态均按 loss bits 精确比较。
 
@@ -52,7 +52,7 @@ C++ BestSamples 类与 Rust BestSamples 结构逐方法对应；既有 search tr
 | # | 项 | 判定 | 影响 | 证据 |
 |---|---|---|---|---|
 | 1 | 淘汰-插入顺序：Rust 满容量时先 pop 再 push + 稳定 sort_by_key；C++ push 后稳定插入排序再截断 | S10 固定排列及 S15 32 项混合插入序列的真实 BestSamples 轨迹逐步匹配 | Rust 比较器非传递；其他插入序列仍可能受排序算法影响，不能从固定 fixture 推广 | best_samples.rs:35-38,58-60 vs BestSamples.cpp:110-130; SampleEvalComparatorBoundaryRustReference.tsv; SampleEvalNonTransitiveSortRustReference.tsv; BestSamplesSequenceRustReference.tsv |
-| 2 | NaN/Invalid/无穷边界：两侧不预过滤非有限 loss；同 kind NaN 比较时 Rust panic、C++ 抛 domain_error，±Inf 可排序 | 已覆盖 upper-bound、相似项、push 后排序三种失败状态，以及不同 kind 不触发 loss 比较 | 失败位置与失败后的集合只对四个固定轨迹成立；异常类型不同 | BestSamplesSequenceRustReference.tsv; BestSamples.cpp:64-72,110-132; SampleEval.h:73-91; best_samples.rs:27-32,81-87 |
+| 2 | NaN/Invalid/无穷边界：ULP距离≤4的NaN payload按FPA视为Equal；其余同kind NaN比较Rust panic、C++抛domain_error；±Inf正常比较 | 已覆盖NaN对finite、相似项/排序失败和不同kind按rank；相同/近邻NaN payload未覆盖 | 失败位置只对已列轨迹成立 | BestSamplesSequenceRustReference.tsv; BestSamples.cpp:64-72,110-132; SampleEval.h:47-72; best_samples.rs:27-32,81-87 |
 | 3 | size=0 容量边界：Rust/C++ Debug 均失败，Release 均可能接受并持续增长、突破容量；真实 LBF/Separator 搜索入口现在原样传零容量 | 已按 Rust profile 行为覆盖直接 BestSamples 与 LBF Search 调用路径；C++ 异常类型不同 | 这是 Rust 的零容量边界缺陷，不应扩展为普通配置承诺；Release 行为受后续候选相似度与排序路径影响 | best_samples.rs:27,81-87; search.rs:242-245 vs BestSamples.cpp; LbfSearch.cpp; SeparatorWorker.cpp; `search_zero_boundary_reference.rs`; TestSampling.cpp |
 | 4 | 平移精度：Rust 先将坐标存为 f32 后做 f32 相减；C++ 现在先分别 cast 坐标为 float，再相减 | `1.0`/`1.05000001` 在阈值 0.05 下的误分类已修复 | Rust 参考直接用 f32 数据，C++ 测试保留原始 double 输入以覆盖转换边界 | best_samples.rs:96-97 vs BestSamples.cpp:32-38; BestSamplesBoundaryRustReference.tsv |
 | 5 | 平移阈值域：NaN/负值不相似，`+∞` 对有限平移差通过 | C++ 与 Rust 的三种边界分类已由实际 BestSamples 路径验证 | 覆盖 NaN、负无穷和正无穷阈值；不替代其他输入的相似度轨迹 | BestSamples.cpp:24-27; best_samples.rs:96-104; BestSamplesBoundaryRustReference.tsv |
@@ -76,3 +76,8 @@ BestSamples 的平移 f32 舍入、严格 5%/1° 相似度阈值和正容量淘�
 5. **【此前的 2026-10-07 更新：真实 BestSamples 边界参考】** S10 初版新增五组输入各六种排列，Rust 1.98.1 Debug/Release 生成并核对 30 行固定顺序；C++ TestLbfLoss.cpp 通过 BestSamples 实际插入路径逐行对照，并重复执行检查稳定性。BestSamples 不再预过滤非有限 loss：±Inf 正常比较，同 kind NaN 比较映射为 Rust panic/C++ std::domain_error；不同 kind 按 rank 比较。后续扩展见下项。
 6. **【扩展 S10 非传递输入（2026-10-07）】** 边界 fixture 现覆盖七组三样本×六排列（42 行），新增负 epsilon 与 2.0 附近 ULP 链；另以四个连续 ULP 近似相等值覆盖 24 种插入排列。Rust 1.98.1 Debug/Release 的四项排序轨迹一致，C++ Debug/Release 的真实 BestSamples 路径逐行匹配。该证据没有消除 Rust Ord 合同风险，也不证明更长一般序列。
 7. **【S15 长序列与 NaN 触发位置（2026-10-07）】** 新增 `BestSamplesSequenceRustReference.tsv`：32 项混合顺序插入的非传递 loss 链，以及 NaN 在满容量 upper-bound 比较、相似样本比较、push 后排序中的三种失败位置，另含不同 kind 按 rank 比较且不触发 NaN loss 比较。Rust reference 和 C++ 真实 BestSamples 路径逐步核对结果、样本顺序、容量上界及失败后的集合状态；Rust/C++ Debug/Release 均通过。只扩展到列明轨迹，不构成任意非传递序列保证。
+
+### E1补充复核（2026-10-22）
+
+- SampleEval的RustApproxEqualF32现在委托JaguarCore公共比较器；IsBetterSample先做近似相等，再对未近似相等的NaN触发异常。既有NaN对finite用例仍落入失败路径，同payload或ULP≤4的NaN相等边界尚无固定fixture。
+- MSVC14.29 SparrowCore Debug/Release生产库本轮构建成功；本次改动后未重跑全量测试runner。

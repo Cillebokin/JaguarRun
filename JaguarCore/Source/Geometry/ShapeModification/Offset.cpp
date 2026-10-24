@@ -1208,6 +1208,67 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
     }
     if (source.size() > 1U && source.front() == source.back())
         source.pop_back();
+
+    // i_overlay feeds the quantized ring through UniqueSegmentsIter
+    // (mesh/outline/uniq_iter.rs), which fuses consecutive segments that
+    // continue in exactly the same direction before any section or join is
+    // built, so exactly collinear source vertices never produce a join,
+    // spokes, or contour points. Mirror that fusion here: keeping such
+    // vertices makes the offset ring carry quantization-kink artifacts that
+    // the real extraction pipeline never emits.
+    const auto isSourcePassThrough = [](const OverlayPoint& a,
+                                        const OverlayPoint& b,
+                                        const OverlayPoint& c) {
+        const std::int64_t abX = static_cast<std::int64_t>(b.x) - a.x;
+        const std::int64_t abY = static_cast<std::int64_t>(b.y) - a.y;
+        const std::int64_t bcX = static_cast<std::int64_t>(c.x) - b.x;
+        const std::int64_t bcY = static_cast<std::int64_t>(c.y) - b.y;
+        return abX * bcY - abY * bcX == 0 && abX * bcX + abY * bcY > 0;
+    };
+    for (bool fusedAgain = true; fusedAgain && source.size() > 3U;)
+    {
+        fusedAgain = false;
+        std::size_t anchor = source.size();
+        for (std::size_t i = 0U; i < source.size(); ++i)
+        {
+            if (!isSourcePassThrough(
+                    source[(i + source.size() - 1U) % source.size()],
+                    source[i], source[(i + 1U) % source.size()]))
+            {
+                anchor = i;
+                break;
+            }
+        }
+        if (anchor == source.size())
+            break; // fully collinear ring; keep it for the CCW check to reject
+        std::vector<OverlayPoint> fused;
+        fused.reserve(source.size());
+        for (std::size_t k = 0U; k < source.size(); ++k)
+        {
+            const OverlayPoint& candidate =
+                source[(anchor + k) % source.size()];
+            if (fused.size() >= 2U &&
+                isSourcePassThrough(fused[fused.size() - 2U], fused.back(),
+                                    candidate))
+            {
+                fused.back() = candidate;
+                fusedAgain = true;
+            }
+            else
+            {
+                fused.push_back(candidate);
+            }
+        }
+        while (fused.size() > 3U &&
+               isSourcePassThrough(fused[fused.size() - 2U], fused.back(),
+                                   fused.front()))
+        {
+            fused.pop_back();
+            fusedAgain = true;
+        }
+        source = std::move(fused);
+    }
+
     if (!isCounterClockwise(source))
         return std::nullopt;
 

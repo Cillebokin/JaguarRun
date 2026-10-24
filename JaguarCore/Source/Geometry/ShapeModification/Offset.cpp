@@ -1352,6 +1352,68 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
     if (outline.size() < 3U)
         return std::nullopt;
 
+    // i_overlay rebuilds every path through build_graph_view +
+    // extract_contours_into (mesh/outline/offset.rs), and the default
+    // OverlayOptions have preserve_output_collinear == false, so vertices
+    // that are exactly collinear pass-throughs on the integer grid are
+    // dropped during contour extraction. Mirror that on the outline ring
+    // before choosing the canonical contour start; otherwise quantization
+    // kinks below the adapter resolution survive as extra ring vertices.
+    const auto isIntPassThrough = [](const OverlayPoint& a,
+                                     const OverlayPoint& b,
+                                     const OverlayPoint& c) {
+        const std::int64_t abX = static_cast<std::int64_t>(b.x) - a.x;
+        const std::int64_t abY = static_cast<std::int64_t>(b.y) - a.y;
+        const std::int64_t bcX = static_cast<std::int64_t>(c.x) - b.x;
+        const std::int64_t bcY = static_cast<std::int64_t>(c.y) - b.y;
+        return abX * bcY - abY * bcX == 0 && abX * bcX + abY * bcY > 0;
+    };
+    bool simplifiedAgain = true;
+    while (simplifiedAgain && outline.size() > 3U)
+    {
+        simplifiedAgain = false;
+        std::size_t anchor = outline.size();
+        for (std::size_t i = 0U; i < outline.size(); ++i)
+        {
+            if (!isIntPassThrough(
+                    outline[(i + outline.size() - 1U) % outline.size()],
+                    outline[i], outline[(i + 1U) % outline.size()]))
+            {
+                anchor = i;
+                break;
+            }
+        }
+        if (anchor == outline.size())
+            break; // fully collinear ring; leave it for the import to reject
+        std::vector<OverlayPoint> simplified;
+        simplified.reserve(outline.size());
+        for (std::size_t k = 0U; k < outline.size(); ++k)
+        {
+            const OverlayPoint& candidate =
+                outline[(anchor + k) % outline.size()];
+            if (simplified.size() >= 2U &&
+                isIntPassThrough(simplified[simplified.size() - 2U],
+                                 simplified.back(), candidate))
+            {
+                simplified.back() = candidate;
+            }
+            else
+            {
+                simplified.push_back(candidate);
+            }
+        }
+        while (simplified.size() > 3U &&
+               isIntPassThrough(simplified[simplified.size() - 2U],
+                                simplified.back(), simplified.front()))
+        {
+            simplified.pop_back();
+        }
+        simplifiedAgain = simplified.size() != outline.size();
+        outline = std::move(simplified);
+    }
+    if (outline.size() < 3U)
+        return std::nullopt;
+
     // Match i_overlay's tested left-top contour start. A vertical leftmost
     // edge starts at its upper endpoint; with a unique leftmost point, the
     // extracted contour starts at its predecessor in the CCW ring.

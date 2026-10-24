@@ -198,3 +198,6 @@ consts.rs 的 19 个 `pub const` 中，核心 GLS/CD/LBF 等算法常量在 C++ 
 新增 Rust 测试 `slice_shuffle_reference.rs` 校验 fixture 由锁定的 Rust RNG 实际生成；C++ `TestRng.cpp::TestSliceShuffleRustReference` 调用生产 shuffle 算法的测试入口，逐组比较排列及后续 RNG 输出。S16 连续 sampler fixture 同时由 Rust/C++ 比较 16 个实际旋转结果及每次采样后的 4 个 `u64`，其中采样器的 `SliceRandom::choose` 处理多项旋转候选。Debug/Release RustReference 全量套件和 SparrowCoreTests 全量程序均通过。
 
 本次收口覆盖的是 Sparrow 当前实际 RNG 调用点和表中固定 seed/长度/候选组合；结论不外推到任意外部迭代器 size hint、`usize` 极大长度或未列出的 Explore 几何轨迹。
+## 2026-10-24 增补：正态 ziggurat 表字面量化（第三十一阶段）
+
+UCRT libm 逐位模拟证明运行期递推重建的 F 表与 rand_distr 0.6.0 `ziggurat_tables.rs` 字面量存在 3 项 ULP 差（F[0] 6 ULP、F[3]/F[94] 各 1 ULP；X 全等）。`SparrowRng.cpp` 改为内嵌 ZIG_NORM_X/F 各 257 项逐字字面量（Apache-2.0 OR MIT，注明来源），删除重建代码与 NORMAL_ZIGGURAT_AREA 常量。SparrowCoreTests Release 全套件与三个 pinned LBF 搜索轨迹（含 `next_rng_u64`）逐位通过。结论限本机 UCRT/MSVC 证据与既有轨迹；跨 libm 平台差异由字面量表消除。

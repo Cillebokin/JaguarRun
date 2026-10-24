@@ -40,12 +40,15 @@ class SPInstance
 {
 public:
     // 创建 SPP 问题实例
+    // minItemSeparation 参与 Rust import_spp_instance 的初始条宽公式：
+    // separation + total_item_area / (fixed_height - separation)
     static JAGUARCORE_API Result<SPInstance> Create(
         std::vector<Item> items,
         std::vector<std::size_t> demands,
         double fixedHeight,
         CDEConfig cdeConfig,
-        ShapeModifyConfig shapeModifyConfig);
+        ShapeModifyConfig shapeModifyConfig,
+        double minItemSeparation = 0.0);
     // 使用显式基础条带创建 SPP 问题实例
     static JAGUARCORE_API Result<SPInstance> Create(
         std::vector<Item> items,

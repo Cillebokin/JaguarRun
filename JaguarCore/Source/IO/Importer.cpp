@@ -513,7 +513,8 @@ JAGUARCORE_API Result<SPInstance> Importer::ImportSPInstance(
         return Result<SPInstance>::FromError(items.GetError());
     return SPInstance::Create(items.Value(), std::move(demands),
                               external.stripHeight, m_Config.cdeConfig,
-                              problemShapeConfig(scoped.ShapeConfig().offset));
+                              problemShapeConfig(scoped.ShapeConfig().offset),
+                              external.minItemSeparation);
 }
 
 JAGUARCORE_API Result<SPSolution> Importer::ImportSPSolution(

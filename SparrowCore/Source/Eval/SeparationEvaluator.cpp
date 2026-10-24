@@ -7,6 +7,14 @@
 
 namespace
 {
+constexpr float TWO_PI_F = 6.28318530717958647692F;
+
+float NormalizeRotationRustF32(float rotation) noexcept
+{
+    const float value = std::fmod(rotation, TWO_PI_F);
+    return value < 0.0F ? value + TWO_PI_F : value;
+}
+
 bool IsFiniteTransform(const jaguar::Transform2d& transform) noexcept
 {
     return transform.IsFinite();
@@ -32,7 +40,12 @@ std::optional<jaguar::Transform2d> LegalizeTransform(
         {
             return std::nullopt;
         }
-        double nearest = std::numeric_limits<double>::infinity();
+        // 对齐 sparrow convert_sample_to_closest_feasible
+        // (sample/uniform_sampler.rs)：键为 f32 域的
+        // normalize_rotation(rotation - allowed) ∈ [0, 2π) 前向距离，
+        // 不是未归一的裸差；min_by_key 平局取首个（严格 < 保留先者）。
+        const float rotation = static_cast<float>(result.rotationRad);
+        float nearest = std::numeric_limits<float>::infinity();
         double selected = 0.0;
         for (const double allowed : item.AllowedRotation().radians)
         {
@@ -40,7 +53,9 @@ std::optional<jaguar::Transform2d> LegalizeTransform(
             {
                 return std::nullopt;
             }
-            const double distance = std::abs(result.rotationRad - allowed);
+            const float allowedAsFloat = static_cast<float>(allowed);
+            const float distance =
+                NormalizeRotationRustF32(rotation - allowedAsFloat);
             if (distance < nearest)
             {
                 nearest = distance;

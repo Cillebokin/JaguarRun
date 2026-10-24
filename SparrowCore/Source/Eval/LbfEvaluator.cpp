@@ -22,12 +22,6 @@ float NormalizeRotation(float rotation) noexcept
     return value < 0.0F ? value + TWO_PI : value;
 }
 
-float ShortestRotationDistance(float left, float right) noexcept
-{
-    const float delta = NormalizeRotation(left - right);
-    return std::min(delta, TWO_PI - delta);
-}
-
 std::optional<jaguar::Transform2d> LegalizeTransform(
     const jaguar::Transform2d& transform, const jaguar::Item& item)
 {
@@ -48,6 +42,10 @@ std::optional<jaguar::Transform2d> LegalizeTransform(
         {
             return std::nullopt;
         }
+        // 对齐 sparrow convert_sample_to_closest_feasible
+        // (sample/uniform_sampler.rs)：键为
+        // normalize_rotation(rotation - allowed) ∈ [0, 2π) 的前向距离，
+        // 不是环形最短距；min_by_key 平局取首个（严格 < 保留先者）。
         float bestRotation = 0.0F;
         float bestDistance = std::numeric_limits<float>::infinity();
         for (const double allowed : item.AllowedRotation().radians)
@@ -57,7 +55,7 @@ std::optional<jaguar::Transform2d> LegalizeTransform(
             {
                 return std::nullopt;
             }
-            const float distance = ShortestRotationDistance(rotation, allowedAsFloat);
+            const float distance = NormalizeRotation(rotation - allowedAsFloat);
             if (distance < bestDistance)
             {
                 bestDistance = distance;

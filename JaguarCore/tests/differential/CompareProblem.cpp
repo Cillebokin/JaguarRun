@@ -8,7 +8,9 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
@@ -200,6 +202,35 @@ void runProblemDifferentialTests()
                        static_cast<double>(sppProblem.Value().PlacedItemCount()),
                        sppProblem.Value().Density(),
                        sppProblem.Value().StripWidth()});
+
+    // Paired case: SPP import with min_item_separation > 0. Locks the initial
+    // strip width formula separation + total_area / (height - separation)
+    // (jagua-rs spp/io/import.rs), the raw width bits, and the
+    // "separation leaves no usable strip height" error exit.
+    {
+        jaguar::ExternalSPInstance sepExternal = sppExternal.Value();
+        sepExternal.minItemSeparation = 0.5;
+        const auto sepInstance = importer.ImportSPInstance(sepExternal);
+        assert(sepInstance.HasValue());
+        expectRustNumbers(problemReference, "spp_sep.instance",
+                          {static_cast<double>(sepInstance.Value().TotalDemand()),
+                           sepInstance.Value().TotalItemArea(),
+                           sepInstance.Value().BaseStrip().fixedHeight,
+                           sepInstance.Value().BaseStrip().width});
+        const float sepWidth = static_cast<float>(sepInstance.Value().BaseStrip().width);
+        std::uint32_t sepWidthBits = 0U;
+        std::memcpy(&sepWidthBits, &sepWidth, sizeof(sepWidthBits));
+        char sepWidthBitsText[16];
+        std::snprintf(sepWidthBitsText, sizeof(sepWidthBitsText), "%08x", sepWidthBits);
+        expectRustText(problemReference, "spp_sep.width_bits", sepWidthBitsText);
+
+        jaguar::ExternalSPInstance tooMuchExternal = sppExternal.Value();
+        tooMuchExternal.minItemSeparation = 4.0;
+        const auto tooMuchResult = importer.ImportSPInstance(tooMuchExternal);
+        assert(!tooMuchResult.HasValue());
+        expectRustText(problemReference, "spp_sep.too_much_error",
+                       tooMuchResult.GetError().message.c_str());
+    }
 
     const auto bppJson = loadReference("bpp_instance.json");
     assert(!bppJson.empty());

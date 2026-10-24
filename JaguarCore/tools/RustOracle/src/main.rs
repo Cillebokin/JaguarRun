@@ -3540,6 +3540,47 @@ fn run_problem_types_b7_parity_oracle() {
         spp_problem.strip_width()
     );
 
+    // Paired case: SPP import with min_item_separation > 0. Locks the initial
+    // strip width formula `separation + total_item_area / (fixed_height -
+    // separation)` (spp/io/import.rs) including the raw width bits, plus the
+    // "separation leaves no usable strip height" error exit.
+    let spp_sep_external: ExtSPInstance = {
+        let mut value = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../Tests/Fixtures/RustReference/spp_instance.json"
+        ))
+        .unwrap();
+        value["min_item_separation"] = serde_json::Value::from(0.5_f64);
+        serde_json::from_value(value).unwrap()
+    };
+    match import_spp_instance(&importer, &spp_sep_external) {
+        Ok(instance) => {
+            println!(
+                "spp_sep.instance={},{:.9},{:.9},{:.9}",
+                instance.total_item_qty(),
+                instance.item_area(),
+                instance.base_strip.fixed_height,
+                instance.base_strip.width
+            );
+            println!(
+                "spp_sep.width_bits={:08x}",
+                instance.base_strip.width.to_bits()
+            );
+        }
+        Err(e) => println!("spp_sep.instance=error:{}", e),
+    }
+    let spp_sep_too_much: ExtSPInstance = {
+        let mut value = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../Tests/Fixtures/RustReference/spp_instance.json"
+        ))
+        .unwrap();
+        value["min_item_separation"] = serde_json::Value::from(4.0_f64);
+        serde_json::from_value(value).unwrap()
+    };
+    match import_spp_instance(&importer, &spp_sep_too_much) {
+        Ok(_) => println!("spp_sep.too_much_error=unexpected-ok"),
+        Err(e) => println!("spp_sep.too_much_error={}", e),
+    }
+
     let bpp_external: ExtBPInstance = serde_json::from_str(include_str!(
         "../../../Tests/Fixtures/RustReference/bpp_instance.json"
     ))

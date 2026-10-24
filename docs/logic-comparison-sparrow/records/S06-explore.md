@@ -434,3 +434,6 @@ slot 元数据边界另做了 C++ 快照表示检查：有效 sparse slotmap（�
 **非默认池标准差与 contained relocation**：固定 37° 三件几何、seed=43、初始宽度约 9.9、迭代上限 3、pool stddev=1.0；Rust 产生两份 failure 快照和包含 child relocation 的完整事件轨迹，C++ Debug/Release 与 golden 对照。它补充既有 pool stddev=0.25 的相同几何轨迹，不代表其他几何或参数组合。
 
 **验收边界与验证**：S06 工作项按列明的固定 reference 范围收口。更高候选数、其他 seed/参数/几何/收缩链、未列明的损坏快照，以及完整 `optimize → compress` 仍不由这些夹具外推。`verify-rust-reference.ps1` 的工具链锁定、`cargo fmt --check`、Rust Debug/Release 全量运行均通过；SparrowCore Debug/Release 全量测试程序均退出码 0。
+## 2026-10-24 增补：不可行池停机语义核验（第三十一阶段）
+
+Rust `explore.rs:239-243` 为“池长 ≥ max_conseq_failed_attempts 即停”（默认 None 不停）；C++ `maxConsecutiveFailures` 与之语义等价（连续失败、成功清零、默认 nullopt、CLI -x 置 10 且压缩 FailureBased 0.9，与 Rust cli.rs/consts.rs 一致）。`infeasiblePoolSize>0` 时“淘汰最差继续”为 Rust 无对应的 C++ 扩展（默认 0 关闭），登记为扩展；无代码改动。

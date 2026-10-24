@@ -80,3 +80,6 @@ Rust 1.98.1 / jagua-rs `f5e2b5f` Debug/Release 各 21 行总输出逐行匹配 f
 - pinned Rust：`probs/spp/entities/{instance,problem,solution,strip}.rs`、`probs/spp/io/{export,ext_repr,import}.rs`；实例断言见 `probs/spp/util/assertions.rs`。
 - C++：`JaguarCore/Include/JaguarCore/Problems/Spp.h`、`JaguarCore/Source/Problems/SPP/{Instance,Problem,Solution,Strip}.cpp`、`JaguarCore/Source/IO/{Importer,JsonCodec}.cpp`。
 - 现有单元测试入口：`JaguarCore/Tests/TestSpp.cpp`、`TestIo.cpp`，本轮未执行；B7 定向 runner 及其范围见上节，JSON round-trip 仍未验证。
+## 2026-10-24 增补：初始条宽 separation 域（第三十一阶段）
+
+按 `probs/spp/io/import.rs:45-52` 核验并修复：`SPInstance::Create` 新增 `minItemSeparation` 参数（默认 0 位级不变），宽公式对齐 `separation + total_area / (fixed_height - separation)`（f32），新增 `separation leaves no usable strip height` 错误出口；`Importer::ImportSPInstance` 传入该值。RustOracle B7 新增 `spp_sep.instance=2,8.000000000,4.000000000,2.785714388`、`spp_sep.width_bits=40324925`、`spp_sep.too_much_error=separation leaves no usable strip height` 三键并重生成 fixture；C++ CompareProblem 同步消费，独立运行器三行逐字一致。结论限固定样例；MSVC 全量 runner 因既有 notch 断言（与本项无关）中止，详见清单第三十一阶段。

@@ -20,7 +20,8 @@ JAGUARCORE_API Result<SPInstance> SPInstance::Create(
     std::vector<std::size_t> demands,
     double fixedHeight,
     CDEConfig cdeConfig,
-    ShapeModifyConfig shapeModifyConfig)
+    ShapeModifyConfig shapeModifyConfig,
+    double minItemSeparation)
 {
     if (items.empty() || items.size() != demands.size() ||
         !std::isfinite(fixedHeight) || fixedHeight <= 0.0)
@@ -70,7 +71,18 @@ JAGUARCORE_API Result<SPInstance> SPInstance::Create(
     }
 
     const float rustFixedHeight = static_cast<float>(fixedHeight);
-    const float stripWidth = totalArea / rustFixedHeight;
+    // 对齐 jagua-rs import_spp_instance（spp/io/import.rs）：
+    // usable_height = fixed_height - separation（f32），
+    // width = separation + total_item_area / usable_height（f32）。
+    // separation == 0 时与旧公式 totalArea / fixedHeight 位级一致。
+    const float rustSeparation = static_cast<float>(minItemSeparation);
+    const float usableHeight = rustFixedHeight - rustSeparation;
+    if (!(usableHeight > 0.0F))
+    {
+        return Result<SPInstance>::FromError(
+            {ErrorCode::InvalidInput, "separation leaves no usable strip height"});
+    }
+    const float stripWidth = rustSeparation + totalArea / usableHeight;
     const auto strip = Strip::Create(
         static_cast<double>(rustFixedHeight), cdeConfig, shapeModifyConfig,
         static_cast<double>(stripWidth));

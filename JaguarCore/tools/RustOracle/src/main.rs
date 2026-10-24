@@ -1787,6 +1787,81 @@ fn run_import_boundary_oracle() {
     );
 }
 
+fn run_offset_random_matrix_oracle() {
+    struct XorShift64Star {
+        state: u64,
+    }
+    impl XorShift64Star {
+        fn next(&mut self) -> u64 {
+            self.state ^= self.state >> 12;
+            self.state ^= self.state << 25;
+            self.state ^= self.state >> 27;
+            self.state.wrapping_mul(2_685_821_657_736_338_717)
+        }
+    }
+    // D8-A acceptance infrastructure: deterministic paired random matrix.
+    // Rectilinear monotone-mountain polygons generated with integer-only
+    // arithmetic (plus exact f32 scale/translate), so the generator is
+    // bit-identical in the C++ mirror without any libm dependence. Heights of
+    // zero can trip polygon validation; those paired error outcomes are part
+    // of the matrix. RNG consumption order per index: profile, then
+    // {width,height} per profile point, then scale, tx, ty, distance.
+    const N: usize = 200;
+    const SCALES: [f32; 4] = [1.0, 10.0, 100.0, 1000.0];
+    const DISTANCES: [f32; 4] = [0.05, 0.25, 1.0, 2.5];
+    let mut rng = XorShift64Star {
+        state: 0x4F464652414E444D,
+    };
+    for index in 0..N {
+        let profile = 3 + (rng.next() % 12) as usize;
+        let mut widths = [0u64; 16];
+        let mut heights = [0u64; 16];
+        for i in 0..profile {
+            widths[i] = 1 + rng.next() % 7;
+            heights[i] = 1 + rng.next() % 9;
+        }
+        let scale = SCALES[(rng.next() % 4) as usize];
+        let tx = (rng.next() % 100) as f32;
+        let ty = (rng.next() % 100) as f32;
+        let distance = DISTANCES[(rng.next() % 4) as usize];
+
+        let mut xs = [0.0f32; 16];
+        for i in 0..profile {
+            let previous = if i == 0 { 0.0 } else { xs[i - 1] };
+            xs[i] = previous + widths[i] as f32;
+        }
+        let total = xs[profile - 1] + 1.0;
+        let mut points = Vec::with_capacity(profile + 2);
+        let transform =
+            |x: f32, y: f32, scale: f32, tx: f32, ty: f32| -> Point {
+                Point(x * scale + tx, y * scale + ty)
+            };
+        points.push(transform(0.0, 0.0, scale, tx, ty));
+        for i in 0..profile {
+            points.push(transform(xs[i], heights[i] as f32, scale, tx, ty));
+        }
+        points.push(transform(total, 0.0, scale, tx, ty));
+
+        match SPolygon::new(points) {
+            Err(error) => println!("offset.random.{index}.polygon=error:{error}"),
+            Ok(polygon) => {
+                print_offset_shape_values(
+                    &format!("offset.random.{index}.inflate"),
+                    &polygon,
+                    ShapeModifyMode::Inflate,
+                    distance,
+                );
+                print_offset_shape_values(
+                    &format!("offset.random.{index}.deflate"),
+                    &polygon,
+                    ShapeModifyMode::Deflate,
+                    distance,
+                );
+            }
+        }
+    }
+}
+
 fn run_offset_boundary_oracle() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -3799,6 +3874,10 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--collision-parity-only") {
         run_collision_parity_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--offset-random-matrix") {
+        run_offset_random_matrix_oracle();
         return;
     }
     if std::env::args().any(|arg| arg == "--collision-entire-b4a-parity-only") {

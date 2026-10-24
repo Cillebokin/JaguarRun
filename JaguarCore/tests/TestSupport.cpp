@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 
 void runGeometryTests();
 void runPolygonTests();
@@ -150,8 +151,16 @@ void testRect()
 }
 }
 
-int main()
+// D8-A random offset matrix census probe (not part of the default suite
+// until the source-port tracks close the divergences it reports).
+int runOffsetRandomMatrixCensus();
+
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view{argv[1]} == "--offset-random-matrix")
+    {
+        return runOffsetRandomMatrixCensus();
+    }
     testVersion();
     testResult();
     testNumericPolicy();

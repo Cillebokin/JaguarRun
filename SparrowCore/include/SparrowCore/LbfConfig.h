@@ -52,11 +52,9 @@ struct LbfConfig
             return Result<void>::FromError({jaguar::ErrorCode::InvalidInput, message});
         };
 
-        if (!std::isfinite(localSearchFraction)
-            || localSearchFraction < 0.0
-            || localSearchFraction > 1.0)
+        if (std::isnan(localSearchFraction) || localSearchFraction > 1.0)
         {
-            return invalid("localSearchFraction must be finite and within [0, 1]");
+            return invalid("localSearchFraction must not be NaN or greater than one");
         }
         if (!std::isfinite(minTranslationStddevRatio)
             || !std::isfinite(maxTranslationStddevRatio)

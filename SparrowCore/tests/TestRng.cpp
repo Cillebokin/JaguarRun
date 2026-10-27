@@ -575,9 +575,25 @@ bool TestConfigValidation(std::ostream& output)
 
     sparrow::LbfConfig negativeFraction = defaults;
     negativeFraction.localSearchFraction = -0.01;
-    if (!ExpectInvalidConfig(negativeFraction,
-                             output,
-                             "negative local search fraction must be invalid"))
+    if (!Expect(negativeFraction.Validate().HasValue()
+                    && negativeFraction.LocalSearchSampleBudget() == 0U
+                    && negativeFraction.UniformSampleBudget()
+                           == negativeFraction.samplesPerItem,
+                output,
+                "negative local search fraction must saturate to uniform-only sampling"))
+    {
+        return false;
+    }
+
+    sparrow::LbfConfig negativeOverflowFraction = defaults;
+    negativeOverflowFraction.localSearchFraction =
+        -std::numeric_limits<double>::infinity();
+    if (!Expect(negativeOverflowFraction.Validate().HasValue()
+                    && negativeOverflowFraction.LocalSearchSampleBudget() == 0U
+                    && negativeOverflowFraction.UniformSampleBudget()
+                           == negativeOverflowFraction.samplesPerItem,
+                output,
+                "negative infinite local fraction must saturate to uniform-only sampling"))
     {
         return false;
     }
@@ -587,6 +603,16 @@ bool TestConfigValidation(std::ostream& output)
     if (!ExpectInvalidConfig(excessiveFraction,
                              output,
                              "local search fraction above one must be invalid"))
+    {
+        return false;
+    }
+
+    sparrow::LbfConfig positiveOverflowFraction = defaults;
+    positiveOverflowFraction.localSearchFraction =
+        std::numeric_limits<double>::infinity();
+    if (!ExpectInvalidConfig(positiveOverflowFraction,
+                             output,
+                             "positive infinite local fraction must remain invalid"))
     {
         return false;
     }

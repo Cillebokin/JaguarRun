@@ -1,5 +1,6 @@
 #include "SparrowCore/Optimizer/BppLbfOptimizer.h"
 
+#include "LbfOptimizerTrace.h"
 #include "JaguarCore/Assertions.h"
 
 #include <algorithm>
@@ -24,9 +25,10 @@ sparrow::Result<sparrow::BppLbfResult> InvalidBpp(const char* message)
 
 namespace sparrow
 {
-Result<BppLbfResult> SolveBppLbf(
+Result<BppLbfResult> SolveBppLbfWithDiagnostics(
     const jaguar::BPInstance& instance,
-    const LbfConfig& config)
+    const LbfConfig& config,
+    const LbfDiagnosticCallback& callback)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -85,6 +87,11 @@ Result<BppLbfResult> SolveBppLbf(
 
             for (const jaguar::BPLayoutSnapshot& open : current.layouts)
             {
+                if (callback)
+                {
+                    callback("searching in layout Open("
+                             + std::to_string(open.layoutIndex) + ")");
+                }
                 jaguar::Layout layout(open.layoutSnapshot.container);
                 const auto restored = layout.Restore(open.layoutSnapshot);
                 if (!restored.HasValue())
@@ -100,8 +107,20 @@ Result<BppLbfResult> SolveBppLbf(
                         && entity.kind == jaguar::HazardKind::InferiorQualityZone
                         && entity.quality < *minQuality;
                 };
-                const auto searched = SearchLbf(
-                    layout, instance.GetItem(ordered.index), config, rng, filter);
+                const auto searched = callback
+                    ? SearchLbfWithDiagnostics(
+                          layout,
+                          instance.GetItem(ordered.index),
+                          config,
+                          rng,
+                          filter,
+                          callback)
+                    : SearchLbf(
+                          layout,
+                          instance.GetItem(ordered.index),
+                          config,
+                          rng,
+                          filter);
                 if (!searched.HasValue())
                 {
                     return Result<BppLbfResult>::FromError(searched.GetError());
@@ -129,6 +148,11 @@ Result<BppLbfResult> SolveBppLbf(
                     {
                         continue;
                     }
+                    if (callback)
+                    {
+                        callback("searching in layout Closed { bin_id: "
+                                 + std::to_string(binIndex) + " }");
+                    }
                     jaguar::Layout layout(instance.GetBin(binIndex).container);
                     jaguar::HazardFilter filter;
                     const auto minQuality = instance.GetItem(ordered.index).MinQuality();
@@ -139,8 +163,20 @@ Result<BppLbfResult> SolveBppLbf(
                             && entity.kind == jaguar::HazardKind::InferiorQualityZone
                             && entity.quality < *minQuality;
                     };
-                    const auto searched = SearchLbf(
-                        layout, instance.GetItem(ordered.index), config, rng, filter);
+                    const auto searched = callback
+                        ? SearchLbfWithDiagnostics(
+                              layout,
+                              instance.GetItem(ordered.index),
+                              config,
+                              rng,
+                              filter,
+                              callback)
+                        : SearchLbf(
+                              layout,
+                              instance.GetItem(ordered.index),
+                              config,
+                              rng,
+                              filter);
                     if (!searched.HasValue())
                     {
                         return Result<BppLbfResult>::FromError(searched.GetError());
@@ -188,5 +224,12 @@ Result<BppLbfResult> SolveBppLbf(
     metrics.feasible = metrics.remainingDemand == 0U
         && jaguar::ValidateBPSolution(problem, solution).HasValue();
     return Result<BppLbfResult>::FromValue({solution, metrics});
+}
+
+Result<BppLbfResult> SolveBppLbf(
+    const jaguar::BPInstance& instance,
+    const LbfConfig& config)
+{
+    return SolveBppLbfWithDiagnostics(instance, config, {});
 }
 }

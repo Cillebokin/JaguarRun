@@ -4,14 +4,58 @@
 #include "JaguarCore/Geometry/RustF32.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace jaguar
 {
+struct SvgDebugAccess
+{
+    struct QuadtreeCell
+    {
+        Rect2d bounds;
+        HazardPresence presence = HazardPresence::None;
+    };
+
+    static std::vector<QuadtreeCell> QuadtreeCells(const Layout& layout)
+    {
+        std::vector<QuadtreeCell> cells;
+        if (layout.m_Cde)
+            AppendQuadtreeCells(layout.m_Cde->m_QuadTree.m_Root, cells);
+        return cells;
+    }
+
+private:
+    static void AppendQuadtreeCells(const QuadTree::Node& node,
+                                    std::vector<QuadtreeCell>& cells)
+    {
+        const bool hasHazards = !node.hazards.empty();
+        const bool hasChildren = std::any_of(
+            node.children.begin(), node.children.end(),
+            [](const auto& child) { return static_cast<bool>(child); });
+        if (hasChildren && hasHazards)
+        {
+            for (const auto& child : node.children)
+            {
+                if (child)
+                    AppendQuadtreeCells(*child, cells);
+            }
+            return;
+        }
+
+        cells.push_back({node.bounds,
+                         hasHazards ? node.hazards.front().presence
+                                    : HazardPresence::None});
+    }
+};
+
 SvgLayoutTheme SvgLayoutTheme::Gray() noexcept
 {
     SvgLayoutTheme theme{};
@@ -34,6 +78,20 @@ std::string number(double value)
     std::ostringstream stream;
     stream << std::setprecision(17) << value;
     return stream.str();
+}
+
+std::string number(float value)
+{
+    char buffer[64]{};
+    const auto formatted = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    if (formatted.ec != std::errc{})
+        return number(static_cast<double>(value));
+    return std::string(buffer, formatted.ptr);
+}
+
+std::string geometryNumber(double value)
+{
+    return number(static_cast<float>(value));
 }
 
 std::string color(const SvgColor& value)
@@ -87,11 +145,12 @@ std::string polygonPath(const SimplePolygon& polygon,
         return {};
 
     const Point2d first = Apply(transform, vertices.front());
-    path << "M " << number(first.x) << ' ' << number(first.y);
+    path << "M " << geometryNumber(first.x) << ' ' << geometryNumber(first.y);
     for (std::size_t i = 1; i < vertices.size(); ++i)
     {
         const Point2d point = Apply(transform, vertices[i]);
-        path << " L " << number(point.x) << ' ' << number(point.y);
+        path << " L " << geometryNumber(point.x) << ' '
+             << geometryNumber(point.y);
     }
     path << " Z";
     return path.str();
@@ -99,28 +158,29 @@ std::string polygonPath(const SimplePolygon& polygon,
 
 std::string transformAttribute(const Transform2d& transform)
 {
-    return "translate(" + number(transform.translation.x) + " " +
-           number(transform.translation.y) + ") rotate(" +
-           number(static_cast<double>(
-               detail::ToDegreesRustF32(transform.rotationRad))) + ")";
+    return "translate(" + geometryNumber(transform.translation.x) + " " +
+           geometryNumber(transform.translation.y) + ") rotate(" +
+           number(detail::ToDegreesRustF32(transform.rotationRad)) + ")";
 }
 
 std::string linePath(const Point2d& start, const Point2d& end)
 {
-    return "M " + number(start.x) + ' ' + number(start.y) + " L " +
-           number(end.x) + ' ' + number(end.y);
+    return "M " + geometryNumber(start.x) + ' ' + geometryNumber(start.y) +
+           " L " + geometryNumber(end.x) + ' ' + geometryNumber(end.y);
 }
 
 std::string circleElement(const Circle2d& circle,
                           const Transform2d& transform,
                           const char* className,
                           const std::string& stroke,
-                          double strokeWidth)
+                          float strokeWidth)
 {
     const Point2d center = Apply(transform, circle.center);
     std::ostringstream output;
-    output << "<circle class=\"" << className << "\" cx=\"" << number(center.x)
-           << "\" cy=\"" << number(center.y) << "\" r=\"" << number(circle.radius)
+    output << "<circle class=\"" << className << "\" cx=\""
+           << geometryNumber(center.x) << "\" cy=\""
+           << geometryNumber(center.y) << "\" r=\""
+           << geometryNumber(circle.radius)
            << "\" fill=\"none\" stroke=\"" << stroke << "\" stroke-width=\""
            << number(strokeWidth) << "\"/>";
     return output.str();
@@ -129,18 +189,26 @@ std::string circleElement(const Circle2d& circle,
 bool validOptions(const SvgExportOptions& options) noexcept
 {
     return std::isfinite(options.theme.strokeWidthMultiplier) &&
-           options.theme.strokeWidthMultiplier > 0.0;
+           std::isfinite(static_cast<float>(options.theme.strokeWidthMultiplier));
 }
 }
 
 JAGUARCORE_API Result<std::string> ExportLayoutSvg(
     const Layout& layout, const SvgExportOptions& options)
 {
+    return ExportLayoutSvg(layout, options, SvgDebugOptions{});
+}
+
+JAGUARCORE_API Result<std::string> ExportLayoutSvg(
+    const Layout& layout,
+    const SvgExportOptions& options,
+    const SvgDebugOptions& debugOptions)
+{
     if (!validOptions(options))
     {
         return Result<std::string>::FromError(
             {ErrorCode::SerializationFailure,
-             "SVG stroke width multiplier must be finite and positive"});
+             "SVG stroke width multiplier must be finite"});
     }
 
     const Rect2d bounds = layout.GetContainer().Bounds();
@@ -152,15 +220,38 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
             {ErrorCode::SerializationFailure, "layout bounds are invalid for SVG export"});
     }
 
-    const double largestSide = std::max(bounds.Width(), bounds.Height());
-    const double margin = std::max(1.0e-6, largestSide * 0.05);
-    const double viewX = bounds.xMin - margin;
-    const double viewY = bounds.yMin - margin;
-    const double viewWidth = bounds.Width() + margin * 2.0;
-    const double viewHeight = bounds.Height() + margin * 2.0;
-    const double flipTranslation = viewY + viewHeight;
-    const double strokeWidth = largestSide * 0.0025 *
-                                options.theme.strokeWidthMultiplier;
+    const Rect2d& originalContainerBounds =
+        layout.GetContainer().GetOriginalShape().shape.BoundingBox();
+    const float originalContainerHeight =
+        static_cast<float>(originalContainerBounds.HeightRustF32());
+    const float strokeBoundsResize = originalContainerHeight * 0.01F;
+    const auto strokeBounds = originalContainerBounds.ResizeByRustF32(
+        strokeBoundsResize, strokeBoundsResize);
+    if (!strokeBounds.has_value())
+    {
+        return Result<std::string>::FromError(
+            {ErrorCode::SerializationFailure,
+             "layout bounds are invalid for SVG stroke width"});
+    }
+    const float scaleFactorMinusOne = 1.1F - 1.0F;
+    const float viewResizeX =
+        static_cast<float>(strokeBounds->WidthRustF32()) * scaleFactorMinusOne /
+        2.0F;
+    const float viewResizeY =
+        static_cast<float>(strokeBounds->HeightRustF32()) * scaleFactorMinusOne /
+        2.0F;
+    const float viewX = static_cast<float>(strokeBounds->xMin) - viewResizeX;
+    const float viewY = static_cast<float>(strokeBounds->yMin) - viewResizeY;
+    const float viewXMax = static_cast<float>(strokeBounds->xMax) + viewResizeX;
+    const float viewYMax = static_cast<float>(strokeBounds->yMax) + viewResizeY;
+    const float viewWidth = viewXMax - viewX;
+    const float viewHeight = viewYMax - viewY;
+    const float minimumStrokeSide = detail::MinRustF32(
+        static_cast<float>(strokeBounds->WidthRustF32()),
+        static_cast<float>(strokeBounds->HeightRustF32()));
+    const float strokeBase = minimumStrokeSide * 0.001F;
+    const float strokeWidth =
+        strokeBase * static_cast<float>(options.theme.strokeWidthMultiplier);
 
     std::ostringstream svg;
     svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
@@ -168,21 +259,42 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         << number(viewX) << ' ' << number(viewY) << ' ' << number(viewWidth) << ' '
         << number(viewHeight) << "\">\n";
     svg << "  <title>" << xmlEscape(options.title) << "</title>\n";
-    svg << "  <g id=\"scene\" transform=\"translate(0 "
-        << number(flipTranslation) << ") scale(1 -1)\">\n";
+    svg << "  <g id=\"scene\">\n";
 
     const Container& container = layout.GetContainer();
-    svg << "    <path class=\"container-original\" data-container-id=\""
-        << container.Id() << "\" d=\"" << polygonPath(container.GetOriginalShape().shape)
-        << "\" fill=\"" << color(options.theme.containerFill)
-        << "\" fill-opacity=\"0.25\" stroke=\"" << color(options.theme.containerFill)
-        << "\" stroke-width=\"" << number(strokeWidth) << "\" fill-rule=\"evenodd\"/>\n";
-    svg << "    <path class=\"container-collision\" data-container-id=\""
-        << container.Id() << "\" d=\"" << polygonPath(container.CollisionShape())
-        << "\" fill=\"none\" stroke=\"" << color(options.theme.collisionStroke)
-        << "\" stroke-width=\"" << number(strokeWidth)
-        << "\" stroke-dasharray=\"" << number(strokeWidth * 3.0) << ' '
-        << number(strokeWidth * 2.0) << "\"/>\n";
+    if (debugOptions.drawCdShapes)
+    {
+        svg << "    <path class=\"container-cd-display\" data-container-id=\""
+            << container.Id() << "\" d=\"" << polygonPath(container.CollisionShape())
+            << "\" fill=\"" << color(options.theme.containerFill)
+            << "\" stroke=\"black"
+            << "\" stroke-width=\"" << number(strokeWidth * 2.0F)
+            << "\" fill-rule=\"nonzero\"/>\n";
+    }
+    else
+    {
+        svg << "    <path class=\"container-original\" data-container-id=\""
+            << container.Id() << "\" d=\""
+            << polygonPath(container.GetOriginalShape().shape)
+            << "\" fill=\"" << color(options.theme.containerFill)
+            << "\" stroke=\"black"
+            << "\" stroke-width=\"" << number(strokeWidth * 2.0F)
+            << "\" fill-rule=\"nonzero\"/>\n";
+    }
+    if (debugOptions.highlightCdShapes)
+    {
+        const char* className = debugOptions.drawCdShapes
+            ? "container-cd-highlight"
+            : "container-collision";
+        svg << "    <path class=\"" << className
+            << "\" data-container-id=\"" << container.Id()
+            << "\" d=\"" << polygonPath(container.CollisionShape())
+            << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth * 0.5F)
+            << "\" stroke-opacity=\"0.3\" stroke-dasharray=\""
+            << number(strokeWidth) << ' ' << number(strokeWidth * 2.0F)
+            << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+    }
 
     const LayoutSnapshot snapshot = layout.Save();
     for (std::size_t placementIndex = 0;
@@ -199,28 +311,56 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         svg << "    <g id=\"item_" << placementIndex << "_" << item.ExternalId()
             << "\" data-item-id=\"" << item.ExternalId()
             << "\" data-rotation-degrees=\""
-            << number(static_cast<double>(
-                   detail::ToDegreesRustF32(externalTransform.rotationRad)))
-            << "\" data-translation-x=\"" << number(externalTransform.translation.x)
-            << "\" data-translation-y=\"" << number(externalTransform.translation.y)
+            << number(detail::ToDegreesRustF32(externalTransform.rotationRad))
+            << "\" data-translation-x=\""
+            << geometryNumber(externalTransform.translation.x)
+            << "\" data-translation-y=\""
+            << geometryNumber(externalTransform.translation.y)
             << "\">\n";
         svg << "      <title>item id: " << item.ExternalId() << ", transform: "
             << xmlEscape(transformAttribute(externalTransform)) << "</title>\n";
+        const Transform2d& displayTransform = debugOptions.drawCdShapes
+            ? internalTransform
+            : externalTransform;
+        const SimplePolygon& displayShape = debugOptions.drawCdShapes
+            ? item.CollisionShape()
+            : item.GetOriginalShape().shape;
+        const char* displayClass = debugOptions.drawCdShapes
+            ? "item-cd-display"
+            : "item-original";
         svg << "      <g class=\"item-placement\" transform=\""
-            << transformAttribute(externalTransform) << "\">\n";
-        svg << "        <path class=\"item-original\" d=\""
-            << polygonPath(item.GetOriginalShape().shape) << "\" fill=\""
+            << transformAttribute(displayTransform) << "\">\n";
+        svg << "        <path class=\"" << displayClass << "\" d=\""
+            << polygonPath(displayShape) << "\" fill=\""
             << color(options.theme.itemFill)
-            << "\" fill-opacity=\"0.7\" stroke=\""
-            << color(options.theme.itemFill) << "\" stroke-width=\""
+            << "\" fill-opacity=\"0.5\" stroke=\"black\" stroke-width=\""
             << number(strokeWidth) << "\"/>\n";
         svg << "      </g>\n";
-        svg << "      <path class=\"item-collision\" d=\""
-            << polygonPath(item.CollisionShape(), internalTransform) << "\" fill=\"none\""
-            << " stroke=\"" << color(options.theme.collisionStroke)
-            << "\" stroke-width=\"" << number(strokeWidth)
-            << "\" stroke-dasharray=\"" << number(strokeWidth * 2.0) << ' '
-            << number(strokeWidth) << "\"/>\n";
+        if (debugOptions.highlightCdShapes)
+        {
+            const char* collisionClass = debugOptions.drawCdShapes
+                ? "item-cd-highlight"
+                : "item-collision";
+            svg << "      <path class=\"" << collisionClass << "\" d=\""
+                << polygonPath(item.CollisionShape(), internalTransform)
+                << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
+                << number(strokeWidth * 0.5F)
+                << "\" stroke-opacity=\"0.3\" stroke-dasharray=\""
+                << number(strokeWidth) << ' ' << number(strokeWidth * 2.0F)
+                << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+            if (debugOptions.drawCdShapes)
+            {
+                for (const Point2d& vertex : item.CollisionShape().Vertices())
+                {
+                    const Point2d point = Apply(internalTransform, vertex);
+                    svg << "      <circle class=\"item-cd-vertex\" cx=\""
+                        << geometryNumber(point.x) << "\" cy=\""
+                        << geometryNumber(point.y)
+                        << "\" r=\"" << number(strokeWidth * 0.5F)
+                        << "\" fill=\"cyan\" fill-opacity=\"0.8\"/>\n";
+                }
+            }
+        }
 
         if (options.drawSurrogates && item.CollisionShape().GetSurrogate())
         {
@@ -250,15 +390,18 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
     }
 
     svg << "    <g id=\"quality_zones\">\n";
+    const std::vector<QualityZone>& qualityZones = debugOptions.drawCdShapes
+        ? container.QualityZones()
+        : container.OriginalQualityZones();
     for (std::size_t quality = options.theme.qualityZoneFills.size();
          quality-- > 0;)
     {
         const auto zone = std::find_if(
-            container.QualityZones().begin(), container.QualityZones().end(),
+            qualityZones.begin(), qualityZones.end(),
             [quality](const QualityZone& candidate) {
                 return candidate.quality == quality;
             });
-        if (zone == container.QualityZones().end())
+        if (zone == qualityZones.end())
             continue;
 
         const SvgColor fill = options.theme.qualityZoneFills[quality];
@@ -269,10 +412,11 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
                 << quality << "\" d=\"" << polygonPath(shape)
                 << "\" fill=\"" << color(fill)
                 << "\" fill-opacity=\"0.5\" stroke=\"" << color(stroke)
-                << "\" stroke-width=\"" << number(strokeWidth * 2.0)
+                << "\" stroke-width=\"" << number(strokeWidth * 2.0F)
                 << "\" stroke-opacity=\""
-                << number(options.theme.qualityZoneStrokeOpacity)
-                << "\" stroke-dasharray=\"" << number(strokeWidth * 5.0)
+                << number(static_cast<float>(
+                       options.theme.qualityZoneStrokeOpacity))
+                << "\" stroke-dasharray=\"" << number(strokeWidth * 5.0F)
                 << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n"
                 << "        <title>quality zone, q: " << quality
                 << "</title>\n"
@@ -280,6 +424,47 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         }
     }
     svg << "    </g>\n";
+
+    if (debugOptions.drawQuadtree)
+    {
+        const std::vector<SvgDebugAccess::QuadtreeCell> cells =
+            SvgDebugAccess::QuadtreeCells(layout);
+        std::array<std::ostringstream, 3> paths;
+        for (const SvgDebugAccess::QuadtreeCell& cell : cells)
+        {
+            std::size_t index = 0U;
+            switch (cell.presence)
+            {
+            case HazardPresence::Entire: index = 0U; break;
+            case HazardPresence::Partial: index = 1U; break;
+            case HazardPresence::None: index = 2U; break;
+            }
+            const Rect2d& rect = cell.bounds;
+            paths[index] << "M " << geometryNumber(rect.xMin) << ' '
+                         << geometryNumber(rect.yMin) << " L "
+                         << geometryNumber(rect.xMax) << ' '
+                         << geometryNumber(rect.yMin) << " L "
+                         << geometryNumber(rect.xMax) << ' '
+                         << geometryNumber(rect.yMax) << " L "
+                         << geometryNumber(rect.xMin) << ' '
+                         << geometryNumber(rect.yMax)
+                         << " Z ";
+        }
+        svg << "    <g id=\"quadtree\">\n"
+            << "      <path class=\"quadtree-cell quadtree-entire\" d=\""
+            << paths[0].str()
+            << "\" fill=\"red\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth * 0.25F) << "\" fill-opacity=\"0.6\"/>\n"
+            << "      <path class=\"quadtree-cell quadtree-partial\" d=\""
+            << paths[1].str()
+            << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth * 0.25F) << "\" fill-opacity=\"0.3\"/>\n"
+            << "      <path class=\"quadtree-cell quadtree-none\" d=\""
+            << paths[2].str()
+            << "\" fill=\"green\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth * 0.25F) << "\" fill-opacity=\"0.6\"/>\n"
+            << "    </g>\n";
+    }
 
     if (options.highlightCollisions)
     {
@@ -294,7 +479,7 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         if (!restored.HasValue())
             return Result<std::string>::FromError(restored.GetError());
 
-        const double highlightWidth = strokeWidth * 4.0;
+        const float highlightWidth = strokeWidth * 4.0F;
         const auto appendHighlightLine = [&svg, &options, highlightWidth](
                                             const Point2d& start,
                                             const Point2d& end) {
@@ -304,7 +489,7 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
                 << "\" stroke-opacity=\"0.75\" stroke-width=\""
                 << number(highlightWidth) << "\" stroke-dasharray=\""
                 << number(highlightWidth) << ' '
-                << number(highlightWidth * 2.0)
+                << number(highlightWidth * 2.0F)
                 << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
         };
 
@@ -352,9 +537,9 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
                 }
                 case HazardKind::Exterior:
                     svg << "      <circle class=\"collision-highlight\" cx=\""
-                        << number(placedCenter.x) << "\" cy=\""
-                        << number(placedCenter.y) << "\" r=\""
-                        << number(strokeWidth * 3.0) << "\" fill=\""
+                        << geometryNumber(placedCenter.x) << "\" cy=\""
+                        << geometryNumber(placedCenter.y) << "\" r=\""
+                        << number(strokeWidth * 3.0F) << "\" fill=\""
                         << color(options.theme.collisionHighlight)
                         << "\"/>\n";
                     break;
@@ -404,14 +589,32 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         << (options.highlightCollisions ? "true" : "false") << "\"/>\n";
     svg << "  </g>\n";
 
+    const float originalWidth =
+        static_cast<float>(originalContainerBounds.WidthRustF32());
+    const float originalHeight =
+        static_cast<float>(originalContainerBounds.HeightRustF32());
+    const float labelSide = detail::MinRustF32(originalWidth, originalHeight);
+    const float labelY = static_cast<float>(originalContainerBounds.yMin) -
+                         (0.5F * 0.025F) * labelSide;
+    std::ostringstream label;
+    label << std::fixed << std::setprecision(3)
+          << "h: " << originalHeight << " | w: " << originalWidth << " | d: "
+          << (static_cast<float>(layout.Density()) * 100.0F) << "% | "
+          << options.title;
+    svg << "  <text font-family=\"monospace\" font-size=\""
+        << number(labelSide * 0.025F) << "\" font-weight=\"500\" x=\""
+        << number(static_cast<float>(originalContainerBounds.xMin))
+        << "\" y=\"" << number(labelY) << "\">\n"
+        << xmlEscape(label.str()) << "\n"
+        << "  </text>\n";
+
     if (options.includeAxes)
     {
-        const double xAxisY = std::clamp(0.0, viewY, viewY + viewHeight);
-        const double yAxisX = std::clamp(0.0, viewX, viewX + viewWidth);
-        svg << "  <g id=\"axes\" transform=\"translate(0 "
-            << number(flipTranslation) << ") scale(1 -1)\" stroke=\""
+        const float xAxisY = std::clamp(0.0F, viewY, viewY + viewHeight);
+        const float yAxisX = std::clamp(0.0F, viewX, viewX + viewWidth);
+        svg << "  <g id=\"axes\" stroke=\""
             << color(options.theme.axisStroke) << "\" stroke-width=\""
-            << number(strokeWidth * 0.75) << "\" fill=\"none\">\n";
+            << number(strokeWidth * 0.75F) << "\" fill=\"none\">\n";
         svg << "    <path d=\"M " << number(viewX) << ' ' << number(xAxisY)
             << " L " << number(viewX + viewWidth) << ' ' << number(xAxisY) << "\"/>\n";
         svg << "    <path d=\"M " << number(yAxisX) << ' ' << number(viewY)

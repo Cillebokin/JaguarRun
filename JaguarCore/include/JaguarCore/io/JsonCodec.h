@@ -25,6 +25,12 @@ struct JsonCodecOptions
     bool pretty = false;
 };
 
+struct JsonParseOptions
+{
+    // 是否接受WASM适配层生成的NaN/Infinity数字标记
+    bool allowNonFiniteNumbers = false;
+};
+
 // 将内部布局转换为外部布局
 JAGUARCORE_API Result<ExternalLayout> ExternalLayoutFromLayout(
     const Layout& layout,
@@ -73,6 +79,8 @@ JAGUARCORE_API Result<std::string> SerializeExternalLayoutJson(
 // 解析外部 SPP 实例 JSON
 JAGUARCORE_API Result<ExternalSPInstance> ParseExternalSPInstanceJson(
     const std::string& json);
+JAGUARCORE_API Result<ExternalSPInstance> ParseExternalSPInstanceJson(
+    const std::string& json, JsonParseOptions options);
 // 序列化外部 SPP 实例 JSON
 JAGUARCORE_API Result<std::string> SerializeExternalSPInstanceJson(
     const ExternalSPInstance& instance,
@@ -97,6 +105,8 @@ JAGUARCORE_API Result<std::string> SerializeExternalSPOutputJson(
 // 解析外部 BPP 实例 JSON
 JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(
     const std::string& json);
+JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(
+    const std::string& json, JsonParseOptions options);
 // 序列化外部 BPP 实例 JSON
 JAGUARCORE_API Result<std::string> SerializeExternalBPInstanceJson(
     const ExternalBPInstance& instance,

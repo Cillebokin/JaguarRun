@@ -66,8 +66,21 @@ struct SvgExportOptions
     std::string title = "JaguarCore Layout";
 };
 
+// Optional diagnostic layers used by tools that need Rust-compatible SVG
+// inspection without changing the existing SvgExportOptions ABI.
+struct SvgDebugOptions
+{
+    bool drawQuadtree = false;
+    bool drawCdShapes = false;
+    bool highlightCdShapes = true;
+};
+
 // 将布局导出为 SVG
 JAGUARCORE_API Result<std::string> ExportLayoutSvg(
     const Layout& layout,
     const SvgExportOptions& options = {});
+JAGUARCORE_API Result<std::string> ExportLayoutSvg(
+    const Layout& layout,
+    const SvgExportOptions& options,
+    const SvgDebugOptions& debugOptions);
 }

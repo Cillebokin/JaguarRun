@@ -344,3 +344,13 @@ RustOracle直接依赖Cargo.lock锁定的jagua-rs revision `f5e2b5ffd14931f17a20
 - 新用例的临时诊断显示，outline未通过`SimplePolygon::Create`；resolver建图后有14个面，旧的单一外部面winding root只传播到5个面并失败。C++现将每个负有向面积外部面初始化为winding 0，以覆盖不连通图中各分量自己的外部面；共线源轮廓仍先尝试直接导入，只有导入失败才调用resolver。
 - 锁定Rust Debug/Release各109条profile-active值均与fixture逐字一致（55条有限结果、53条稳定错误、1条活动NaN），fixture共110个唯一键；另有2条既有首组件别名输出。`cargo fmt --check`通过。LLVM-MinGW scalar-fallback全源码差分runner在断言启用的`-O0`与`-O2 -UNDEBUG`下均通过。
 - 本轮只验证这组含冗余共线点的梳形精确收缩，以及完整Offset固定矩阵回归；不证明通用不连通overlay、多环/洞或legacy fallback等价，E1与Offset仍部分完成。
+
+## 第三十二阶段：极端分离值下量化空路径对齐（2026-10-27）
+
+- 锁定`i_overlay 4.5.2`的`OutlineSolver::build_overlay`：对每条输入path按`FloatPointAdapter`转换为i32后计算wrapping i64双面积；`abs(area) <= 1`时跳过路径。Rust输出空`Shapes`，上层`offset_shape`将其报告为`Offset resulted in an empty polygon`。
+- C++ `simpleOffsetWithIOverlayOutlineRules`此前仅在source点去重后少于3点时回退；为对齐空结果，本阶段在量化source上逐项使用u64模运算复现Rust的i64累加，并在`abs(area) <= 1`时返回空组件。先前试加的`source.size() < 3`单条件过宽，会把`min_item_separation=2^53`等既有边界错误地留给fallback；已替换为面积条件。
+- f5e2b5f Release CLI确认`min_item_separation=2^53`与最大f32都在SPP导入时返回空Offset错误。WASM回归现在对普通对象和具名根数组共4种形式检查相同的`Importer error: Offset resulted in an empty polygon`；旧的2^53 Strip trap预期已据此修正。完整`LbfWasmConfigRegression.cjs`退出0，代码由Emscripten 6.0.13 Release重新编译。
+- 原生MSVC全套回归进一步命中tiny矩形半宽前驱值：overlay提取的4点轮廓经f32去退化后不足3点。此前把这一导入失败设为终止错误，使`OffsetShapes`错误退出；现在回退到既有skeleton/fallback，恢复空组件语义，并由`OffsetShape`返回锁定fixture中的`Simple polygon must have at least 3 points`。自交终止错误仍按原路径处理。
+- Qt5.12.10/MSVC 19.44原生Release与Debug核心及测试runner重建成功；完整`JaguarCoreTests.exe`两配置均退出0，测试进程Job Object上限1 GiB。该结果只覆盖当前固定差分和边界矩阵，不扩大Offset通用overlay/fallback等价范围。
+- 共享`Offset.cpp`更新后又增量重建Emscripten 6.0.13 Release `LbfWasm`，Node语法检查与完整`LbfWasmConfigRegression.cjs`均退出0；对应进程Job Object上限为1 GiB、512 MiB、512 MiB。
+- 这只收口固定输入上的量化空路径/Importer出口；不证明其它数值面积回绕、一般自交overlay、多环洞或legacy fallback等价，Offset整体仍部分完成。

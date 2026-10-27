@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace jaguar
@@ -670,8 +671,46 @@ inline void SortMarksByIndexAndPoint(std::vector<LineMark>& marks) noexcept
 // ============================================================================
 
 // rs segm/segment.rs:30-43 create_and_validate. count.invert() negates both
-// components of ShapeCountBoolean (rs segm/boolean.rs:51-56); with the clip
-// component always 0 (Subject-only) this is a plain negation of fill.
+// components of ShapeCountBoolean independently (rs segm/boolean.rs:51-56).
+// The fill is a packed pair of 16-bit counters (subject in bits 0..15, clip
+// in bits 16..31 — same layout as OverlayExtract.h packShapeCount), so a raw
+// negation of the packed int32 is WRONG: -pack(1,0) = 0xFFFF0000 unpacks to
+// (subj=-1, clip=-1) instead of (subj=-1, clip=0) — the borrow leaks into
+// the clip field and corrupts every winding computation downstream.
+inline std::int32_t PackShapeCount(std::int32_t subjCount,
+                                   std::int32_t clipCount) noexcept
+{
+    return static_cast<std::int32_t>(
+        (static_cast<std::uint32_t>(static_cast<std::uint16_t>(subjCount)) << 0)
+        | (static_cast<std::uint32_t>(static_cast<std::uint16_t>(clipCount))
+           << 16));
+}
+
+inline std::int32_t ShapeCountSubj(std::int32_t fill) noexcept
+{
+    return static_cast<std::int16_t>(static_cast<std::uint32_t>(fill)
+                                     & 0xFFFFu);
+}
+
+inline std::int32_t ShapeCountClip(std::int32_t fill) noexcept
+{
+    return static_cast<std::int16_t>(static_cast<std::uint32_t>(fill) >> 16);
+}
+
+inline std::int32_t NegatePackedCount(std::int32_t fill) noexcept
+{
+    return PackShapeCount(-ShapeCountSubj(fill), -ShapeCountClip(fill));
+}
+
+// rs segm/boolean.rs:38-43 ShapeCountBoolean::add/apply — component-wise
+// addition; a raw packed += leaks carries between the two 16-bit fields.
+inline std::int32_t AddPackedCount(std::int32_t left,
+                                   std::int32_t right) noexcept
+{
+    return PackShapeCount(ShapeCountSubj(left) + ShapeCountSubj(right),
+                          ShapeCountClip(left) + ShapeCountClip(right));
+}
+
 inline OverlaySegment CreateAndValidate(const IntPoint& a, const IntPoint& b,
                                         std::int32_t count) noexcept
 {
@@ -679,7 +718,7 @@ inline OverlaySegment CreateAndValidate(const IntPoint& a, const IntPoint& b,
     {
         return OverlaySegment{ a, b, count };
     }
-    return OverlaySegment{ b, a, -count };
+    return OverlaySegment{ b, a, NegatePackedCount(count) };
 }
 
 // ============================================================================
@@ -721,7 +760,7 @@ inline std::size_t MergeEqual(std::vector<OverlaySegment>& segments, std::size_t
     {
         if (EqXSegment(XSegOf(prev), XSegOf(segments[i]))) // rs:36
         {
-            prev.fill += segments[i].fill; // rs:37 - count.apply (boolean.rs:45-48)
+            prev.fill = AddPackedCount(prev.fill, segments[i].fill); // rs:37 - count.apply (boolean.rs:45-48)
         }
         else
         {
@@ -1306,12 +1345,26 @@ public:
     {
         bool need_to_fix = true; // rs:15
 
+        // Bring-up guard: the fix-up loop terminates in Rust because a pass
+        // without new marks breaks it; a translation defect in the mark
+        // logic would spin here while pushing split segments without bound
+        // (the failure mode that exhausted system memory). Real inputs
+        // settle in a handful of rounds and a few thousand segments, so 64
+        // rounds / 2^20 segments are orders of magnitude above any valid
+        // offset case. Tripping the guard aborts the whole split; the
+        // caller catches and falls back to the ring resolver.
+        std::size_t splitRoundGuard = 0;
+
         // rs:17 - snap_radius moved (by value here)
         bool any_intersection = false; // rs:18
         std::vector<LineMark> reusable_buffer; // rs:19 (parallel-sort scratch, unused)
 
         while (need_to_fix && segments.size() > 1) // rs:21
         {
+            if (++splitRoundGuard > 64U || segments.size() > (1U << 20))
+            {
+                throw std::runtime_error("overlay split: guard tripped");
+            }
             need_to_fix = false; // rs:22
             marks.clear(); // rs:23
 
@@ -1417,9 +1470,14 @@ public:
         bool any_intersection = false; // rs:43
 
         // rs:45 - snap_radius moved (by value here)
+        std::size_t splitRoundGuard = 0; // same bring-up guard as list_split
 
         while (need_to_fix && segments.size() > 2) // rs:47
         {
+            if (++splitRoundGuard > 64U || segments.size() > (1U << 20))
+            {
+                throw std::runtime_error("overlay split: guard tripped");
+            }
             need_to_fix = false; // rs:48
             marks.clear(); // rs:49
 
@@ -1516,8 +1574,14 @@ public:
 
         SnapRadius snap = snap_radius; // rs:32 - moved copy
 
+        std::size_t splitRoundGuard = 0; // same bring-up guard as list_split
+
         while (need_to_fix && segments.size() > 2) // rs:34
         {
+            if (++splitRoundGuard > 64U || segments.size() > (1U << 20))
+            {
+                throw std::runtime_error("overlay split: guard tripped");
+            }
             marks.clear(); // rs:35
 
             buffer.InitFragmentBuffer(segments); // rs:37

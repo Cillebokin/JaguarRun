@@ -29,6 +29,8 @@ HEADERS += \
     $$PWD/Include/SparrowCore/Optimizer/Exploration.h \
     $$PWD/Source/Optimizer/ExplorationNormalSampler.h \
     $$PWD/Source/Optimizer/ExplorationTrace.h \
+    $$PWD/Source/Optimizer/LbfSearchTrace.h \
+    $$PWD/Source/Optimizer/LbfOptimizerTrace.h \
     $$PWD/Source/Optimizer/CompressionTrace.h \
     $$PWD/Source/Optimizer/CompressionClock.h \
     $$PWD/Source/Optimizer/WorkerLossSelector.h \

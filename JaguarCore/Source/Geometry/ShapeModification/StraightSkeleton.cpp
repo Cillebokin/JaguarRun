@@ -26,6 +26,7 @@ namespace
 {
 constexpr double EPSILON = 1.0e-9;
 constexpr double ROUNDED_STEP = 0.1;
+constexpr double PI = 3.14159265358979323846264338327950288;
 constexpr std::size_t INVALID_INDEX = std::numeric_limits<std::size_t>::max();
 
 std::uint32_t orderedFloatBits(float value) noexcept
@@ -586,16 +587,19 @@ public:
             }
             leftNormal.normalize();
             rightNormal.normalize();
+
             while (true)
             {
                 result.back().push_back(leftNormal.point(remaining));
-                leftNormal = leftNormal.rotate(polygonOrientation ? ROUNDED_STEP
-                                                                  : -ROUNDED_STEP);
+                leftNormal = leftNormal.rotate(
+                    polygonOrientation ? ROUNDED_STEP : -ROUNDED_STEP);
                 const int sideOrientation =
                     leftNormal.orientation(rightNormal.point(1.0));
                 if ((polygonOrientation && sideOrientation == -1) ||
                     (!polygonOrientation && sideOrientation == 1))
+                {
                     break;
+                }
             }
             result.back().push_back(rightNormal.point(remaining));
         }

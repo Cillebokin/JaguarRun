@@ -1527,6 +1527,26 @@ struct GraphBuilder
             nodes.push_back(overlayNodeWithIndices(indices));
             indices.clear();
         }
+
+        // Rust's OverlayGraph::validate checks these connection invariants in
+        // debug builds. Keep the guard active here as this graph is fed by
+        // offset-generated segments that can expose split/rounding defects;
+        // a singleton Cross node can send contour traversal to an unrelated
+        // default link and leave the outer extraction cursor unchanged.
+        for (size_t node_id = 0; node_id < nodes.size(); ++node_id)
+        {
+            const OverlayNode& node = nodes[node_id];
+            if (node.indices.size() < 2U)
+            {
+                throw std::runtime_error(
+                    "overlay graph: node has fewer than two incident links");
+            }
+        }
+        if (nodes.size() > links.size())
+        {
+            throw std::runtime_error(
+                "overlay graph: node count exceeds link count");
+        }
     }
 };
 
@@ -2227,6 +2247,16 @@ struct GraphUtil
             }
         }
 
+        if (is_first)
+        {
+            // The Rust implementation relies on the graph invariant that a
+            // Cross node always has an unvisited outgoing link. A malformed
+            // graph must not fall through to the default index 0: that can
+            // teleport the contour to an unrelated link and break traversal.
+            throw std::runtime_error(
+                "overlay extract: cross node has no unvisited link");
+        }
+
         if (second_index == kSizeMax)
         {
             return first_index;
@@ -2371,6 +2401,15 @@ struct OverlayGraph
             {
                 link_index += 1;
                 continue;
+            }
+
+            // A valid contour must consume the cursor link as well as close
+            // the selected tour. Otherwise link_index can stay fixed while
+            // the same already-visited contour is appended forever.
+            if (!isVisited(buffer.visited, link_index))
+            {
+                throw std::runtime_error(
+                    "overlay extract: contour made no progress");
             }
 
             // rs extract.rs:263: output.add_contour(buffer.points.as_slice()) — flat contour,

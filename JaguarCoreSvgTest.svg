@@ -2,17 +2,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="-5 -5 110 110">
   <title>JaguarCore Layout</title>
   <g id="scene" transform="translate(0 105) scale(1 -1)">
-    <path class="container-original" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="#CC824A" fill-opacity="0.25" stroke="#CC824A" stroke-width="0.5" fill-rule="evenodd"/>
-    <path class="container-collision" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="none" stroke="#0080FF" stroke-width="0.5" stroke-dasharray="1.5 1"/>
+    <path class="container-original" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="#CC824A" fill-opacity="0.25" stroke="#CC824A" stroke-width="0.40800002" fill-rule="evenodd"/>
+    <path class="container-collision" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="none" stroke="#0080FF" stroke-width="0.20400001" stroke-dasharray="0.61200005 0.40800002"/>
     <g id="item_0_9001" data-item-id="9001" data-rotation-degrees="45" data-translation-x="53.535533905029297" data-translation-y="39.393398284912109">
       <title>item id: 9001, transform: translate(53.535533905029297 39.393398284912109) rotate(45)</title>
       <g class="item-placement" transform="translate(53.535533905029297 39.393398284912109) rotate(45)">
-        <path class="item-original" d="M 0 0 L 10 0 L 10 20 L 0 20 Z" fill="#FFC879" fill-opacity="0.7" stroke="#FFC879" stroke-width="0.5"/>
+        <path class="item-original" d="M 0 0 L 10 0 L 10 20 L 0 20 Z" fill="#FFC879" fill-opacity="0.7" stroke="#FFC879" stroke-width="0.20400001"/>
       </g>
-      <path class="item-collision" d="M 53.535534137747391 39.393398359473338 L 60.606601795069764 46.464466325881915 L 46.464465862252609 60.606601640526662 L 39.393398204930236 53.535533674118085 Z" fill="none" stroke="#0080FF" stroke-width="0.5" stroke-dasharray="1 0.5"/>
+      <path class="item-collision" d="M 53.535534137747391 39.393398359473338 L 60.606601795069764 46.464466325881915 L 46.464465862252609 60.606601640526662 L 39.393398204930236 53.535533674118085 Z" fill="none" stroke="#0080FF" stroke-width="0.20400001" stroke-dasharray="0.40800002 0.20400001"/>
       <g class="surrogate" data-item-id="9001">
-        <circle class="surrogate-pole" cx="50" cy="50" r="5" fill="none" stroke="#00AA55" stroke-width="0.5"/>
-        <circle class="surrogate-pole" cx="46.464465944957318" cy="56.82247550683303" r="2.67578125" fill="none" stroke="#00AA55" stroke-width="0.5"/>
+        <circle class="surrogate-pole" cx="50" cy="50" r="5" fill="none" stroke="#00AA55" stroke-width="0.20400001"/>
+        <circle class="surrogate-pole" cx="46.464465944957318" cy="56.82247550683303" r="2.67578125" fill="none" stroke="#00AA55" stroke-width="0.20400001"/>
       </g>
     </g>
     <g id="quality_zones">
@@ -21,7 +21,7 @@
     </g>
     <g id="collision-debug" data-layout-feasible="true" data-enabled="true"/>
   </g>
-  <g id="axes" transform="translate(0 105) scale(1 -1)" stroke="#555555" stroke-width="0.375" fill="none">
+  <g id="axes" transform="translate(0 105) scale(1 -1)" stroke="#555555" stroke-width="0.15300001" fill="none">
     <path d="M -5 0 L 105 0"/>
     <path d="M 0 -5 L 0 105"/>
   </g>

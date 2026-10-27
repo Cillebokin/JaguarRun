@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sparrow LBF WebAssembly Demo</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #242424; }
+    label { display: block; margin: 1rem 0 .35rem; font-weight: 600; }
+    select, input, button { font: inherit; }
+    button { margin-top: 1rem; padding: .55rem 1rem; }
+    #status { min-height: 1.5rem; color: #4a4a4a; }
+    pre { max-height: 30rem; overflow: auto; padding: 1rem; background: #f3f4f6; }
+    .svg-result { margin: 1rem 0; padding: 1rem; border: 1px solid #d5d5d5; }
+    .svg-result svg { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <h1>Sparrow LBF WebAssembly</h1>
+  <p>Choose a problem, optionally upload instance and config JSON, then run the LBF solver in this browser. Without an instance file, the bundled Rust reference example is used.</p>
+
+  <label for="problem-type">Problem type</label>
+  <select id="problem-type">
+    <option value="bpp">BPP — Bin Packing</option>
+    <option value="spp">SPP — Strip Packing</option>
+  </select>
+
+  <label for="instance-file">Instance JSON (optional)</label>
+  <input type="file" id="instance-file" accept="application/json,.json">
+
+  <label for="config-file">LBF config JSON (optional)</label>
+  <input type="file" id="config-file" accept="application/json,.json">
+
+  <div>
+    <button id="solve-button" type="button">Solve</button>
+    <button id="clear-button" type="button">Clear output</button>
+  </div>
+  <p id="status" role="status">Loading WebAssembly module…</p>
+
+  <h2>Solution JSON</h2>
+  <pre id="result">No result yet.</pre>
+  <h2>SVG layouts</h2>
+  <div id="svgs"></div>
+
+  <script src="./build/lbf.js"></script>
+  <script type="module" src="./index.js"></script>
+</body>
+</html>

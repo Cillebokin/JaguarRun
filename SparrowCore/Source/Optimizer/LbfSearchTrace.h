@@ -32,6 +32,8 @@ struct LbfSearchTraceEvent
     jaguar::Transform2d transform = jaguar::Transform2d::Identity();
     SampleEval evaluation{};
     bool accepted = false;
+    std::size_t sampleIndex = 0U;
+    std::size_t sampleBudget = 0U;
     std::vector<std::pair<jaguar::Transform2d, SampleEval>> retained;
     std::size_t evaluationCount = 0U;
 };

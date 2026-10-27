@@ -5,10 +5,12 @@
 #include "JaguarCore/NumericPolicy.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <set>
+#include <string>
 #include <utility>
 
 namespace jaguar
@@ -35,6 +37,33 @@ Result<SimplePolygon> invalidShape(const char* message)
 {
     return Result<SimplePolygon>::FromError(
         {ErrorCode::UnsupportedShape, message});
+}
+
+std::string rustF32Display(float value)
+{
+    if (std::isnan(value))
+        return "NaN";
+    if (std::isinf(value))
+        return std::signbit(value) ? "-inf" : "inf";
+
+    char buffer[256]{};
+    const auto result = std::to_chars(
+        buffer, buffer + sizeof(buffer), value, std::chars_format::fixed);
+    if (result.ec == std::errc{})
+        return std::string(buffer, result.ptr);
+    return "0";
+}
+
+std::string invalidRectangleMessage(const ExternalRectangle& rectangle)
+{
+    const float xMin = static_cast<float>(rectangle.xMin);
+    const float yMin = static_cast<float>(rectangle.yMin);
+    const float xMax = xMin + static_cast<float>(rectangle.width);
+    const float yMax = yMin + static_cast<float>(rectangle.height);
+    return "invalid rectangle, x_min: " + rustF32Display(xMin)
+        + ", x_max: " + rustF32Display(xMax)
+        + ", y_min: " + rustF32Display(yMin)
+        + ", y_max: " + rustF32Display(yMax);
 }
 
 bool normalizedRectangleBounds(const ExternalRectangle& rectangle,
@@ -258,7 +287,7 @@ Result<SimplePolygon> Importer::ImportItemShape(const ExternalShape& shape) cons
         if (!normalizedRectangleBounds(*rectangle, bounds))
         {
             return Result<SimplePolygon>::FromError(
-                {ErrorCode::InvalidInput, "invalid external rectangle"});
+                {ErrorCode::InvalidInput, invalidRectangleMessage(*rectangle)});
         }
         return SimplePolygon::Create({
             {bounds.xMin, bounds.yMin},
@@ -285,7 +314,7 @@ Result<SimplePolygon> Importer::ImportContainerOuter(const ExternalShape& shape)
         if (!normalizedRectangleBounds(*rectangle, bounds))
         {
             return Result<SimplePolygon>::FromError(
-                {ErrorCode::InvalidInput, "invalid external rectangle"});
+                {ErrorCode::InvalidInput, invalidRectangleMessage(*rectangle)});
         }
         return SimplePolygon::Create({
             {bounds.xMin, bounds.yMin},
@@ -418,6 +447,24 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
             {ErrorCode::InvalidInput, "minimum item separation must be finite and nonnegative"});
     }
 
+    std::vector<const ExternalQualityZone*> orderedZones;
+    orderedZones.reserve(external.zones.size());
+    for (const ExternalQualityZone& zone : external.zones)
+        orderedZones.push_back(&zone);
+    std::stable_sort(orderedZones.begin(), orderedZones.end(),
+                     [](const auto* lhs, const auto* rhs) {
+                         return lhs->quality < rhs->quality;
+                     });
+    for (const ExternalQualityZone* zone : orderedZones)
+    {
+        if (zone->quality >= MAX_QUALITIES)
+        {
+            return Result<Container>::FromError(
+                {ErrorCode::InvalidInput,
+                 "quality zone is outside the supported range"});
+        }
+    }
+
     auto outer = ImportContainerOuter(external.shape);
     if (!outer.HasValue())
         return Result<Container>::FromError(outer.GetError());
@@ -435,29 +482,27 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
         }
     }
 
-    for (const ExternalQualityZone& zone : external.zones)
+    for (const ExternalQualityZone* zone : orderedZones)
     {
-        if (zone.quality >= MAX_QUALITIES)
-        {
-            return Result<Container>::FromError(
-                {ErrorCode::InvalidInput, "quality zone is outside the supported range"});
-        }
-        auto zoneShape = ImportZoneShape(zone.shape);
+        auto zoneShape = ImportZoneShape(zone->shape);
         if (!zoneShape.HasValue())
             return Result<Container>::FromError(zoneShape.GetError());
-        grouped[zone.quality].push_back(std::move(zoneShape.Value()));
+        grouped[zone->quality].push_back(std::move(zoneShape.Value()));
     }
 
     for (SimplePolygon& hole : holes)
         grouped[0].push_back(std::move(hole));
 
     std::vector<QualityZone> zones;
+    std::vector<QualityZone> originalZones;
     for (std::size_t quality = 0; quality < grouped.size(); ++quality)
     {
         if (!grouped[quality].empty())
         {
             std::vector<SimplePolygon> convertedShapes;
+            std::vector<SimplePolygon> originalShapes;
             convertedShapes.reserve(grouped[quality].size());
+            originalShapes.reserve(grouped[quality].size());
             for (SimplePolygon& shape : grouped[quality])
             {
                 OriginalShape zoneOriginal{
@@ -467,16 +512,19 @@ JAGUARCORE_API Result<Container> Importer::ImportContainer(
                 if (!converted.HasValue())
                     return Result<Container>::FromError(converted.GetError());
                 convertedShapes.push_back(std::move(converted.Value()));
+                originalShapes.push_back(std::move(zoneOriginal.shape));
             }
             zones.push_back({quality, std::move(convertedShapes)});
+            originalZones.push_back({quality, std::move(originalShapes)});
         }
     }
 
     OriginalShape originalOuter{
         std::move(outer.Value()), Transform2d::Identity(),
         ShapeModifyMode::Deflate, ShapeConfig()};
-    return Container::Create(external.id, std::move(originalOuter),
-                             std::move(zones), m_Config.cdeConfig);
+    return Container::CreateWithOriginalQualityZones(
+        external.id, std::move(originalOuter), std::move(zones),
+        std::move(originalZones), true, m_Config.cdeConfig);
 }
 
 JAGUARCORE_API Result<Item> Importer::ImportItemJson(

@@ -67,20 +67,28 @@ struct JsonValue
 
     JsonValue() : value(nullptr) {}
     explicit JsonValue(bool valueIn) : value(valueIn) {}
-    explicit JsonValue(double valueIn) : value(valueIn) {}
-    explicit JsonValue(std::uint64_t valueIn) : value(valueIn) {}
+    explicit JsonValue(double valueIn, bool allowNonFiniteNumberIn = false)
+        : value(valueIn), allowNonFiniteNumber(allowNonFiniteNumberIn)
+    {
+    }
+    explicit JsonValue(std::uint64_t valueIn, bool allowNonFiniteNumberIn = false)
+        : value(valueIn), allowNonFiniteNumber(allowNonFiniteNumberIn)
+    {
+    }
     explicit JsonValue(std::string valueIn) : value(std::move(valueIn)) {}
     explicit JsonValue(Array valueIn) : value(std::move(valueIn)) {}
     explicit JsonValue(Object valueIn) : value(std::move(valueIn)) {}
 
     Storage value;
+    bool allowNonFiniteNumber = false;
 };
 
 class JsonParser
 {
 public:
-    explicit JsonParser(const std::string& input)
-        : m_Input(input)
+    explicit JsonParser(const std::string& input,
+                        bool allowNonFiniteNumbers = false)
+        : m_Input(input), m_AllowNonFiniteNumbers(allowNonFiniteNumbers)
     {
     }
 
@@ -161,6 +169,16 @@ private:
                 return false;
             value = JsonValue(false);
             return true;
+        case 'N':
+            if (!m_AllowNonFiniteNumbers || !consumeLiteral("NaN"))
+                return fail("unexpected character");
+            value = JsonValue(std::numeric_limits<double>::quiet_NaN(), true);
+            return true;
+        case 'I':
+            if (!m_AllowNonFiniteNumbers || !consumeLiteral("Infinity"))
+                return fail("unexpected character");
+            value = JsonValue(std::numeric_limits<double>::infinity(), true);
+            return true;
         case '"':
         {
             std::string stringValue;
@@ -173,9 +191,17 @@ private:
             return parseArray(value);
         case '{':
             return parseObject(value);
+        case '-':
+            if (m_AllowNonFiniteNumbers
+                && m_Input.compare(m_Position, 9U, "-Infinity") == 0)
+            {
+                m_Position += 9U;
+                value = JsonValue(-std::numeric_limits<double>::infinity(), true);
+                return true;
+            }
+            return parseNumber(value);
         default:
-            if (m_Input[m_Position] == '-' ||
-                (m_Input[m_Position] >= '0' && m_Input[m_Position] <= '9'))
+            if (m_Input[m_Position] >= '0' && m_Input[m_Position] <= '9')
                 return parseNumber(value);
             return fail("unexpected character");
         }
@@ -453,7 +479,8 @@ private:
                 std::strtoull(token.c_str(), &end, 10);
             if (errno == 0 && end == token.c_str() + token.size())
             {
-                value = JsonValue(static_cast<std::uint64_t>(integerValue));
+                value = JsonValue(static_cast<std::uint64_t>(integerValue),
+                                  m_AllowNonFiniteNumbers);
                 return true;
             }
         }
@@ -461,14 +488,16 @@ private:
         errno = 0;
         char* end = nullptr;
         const double numberValue = std::strtod(token.c_str(), &end);
-        if (errno == ERANGE || end != token.c_str() + token.size() ||
-            !std::isfinite(numberValue))
+        if (end != token.c_str() + token.size()
+            || (!m_AllowNonFiniteNumbers
+                && (errno == ERANGE || !std::isfinite(numberValue))))
             return fail("number is outside the supported finite range");
-        value = JsonValue(numberValue);
+        value = JsonValue(numberValue, m_AllowNonFiniteNumbers);
         return true;
     }
 
     const std::string& m_Input;
+    bool m_AllowNonFiniteNumbers = false;
     std::size_t m_Position = 0;
     std::string m_Error;
     std::size_t m_ErrorPosition = 0;
@@ -639,9 +668,11 @@ Result<std::string> writeJson(const JsonValue& value, JsonCodecOptions options)
 }
 
 template <typename T, typename ParseFunction>
-Result<T> parseJson(const std::string& json, ParseFunction parseFunction)
+Result<T> parseJson(const std::string& json,
+                    ParseFunction parseFunction,
+                    bool allowNonFiniteNumbers = false)
 {
-    JsonParser parser(json);
+    JsonParser parser(json, allowNonFiniteNumbers);
     JsonValue root;
     if (!parser.parse(root))
     {
@@ -720,13 +751,15 @@ bool numberValue(const JsonValue& value,
 {
     if (const auto* number = std::get_if<double>(&value.value))
     {
-        if (!std::isfinite(*number))
+        const float narrowed = static_cast<float>(*number);
+        if (!value.allowNonFiniteNumber
+            && (!std::isfinite(*number) || !std::isfinite(narrowed)))
         {
             error = std::string(name) + " must be finite";
             return false;
         }
-        result = static_cast<double>(static_cast<float>(*number));
-        if (!std::isfinite(result))
+        result = static_cast<double>(narrowed);
+        if (!value.allowNonFiniteNumber && !std::isfinite(result))
         {
             error = std::string(name) + " must be finite";
             return false;
@@ -735,8 +768,9 @@ bool numberValue(const JsonValue& value,
     }
     if (const auto* integer = std::get_if<std::uint64_t>(&value.value))
     {
-        result = static_cast<double>(static_cast<float>(*integer));
-        if (!std::isfinite(result))
+        const float narrowed = static_cast<float>(*integer);
+        result = static_cast<double>(narrowed);
+        if (!value.allowNonFiniteNumber && !std::isfinite(result))
         {
             error = std::string(name) + " must be finite";
             return false;
@@ -1932,6 +1966,13 @@ JAGUARCORE_API Result<ExternalSPInstance> ParseExternalSPInstanceJson(
     return parseJson<ExternalSPInstance>(json, parseSPInstanceValue);
 }
 
+JAGUARCORE_API Result<ExternalSPInstance> ParseExternalSPInstanceJson(
+    const std::string& json, JsonParseOptions options)
+{
+    return parseJson<ExternalSPInstance>(
+        json, parseSPInstanceValue, options.allowNonFiniteNumbers);
+}
+
 JAGUARCORE_API Result<std::string> SerializeExternalSPInstanceJson(
     const ExternalSPInstance& instance, JsonCodecOptions options)
 {
@@ -1966,6 +2007,13 @@ JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(
     const std::string& json)
 {
     return parseJson<ExternalBPInstance>(json, parseBPInstanceValue);
+}
+
+JAGUARCORE_API Result<ExternalBPInstance> ParseExternalBPInstanceJson(
+    const std::string& json, JsonParseOptions options)
+{
+    return parseJson<ExternalBPInstance>(
+        json, parseBPInstanceValue, options.allowNonFiniteNumbers);
 }
 
 JAGUARCORE_API Result<std::string> SerializeExternalBPInstanceJson(

@@ -28,6 +28,7 @@ using CollisionStopCallback = std::function<bool(const HazardEntity&)>;
 class ThreadPool;
 class PolygonSoA;
 class Layout;
+struct SvgDebugAccess;
 
 // 碰撞检测引擎配置
 struct CDEConfig
@@ -129,6 +130,7 @@ public:
 
 private:
     friend class Layout;
+    friend struct SvgDebugAccess;
 
     struct Slot
     {

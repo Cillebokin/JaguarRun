@@ -1,5 +1,6 @@
 #include "SparrowCore/Optimizer/SppLbfOptimizer.h"
 
+#include "LbfOptimizerTrace.h"
 #include "JaguarCore/Assertions.h"
 
 #include <algorithm>
@@ -27,13 +28,28 @@ sparrow::Result<sparrow::SppLbfResult> InfeasibleSpp(const char* message)
     return sparrow::Result<sparrow::SppLbfResult>::FromError(
         {jaguar::ErrorCode::Infeasible, message});
 }
+
+bool StripWidthIsInCheck(const jaguar::SPInstance& instance,
+                         float stripWidth) noexcept
+{
+    float diametersOfAllItems = 0.0F;
+    for (std::size_t index = 0U; index < instance.ItemCount(); ++index)
+    {
+        const float diameter = static_cast<float>(
+            instance.GetItem(index).CollisionShape().Diameter());
+        const float demand = static_cast<float>(instance.ItemDemand(index));
+        diametersOfAllItems += diameter * demand;
+    }
+    return stripWidth < 2.0F * diametersOfAllItems;
+}
 }
 
 namespace sparrow
 {
-Result<SppLbfResult> SolveSppLbf(
+Result<SppLbfResult> SolveSppLbfWithDiagnostics(
     const jaguar::SPInstance& instance,
-    const LbfConfig& config)
+    const LbfConfig& config,
+    const LbfDiagnosticCallback& callback)
 {
     const Result<void> configResult = config.Validate();
     if (!configResult.HasValue())
@@ -106,12 +122,20 @@ Result<SppLbfResult> SolveSppLbf(
                     && entity.quality < *minQuality;
             };
 
-            const auto search = SearchLbf(
-                currentLayout,
-                instance.GetItem(ordered.index),
-                config,
-                rng,
-                filter);
+            const auto search = callback
+                ? SearchLbfWithDiagnostics(
+                      currentLayout,
+                      instance.GetItem(ordered.index),
+                      config,
+                      rng,
+                      filter,
+                      callback)
+                : SearchLbf(
+                      currentLayout,
+                      instance.GetItem(ordered.index),
+                      config,
+                      rng,
+                      filter);
             if (!search.HasValue())
             {
                 return Result<SppLbfResult>::FromError(search.GetError());
@@ -130,6 +154,12 @@ Result<SppLbfResult> SolveSppLbf(
                 if (!changed.HasValue())
                 {
                     return Result<SppLbfResult>::FromError(changed.GetError());
+                }
+                if (!StripWidthIsInCheck(
+                        instance, static_cast<float>(problem.StripWidth())))
+                {
+                    return InfeasibleSpp(
+                        " strip width is running away, check if all items fit in the height of the strip");
                 }
                 ++widthGrowthAttempts;
                 continue;
@@ -169,5 +199,12 @@ Result<SppLbfResult> SolveSppLbf(
         return InfeasibleSpp("SPP solution validation failed");
     }
     return Result<SppLbfResult>::FromValue({solution, metrics});
+}
+
+Result<SppLbfResult> SolveSppLbf(
+    const jaguar::SPInstance& instance,
+    const LbfConfig& config)
+{
+    return SolveSppLbfWithDiagnostics(instance, config, {});
 }
 }

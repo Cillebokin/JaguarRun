@@ -15,6 +15,7 @@ namespace jaguar
 {
 struct Circle2d;
 class CollisionEngine;
+struct SvgDebugAccess;
 
 // 障碍物相对节点的覆盖状态
 enum class HazardPresence
@@ -68,6 +69,7 @@ public:
 
 private:
     friend class CollisionEngine;
+    friend struct SvgDebugAccess;
 
     // 部分覆盖节点内的边子集（jagua-rs QTHazPartial）
     struct PartialHazard

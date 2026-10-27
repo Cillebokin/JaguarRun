@@ -53,6 +53,35 @@ if(EMSCRIPTEN)
     target_link_libraries(SparrowWasm PRIVATE
         "${SPARROWCORE_LIBRARY}"
         "${JAGUARCORE_LIBRARY}")
+
+    get_filename_component(JAGUA_RS_ASSETS
+        "${CMAKE_CURRENT_LIST_DIR}/../../../CodeResource/jagua-rs/assets" ABSOLUTE)
+    add_executable(LbfWasm
+        LbfWasm.cpp
+        "${SPARROWCORE_ROOT}/Tools/Lbf/LbfProductSupport.cpp")
+    target_include_directories(LbfWasm PRIVATE
+        "${SPARROWCORE_ROOT}/Tools/Lbf")
+    target_compile_options(LbfWasm PRIVATE
+        -pthread -fexceptions ${SPARROW_FP_COMPILE_OPTIONS})
+    target_link_options(LbfWasm PRIVATE
+        "--bind"
+        "--no-entry"
+        "-fexceptions"
+        "-pthread"
+        "-sMODULARIZE=1"
+        "-sEXPORT_NAME=LbfModule"
+        "--post-js=${CMAKE_CURRENT_LIST_DIR}/LbfWasmPost.js"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sPTHREAD_POOL_SIZE=3"
+        "-sFORCE_FILESYSTEM=1"
+        "--preload-file=${JAGUA_RS_ASSETS}/swim.json@/lbf_assets/swim.json"
+        "--preload-file=${JAGUA_RS_ASSETS}/baldacci1.json@/lbf_assets/baldacci1.json")
+    set_property(TARGET LbfWasm APPEND PROPERTY LINK_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/LbfWasmPost.js")
+    target_link_libraries(LbfWasm PRIVATE
+        "${SPARROWCORE_LIBRARY}"
+        "${JAGUARCORE_LIBRARY}")
+    set_target_properties(LbfWasm PROPERTIES OUTPUT_NAME "lbf")
 else()
     add_library(SparrowWasm STATIC SparrowWasm.cpp)
     target_compile_options(SparrowWasm PRIVATE ${SPARROW_FP_COMPILE_OPTIONS})

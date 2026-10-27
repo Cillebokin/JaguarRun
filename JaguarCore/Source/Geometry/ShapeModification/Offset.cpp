@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -114,6 +113,34 @@ bool preservesModificationMode(const SimplePolygon& original,
                                const SimplePolygon& modified,
                                ShapeModifyMode mode);
 
+std::optional<std::pair<std::size_t, std::size_t>> firstRustF32Intersection(
+    const std::vector<Point2d>& points)
+{
+    const std::size_t count = points.size();
+    for (std::size_t i = 0U; i < count; ++i)
+    {
+        const std::size_t iNext = (i + 1U) % count;
+        const auto first = Edge2d::Create(points[i], points[iNext]);
+        if (!first.HasValue())
+            return std::pair<std::size_t, std::size_t>{i, i};
+
+        for (std::size_t j = i + 1U; j < count; ++j)
+        {
+            const std::size_t jNext = (j + 1U) % count;
+            if (iNext == j || jNext == i)
+                continue;
+
+            const auto second = Edge2d::Create(points[j], points[jNext]);
+            if (!second.HasValue() ||
+                first.Value().IntersectsRustF32(second.Value()))
+            {
+                return std::pair<std::size_t, std::size_t>{i, j};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 NormalizedOffset normalizeOffsetRustF32(ShapeModifyMode mode,
                                         double distance) noexcept
 {
@@ -175,6 +202,30 @@ bool isCounterClockwise(const std::vector<OverlayPoint>& points) noexcept
                            static_cast<long double>(current.y) * next.x;
     }
     return signedAreaTwice > 0.0L;
+}
+
+bool iOverlaySkipsDegeneratePath(const std::vector<OverlayPoint>& points) noexcept
+{
+    if (points.empty())
+        return true;
+
+    // i_overlay 4.5.2 accumulates the signed double area with wrapping i64
+    // arithmetic, then skips a path when abs(area) <= 1.
+    std::uint64_t area = 0U;
+    OverlayPoint previous = points.back();
+    for (const OverlayPoint& current : points)
+    {
+        const std::int64_t positive =
+            static_cast<std::int64_t>(current.x) * previous.y;
+        const std::int64_t negative =
+            static_cast<std::int64_t>(current.y) * previous.x;
+        area += static_cast<std::uint64_t>(positive);
+        area -= static_cast<std::uint64_t>(negative);
+        previous = current;
+    }
+
+    return area == 0U || area == 1U ||
+           area == std::numeric_limits<std::uint64_t>::max();
 }
 
 std::int64_t crossInt(const OverlayPoint& origin,
@@ -1191,8 +1242,10 @@ std::optional<SimplePolygon> rotateConvexContourToIOverlayStart(
 // round-join outline path for either inflate or deflate. Topology changes and
 // self-intersections still require the overlay stage.
 std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
-    const SimplePolygon& shape, ShapeModifyMode mode, double distance)
+    const SimplePolygon& shape, ShapeModifyMode mode, double distance,
+    std::optional<Error>& terminalError)
 {
+    terminalError.reset();
     if (shape.VertexCount() < 3U || !(distance > 0.0))
         return std::nullopt;
 
@@ -1212,6 +1265,14 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
     }
     if (source.size() > 1U && source.front() == source.back())
         source.pop_back();
+
+    const bool skipDegeneratePath =
+        source.size() < 3U || iOverlaySkipsDegeneratePath(source);
+    // i_overlay skips quantized paths whose signed integer double-area has
+    // magnitude at most one. Preserve its empty-outline result instead of
+    // letting the legacy skeleton path reinterpret the collapsed geometry.
+    if (skipDegeneratePath)
+        return std::vector<SimplePolygon>{};
 
     // i_overlay feeds the quantized ring through UniqueSegmentsIter
     // (mesh/outline/uniq_iter.rs), which fuses consecutive segments that
@@ -1370,7 +1431,7 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
         {
             // i_overlay closes an inner corner through the source vertex;
             // intersecting the offset sections here changes the segment set.
-            appendSoupSegment(previous.b, previous.bTop);
+            appendSoupSegment(previous.bTop, previous.b);
             appendSoupSegment(next.a, next.aTop);
             if (previous.bTop != previous.b)
                 appendOutlinePoint(previous.b);
@@ -1545,19 +1606,23 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
         segments.reserve(soup.size());
         for (const auto& soupSegment : soup)
         {
-            segments.push_back({{soupSegment.first.x, soupSegment.first.y},
-                                {soupSegment.second.x, soupSegment.second.y},
-                                overlay::packShapeCount(1, 0)});
+            // Segment::subject() normalization (rs segm/segment.rs:30-43):
+            // a < b lexicographically keeps the +1 count; otherwise the
+            // segment is swapped and the count negated. The soup is
+            // collected in geometric direction, so this normalization is
+            // what gives the sweep correctly signed winding counts.
+            const overlay::IntPoint p0{soupSegment.first.x, soupSegment.first.y};
+            const overlay::IntPoint p1{soupSegment.second.x, soupSegment.second.y};
+            const bool forward = p0.x < p1.x || (p0.x == p1.x && p0.y < p1.y);
+            segments.push_back(forward
+                                   ? overlay::OverlaySegment{p0, p1, overlay::packShapeCount(1, 0)}
+                                   : overlay::OverlaySegment{p1, p0, overlay::packShapeCount(-1, 0)});
         }
         try
         {
         overlay::splitSegments(segments);
-        std::fprintf(stderr, "[engine] split ok: %zu segments\n",
-                     segments.size());
         const auto extracted = overlay::extractSubjectContours(
             std::move(segments), true, false, false, 0U);
-        std::fprintf(stderr, "[engine] extract ok: %zu contours\n",
-                     extracted.size());
         if (!extracted.empty())
         {
             std::vector<SimplePolygon> components;
@@ -1574,24 +1639,47 @@ std::optional<std::vector<SimplePolygon>> simpleOffsetWithIOverlayOutlineRules(
                         OverlayPoint{point.x, point.y}));
                 }
                 const auto imported = detail::createRustImportedOffsetPolygon(
-                    std::move(contourPoints));
+                    contourPoints);
                 if (!imported.HasValue())
+                {
+                    if (imported.GetError().message ==
+                        "simple polygon needs at least three points")
+                    {
+                        // This extracted component collapsed after f32 import.
+                        // Preserve OffsetShapes' empty-component behavior and
+                        // let OffsetShape translate the fallback failure to
+                        // Rust's public error text.
+                        return std::nullopt;
+                    }
+                    if (imported.GetError().message ==
+                        "simple polygon contains intersecting edges")
+                    {
+                        const auto edges =
+                            firstRustF32Intersection(contourPoints);
+                        if (edges.has_value())
+                        {
+                            terminalError = Error{
+                                ErrorCode::SelfIntersection,
+                                "Simple polygon contains intersecting edges " +
+                                    std::to_string(edges->first) + " and " +
+                                    std::to_string(edges->second)};
+                        }
+                    }
+                    if (!terminalError.has_value())
+                        terminalError = imported.GetError();
                     return std::nullopt;
+                }
                 components.push_back(imported.Value());
             }
             if (!components.empty())
                 return components;
         }
         }
-        catch (const std::exception& error)
-        {
-            std::fprintf(stderr, "[engine] exception: %s (soup=%zu)\n",
-                         error.what(), soup.size());
-        }
         catch (...)
         {
-            std::fprintf(stderr, "[engine] unknown exception (soup=%zu)\n",
-                         soup.size());
+            // Engine guard tripped or allocation failed: the established
+            // ring resolver below produces the result. Silent by design —
+            // the fallback path is exercised on every long test run.
         }
     }
 
@@ -1886,6 +1974,9 @@ JAGUARCORE_API Result<SimplePolygon> OffsetShape(const SimplePolygon& shape,
         return reimportOffsetPolygon(skeletonOffsets.Value().front());
     }
 
+    if (skeletonOffsets.GetError().code == ErrorCode::SelfIntersection)
+        return Result<SimplePolygon>::FromError(skeletonOffsets.GetError());
+
     return fallbackOffsetShape(shape, offset.mode, offset.distance);
 }
 
@@ -1908,8 +1999,14 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
         return Result<std::vector<SimplePolygon>>::FromValue({});
     }
 
+    std::optional<Error> simpleOffsetError;
     const auto simpleOffset = simpleOffsetWithIOverlayOutlineRules(
-        shape, offset.mode, offset.distance);
+        shape, offset.mode, offset.distance, simpleOffsetError);
+    if (simpleOffsetError.has_value())
+    {
+        return Result<std::vector<SimplePolygon>>::FromError(
+            std::move(*simpleOffsetError));
+    }
     if (simpleOffset.has_value())
     {
         return Result<std::vector<SimplePolygon>>::FromValue(
@@ -1922,7 +2019,9 @@ JAGUARCORE_API Result<std::vector<SimplePolygon>> OffsetShapes(
             ? offset.distance
             : -offset.distance);
     if (!skeletonOffsets.HasValue())
+    {
         return skeletonOffsets;
+    }
 
     if (skeletonOffsets.Value().empty())
     {

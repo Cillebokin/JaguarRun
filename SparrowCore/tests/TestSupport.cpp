@@ -37,10 +37,15 @@ bool RunE5Round26PairedWorkerSearch(std::ostream& output);
 bool RunExplorationTests(std::ostream& output);
 bool RunE5NaturalTimeAcceptance(std::ostream& output);
 bool RunWasmTests(std::ostream& output);
+bool RunLbfEntryTests(std::ostream& output);
 bool RunWindowsConsoleCtrlCProbe(int argc, char** argv, std::ostream& output);
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view{argv[1]} == "--rng")
+    {
+        return RunRngTests(std::cerr) ? 0 : 1;
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--lbf-budget-runtime")
     {
         return RunLbfBudgetSplitRuntimeTest(std::cerr) ? 0 : 1;
@@ -78,6 +83,10 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view{argv[1]} == "--bpp-lbf")
     {
         return RunBppLbfTests(std::cerr) ? 0 : 1;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--lbf-entry")
+    {
+        return RunLbfEntryTests(std::cerr) ? 0 : 1;
     }
     if (argc == 2 && std::string_view{argv[1]} == "--e5-natural-time")
     {
@@ -197,6 +206,10 @@ int main(int argc, char** argv)
         return 1;
     }
     if (!RunBppLbfTests(std::cerr))
+    {
+        return 1;
+    }
+    if (!RunLbfEntryTests(std::cerr))
     {
         return 1;
     }

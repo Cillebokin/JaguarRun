@@ -161,6 +161,11 @@ int main(int argc, char** argv)
     {
         return runOffsetRandomMatrixCensus();
     }
+    if (argc == 2 && std::string_view{argv[1]} == "--svg-export-only")
+    {
+        runSvgExportTests();
+        return 0;
+    }
     testVersion();
     testResult();
     testNumericPolicy();

@@ -4,6 +4,7 @@
 #include "JaguarCore/Geometry/SimplePolygon.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -140,14 +141,30 @@ int runOffsetRandomMatrixCensus()
         return -1;
     }
 
+    // ORM_LIMIT caps the exclusive end of the deterministic case range;
+    // ORM_START skips a prefix so one problematic case can run in isolation.
     constexpr std::size_t N = 200U;
+    std::size_t limit = N;
+    std::size_t start = 0U;
+    if (const char* raw = std::getenv("ORM_LIMIT"))
+    {
+        const unsigned long parsed = std::strtoul(raw, nullptr, 10);
+        if (parsed > 0U && parsed <= N)
+            limit = static_cast<std::size_t>(parsed);
+    }
+    if (const char* raw = std::getenv("ORM_START"))
+    {
+        const unsigned long parsed = std::strtoul(raw, nullptr, 10);
+        if (parsed < limit)
+            start = static_cast<std::size_t>(parsed);
+    }
     constexpr float SCALES[4] = {1.0F, 10.0F, 100.0F, 1000.0F};
     constexpr float DISTANCES[4] = {0.05F, 0.25F, 1.0F, 2.5F};
     XorShift64Star rng{0x4F464652414E444DULL};
 
     std::size_t divergent = 0U;
     std::size_t compared = 0U;
-    for (std::size_t index = 0U; index < N; ++index)
+    for (std::size_t index = 0U; index < limit; ++index)
     {
         const std::size_t profile =
             3U + static_cast<std::size_t>(rng.Next() % 12U);
@@ -162,6 +179,9 @@ int runOffsetRandomMatrixCensus()
         const float tx = static_cast<float>(rng.Next() % 100U);
         const float ty = static_cast<float>(rng.Next() % 100U);
         const float distance = DISTANCES[rng.Next() % 4U];
+
+        if (index < start)
+            continue;
 
         float xs[16] = {};
         for (std::size_t i = 0U; i < profile; ++i)

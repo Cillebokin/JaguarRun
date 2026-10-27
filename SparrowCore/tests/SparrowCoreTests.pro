@@ -10,10 +10,13 @@ INCLUDEPATH += $$PWD/../Include
 INCLUDEPATH += $$PWD/../../JaguarCore/Include
 INCLUDEPATH += $$PWD/../Tools/SparrowWasm
 INCLUDEPATH += $$PWD/../Tools/SparrowCli
+INCLUDEPATH += $$PWD/../Tools/Lbf
 
 HEADERS += \
     $$PWD/../Source/Optimizer/ExplorationNormalSampler.h \
     $$PWD/../Source/Optimizer/ExplorationTrace.h \
+    $$PWD/../Source/Optimizer/LbfSearchTrace.h \
+    $$PWD/../Source/Optimizer/LbfOptimizerTrace.h \
     $$PWD/../Source/Optimizer/CompressionTrace.h \
     $$PWD/../Source/Optimizer/WorkerLossSelector.h \
     $$PWD/../Source/Optimizer/WorkerRoundCollector.h
@@ -41,6 +44,8 @@ SOURCES += \
     $$PWD/TestLbfLoss.cpp \
     $$PWD/TestSppLbf.cpp \
     $$PWD/TestBppLbf.cpp \
+    $$PWD/TestLbfEntry.cpp \
+    $$PWD/../Tools/Lbf/LbfProductSupport.cpp \
     $$PWD/TestQuantify.cpp \
     $$PWD/TestSeparator.cpp \
     $$PWD/TestExploration.cpp \

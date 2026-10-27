@@ -1,4 +1,5 @@
 #include "SparrowCore/Optimizer/LbfSearch.h"
+#include "LbfOptimizerTrace.h"
 #include "LbfSearchTrace.h"
 
 #include "SparrowCore/Eval/LbfEvaluator.h"
@@ -7,6 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -234,7 +238,9 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
     std::optional<LbfLoss> bestLoss;
     LbfSearchTracePhase evaluatorPhase = LbfSearchTracePhase::ContainerSample;
     const auto report = [&](const jaguar::Transform2d& candidate,
-                            const SampleEval& evaluation) {
+                            const SampleEval& evaluation,
+                            std::size_t sampleIndex,
+                            std::size_t sampleBudget) {
         std::optional<LbfLoss> candidateLoss;
         if (evaluation.kind == SampleKind::SAMPLE_KIND_CLEAR)
         {
@@ -260,6 +266,8 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
             event.transform = candidate;
             event.evaluation = evaluation;
             event.accepted = accepted;
+            event.sampleIndex = sampleIndex;
+            event.sampleBudget = sampleBudget;
             if (best.has_value())
             {
                 event.retained.push_back(*best);
@@ -278,7 +286,10 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
         {
             upperBound = best->second;
         }
-        if (report(candidate, evaluator.Evaluate(candidate, upperBound)))
+        if (report(candidate,
+                   evaluator.Evaluate(candidate, upperBound),
+                   index,
+                   uniformBudget))
         {
             const jaguar::Rect2d tightenedBounds =
                 bestLoss->TightenSampleBBox(sampler.BoundingBox());
@@ -315,7 +326,10 @@ Result<std::optional<SearchResult>> SearchLbfImpl(
         {
             const jaguar::Transform2d candidate = localSampler.Sample(rng);
             const auto upperBound = std::optional<SampleEval>{best->second};
-            if (report(candidate, evaluator.Evaluate(candidate, upperBound)))
+            if (report(candidate,
+                       evaluator.Evaluate(candidate, upperBound),
+                       index,
+                       localSearchBudget))
             {
                 localSampler.ShiftMean(candidate);
             }
@@ -365,6 +379,54 @@ Result<std::optional<SearchResult>> SearchLbfWithTrace(
     const LbfSearchTraceCallback& callback)
 {
     return SearchLbfImpl(layout, item, config, rng, filter, &callback);
+}
+
+Result<std::optional<SearchResult>> SearchLbfWithDiagnostics(
+    const jaguar::Layout& layout,
+    const jaguar::Item& item,
+    const LbfConfig& config,
+    SparrowRng& rng,
+    const jaguar::HazardFilter& filter,
+    const LbfDiagnosticCallback& callback)
+{
+    const LbfSearchTraceCallback trace = [&callback](
+        const LbfSearchTraceEvent& event) {
+        if (event.type != LbfSearchTraceEvent::Type::Report || !event.accepted)
+        {
+            return;
+        }
+
+        const char* phase = nullptr;
+        if (event.phase == LbfSearchTracePhase::ContainerSample)
+        {
+            phase = "UNI";
+        }
+        else if (event.phase == LbfSearchTracePhase::LocalSearch)
+        {
+            phase = "LS";
+        }
+        if (phase == nullptr)
+        {
+            return;
+        }
+
+        std::ostringstream message;
+        message.imbue(std::locale::classic());
+        message << '[' << phase << ": " << event.sampleIndex << '/'
+                << event.sampleBudget << "] better: r: "
+                << std::fixed << std::setprecision(3)
+                << static_cast<float>(event.transform.rotationRad)
+                       * (180.0F / 3.14159265358979323846F)
+                << "°, t: ("
+                << static_cast<float>(event.transform.translation.x) << ", "
+                << static_cast<float>(event.transform.translation.y) << ')';
+        if (event.phase == LbfSearchTracePhase::ContainerSample)
+        {
+            message << ' ';
+        }
+        callback(message.str());
+    };
+    return SearchLbfWithTrace(layout, item, config, rng, filter, trace);
 }
 
 Result<std::vector<jaguar::Transform2d>> SampleLbfUniformForTrace(

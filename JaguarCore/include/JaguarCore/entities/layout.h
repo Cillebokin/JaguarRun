@@ -13,6 +13,8 @@
 
 namespace jaguar
 {
+struct SvgDebugAccess;
+
 // 已放置物品的快照
 struct LayoutPlacementSnapshot
 {
@@ -72,6 +74,8 @@ public:
     JAGUARCORE_API std::optional<double> RightmostCollisionX() const noexcept;
 
 private:
+    friend struct SvgDebugAccess;
+
     struct Slot
     {
         std::optional<PlacedItem> placedItem; // 已放置物品

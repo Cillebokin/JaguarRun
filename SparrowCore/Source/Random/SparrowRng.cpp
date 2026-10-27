@@ -241,6 +241,13 @@ std::uint64_t RotateLeft(std::uint64_t value, unsigned int shift) noexcept
 {
     return (value << shift) | (value >> (64U - shift));
 }
+
+#if defined(__wasm32__)
+std::uint32_t RotateLeft(std::uint32_t value, unsigned int shift) noexcept
+{
+    return (value << shift) | (value >> (32U - shift));
+}
+#endif
 }
 
 namespace sparrow
@@ -248,14 +255,24 @@ namespace sparrow
 SparrowRng::SparrowRng(std::uint64_t seed) noexcept
 {
     std::uint64_t splitMixState = seed;
+#if defined(__wasm32__)
+    // rand::SmallRng uses Xoshiro128++ on wasm32, seeded from two SplitMix64 words.
+    m_State[0] = SplitMix64Next(splitMixState);
+    m_State[1] = SplitMix64Next(splitMixState);
+#else
     for (std::uint64_t& value : m_State)
     {
         value = SplitMix64Next(splitMixState);
     }
+#endif
 }
 
 std::uint64_t SparrowRng::NextU64() noexcept
 {
+#if defined(__wasm32__)
+    const std::uint64_t low = NextU32();
+    return (static_cast<std::uint64_t>(NextU32()) << 32U) | low;
+#else
     const std::uint64_t result = RotateLeft(m_State[0] + m_State[3], 23U) + m_State[0];
     const std::uint64_t temporary = m_State[1] << 17U;
 
@@ -267,11 +284,35 @@ std::uint64_t SparrowRng::NextU64() noexcept
     m_State[3] = RotateLeft(m_State[3], 45U);
 
     return result;
+#endif
 }
 
 std::uint32_t SparrowRng::NextU32() noexcept
 {
+#if defined(__wasm32__)
+    std::uint32_t s0 = static_cast<std::uint32_t>(m_State[0]);
+    std::uint32_t s1 = static_cast<std::uint32_t>(m_State[0] >> 32U);
+    std::uint32_t s2 = static_cast<std::uint32_t>(m_State[1]);
+    std::uint32_t s3 = static_cast<std::uint32_t>(m_State[1] >> 32U);
+
+    const std::uint32_t result = RotateLeft(s0 + s3, 7U) + s0;
+    const std::uint32_t temporary = s1 << 9U;
+
+    s2 ^= s0;
+    s3 ^= s1;
+    s1 ^= s2;
+    s0 ^= s3;
+    s2 ^= temporary;
+    s3 = RotateLeft(s3, 11U);
+
+    m_State[0] = static_cast<std::uint64_t>(s0)
+        | (static_cast<std::uint64_t>(s1) << 32U);
+    m_State[1] = static_cast<std::uint64_t>(s2)
+        | (static_cast<std::uint64_t>(s3) << 32U);
+    return result;
+#else
     return static_cast<std::uint32_t>(NextU64() >> 32U);
+#endif
 }
 
 std::uint32_t SparrowRng::UniformIndex(std::uint32_t upperExclusive)

@@ -11,6 +11,8 @@
 
 namespace jaguar
 {
+
+class Importer;
 // 容器外部标识
 using ContainerId = std::uint64_t;
 
@@ -31,7 +33,6 @@ public:
         OriginalShape originalOuter,
         std::vector<QualityZone> qualityZones,
         CDEConfig cdeConfig);
-
     // 禁止创建空容器
     Container() = delete;
     Container(const Container&) noexcept = default;
@@ -50,6 +51,8 @@ public:
     JAGUARCORE_API const SimplePolygon& CollisionShape() const noexcept;
     // 获取按质量等级分组的质量区域
     JAGUARCORE_API const std::vector<QualityZone>& QualityZones() const noexcept;
+    // 获取未执行形状修改的质量区域轮廓
+    JAGUARCORE_API const std::vector<QualityZone>& OriginalQualityZones() const noexcept;
     // 获取包围盒
     JAGUARCORE_API const Rect2d& Bounds() const noexcept;
     // 判断是否来自同一基础容器
@@ -58,6 +61,17 @@ public:
     JAGUARCORE_API CollisionEnginePtr CreateCollisionEngine() const;
 
 private:
+    friend class Importer;
+
+    // Importer-only construction path retaining raw zone outlines for SVG.
+    static Result<Container> CreateWithOriginalQualityZones(
+        ContainerId id,
+        OriginalShape originalOuter,
+        std::vector<QualityZone> qualityZones,
+        std::vector<QualityZone> originalQualityZones,
+        bool hasOriginalQualityZones,
+        CDEConfig cdeConfig);
+
     struct Data;
 
     explicit Container(std::shared_ptr<const Data> data);

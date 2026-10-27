@@ -37,6 +37,8 @@ struct Container::Data
     std::shared_ptr<const OriginalShape> originalOuter;
     std::shared_ptr<const SimplePolygon> collisionOuter;
     std::vector<QualityZone> qualityZones;
+    std::vector<QualityZone> originalQualityZones;
+    bool hasOriginalQualityZones = false;
     CDEConfig cdeConfig{};
     Rect2d bounds{};
     std::vector<Hazard> staticHazards;
@@ -53,11 +55,26 @@ JAGUARCORE_API Result<Container> Container::Create(
     std::vector<QualityZone> qualityZones,
     CDEConfig cdeConfig)
 {
+    return CreateWithOriginalQualityZones(
+        id, std::move(originalOuter), std::move(qualityZones),
+        {}, false, cdeConfig);
+}
+
+Result<Container> Container::CreateWithOriginalQualityZones(
+    ContainerId id,
+    OriginalShape originalOuter,
+    std::vector<QualityZone> qualityZones,
+    std::vector<QualityZone> originalQualityZones,
+    bool hasOriginalQualityZones,
+    CDEConfig cdeConfig)
+{
     auto collisionOuter = originalOuter.ConvertToInternal();
     if (!collisionOuter.HasValue())
         return Result<Container>::FromError(collisionOuter.GetError());
 
     std::vector<bool> qualitySeen(MAX_QUALITIES, false);
+    std::vector<const QualityZone*> collisionByQuality(MAX_QUALITIES, nullptr);
+    std::vector<const QualityZone*> originalByQuality(MAX_QUALITIES, nullptr);
     for (const QualityZone& zone : qualityZones)
     {
         if (zone.quality >= MAX_QUALITIES || qualitySeen[zone.quality])
@@ -67,6 +84,36 @@ JAGUARCORE_API Result<Container> Container::Create(
                  "container quality zones must have unique qualities below 10"});
         }
         qualitySeen[zone.quality] = true;
+        collisionByQuality[zone.quality] = &zone;
+    }
+    for (const QualityZone& zone : originalQualityZones)
+    {
+        if (zone.quality >= MAX_QUALITIES ||
+            originalByQuality[zone.quality] != nullptr)
+        {
+            return Result<Container>::FromError(
+                {ErrorCode::InvalidInput,
+                 "original container quality zones must have unique qualities below 10"});
+        }
+        originalByQuality[zone.quality] = &zone;
+    }
+    for (std::size_t quality = 0;
+         hasOriginalQualityZones && quality < MAX_QUALITIES; ++quality)
+    {
+        if (qualitySeen[quality] != (originalByQuality[quality] != nullptr))
+        {
+            return Result<Container>::FromError(
+                {ErrorCode::InvalidInput,
+                 "original and collision quality zones must have matching qualities"});
+        }
+        if (qualitySeen[quality] &&
+            originalByQuality[quality]->shapes.size() !=
+                collisionByQuality[quality]->shapes.size())
+        {
+            return Result<Container>::FromError(
+                {ErrorCode::InvalidInput,
+                 "original and collision quality zones must have matching shape counts"});
+        }
     }
 
     auto data = std::make_shared<Data>();
@@ -76,6 +123,8 @@ JAGUARCORE_API Result<Container> Container::Create(
     data->collisionOuter = std::make_shared<const SimplePolygon>(
         std::move(collisionOuter.Value()));
     data->qualityZones = std::move(qualityZones);
+    data->originalQualityZones = std::move(originalQualityZones);
+    data->hasOriginalQualityZones = hasOriginalQualityZones;
     data->cdeConfig = cdeConfig;
     data->bounds = squareBounds(data->collisionOuter->BoundingBox());
 
@@ -122,6 +171,13 @@ JAGUARCORE_API const SimplePolygon& Container::CollisionShape() const noexcept
 JAGUARCORE_API const std::vector<QualityZone>& Container::QualityZones() const noexcept
 {
     return m_Data->qualityZones;
+}
+
+JAGUARCORE_API const std::vector<QualityZone>& Container::OriginalQualityZones() const noexcept
+{
+    return m_Data->hasOriginalQualityZones
+               ? m_Data->originalQualityZones
+               : m_Data->qualityZones;
 }
 
 JAGUARCORE_API const Rect2d& Container::Bounds() const noexcept

@@ -272,6 +272,38 @@ void runIoTests()
         makeImporter().ImportSPInstance(solutionInstanceInput);
     assert(solutionInstance.HasValue());
 
+    jaguar::ExternalSPSolution zeroStripWidthSolution{};
+    zeroStripWidthSolution.stripWidth = 0.0;
+    jaguar::ExternalPlacedItem unknownItemAtInvalidWidth{};
+    unknownItemAtInvalidWidth.itemId = std::numeric_limits<std::uint64_t>::max();
+    zeroStripWidthSolution.layout.placedItems.push_back(unknownItemAtInvalidWidth);
+    const auto rejectedZeroStripWidth = makeImporter().ImportSPSolution(
+        solutionInstance.Value(), zeroStripWidthSolution);
+    assert(!rejectedZeroStripWidth.HasValue());
+    assert(rejectedZeroStripWidth.GetError().code ==
+           jaguar::ErrorCode::InvalidInput);
+    assert(rejectedZeroStripWidth.GetError().message ==
+           "strip width must be positive");
+    for (const double invalidWidth : {-1.0, -infinity, nan})
+    {
+        jaguar::ExternalSPSolution invalidStripWidthSolution{};
+        invalidStripWidthSolution.stripWidth = invalidWidth;
+        const auto rejectedInvalidStripWidth = makeImporter().ImportSPSolution(
+            solutionInstance.Value(), invalidStripWidthSolution);
+        assert(!rejectedInvalidStripWidth.HasValue());
+        assert(rejectedInvalidStripWidth.GetError().code ==
+               jaguar::ErrorCode::InvalidInput);
+        assert(rejectedInvalidStripWidth.GetError().message ==
+               "strip width must be positive");
+    }
+    jaguar::ExternalSPSolution infiniteStripWidthSolution{};
+    infiniteStripWidthSolution.stripWidth = infinity;
+    const auto rejectedInfiniteStripWidth = makeImporter().ImportSPSolution(
+        solutionInstance.Value(), infiniteStripWidthSolution);
+    assert(!rejectedInfiniteStripWidth.HasValue());
+    assert(rejectedInfiniteStripWidth.GetError().code ==
+           jaguar::ErrorCode::SnapshotMismatch);
+
     jaguar::ExternalSPSolution nonFiniteTransformSolution{};
     nonFiniteTransformSolution.stripWidth = 10.0;
     jaguar::ExternalPlacedItem placedItem{};

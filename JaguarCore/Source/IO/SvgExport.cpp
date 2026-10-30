@@ -112,6 +112,16 @@ SvgColor halfBrightness(const SvgColor& value) noexcept
         static_cast<std::uint8_t>(static_cast<float>(value.blue) * 0.5F)};
 }
 
+SvgColor blendColors(const SvgColor& first, const SvgColor& second) noexcept
+{
+    const auto blend = [](std::uint8_t lhs, std::uint8_t rhs) {
+        return static_cast<std::uint8_t>(
+            (static_cast<unsigned int>(lhs) + rhs) / 2U);
+    };
+    return {blend(first.red, second.red), blend(first.green, second.green),
+            blend(first.blue, second.blue)};
+}
+
 std::string xmlEscape(const std::string& value)
 {
     std::string escaped;
@@ -136,6 +146,11 @@ Point2d Apply(const Transform2d& transform, const Point2d& point) noexcept
     return transform.Apply(point);
 }
 
+std::string pathPoint(const Point2d& point)
+{
+    return geometryNumber(point.x) + ',' + geometryNumber(point.y);
+}
+
 std::string polygonPath(const SimplePolygon& polygon,
                         const Transform2d& transform = Transform2d::Identity())
 {
@@ -145,44 +160,78 @@ std::string polygonPath(const SimplePolygon& polygon,
         return {};
 
     const Point2d first = Apply(transform, vertices.front());
-    path << "M " << geometryNumber(first.x) << ' ' << geometryNumber(first.y);
+    path << "M" << pathPoint(first);
     for (std::size_t i = 1; i < vertices.size(); ++i)
     {
         const Point2d point = Apply(transform, vertices[i]);
-        path << " L " << geometryNumber(point.x) << ' '
-             << geometryNumber(point.y);
+        path << " L" << pathPoint(point);
     }
-    path << " Z";
+    path << " z";
     return path.str();
 }
 
 std::string transformAttribute(const Transform2d& transform)
 {
     return "translate(" + geometryNumber(transform.translation.x) + " " +
-           geometryNumber(transform.translation.y) + ") rotate(" +
+           geometryNumber(transform.translation.y) + "), rotate(" +
            number(detail::ToDegreesRustF32(transform.rotationRad)) + ")";
+}
+
+std::string fixedThree(float value)
+{
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(3) << value;
+    return stream.str();
+}
+
+std::string rustTransformLabel(const Transform2d& transform)
+{
+    return "r: " + fixedThree(detail::ToDegreesRustF32(transform.rotationRad)) +
+           "°, t: (" + fixedThree(static_cast<float>(transform.translation.x)) +
+           ", " + fixedThree(static_cast<float>(transform.translation.y)) + ")";
+}
+
+std::string rustContainerTitle(const Rect2d& bounds)
+{
+    return "container, bbox: [x_min: " +
+           fixedThree(static_cast<float>(bounds.xMin)) + ", y_min: " +
+           fixedThree(static_cast<float>(bounds.yMin)) + ", x_max: " +
+           fixedThree(static_cast<float>(bounds.xMax)) + ", y_max: " +
+           fixedThree(static_cast<float>(bounds.yMax)) + "]";
 }
 
 std::string linePath(const Point2d& start, const Point2d& end)
 {
-    return "M " + geometryNumber(start.x) + ' ' + geometryNumber(start.y) +
-           " L " + geometryNumber(end.x) + ' ' + geometryNumber(end.y);
+    return "M" + pathPoint(start) + " L" + pathPoint(end);
 }
 
-std::string circleElement(const Circle2d& circle,
-                          const Transform2d& transform,
-                          const char* className,
-                          const std::string& stroke,
-                          float strokeWidth)
+std::string surrogatePoleElement(const Circle2d& circle,
+                                 const Transform2d& transform,
+                                 const char* role,
+                                 const std::string& stroke,
+                                 float strokeWidth,
+                                 bool isPoi,
+                                 bool isFailFast)
 {
     const Point2d center = Apply(transform, circle.center);
     std::ostringstream output;
-    output << "<circle class=\"" << className << "\" cx=\""
+    output << "<circle class=\"surrogate-pole\" data-pole-role=\""
+           << role << "\" cx=\""
            << geometryNumber(center.x) << "\" cy=\""
            << geometryNumber(center.y) << "\" r=\""
-           << geometryNumber(circle.radius)
-           << "\" fill=\"none\" stroke=\"" << stroke << "\" stroke-width=\""
-           << number(strokeWidth) << "\"/>";
+           << geometryNumber(circle.radius) << "\" fill=\""
+           << (isPoi ? "black" : "none") << "\"";
+    if (isPoi)
+        output << " fill-opacity=\"0.1\"";
+    output << " stroke=\"" << stroke << "\" stroke-width=\""
+           << number(strokeWidth) << "\" stroke-opacity=\""
+           << number(isPoi || isFailFast ? 0.8F : 0.5F) << "\"";
+    if (!isPoi && !isFailFast)
+    {
+        output << " stroke-dasharray=\"" << number(strokeWidth * 5.0F)
+               << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"";
+    }
+    output << "/>";
     return output.str();
 }
 
@@ -262,6 +311,7 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
     svg << "  <g id=\"scene\">\n";
 
     const Container& container = layout.GetContainer();
+    svg << "    <g id=\"container\">\n";
     if (debugOptions.drawCdShapes)
     {
         svg << "    <path class=\"container-cd-display\" data-container-id=\""
@@ -281,68 +331,53 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
             << "\" stroke-width=\"" << number(strokeWidth * 2.0F)
             << "\" fill-rule=\"nonzero\"/>\n";
     }
-    if (debugOptions.highlightCdShapes)
-    {
-        const char* className = debugOptions.drawCdShapes
-            ? "container-cd-highlight"
-            : "container-collision";
-        svg << "    <path class=\"" << className
-            << "\" data-container-id=\"" << container.Id()
-            << "\" d=\"" << polygonPath(container.CollisionShape())
-            << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
-            << number(strokeWidth * 0.5F)
-            << "\" stroke-opacity=\"0.3\" stroke-dasharray=\""
-            << number(strokeWidth) << ' ' << number(strokeWidth * 2.0F)
-            << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
-    }
+    svg << "      <title>" << rustContainerTitle(originalContainerBounds)
+        << "</title>\n"
+        << "    </g>\n";
 
     const LayoutSnapshot snapshot = layout.Save();
-    for (std::size_t placementIndex = 0;
-         placementIndex < snapshot.placements.size(); ++placementIndex)
+    const auto uniqueItems = layout.Items();
+    svg << "    <g id=\"items\">\n      <defs>\n";
+    for (const auto& itemReference : uniqueItems)
     {
-        const LayoutPlacementSnapshot& placement = snapshot.placements[placementIndex];
-        const PlacedItem& placedItem = placement.placedItem;
-        const Item& item = placedItem.GetItem();
-        const Transform2d externalTransform =
-            item.GetOriginalShape().preTransform.FollowedByRustF32(
-                placedItem.Transform());
-        const Transform2d internalTransform = placedItem.Transform();
-
-        svg << "    <g id=\"item_" << placementIndex << "_" << item.ExternalId()
-            << "\" data-item-id=\"" << item.ExternalId()
-            << "\" data-rotation-degrees=\""
-            << number(detail::ToDegreesRustF32(externalTransform.rotationRad))
-            << "\" data-translation-x=\""
-            << geometryNumber(externalTransform.translation.x)
-            << "\" data-translation-y=\""
-            << geometryNumber(externalTransform.translation.y)
-            << "\">\n";
-        svg << "      <title>item id: " << item.ExternalId() << ", transform: "
-            << xmlEscape(transformAttribute(externalTransform)) << "</title>\n";
-        const Transform2d& displayTransform = debugOptions.drawCdShapes
-            ? internalTransform
-            : externalTransform;
+        const Item& item = itemReference.get();
+        const Transform2d localTransform = debugOptions.drawCdShapes
+            ? Transform2d::Identity()
+            : item.GetOriginalShape().preTransform.InverseRustF32();
         const SimplePolygon& displayShape = debugOptions.drawCdShapes
             ? item.CollisionShape()
             : item.GetOriginalShape().shape;
         const char* displayClass = debugOptions.drawCdShapes
             ? "item-cd-display"
             : "item-original";
-        svg << "      <g class=\"item-placement\" transform=\""
-            << transformAttribute(displayTransform) << "\">\n";
-        svg << "        <path class=\"" << displayClass << "\" d=\""
+        SvgColor itemFill = options.theme.itemFill;
+        if (const std::optional<std::size_t> minQuality = item.MinQuality();
+            minQuality.has_value())
+        {
+            if (*minQuality >= options.theme.qualityZoneFills.size())
+            {
+                return Result<std::string>::FromError(
+                    {ErrorCode::SerializationFailure,
+                     "item minimum quality is outside the SVG theme range"});
+            }
+            itemFill = blendColors(
+                itemFill, options.theme.qualityZoneFills[*minQuality]);
+        }
+        svg << "        <g id=\"item_" << item.ExternalId() << "\">\n"
+            << "          <path class=\"" << displayClass << "\" d=\""
             << polygonPath(displayShape) << "\" fill=\""
-            << color(options.theme.itemFill)
-            << "\" fill-opacity=\"0.5\" stroke=\"black\" stroke-width=\""
-            << number(strokeWidth) << "\"/>\n";
-        svg << "      </g>\n";
+            << color(itemFill)
+            << "\" fill-opacity=\"0.5\" fill-rule=\"nonzero\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth) << "\"/>\n"
+            << "        </g>\n";
         if (debugOptions.highlightCdShapes)
         {
             const char* collisionClass = debugOptions.drawCdShapes
                 ? "item-cd-highlight"
                 : "item-collision";
-            svg << "      <path class=\"" << collisionClass << "\" d=\""
-                << polygonPath(item.CollisionShape(), internalTransform)
+            svg << "        <g id=\"cd_shape_" << item.ExternalId() << "\">\n"
+                << "          <path class=\"" << collisionClass << "\" d=\""
+                << polygonPath(item.CollisionShape(), localTransform)
                 << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
                 << number(strokeWidth * 0.5F)
                 << "\" stroke-opacity=\"0.3\" stroke-dasharray=\""
@@ -352,43 +387,90 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
             {
                 for (const Point2d& vertex : item.CollisionShape().Vertices())
                 {
-                    const Point2d point = Apply(internalTransform, vertex);
-                    svg << "      <circle class=\"item-cd-vertex\" cx=\""
-                        << geometryNumber(point.x) << "\" cy=\""
-                        << geometryNumber(point.y)
+                    svg << "          <circle class=\"item-cd-vertex\" cx=\""
+                        << geometryNumber(vertex.x) << "\" cy=\""
+                        << geometryNumber(vertex.y)
                         << "\" r=\"" << number(strokeWidth * 0.5F)
                         << "\" fill=\"cyan\" fill-opacity=\"0.8\"/>\n";
                 }
             }
+            svg << "        </g>\n";
         }
-
-        if (options.drawSurrogates && item.CollisionShape().GetSurrogate())
+        if (options.drawSurrogates)
         {
-            const auto transformed =
-                item.CollisionShape().GetSurrogate()->Transformed(internalTransform);
-            if (!transformed.HasValue())
-                return Result<std::string>::FromError(transformed.GetError());
-            svg << "      <g class=\"surrogate\" data-item-id=\""
-                << item.ExternalId() << "\">\n";
-            for (const Circle2d& pole : transformed.Value().Poles())
+            const Surrogate* itemSurrogate =
+                item.CollisionShape().GetSurrogate();
+            if (itemSurrogate != nullptr)
             {
-                svg << "        "
-                    << circleElement(pole, Transform2d::Identity(), "surrogate-pole",
-                                     color(options.theme.surrogateStroke), strokeWidth)
-                    << "\n";
-            }
-            for (const Edge2d& pier : transformed.Value().Piers())
-            {
-                svg << "        <path class=\"surrogate-pier\" d=\""
-                    << linePath(pier.start, pier.end) << "\" fill=\"none\" stroke=\""
-                    << color(options.theme.surrogateStroke) << "\" stroke-width=\""
-                    << number(strokeWidth) << "\"/>\n";
-            }
-            svg << "      </g>\n";
-        }
-        svg << "    </g>\n";
-    }
+                const Transform2d surrogateLocalTransform =
+                    debugOptions.drawCdShapes
+                        ? Transform2d::Identity()
+                        : item.GetOriginalShape().preTransform.InverseRustF32();
+                const auto transformed =
+                    itemSurrogate->TransformedRustF32(surrogateLocalTransform);
+                if (!transformed.HasValue())
+                    return Result<std::string>::FromError(
+                        transformed.GetError());
 
+                svg << "        <g id=\"surrogate_" << item.ExternalId()
+                    << "\">\n";
+                const std::vector<Circle2d>& poles =
+                    transformed.Value().Poles();
+                const std::size_t failFastPoleCount =
+                    transformed.Value().FailFastPoleCount();
+                for (std::size_t index = 0; index < poles.size(); ++index)
+                {
+                    const bool isPoi = index == 0U;
+                    const bool isFailFast = index < failFastPoleCount;
+                    const char* poleRole = isPoi
+                        ? "poi"
+                        : (isFailFast ? "fail-fast" : "ordinary");
+                    svg << "          "
+                        << surrogatePoleElement(
+                               poles[index], Transform2d::Identity(), poleRole,
+                               color(options.theme.surrogateStroke), strokeWidth,
+                               isPoi, isFailFast)
+                        << "\n";
+                }
+                for (const Edge2d& pier : transformed.Value().Piers())
+                {
+                    svg << "          <path class=\"surrogate-pier\" d=\""
+                        << linePath(pier.start, pier.end)
+                        << "\" fill=\"none\" stroke=\""
+                        << color(options.theme.surrogateStroke)
+                        << "\" stroke-width=\"" << number(strokeWidth)
+                        << "\" stroke-opacity=\"0.8\"/>\n";
+                }
+                svg << "        </g>\n";
+            }
+        }
+    }
+    svg << "      </defs>\n";
+    for (const LayoutPlacementSnapshot& placement : snapshot.placements)
+    {
+        const PlacedItem& placedItem = placement.placedItem;
+        const Item& item = placedItem.GetItem();
+        const Transform2d externalTransform =
+            item.GetOriginalShape().preTransform.FollowedByRustF32(
+                placedItem.Transform());
+        const Transform2d displayTransform = debugOptions.drawCdShapes
+            ? placedItem.Transform()
+            : externalTransform;
+        svg << "      <use href=\"#item_" << item.ExternalId()
+            << "\" transform=\"" << transformAttribute(displayTransform)
+            << "\" data-item-id=\"" << item.ExternalId()
+            << "\" data-rotation-degrees=\""
+            << number(detail::ToDegreesRustF32(externalTransform.rotationRad))
+            << "\" data-translation-x=\""
+            << geometryNumber(externalTransform.translation.x)
+            << "\" data-translation-y=\""
+            << geometryNumber(externalTransform.translation.y) << "\">\n"
+            << "        <title>item, id: " << item.ExternalId()
+            << ", transf: [" << rustTransformLabel(displayTransform) << "]"
+            << "</title>\n"
+            << "      </use>\n";
+    }
+    svg << "    </g>\n";
     svg << "    <g id=\"quality_zones\">\n";
     const std::vector<QualityZone>& qualityZones = debugOptions.drawCdShapes
         ? container.QualityZones()
@@ -411,7 +493,7 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
             svg << "      <path class=\"quality-zone\" data-quality=\""
                 << quality << "\" d=\"" << polygonPath(shape)
                 << "\" fill=\"" << color(fill)
-                << "\" fill-opacity=\"0.5\" stroke=\"" << color(stroke)
+                << "\" fill-opacity=\"0.50\" stroke=\"" << color(stroke)
                 << "\" stroke-width=\"" << number(strokeWidth * 2.0F)
                 << "\" stroke-opacity=\""
                 << number(static_cast<float>(
@@ -425,11 +507,69 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
     }
     svg << "    </g>\n";
 
+    svg << "    <g id=\"optionals\">\n";
+    if (debugOptions.highlightCdShapes)
+    {
+        svg << "    <g id=\"highlight_cd_shapes\">\n";
+        for (const LayoutPlacementSnapshot& placement : snapshot.placements)
+        {
+            const PlacedItem& placedItem = placement.placedItem;
+            const Item& item = placedItem.GetItem();
+            const Transform2d externalTransform =
+                item.GetOriginalShape().preTransform.FollowedByRustF32(
+                    placedItem.Transform());
+            const Transform2d displayTransform = debugOptions.drawCdShapes
+                ? placedItem.Transform()
+                : externalTransform;
+            svg << "      <use href=\"#cd_shape_" << item.ExternalId()
+                << "\" transform=\"" << transformAttribute(displayTransform)
+                << "\"/>\n";
+        }
+        const char* containerCollisionClass = debugOptions.drawCdShapes
+            ? "container-cd-highlight"
+            : "container-collision";
+        svg << "      <path class=\"" << containerCollisionClass
+            << "\" data-container-id=\"" << container.Id()
+            << "\" d=\"" << polygonPath(container.CollisionShape())
+            << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
+            << number(strokeWidth * 0.5F)
+            << "\" stroke-opacity=\"0.3\" stroke-dasharray=\""
+            << number(strokeWidth) << ' ' << number(strokeWidth * 2.0F)
+            << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+        svg << "    </g>\n";
+    }
+
+    svg << "      <g id=\"surrogates\">\n";
+    if (options.drawSurrogates)
+    {
+        for (const LayoutPlacementSnapshot& placement : snapshot.placements)
+        {
+            const PlacedItem& placedItem = placement.placedItem;
+            const Item& item = placedItem.GetItem();
+            if (item.CollisionShape().GetSurrogate() == nullptr)
+                continue;
+            const Transform2d externalTransform =
+                item.GetOriginalShape().preTransform.FollowedByRustF32(
+                    placedItem.Transform());
+            const Transform2d displayTransform = debugOptions.drawCdShapes
+                ? placedItem.Transform()
+                : externalTransform;
+            svg << "        <g class=\"surrogate\" data-item-id=\""
+                << item.ExternalId() << "\">\n";
+            svg << "          <use href=\"#surrogate_" << item.ExternalId()
+                << "\" transform=\"" << transformAttribute(displayTransform)
+                << "\"/>\n"
+                << "        </g>\n";
+        }
+    }
+    svg << "      </g>\n";
+
     if (debugOptions.drawQuadtree)
     {
         const std::vector<SvgDebugAccess::QuadtreeCell> cells =
             SvgDebugAccess::QuadtreeCells(layout);
         std::array<std::ostringstream, 3> paths;
+        std::array<bool, 3> hasPath{};
         for (const SvgDebugAccess::QuadtreeCell& cell : cells)
         {
             std::size_t index = 0U;
@@ -440,24 +580,26 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
             case HazardPresence::None: index = 2U; break;
             }
             const Rect2d& rect = cell.bounds;
-            paths[index] << "M " << geometryNumber(rect.xMin) << ' '
-                         << geometryNumber(rect.yMin) << " L "
-                         << geometryNumber(rect.xMax) << ' '
-                         << geometryNumber(rect.yMin) << " L "
-                         << geometryNumber(rect.xMax) << ' '
-                         << geometryNumber(rect.yMax) << " L "
-                         << geometryNumber(rect.xMin) << ' '
-                         << geometryNumber(rect.yMax)
-                         << " Z ";
+            if (hasPath[index])
+                paths[index] << ' ';
+            paths[index] << "M" << geometryNumber(rect.xMin) << ','
+                         << geometryNumber(rect.yMin) << " L"
+                         << geometryNumber(rect.xMax) << ','
+                         << geometryNumber(rect.yMin) << " L"
+                         << geometryNumber(rect.xMax) << ','
+                         << geometryNumber(rect.yMax) << " L"
+                         << geometryNumber(rect.xMin) << ','
+                         << geometryNumber(rect.yMax) << " z";
+            hasPath[index] = true;
         }
         svg << "    <g id=\"quadtree\">\n"
             << "      <path class=\"quadtree-cell quadtree-entire\" d=\""
             << paths[0].str()
-            << "\" fill=\"red\" stroke=\"black\" stroke-width=\""
+            << "\" fill=\"red\" fill-rule=\"nonzero\" stroke=\"black\" stroke-width=\""
             << number(strokeWidth * 0.25F) << "\" fill-opacity=\"0.6\"/>\n"
             << "      <path class=\"quadtree-cell quadtree-partial\" d=\""
             << paths[1].str()
-            << "\" fill=\"none\" stroke=\"black\" stroke-width=\""
+            << "\" fill=\"none\" fill-rule=\"nonzero\" stroke=\"black\" stroke-width=\""
             << number(strokeWidth * 0.25F) << "\" fill-opacity=\"0.3\"/>\n"
             << "      <path class=\"quadtree-cell quadtree-none\" d=\""
             << paths[2].str()
@@ -583,6 +725,8 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         svg << "    </g>\n";
     }
 
+    svg << "    </g>\n";
+
     const bool feasible = layout.IsFeasible();
     svg << "    <g id=\"collision-debug\" data-layout-feasible=\""
         << (feasible ? "true" : "false") << "\" data-enabled=\""
@@ -615,10 +759,10 @@ JAGUARCORE_API Result<std::string> ExportLayoutSvg(
         svg << "  <g id=\"axes\" stroke=\""
             << color(options.theme.axisStroke) << "\" stroke-width=\""
             << number(strokeWidth * 0.75F) << "\" fill=\"none\">\n";
-        svg << "    <path d=\"M " << number(viewX) << ' ' << number(xAxisY)
-            << " L " << number(viewX + viewWidth) << ' ' << number(xAxisY) << "\"/>\n";
-        svg << "    <path d=\"M " << number(yAxisX) << ' ' << number(viewY)
-            << " L " << number(yAxisX) << ' ' << number(viewY + viewHeight) << "\"/>\n";
+        svg << "    <path d=\"M" << pathPoint({viewX, xAxisY})
+            << " L" << pathPoint({viewX + viewWidth, xAxisY}) << "\"/>\n";
+        svg << "    <path d=\"M" << pathPoint({yAxisX, viewY})
+            << " L" << pathPoint({yAxisX, viewY + viewHeight}) << "\"/>\n";
         svg << "  </g>\n";
     }
 

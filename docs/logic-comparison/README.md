@@ -126,7 +126,7 @@
 | 33 | [records/33-ext-repr.md](records/33-ext-repr.md) | wire 基本一致 | 7 |
 | 34 | [records/34-import.md](records/34-import.md) | 基本等价（非连续重复顶点由下游构造拒绝，诊断不同） | 12 |
 | 35 | [records/35-export.md](records/35-export.md) | wire 基本一致（SPP container_id 双侧实际均为 0；min_item_separation 零值差异仍在） | 7 |
-| 36 | [records/36-svg.md](records/36-svg.md) | **不等价**（有意重写：y-flip/viewBox/图层公式；quality_zones 已补，quadtree/可见标签/开关仍缺） | 15 |
+| 36 | [records/36-svg.md](records/36-svg.md) | 部分对齐（固定BPP Surrogate、quadtree、CD开关矩阵、Importer容器画布长宽比/viewBox、非矩形与单洞/多洞容器默认及CD模式path/共有样式、quality 0与选定quality 2/5 path双模式对照、描边倍率/质量区路径与样式、min_quality过滤、Exterior及多危险区`draw_cd_shapes × highlight_collisions`组合等子集已对拍；保留C++诊断DOM/wrapper扩展并记录少量DOM差异，广泛BPP和其他调试组合仍未完成） | 16 |
 | 37 | [records/37-prob-io.md](records/37-prob-io.md) | 基本等价 | 14 |
 | 38 | [records/38-fpa.md](records/38-fpa.md) | 核心算法及Importer相邻顶点比较对齐pinned float-cmp 0.10.0；整体多边形非有限契约另核 | 7 |
 | 39 | [records/39-assertions.md](records/39-assertions.md) | 基本等价 | 9 |

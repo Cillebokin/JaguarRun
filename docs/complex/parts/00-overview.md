@@ -32,7 +32,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 其二，`Rust filter.rs` 锁定版的 `from_irrelevant_qzones` 实际把 `quality < required_quality` 的区域设为无关，这与 API 注释、`container.rs:86` 的质量递增定义、`item.rs:23–24` 的最低质量要求及 SVG 对 `quality >= min_quality` 的处理相反。维护版上游也按 `quality >= min_quality` 忽略达标区。项目按 D5 保留锁定 `f5e2b5f` 的实际谓词；SparrowCore callback 与现有测试断言和 pinned 行为一致。B4b 已按固定基线收口，意图语义差异留在 R8，见碰撞记录。
 
-其三，JaguarCore/Source/IO/SvgExport.cpp:146 的 flipTranslation = viewY + viewHeight，而第 156–157 行变换为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认，需以非零 viewY 的 SVG 渲染用例回归。
+其三，早期SVG场景Y轴翻转问题已在L4第160阶段关闭：JaguarCore移除了scene上的translate/scale翻转，直接输出布局坐标以匹配pinned Rust。TestSvgExport覆盖viewY非零的viewBox及无翻转变换断言；scene仅保留分组作用。DOM扩展仍按第164阶段保留，见36-svg记录。
 
 其四是大小写目录副本。C++ include 引用使用大写路径，当前仓库同时存在 Include/include 与 Tests/Differential/differential 副本，且 .pro 所引用的大写路径存在；因此不能仅凭大小写差异断言 Linux、macOS 或大小写敏感 CI 必然构建失败。应比较副本内容、核对 qmake/CMake 的 include root，并明确单一权威目录；副本漂移才是已确认的维护风险。
 

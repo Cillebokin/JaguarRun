@@ -1,0 +1,22 @@
+# Shared JSON inputs for Rust/C++ SPP solution import boundary checks
+spp_width_zero_unknown_item={"strip_width":0,"layout":{"container_id":0,"placed_items":[{"item_id":999999999,"transformation":{"rotation":0,"translation":[0,0]}}],"density":0},"density":0,"run_time_sec":0}
+spp_width_f32_overflow={"strip_width":3.5e38,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0}
+spp_solution_unknown_top_level={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0,"future":1}
+spp_solution_duplicate_unknown_top_level={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0,"future":1,"future":2}
+spp_solution_duplicate_known_strip_width={"strip_width":4,"strip_width":5,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0}
+spp_layout_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0,"future":1},"density":0,"run_time_sec":0}
+spp_layout_duplicate_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0,"future":1,"future":2},"density":0,"run_time_sec":0}
+spp_layout_duplicate_known_placed_items={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"placed_items":[],"density":0},"density":0,"run_time_sec":0}
+spp_placed_item_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0]},"future":1}],"density":0},"density":0,"run_time_sec":0}
+spp_placed_item_duplicate_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0]},"future":1,"future":2}],"density":0},"density":0,"run_time_sec":0}
+spp_placed_item_duplicate_known_item_id={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"item_id":2,"transformation":{"rotation":0,"translation":[0,0]}}],"density":0},"density":0,"run_time_sec":0}
+spp_placed_item_duplicate_known_transformation={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0]},"transformation":{"rotation":1,"translation":[0,0]}}],"density":0},"density":0,"run_time_sec":0}
+spp_transformation_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0],"future":1}}],"density":0},"density":0,"run_time_sec":0}
+spp_transformation_duplicate_unknown_field={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0],"future":1,"future":2}}],"density":0},"density":0,"run_time_sec":0}
+spp_transformation_duplicate_known_rotation={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"rotation":1,"translation":[0,0]}}],"density":0},"density":0,"run_time_sec":0}
+spp_transformation_duplicate_known_translation={"strip_width":4,"layout":{"container_id":0,"placed_items":[{"item_id":1,"transformation":{"rotation":0,"translation":[0,0],"translation":[1,1]}}],"density":0},"density":0,"run_time_sec":0}
+spp_solution_duplicate_known_layout={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0},"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0}
+spp_solution_duplicate_known_density={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"density":0.5,"run_time_sec":0}
+spp_solution_duplicate_known_run_time_sec={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0},"density":0,"run_time_sec":0,"run_time_sec":1}
+spp_layout_duplicate_known_container_id={"strip_width":4,"layout":{"container_id":0,"container_id":1,"placed_items":[],"density":0},"density":0,"run_time_sec":0}
+spp_layout_duplicate_known_density={"strip_width":4,"layout":{"container_id":0,"placed_items":[],"density":0,"density":0.5},"density":0,"run_time_sec":0}

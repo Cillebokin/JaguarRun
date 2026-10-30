@@ -31,7 +31,7 @@ JAGUARCORE_API Result<void> Strip::SetWidth(double newWidth)
     if (!(rustWidth > 0.0F))
     {
         return Result<void>::FromError(
-            {ErrorCode::InvalidInput, "strip width exceeds f32 range"});
+            {ErrorCode::InvalidInput, "strip width must be positive"});
     }
     width = static_cast<double>(rustWidth);
     return Result<void>::FromValue();

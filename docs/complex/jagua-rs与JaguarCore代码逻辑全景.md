@@ -32,7 +32,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 其二，pinned `f5e2b5f` 中 `from_irrelevant_qzones` 把 `quality < required_quality` 标为无关，虽与函数 API 注释、`container.rs`/`item.rs` 契约及 SVG 的阈值方向相反。项目按 D5 保留锁定谓词；SparrowCore callback 与现有阈值断言一致。维护版语义差异登记为 R8，见 B4b 碰撞记录。
 
-其三，SvgExport.cpp 第 146 行的 flipTranslation 为 viewY + viewHeight，第 156–157 行变换为 translate(0 F) scale(1 -1)。按坐标变换公式，viewY 不为 0 时现有平移量可能产生视口垂直偏移；推导得到的候选平移量为 2·viewY + viewHeight，但尚未通过 SVG 渲染结果确认。应以非零 viewY 的输入运行渲染回归后再定性。
+其三，早期SVG场景Y轴翻转问题已在L4第160阶段关闭：JaguarCore移除了scene上的translate/scale翻转，直接输出布局坐标以匹配pinned Rust。TestSvgExport覆盖viewY非零的viewBox及无翻转变换断言；scene仅保留分组作用。DOM扩展仍按第164阶段保留，见36-svg记录。
 
 其四是大小写目录副本。C++ include 引用使用大写路径，当前仓库同时存在 Include/include 与 Tests/Differential/differential 副本，且 .pro 所引用的大写路径存在；因此不能仅凭大小写差异断言 Linux、macOS 或大小写敏感 CI 必然构建失败。应比较副本内容、核对 qmake/CMake 的 include root，并明确单一权威目录；副本漂移才是已确认的维护风险。
 
@@ -159,7 +159,7 @@ B4a 已按 Cargo.lock 锁定的 jagua-rs `f5e2b5f` / Rust 1.98.1 复核。最小
 
 `HazardEntity`（`hazard.rs:40-53`）有四种变体：`PlacedItem { id, dt, pk }`、`Exterior`、`Hole { idx }` 与 `InferiorQualityZone { quality, idx }`。`scope()`（`hazard.rs:55-66`）决定碰撞语义：`PlacedItem`、`Hole`、`InferiorQualityZone` 属于 `Interior`，即障碍是形状内部，只要待检测形状与其相交或互相包含即碰撞；`Exterior` 属于 `Exterior`，即碰撞条件是待检测形状不在容器内部。
 
-容器构造在 `Container::new`（`container.rs:27-71`）中完成：先插入 `Exterior` hazard（第 55 行），再由 `InferiorQualityZone::to_hazards`（`container.rs:115-126`）把各质量区的每个多边形转为 hazard。质量为 0 的区域被视为 `Hole`。导入时容器洞被并入质量 0 的区域（`jagua-rs/src/io/import.rs:176`）。CDE 的根 bbox 取 `outer.bbox.inflate_to_square()`（`container.rs:61`），即容器外接正方形，这一点决定了后续很多边界行为。`Layout::place_item`（`layout.rs:93-105`）注册的 hazard 为 `dynamic = true`，静态 hazard 为 `dynamic = false`。
+容器导入先按 `0..N_QUALITIES` 构造十个质量组，再把容器洞并入质量0；随后无条件创建十个 `InferiorQualityZone`，因此Importer生成的 `quality_zones` 固定数组每槽均为 `Some`，未使用的质量等级对应空shape列表。`Container::new`（`container.rs:27-71`）插入 `Exterior` hazard，再由 `InferiorQualityZone::to_hazards`（`container.rs:115-126`）按每个实际多边形生成hazard；空组不生成hazard。质量为0的区域被视为 `Hole`。CDE根bbox取 `outer.bbox.inflate_to_square()`（`container.rs:61`），即容器外接正方形。`Layout::place_item`（`layout.rs:93-105`）注册的 hazard 为 `dynamic = true`，静态 hazard 为 `dynamic = false`。
 
 entity 的唯一性依赖于 `PItemKey`：它是带代际版本号的 slotmap key（`placed_item.rs:99-102`），删除后再次分配同一槽位时版本号会变化，因此旧 entity 不会误匹配新物件。`HazardEntity::PlacedItem` 还包含 `dt: DTransformation`，因此 entity 的相等比较包含 f32 变换参数。`register_hazard` 在调试模式下检查 entity 是否重复（`cd_engine.rs:60-63`）。
 
@@ -358,7 +358,7 @@ C++ 的 `Transform2d`（`transformation.h`，`Transformation.cpp`）只保存旋
 
 ## 五、实体层：Container、Item、PlacedItem
 
-`Container`（`Container.cpp`，`container.h`）是一个以 `std::shared_ptr<const Data>` 为核心的值语义句柄。`Data` 结构（第 34-43 行）包含 id、原始外形、碰撞外形、质量区、CDE 配置、包围正方形 `bounds` 以及静态障碍物列表 `staticHazards`。`Create`（第 50-100 行）首先通过 `ConvertToInternal` 得到碰撞外形，然后检查质量等级唯一且小于 10（`MAX_QUALITIES`，第 11 行，与 Rust `N_QUALITIES` 一致）。静态障碍物包括一个 `Exterior` 外部障碍物，以及按质量区域生成的障碍物，其中质量 0 的区域被标记为 `Hole`，其余为 `InferiorQualityZone`（第 85-97 行），这与 Rust `container.rs` 第 118 行的映射一致。`SameBase`（第 132-135 行）通过比较 `Data` 指针判断两个容器是否来自同一基础容器，这是快照恢复的前提。`Area()` 返回的是原始外形面积，即“毛面积”，不扣除孔洞和质量区，与 Rust 文档注释一致。`CreateCollisionEngine`（第 137-147 行）构造 `CollisionEngine` 并注册所有静态障碍物，但任何注册失败都直接返回 `nullptr`，错误信息被丢弃。
+`Container`（`Container.cpp`，`container.h`）是一个以 `std::shared_ptr<const Data>` 为核心的值语义句柄。`Data` 保存id、原始/碰撞外形、质量区、CDE配置、包围正方形bounds和静态hazards。构造时检查质量等级唯一且小于10；Importer路径只把非空质量组存入vector，而静态hazards只按实际shape生成，质量0标记为`Hole`，其余为`InferiorQualityZone`。与Rust的固定数组不同，C++ getters返回稀疏vector；空组不会改变仓内碰撞行为，但外部调用方读取组数时可观察差异。`SameBase`（第 132-135 行）通过比较 `Data` 指针判断两个容器是否来自同一基础容器，这是快照恢复的前提。`Area()` 返回的是原始外形面积，即“毛面积”，不扣除孔洞和质量区，与 Rust 文档注释一致。`CreateCollisionEngine`（第 137-147 行）构造 `CollisionEngine` 并注册所有静态障碍物，但任何注册失败都直接返回 `nullptr`，错误信息被丢弃。
 
 `Item`（`Item.cpp`，`item.h`）保存索引、外部 ID、原始形状、碰撞形状、代理配置、最低质量要求和旋转范围。`Item::Create`（第 98-127 行）先校验旋转范围（`rotationRangeRepresentable`，第 66-78 行：`None` 与 `Continuous` 不允许携带离散角度，`Discrete` 的角度数量则不做校验，注释说明 1 到 65536 的规则由导入层执行），再把所有离散角度舍入到 f32（第 111-112 行），然后调用 `ConvertToInternal` 与 `GenerateSurrogate`。`minQuality` 没有与容器的质量区做任何一致性校验。
 
@@ -534,7 +534,7 @@ MSPP 的状态由 `MSPProblem`（`include/JaguarCore/problems/mspp.h`，211 行�
 
 旋转导入（`ImportRotation`，第 327–397 行）允许的最大角度数为 65536。离散模式（Stepped）的步长必须能整除 360。角度列表会排序并去重。若只有单个角度 0，会被折叠为 `None`，即不允许旋转。这一折叠是隐式行为，调用方若期望保留显式的 `[0.0]` 列表，会得到不同的内部表示。
 
-`ImportItem`（第 399–426 行）执行中心化（第 417–420 行）、按 `ShapeModifyConfig` 做 Inflate，然后调用 `Item::Create`。`ImportContainer`（第 428–497 行）中，`MAX_QUALITIES` 为 10（第 442、457 行），与 Rust 的 `N_QUALITIES` 一致（Rust 位于 `entities/container.rs:81`）。孔洞会合并到 `grouped[0]`（第 468–469 行），这意味着多个外轮廓或多个孔洞的归属规则是隐式的，依赖输入的排列顺序。质量区通过 `ConvertToInternal`（第 480–486 行）转换，最后由 `Container::Create` 构造（第 495 行）。
+`ImportItem`执行形状中心化、按`ShapeModifyConfig`做Inflate，再调用`Item::Create`。`ImportContainer`按10个质量等级分组，把孔洞并入`grouped[0]`；导入后逐组转换原始和碰撞shape，但只将非空组加入`zones`与`originalZones`，最后调用`Container::CreateWithOriginalQualityZones`。因此Rust importer输出10个占位组，而C++ importer保留实际有shape的组；两侧当前hazard/SVG消费者均按shape工作，公开容器组数仍是不同的API表示。
 
 Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInstance::Create` 并传入 `stripHeight`。`ImportSPSolution`（第 537–570 行）依次执行 `ChangeStripWidth`、通过 `findItemByExternalId`（线性扫描）查找物品、`externalToInternal`、`PlaceItem` 与 `Save`。线性查找在大规模实例上的代价为 O(n²)。`ImportBPInstance`（第 590–642 行）检查 ID 唯一性（第 606–614 行），按 ID 排序（第 617–619 行），跳过库存为零的 bin（第 625–626 行），并把 bin 重新编号（第 633–634 行），这一重编号意味着外部 bin 索引与内部索引可能不一致。若结果为空则报错（第 636–640 行）。`ImportMSPInstance`（第 669–688 行）以 `maxWidth` 与高度调用 `MSPInstance::Create`。`ImportBPSolution`（第 644–650 行）与 `ImportMSPSolution`（第 690–696 行）直接返回 `UnsupportedOperation`，Rust 中对应的 `import_solution` 也是 `unimplemented!()`，因此两侧都没有 BP 与 MSP 解决方案导入能力。
 
@@ -550,9 +550,9 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 ## 五、SvgExport 渲染流水线
 
-`ExportLayoutSvg`（`Source/IO/SvgExport.cpp`，410 行；接口在 `include/JaguarCore/io/SvgExport.h` 第 67–69 行，返回 `Result<std::string>`）的流水线大致为：计算视口（第 114–145 行），构造 flip 平移（第 146 行），生成场景组（第 156–157 行），绘制容器、布局与碰撞高亮，最后输出坐标轴（第 396–397 行）。
+ExportLayoutSvg当前先计算viewBox并写入SVG根节点，再生成scene分组及容器、物品、质量区、碰撞和可选调试图层，最后输出尺寸标签与可选坐标轴；当前没有scene Y轴翻转变换。
 
-第 146 行的 flipTranslation 计算为 viewY + viewHeight，而第 156–157 行的变换写为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认。应以 viewY 不为 0 的输入运行 SVG 渲染回归后再判定。每个布局的 id 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 CollisionEngine 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
+第160阶段已移除flipTranslation与scene的translate/scale翻转；非零viewY由viewBox定向断言覆盖，输出坐标方向与Rust一致。scene当前只是分组节点。碰撞高亮仍通过重建CollisionEngine判定，带高亮导出会增加查询开销。
 
 错误路径方面，`compatibility.md` 第 120 行声称 SVG 导出只返回 `SerializationFailure`，但代码还会返回 `CollisionEngineFailure` 与 `SnapshotMismatch`，文档与实现不一致。
 

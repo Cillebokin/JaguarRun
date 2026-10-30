@@ -48,9 +48,9 @@ Instance 层的导入：`ImportSPInstance`（第 517–535 行）调用 `SPInsta
 
 ## 五、SvgExport 渲染流水线
 
-`ExportLayoutSvg`（`Source/IO/SvgExport.cpp`，410 行；接口在 `include/JaguarCore/io/SvgExport.h` 第 67–69 行，返回 `Result<std::string>`）的流水线大致为：计算视口（第 114–145 行），构造 flip 平移（第 146 行），生成场景组（第 156–157 行），绘制容器、布局与碰撞高亮，最后输出坐标轴（第 396–397 行）。
+ExportLayoutSvg当前先计算viewBox并写入SVG根节点，再生成scene分组及容器、物品、质量区、碰撞和可选调试图层，最后输出尺寸标签与可选坐标轴；当前没有scene Y轴翻转变换。
 
-第 146 行的 flipTranslation 计算为 viewY + viewHeight，而第 156–157 行的变换写为 translate(0 F) scale(1 -1)。按公式推导，当 viewY 不为 0 时可能产生视口垂直偏移；这是静态推导的疑点，尚未通过渲染结果确认。应以 viewY 不为 0 的输入运行 SVG 渲染回归后再判定。每个布局的 id 在第 184 行生成。碰撞高亮（第 269–384 行）通过重建一个 CollisionEngine 来判定冲突，因此导出一次带高亮的 SVG 代价较大。
+第160阶段已移除flipTranslation与scene的translate/scale翻转；非零viewY由viewBox定向断言覆盖，输出坐标方向与Rust一致。scene当前只是分组节点。碰撞高亮仍通过重建CollisionEngine判定，带高亮导出会增加查询开销。
 
 错误路径方面，`compatibility.md` 第 120 行声称 SVG 导出只返回 `SerializationFailure`，但代码还会返回 `CollisionEngineFailure` 与 `SnapshotMismatch`，文档与实现不一致。
 

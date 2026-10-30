@@ -166,6 +166,11 @@ int main(int argc, char** argv)
         runSvgExportTests();
         return 0;
     }
+    if (argc == 2 && std::string_view{argv[1]} == "--problem-differential-only")
+    {
+        runProblemDifferentialTests();
+        return 0;
+    }
     testVersion();
     testResult();
     testNumericPolicy();

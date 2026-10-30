@@ -568,7 +568,9 @@ JAGUARCORE_API Result<SPInstance> Importer::ImportSPInstance(
 JAGUARCORE_API Result<SPSolution> Importer::ImportSPSolution(
     const SPInstance& instance, const ExternalSPSolution& external) const
 {
-    if (!std::isfinite(external.stripWidth) || external.stripWidth <= 0.0)
+    // Positive infinity reaches NotNan construction in the pinned Rust path.
+    // Keep the C++ import boundary result-based instead of exposing that panic.
+    if (std::isinf(external.stripWidth) && external.stripWidth > 0.0)
     {
         return Result<SPSolution>::FromError(
             {ErrorCode::SnapshotMismatch, "SP solution strip width is invalid"});

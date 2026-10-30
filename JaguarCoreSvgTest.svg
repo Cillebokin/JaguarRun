@@ -1,28 +1,46 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="-5 -5 110 110">
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="-6.1000013 -6.1000013 112.2 112.2">
   <title>JaguarCore Layout</title>
-  <g id="scene" transform="translate(0 105) scale(1 -1)">
-    <path class="container-original" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="#CC824A" fill-opacity="0.25" stroke="#CC824A" stroke-width="0.40800002" fill-rule="evenodd"/>
-    <path class="container-collision" data-container-id="9100" d="M 0 0 L 100 0 L 100 100 L 0 100 Z" fill="none" stroke="#0080FF" stroke-width="0.20400001" stroke-dasharray="0.61200005 0.40800002"/>
-    <g id="item_0_9001" data-item-id="9001" data-rotation-degrees="45" data-translation-x="53.535533905029297" data-translation-y="39.393398284912109">
-      <title>item id: 9001, transform: translate(53.535533905029297 39.393398284912109) rotate(45)</title>
-      <g class="item-placement" transform="translate(53.535533905029297 39.393398284912109) rotate(45)">
-        <path class="item-original" d="M 0 0 L 10 0 L 10 20 L 0 20 Z" fill="#FFC879" fill-opacity="0.7" stroke="#FFC879" stroke-width="0.20400001"/>
-      </g>
-      <path class="item-collision" d="M 53.535534137747391 39.393398359473338 L 60.606601795069764 46.464466325881915 L 46.464465862252609 60.606601640526662 L 39.393398204930236 53.535533674118085 Z" fill="none" stroke="#0080FF" stroke-width="0.20400001" stroke-dasharray="0.40800002 0.20400001"/>
-      <g class="surrogate" data-item-id="9001">
-        <circle class="surrogate-pole" cx="50" cy="50" r="5" fill="none" stroke="#00AA55" stroke-width="0.20400001"/>
-        <circle class="surrogate-pole" cx="46.464465944957318" cy="56.82247550683303" r="2.67578125" fill="none" stroke="#00AA55" stroke-width="0.20400001"/>
-      </g>
+  <g id="scene">
+    <g id="container">
+    <path class="container-original" data-container-id="9100" d="M0,0 L100,0 L100,100 L0,100 z" fill="#CC824A" stroke="black" stroke-width="0.40800002" fill-rule="nonzero"/>
+      <title>container, bbox: [x_min: 0.000, y_min: 0.000, x_max: 100.000, y_max: 100.000]</title>
+    </g>
+    <g id="items">
+      <defs>
+        <g id="item_9001">
+          <path class="item-original" d="M0,0 L10,0 L10,20 L0,20 z" fill="#FFC879" fill-opacity="0.5" fill-rule="nonzero" stroke="black" stroke-width="0.20400001"/>
+        </g>
+        <g id="cd_shape_9001">
+          <path class="item-collision" d="M0,0 L10,0 L10,20 L0,20 z" fill="none" stroke="black" stroke-width="0.102000006" stroke-opacity="0.3" stroke-dasharray="0.20400001 0.40800002" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g id="surrogate_9001">
+          <circle class="surrogate-pole" data-pole-role="poi" cx="5" cy="10" r="5" fill="black" fill-opacity="0.1" stroke="#00AA55" stroke-width="0.20400001" stroke-opacity="0.8"/>
+          <circle class="surrogate-pole" data-pole-role="ordinary" cx="7.3242188" cy="17.324219" r="2.6757812" fill="none" stroke="#00AA55" stroke-width="0.20400001" stroke-opacity="0.5" stroke-dasharray="1.0200001" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </defs>
+      <use href="#item_9001" transform="translate(53.535534 39.3934), rotate(45)" data-item-id="9001" data-rotation-degrees="45" data-translation-x="53.535534" data-translation-y="39.3934">
+        <title>item, id: 9001, transf: [r: 45.000°, t: (53.536, 39.393)]</title>
+      </use>
     </g>
     <g id="quality_zones">
     </g>
+    <g id="optionals">
+    <g id="highlight_cd_shapes">
+      <use href="#cd_shape_9001" transform="translate(53.535534 39.3934), rotate(45)"/>
+      <path class="container-collision" data-container-id="9100" d="M0,0 L100,0 L100,100 L0,100 z" fill="none" stroke="black" stroke-width="0.102000006" stroke-opacity="0.3" stroke-dasharray="0.20400001 0.40800002" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+      <g id="surrogates">
+        <g class="surrogate" data-item-id="9001">
+          <use href="#surrogate_9001" transform="translate(53.535534 39.3934), rotate(45)"/>
+        </g>
+      </g>
     <g id="collision_lines">
+    </g>
     </g>
     <g id="collision-debug" data-layout-feasible="true" data-enabled="true"/>
   </g>
-  <g id="axes" transform="translate(0 105) scale(1 -1)" stroke="#555555" stroke-width="0.15300001" fill="none">
-    <path d="M -5 0 L 105 0"/>
-    <path d="M 0 -5 L 0 105"/>
-  </g>
+  <text font-family="monospace" font-size="2.5" font-weight="500" x="0" y="-1.25">
+h: 100.000 | w: 100.000 | d: 2.000% | JaguarCore Layout
+  </text>
 </svg>

@@ -67,7 +67,7 @@ hazards.extend(qz_hazards);
 
 ### C++ 额外 API
 - `Id()`（cpp:102-105）：返回构造时传入的 ContainerId；Rust Container 无 id 字段（差异 6）。
-- `GetOriginalShape()`（cpp:112-115）、`CollisionShape()`（cpp:117-120）、`QualityZones()`（cpp:122-125）、`Bounds()`（cpp:127-130）：纯访问器，Rust 为公有字段直取。判定：一致。
+- `GetOriginalShape()`、`CollisionShape()`、`Bounds()`：纯访问器，Rust 为公有字段直取，语义一致。`QualityZones()`：Rust公开按质量索引的`[Option<InferiorQualityZone>; 10]`；Importer路径会为10个等级都保留`Some`组，即使shape列表为空。C++返回仅含Importer非空组的vector。仓内hazard与SVG消费者只使用实际shape，空组不改变这些运行行为；外部调用者直接读取长度或槽位存在性仍可观察差异。详见B8 Stage216。
 - `SameBase(other)`（cpp:132-135）：`m_Data == other.m_Data`，等价承载 Rust `Arc::ptr_eq(&base_cde, ...)` 的容器一致性判定职责（layout.rs:75-78 的对应物）。
 - `CreateCollisionEngine()`（cpp:137-147）：
 ```cpp

@@ -28,10 +28,10 @@ use jagua_rs::io::ext_repr::{
 use jagua_rs::io::import::{Importer, import_simple_polygon};
 use jagua_rs::io::svg::{SvgDrawOptions, layout_to_svg};
 use jagua_rs::probs::bpp::entities::{BPInstance, BPLayoutType, BPPlacement, BPProblem, Bin};
-use jagua_rs::probs::bpp::io::ext_repr::ExtBPInstance;
+use jagua_rs::probs::bpp::io::ext_repr::{ExtBPInstance, ExtBPSolution};
 use jagua_rs::probs::bpp::io::import_instance as import_bpp_instance;
 use jagua_rs::probs::mspp::entities::{MSPInstance, MSPPlacement, MSPProblem, Strip};
-use jagua_rs::probs::mspp::io::ext_repr::{ExtMSPInstance, ExtMSPStrip};
+use jagua_rs::probs::mspp::io::ext_repr::{ExtMSPInstance, ExtMSPSolution, ExtMSPStrip};
 use jagua_rs::probs::mspp::io::import_instance as import_mspp_instance;
 use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem, Strip as SPStrip};
 use jagua_rs::probs::spp::io::ext_repr::{ExtSPInstance, ExtSPSolution};
@@ -1302,6 +1302,2094 @@ fn run_zero_min_item_separation_oracle() {
             "wire.{name}.min_item_separation={}",
             serialized["min_item_separation"]
         );
+    }
+}
+
+fn run_solution_import_b8_oracle() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    let empty_bpp_instance = BPInstance::new(vec![], vec![]);
+    let empty_bpp_external = ExtBPInstance {
+        name: String::new(),
+        min_item_separation: 0.0,
+        items: vec![],
+        bins: vec![],
+    };
+    let empty_mspp_strip = Strip::new(
+        1.0,
+        1.0,
+        b11_cde_config(),
+        ShapeModifyConfig::default(),
+        1.0,
+    )
+    .unwrap();
+    let empty_mspp_instance = MSPInstance::new(vec![], empty_mspp_strip);
+    let empty_mspp_external = ExtMSPInstance {
+        name: String::new(),
+        min_item_separation: 0.0,
+        items: vec![],
+        strips: ExtMSPStrip {
+            height: 1.0,
+            max_width: 1.0,
+        },
+    };
+
+    let previous_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let bpp_panics = catch_unwind(AssertUnwindSafe(|| {
+        jagua_rs::probs::bpp::io::import_solution(&empty_bpp_instance, &empty_bpp_external)
+    }))
+    .is_err();
+    let mspp_panics = catch_unwind(AssertUnwindSafe(|| {
+        jagua_rs::probs::mspp::io::import_solution(&empty_mspp_instance, &empty_mspp_external)
+    }))
+    .is_err();
+    std::panic::set_hook(previous_panic_hook);
+
+    println!("import.bpp_solution_unimplemented={bpp_panics}");
+    println!("import.mspp_solution_unimplemented={mspp_panics}");
+
+    let spp_instance = SPInstance::new(
+        vec![(square_item(0, 1.0), 1)],
+        SPStrip::new(10.0, b11_cde_config(), ShapeModifyConfig::default(), 10.0).unwrap(),
+    );
+    for (name, strip_width) in [
+        ("zero", 0.0),
+        ("negative", -1.0),
+        ("negative_infinity", f32::NEG_INFINITY),
+        ("nan", f32::NAN),
+    ] {
+        let solution = ExtSPSolution {
+            strip_width,
+            layout: ExtLayout {
+                container_id: 0,
+                placed_items: vec![],
+                density: 0.0,
+            },
+            density: 0.0,
+            run_time_sec: 0,
+        };
+        match import_spp_solution(&spp_instance, &solution) {
+            Err(error) => println!("import.spp_strip_width.{name}=err:{error}"),
+            Ok(_) => panic!("non-positive SPP solution strip width was accepted"),
+        }
+    }
+    let invalid_width_before_unknown_item = ExtSPSolution {
+        strip_width: 0.0,
+        layout: ExtLayout {
+            container_id: 0,
+            placed_items: vec![ExtPlacedItem {
+                item_id: u64::MAX,
+                transformation: ExtTransformation {
+                    rotation: 0.0,
+                    translation: (0.0, 0.0),
+                },
+            }],
+            density: 0.0,
+        },
+        density: 0.0,
+        run_time_sec: 0,
+    };
+    match import_spp_solution(&spp_instance, &invalid_width_before_unknown_item) {
+        Err(error) => println!("import.spp_invalid_width_before_unknown_item=err:{error}"),
+        Ok(_) => panic!("solution with an invalid width and unknown item was accepted"),
+    }
+    let infinite_width_solution = ExtSPSolution {
+        strip_width: f32::INFINITY,
+        layout: ExtLayout {
+            container_id: 0,
+            placed_items: vec![],
+            density: 0.0,
+        },
+        density: 0.0,
+        run_time_sec: 0,
+    };
+    let previous_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let infinite_width_panicked = catch_unwind(AssertUnwindSafe(|| {
+        import_spp_solution(&spp_instance, &infinite_width_solution)
+    }))
+    .is_err();
+    std::panic::set_hook(previous_panic_hook);
+    println!("import.spp_strip_width.positive_infinity_panicked={infinite_width_panicked}");
+
+    let previous_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    for (name, input_name) in [
+        ("zero_unknown_item", "spp_width_zero_unknown_item"),
+        ("f32_overflow", "spp_width_f32_overflow"),
+    ] {
+        let json = solution_import_b8_input(input_name);
+        match serde_json::from_str::<ExtSPSolution>(json) {
+            Err(error) => println!("json.import.spp_width.{name}=parse_err:{error}"),
+            Ok(solution) => {
+                if name == "f32_overflow" {
+                    println!(
+                        "json.import.spp_width.{name}.deserialized_inf={}",
+                        solution.strip_width.is_infinite()
+                    );
+                }
+                match catch_unwind(AssertUnwindSafe(|| {
+                    import_spp_solution(&spp_instance, &solution)
+                })) {
+                    Ok(Ok(_)) => println!("json.import.spp_width.{name}=ok"),
+                    Ok(Err(error)) => println!("json.import.spp_width.{name}=err:{error}"),
+                    Err(_) => println!("json.import.spp_width.{name}=panic"),
+                }
+            }
+        }
+    }
+    std::panic::set_hook(previous_panic_hook);
+
+    for (name, input_name) in [
+        ("unknown_top_level", "spp_solution_unknown_top_level"),
+        (
+            "duplicate_unknown_top_level",
+            "spp_solution_duplicate_unknown_top_level",
+        ),
+        (
+            "duplicate_known_strip_width",
+            "spp_solution_duplicate_known_strip_width",
+        ),
+        ("layout_unknown_field", "spp_layout_unknown_field"),
+        (
+            "layout_duplicate_unknown_field",
+            "spp_layout_duplicate_unknown_field",
+        ),
+        (
+            "layout_duplicate_known_placed_items",
+            "spp_layout_duplicate_known_placed_items",
+        ),
+        ("placed_item_unknown_field", "spp_placed_item_unknown_field"),
+        (
+            "placed_item_duplicate_unknown_field",
+            "spp_placed_item_duplicate_unknown_field",
+        ),
+        (
+            "placed_item_duplicate_known_item_id",
+            "spp_placed_item_duplicate_known_item_id",
+        ),
+        (
+            "placed_item_duplicate_known_transformation",
+            "spp_placed_item_duplicate_known_transformation",
+        ),
+        (
+            "transformation_unknown_field",
+            "spp_transformation_unknown_field",
+        ),
+        (
+            "transformation_duplicate_unknown_field",
+            "spp_transformation_duplicate_unknown_field",
+        ),
+        (
+            "transformation_duplicate_known_rotation",
+            "spp_transformation_duplicate_known_rotation",
+        ),
+        (
+            "transformation_duplicate_known_translation",
+            "spp_transformation_duplicate_known_translation",
+        ),
+        (
+            "solution_duplicate_known_layout",
+            "spp_solution_duplicate_known_layout",
+        ),
+        (
+            "solution_duplicate_known_density",
+            "spp_solution_duplicate_known_density",
+        ),
+        (
+            "solution_duplicate_known_run_time_sec",
+            "spp_solution_duplicate_known_run_time_sec",
+        ),
+        (
+            "layout_duplicate_known_container_id",
+            "spp_layout_duplicate_known_container_id",
+        ),
+        (
+            "layout_duplicate_known_density",
+            "spp_layout_duplicate_known_density",
+        ),
+    ] {
+        let accepted = serde_json::from_str::<ExtSPSolution>(
+            solution_import_b8_input(input_name),
+        )
+        .is_ok();
+        println!("json.spp_solution.{name}_accepted={accepted}");
+    }
+}
+
+fn solution_import_b8_input(name: &str) -> &'static str {
+    const INPUTS: &str =
+        include_str!("../../../Tests/Fixtures/RustReference/solution_import_b8_inputs.txt");
+    INPUTS
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key == name).then_some(value)
+        })
+        .unwrap_or_else(|| panic!("missing B8 solution import JSON input: {name}"))
+}
+
+fn json_metadata_b8_input(name: &str) -> &'static str {
+    const INPUTS: &str =
+        include_str!("../../../Tests/Fixtures/RustReference/json_metadata_b8_inputs.txt");
+    INPUTS
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key == name).then_some(value)
+        })
+        .unwrap_or_else(|| panic!("missing JSON metadata case: {name}"))
+}
+
+fn json_metadata_b8_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtSPInstance>(json).is_ok()
+}
+
+fn json_metadata_b8_container_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtContainer>(json).is_ok()
+}
+
+fn json_metadata_b8_bpp_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtBPInstance>(json).is_ok()
+}
+
+fn json_metadata_b8_mspp_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtMSPInstance>(json).is_ok()
+}
+
+fn json_metadata_b8_import_error_class(error: &str) -> &'static str {
+    if error.starts_with("Simple polygon must have at least 3 points") {
+        "invalid_geometry"
+    } else if error.starts_with("Offset resulted in an empty polygon") {
+        "offset_failure"
+    } else if error == "No support for multipolygons yet" {
+        "unsupported_shape"
+    } else if error == "bin IDs must be unique" {
+        "duplicate_bin_ids"
+    } else if error == "instance must have positive bin stock" {
+        "no_positive_bin_stock"
+    } else {
+        "other_error"
+    }
+}
+
+fn json_metadata_b8_bpp_import_outcome(name: &str, importer: &Importer) -> &'static str {
+    let Ok(external) = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)) else {
+        return "parse_error";
+    };
+    match import_bpp_instance(importer, &external) {
+        Ok(_) => "success",
+        Err(error) => json_metadata_b8_import_error_class(&error.to_string()),
+    }
+}
+
+fn json_metadata_b8_mspp_import_outcome(name: &str, importer: &Importer) -> &'static str {
+    let Ok(external) = serde_json::from_str::<ExtMSPInstance>(json_metadata_b8_input(name)) else {
+        return "parse_error";
+    };
+    match import_mspp_instance(importer, &external) {
+        Ok(_) => "success",
+        Err(error) => json_metadata_b8_import_error_class(&error.to_string()),
+    }
+}
+
+fn json_metadata_b8_append_shape_state(values: &mut Vec<f32>, shape: &SPolygon) {
+    let centroid = shape.centroid();
+    values.extend([
+        shape.n_vertices() as f32,
+        shape.area,
+        centroid.0,
+        centroid.1,
+    ]);
+    for vertex in &shape.vertices {
+        values.extend([vertex.0, vertex.1]);
+    }
+}
+
+fn json_metadata_b8_imported_item_shape_state(item: &Item) -> String {
+    let mut values = Vec::new();
+    json_metadata_b8_append_shape_state(&mut values, &item.shape_orig.shape);
+    json_metadata_b8_append_shape_state(&mut values, &item.shape_cd);
+    values
+        .iter()
+        .map(|value| format!("{value:.9}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_metadata_b8_bpp_import_shape_state(name: &str, importer: &Importer) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    Some(json_metadata_b8_imported_item_shape_state(instance.item(0)))
+}
+
+fn json_metadata_b8_mspp_import_shape_state(name: &str, importer: &Importer) -> Option<String> {
+    let external = serde_json::from_str::<ExtMSPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_mspp_instance(importer, &external).ok()?;
+    Some(json_metadata_b8_imported_item_shape_state(instance.item(0)))
+}
+
+fn json_metadata_b8_imported_container_shape_state(container: &Container) -> String {
+    let mut values = Vec::new();
+    json_metadata_b8_append_shape_state(&mut values, &container.outer_orig.shape);
+    json_metadata_b8_append_shape_state(&mut values, &container.outer_cd);
+    values
+        .iter()
+        .map(|value| format!("{value:.9}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_metadata_b8_imported_container_quality_shape_state(container: &Container) -> String {
+    let mut values = Vec::new();
+    json_metadata_b8_append_shape_state(&mut values, &container.outer_orig.shape);
+    json_metadata_b8_append_shape_state(&mut values, &container.outer_cd);
+
+    let original_quality_count = container.quality_zones.iter().flatten().count();
+    values.push(original_quality_count as f32);
+    for (quality, zone) in container.quality_zones.iter().enumerate() {
+        if let Some(zone) = zone {
+            values.extend([quality as f32, zone.shapes_orig.len() as f32]);
+            for shape in &zone.shapes_orig {
+                json_metadata_b8_append_shape_state(&mut values, &shape.shape);
+            }
+        }
+    }
+
+    let collision_quality_count = container.quality_zones.iter().flatten().count();
+    values.push(collision_quality_count as f32);
+    for (quality, zone) in container.quality_zones.iter().enumerate() {
+        if let Some(zone) = zone {
+            values.extend([quality as f32, zone.shapes_cd.len() as f32]);
+            for shape in &zone.shapes_cd {
+                json_metadata_b8_append_shape_state(&mut values, shape);
+            }
+        }
+    }
+
+    values
+        .iter()
+        .map(|value| format!("{value:.9}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_metadata_b8_bpp_import_container_shape_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    Some(json_metadata_b8_imported_container_shape_state(
+        &instance.bins.first()?.container,
+    ))
+}
+
+fn json_metadata_b8_bpp_import_container_quality_shape_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    Some(json_metadata_b8_imported_container_quality_shape_state(
+        &instance.bins.first()?.container,
+    ))
+}
+
+fn json_metadata_b8_bpp_import_bin_collection_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    let mut values = vec![instance.bins.len() as f32];
+    for bin in &instance.bins {
+        values.extend([
+            bin.idx as f32,
+            bin.external_id as f32,
+            bin.stock as f32,
+            bin.cost as f32,
+        ]);
+        json_metadata_b8_append_shape_state(&mut values, &bin.container.outer_orig.shape);
+        json_metadata_b8_append_shape_state(&mut values, &bin.container.outer_cd);
+    }
+    Some(
+        values
+            .iter()
+            .map(|value| format!("{value:.9}"))
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+fn json_metadata_b8_bpp_import_bin_integer_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    Some(
+        instance
+            .bins
+            .iter()
+            .map(|bin| format!("{}/{}/{}/{}", bin.idx, bin.external_id, bin.stock, bin.cost))
+            .collect::<Vec<_>>()
+            .join(";"),
+    )
+}
+
+fn json_metadata_b8_imported_container_hazard_probe_state(container: &Container) -> String {
+    let probes = [
+        ("explicit_q0", rectangle(12.75, 4.75, 13.25, 5.25)),
+        ("hole_a", rectangle(4.75, 4.75, 5.25, 5.25)),
+        ("hole_b", rectangle(8.75, 4.75, 9.25, 5.25)),
+        ("q2_a", rectangle(30.75, 4.75, 31.25, 5.25)),
+        ("q2_b", rectangle(25.25, 4.75, 25.75, 5.25)),
+        ("q2_c", rectangle(19.75, 5.25, 20.25, 5.75)),
+        ("q5", rectangle(5.25, 13.25, 5.75, 13.75)),
+    ];
+    let mut states = Vec::with_capacity(probes.len());
+    for (label, probe) in probes {
+        let mut collector = BasicHazardCollector::new();
+        container
+            .base_cde
+            .collect_poly_collisions(&probe, &mut collector);
+        let mut entities = collector
+            .iter()
+            .map(|(_, entity)| match *entity {
+                HazardEntity::Hole { idx } => format!("hole:{idx}"),
+                HazardEntity::InferiorQualityZone { quality, idx } => {
+                    format!("quality:{quality}:{idx}")
+                }
+                HazardEntity::Exterior => "exterior".to_owned(),
+                HazardEntity::PlacedItem { .. } => "placed_item".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        entities.sort();
+        assert_eq!(entities.len(), 1, "unexpected hazards at {label}");
+        states.push(format!("{label}={}", entities.join(",")));
+    }
+    states.join(";")
+}
+
+fn json_metadata_b8_bpp_import_container_hazard_probe_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtBPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_bpp_instance(importer, &external).ok()?;
+    Some(json_metadata_b8_imported_container_hazard_probe_state(
+        &instance.bins.first()?.container,
+    ))
+}
+
+fn json_metadata_b8_mspp_strip_container_shape_state(
+    name: &str,
+    importer: &Importer,
+) -> Option<String> {
+    let external = serde_json::from_str::<ExtMSPInstance>(json_metadata_b8_input(name)).ok()?;
+    let instance = import_mspp_instance(importer, &external).ok()?;
+    let container = Container::try_from(instance.base_strip).ok()?;
+    Some(json_metadata_b8_imported_container_shape_state(&container))
+}
+
+fn json_metadata_b8_mspp_strip_container_outcome(name: &str, importer: &Importer) -> String {
+    let Ok(external) = serde_json::from_str::<ExtMSPInstance>(json_metadata_b8_input(name)) else {
+        return "instance=parse_error;container=not_reached".to_owned();
+    };
+    let instance = match import_mspp_instance(importer, &external) {
+        Ok(instance) => instance,
+        Err(error) => {
+            return format!(
+                "instance={};container=not_reached",
+                json_metadata_b8_import_error_class(&error.to_string())
+            );
+        }
+    };
+    match Container::try_from(instance.base_strip) {
+        Ok(_) => "instance=success;container=success".to_owned(),
+        Err(error) => format!(
+            "instance=success;container={}",
+            json_metadata_b8_import_error_class(&error.to_string())
+        ),
+    }
+}
+
+fn json_metadata_b8_bpp_solution_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtBPSolution>(json).is_ok()
+}
+
+fn json_metadata_b8_mspp_solution_accepts(name: &str) -> bool {
+    let json = json_metadata_b8_input(name);
+    serde_json::from_str::<ExtMSPSolution>(json).is_ok()
+}
+
+fn run_json_metadata_b8_oracle() {
+    println!(
+        "json.unknown_top_level_accepted={}",
+        json_metadata_b8_accepts("unknown_top_level")
+    );
+    println!(
+        "json.duplicate_unknown_top_level_accepted={}",
+        json_metadata_b8_accepts("duplicate_unknown_top_level")
+    );
+    println!(
+        "json.unknown_item_metadata_accepted={}",
+        json_metadata_b8_accepts("unknown_item_metadata")
+    );
+    println!(
+        "json.duplicate_unknown_item_metadata_accepted={}",
+        json_metadata_b8_accepts("duplicate_unknown_item_metadata")
+    );
+    println!(
+        "json.duplicate_known_item_id_accepted={}",
+        json_metadata_b8_accepts("duplicate_known_item_id")
+    );
+    println!(
+        "json.unknown_rotation_field_accepted={}",
+        json_metadata_b8_accepts("unknown_rotation_field")
+    );
+    for (input_name, output_name) in [
+        (
+            "duplicate_known_instance_name",
+            "json.duplicate_known_instance_name_accepted",
+        ),
+        (
+            "duplicate_known_min_item_separation",
+            "json.duplicate_known_min_item_separation_accepted",
+        ),
+        (
+            "duplicate_known_instance_items",
+            "json.duplicate_known_instance_items_accepted",
+        ),
+        (
+            "duplicate_known_strip_height",
+            "json.duplicate_known_strip_height_accepted",
+        ),
+        (
+            "duplicate_known_item_demand",
+            "json.duplicate_known_item_demand_accepted",
+        ),
+        (
+            "duplicate_known_item_orientation",
+            "json.duplicate_known_item_orientation_accepted",
+        ),
+        (
+            "duplicate_known_item_shape",
+            "json.duplicate_known_item_shape_accepted",
+        ),
+        (
+            "duplicate_known_item_min_quality",
+            "json.duplicate_known_item_min_quality_accepted",
+        ),
+        (
+            "duplicate_known_orientation_rotation",
+            "json.duplicate_known_orientation_rotation_accepted",
+        ),
+        (
+            "duplicate_known_rotation_mode",
+            "json.duplicate_known_rotation_mode_accepted",
+        ),
+        (
+            "duplicate_known_rotation_angles",
+            "json.duplicate_known_rotation_angles_accepted",
+        ),
+        (
+            "duplicate_known_rotation_step",
+            "json.duplicate_known_rotation_step_accepted",
+        ),
+        (
+            "duplicate_known_shape_type",
+            "json.duplicate_known_shape_type_accepted",
+        ),
+        (
+            "duplicate_known_shape_data",
+            "json.duplicate_known_shape_data_accepted",
+        ),
+        (
+            "duplicate_known_rectangle_x_min",
+            "json.duplicate_known_rectangle_x_min_accepted",
+        ),
+        (
+            "duplicate_known_rectangle_y_min",
+            "json.duplicate_known_rectangle_y_min_accepted",
+        ),
+        (
+            "duplicate_known_rectangle_width",
+            "json.duplicate_known_rectangle_width_accepted",
+        ),
+        (
+            "duplicate_known_rectangle_height",
+            "json.duplicate_known_rectangle_height_accepted",
+        ),
+        (
+            "duplicate_known_polygon_outer",
+            "json.duplicate_known_polygon_outer_accepted",
+        ),
+        (
+            "duplicate_known_polygon_inner",
+            "json.duplicate_known_polygon_inner_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "container_unknown_field",
+            "json.container_unknown_field_accepted",
+        ),
+        (
+            "container_duplicate_unknown_field",
+            "json.container_duplicate_unknown_field_accepted",
+        ),
+        (
+            "container_duplicate_known_id",
+            "json.container_duplicate_known_id_accepted",
+        ),
+        (
+            "container_duplicate_known_shape",
+            "json.container_duplicate_known_shape_accepted",
+        ),
+        (
+            "container_duplicate_known_zones",
+            "json.container_duplicate_known_zones_accepted",
+        ),
+        (
+            "quality_zone_unknown_field",
+            "json.quality_zone_unknown_field_accepted",
+        ),
+        (
+            "quality_zone_duplicate_unknown_field",
+            "json.quality_zone_duplicate_unknown_field_accepted",
+        ),
+        (
+            "quality_zone_duplicate_known_quality",
+            "json.quality_zone_duplicate_known_quality_accepted",
+        ),
+        (
+            "quality_zone_duplicate_known_shape",
+            "json.quality_zone_duplicate_known_shape_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_container_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        ("bpp_bin_unknown_field", "json.bpp_bin_unknown_field_accepted"),
+        (
+            "bpp_bin_duplicate_unknown_field",
+            "json.bpp_bin_duplicate_unknown_field_accepted",
+        ),
+        (
+            "bpp_bin_duplicate_known_stock",
+            "json.bpp_bin_duplicate_known_stock_accepted",
+        ),
+        (
+            "bpp_bin_duplicate_known_cost",
+            "json.bpp_bin_duplicate_known_cost_accepted",
+        ),
+        (
+            "bpp_bin_duplicate_known_id",
+            "json.bpp_bin_duplicate_known_id_accepted",
+        ),
+        (
+            "bpp_bin_duplicate_known_shape",
+            "json.bpp_bin_duplicate_known_shape_accepted",
+        ),
+        (
+            "bpp_bin_duplicate_known_zones",
+            "json.bpp_bin_duplicate_known_zones_accepted",
+        ),
+        (
+            "bpp_instance_duplicate_known_bins",
+            "json.bpp_instance_duplicate_known_bins_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_bpp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_instance_unknown_field",
+            "json.bpp_instance_unknown_field_accepted",
+        ),
+        (
+            "bpp_instance_duplicate_unknown_field",
+            "json.bpp_instance_duplicate_unknown_field_accepted",
+        ),
+        (
+            "bpp_instance_duplicate_known_name",
+            "json.bpp_instance_duplicate_known_name_accepted",
+        ),
+        (
+            "bpp_instance_duplicate_known_min_item_separation",
+            "json.bpp_instance_duplicate_known_min_item_separation_accepted",
+        ),
+        (
+            "bpp_instance_duplicate_known_items",
+            "json.bpp_instance_duplicate_known_items_accepted",
+        ),
+        (
+            "bpp_item_unknown_field",
+            "json.bpp_item_unknown_field_accepted",
+        ),
+        (
+            "bpp_item_duplicate_unknown_field",
+            "json.bpp_item_duplicate_unknown_field_accepted",
+        ),
+        (
+            "bpp_item_duplicate_known_id",
+            "json.bpp_item_duplicate_known_id_accepted",
+        ),
+        (
+            "bpp_item_duplicate_known_demand",
+            "json.bpp_item_duplicate_known_demand_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_strip_unknown_field",
+            "json.mspp_strip_unknown_field_accepted",
+        ),
+        (
+            "mspp_strip_duplicate_unknown_field",
+            "json.mspp_strip_duplicate_unknown_field_accepted",
+        ),
+        (
+            "mspp_strip_duplicate_known_height",
+            "json.mspp_strip_duplicate_known_height_accepted",
+        ),
+        (
+            "mspp_strip_duplicate_known_max_width",
+            "json.mspp_strip_duplicate_known_max_width_accepted",
+        ),
+        (
+            "mspp_instance_duplicate_known_strips",
+            "json.mspp_instance_duplicate_known_strips_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_instance_unknown_field",
+            "json.mspp_instance_unknown_field_accepted",
+        ),
+        (
+            "mspp_instance_duplicate_unknown_field",
+            "json.mspp_instance_duplicate_unknown_field_accepted",
+        ),
+        (
+            "mspp_instance_duplicate_known_name",
+            "json.mspp_instance_duplicate_known_name_accepted",
+        ),
+        (
+            "mspp_instance_duplicate_known_min_item_separation",
+            "json.mspp_instance_duplicate_known_min_item_separation_accepted",
+        ),
+        (
+            "mspp_instance_duplicate_known_items",
+            "json.mspp_instance_duplicate_known_items_accepted",
+        ),
+        (
+            "mspp_item_unknown_field",
+            "json.mspp_item_unknown_field_accepted",
+        ),
+        (
+            "mspp_item_duplicate_unknown_field",
+            "json.mspp_item_duplicate_unknown_field_accepted",
+        ),
+        (
+            "mspp_item_duplicate_known_id",
+            "json.mspp_item_duplicate_known_id_accepted",
+        ),
+        (
+            "mspp_item_duplicate_known_demand",
+            "json.mspp_item_duplicate_known_demand_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "bpp_solution_unknown_field",
+            "json.bpp_solution_unknown_field_accepted",
+        ),
+        (
+            "bpp_solution_duplicate_unknown_field",
+            "json.bpp_solution_duplicate_unknown_field_accepted",
+        ),
+        (
+            "bpp_solution_duplicate_known_cost",
+            "json.bpp_solution_duplicate_known_cost_accepted",
+        ),
+        (
+            "bpp_solution_duplicate_known_layouts",
+            "json.bpp_solution_duplicate_known_layouts_accepted",
+        ),
+        (
+            "bpp_solution_duplicate_known_density",
+            "json.bpp_solution_duplicate_known_density_accepted",
+        ),
+        (
+            "bpp_solution_duplicate_known_run_time_sec",
+            "json.bpp_solution_duplicate_known_run_time_sec_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_bpp_solution_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_solution_unknown_field",
+            "json.mspp_solution_unknown_field_accepted",
+        ),
+        (
+            "mspp_solution_duplicate_unknown_field",
+            "json.mspp_solution_duplicate_unknown_field_accepted",
+        ),
+        (
+            "mspp_solution_duplicate_known_layouts",
+            "json.mspp_solution_duplicate_known_layouts_accepted",
+        ),
+        (
+            "mspp_solution_duplicate_known_containers",
+            "json.mspp_solution_duplicate_known_containers_accepted",
+        ),
+        (
+            "mspp_solution_duplicate_known_density",
+            "json.mspp_solution_duplicate_known_density_accepted",
+        ),
+        (
+            "mspp_solution_duplicate_known_run_time_sec",
+            "json.mspp_solution_duplicate_known_run_time_sec_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_solution_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "item_min_quality_missing",
+            "json.item_missing_min_quality_emits_null",
+        ),
+        (
+            "item_min_quality_null",
+            "json.item_null_min_quality_emits_null",
+        ),
+    ] {
+        let item: ExtItem = serde_json::from_str(json_metadata_b8_input(input_name))
+            .expect("valid ExtItem fixture");
+        let serialized = serde_json::to_value(item).expect("ExtItem serializes");
+        println!(
+            "{output_name}={}",
+            serialized
+                .get("min_quality")
+                .is_some_and(serde_json::Value::is_null)
+        );
+    }
+
+    let item: ExtItem = serde_json::from_str(json_metadata_b8_input("item_min_quality_some"))
+        .expect("valid ExtItem fixture");
+    let serialized = serde_json::to_value(item).expect("ExtItem serializes");
+    println!(
+        "json.item_present_min_quality_emits_value={}",
+        serialized.get("min_quality") == Some(&serde_json::Value::from(2))
+    );
+
+    let bpp_instance: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_instance_serialization"))
+            .expect("valid BPP instance serialization fixture");
+    println!(
+        "json.serialize.bpp_instance={}",
+        serde_json::to_string(&bpp_instance).expect("BPP instance serializes")
+    );
+    let bpp_u64_boundary: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_multi_bin_u64_boundary_order"))
+            .expect("valid BPP u64-boundary serialization fixture");
+    let bpp_u64_serialized =
+        serde_json::to_string(&bpp_u64_boundary).expect("BPP u64-boundary instance serializes");
+    println!("json.serialize.bpp_u64_boundary_instance={bpp_u64_serialized}");
+    let bpp_u64_roundtrip: ExtBPInstance = serde_json::from_str(&bpp_u64_serialized)
+        .expect("BPP u64-boundary serialization roundtrips");
+    let bin_integer_state = bpp_u64_roundtrip
+        .bins
+        .iter()
+        .map(|bin| format!("{}/{}/{}", bin.base.id, bin.stock, bin.cost))
+        .collect::<Vec<_>>()
+        .join(";");
+    println!("json.serialize.bpp_u64_boundary_bin_integer_state={bin_integer_state}");
+    let mspp_instance: ExtMSPInstance =
+        serde_json::from_str(json_metadata_b8_input("mspp_instance_serialization"))
+            .expect("valid MSP instance serialization fixture");
+    println!(
+        "json.serialize.mspp_instance={}",
+        serde_json::to_string(&mspp_instance).expect("MSP instance serializes")
+    );
+    let bpp_solution: ExtBPSolution =
+        serde_json::from_str(json_metadata_b8_input("bpp_solution_serialization"))
+            .expect("valid BPP solution serialization fixture");
+    println!(
+        "json.serialize.bpp_solution={}",
+        serde_json::to_string(&bpp_solution).expect("BPP solution serializes")
+    );
+    let mspp_solution: ExtMSPSolution =
+        serde_json::from_str(json_metadata_b8_input("mspp_solution_serialization"))
+            .expect("valid MSP solution serialization fixture");
+    println!(
+        "json.serialize.mspp_solution={}",
+        serde_json::to_string(&mspp_solution).expect("MSP solution serializes")
+    );
+    for (input_name, output_name) in [
+        (
+            "bpp_item_duplicate_known_orientation",
+            "json.bpp_item_duplicate_known_orientation_accepted",
+        ),
+        (
+            "bpp_item_duplicate_known_shape",
+            "json.bpp_item_duplicate_known_shape_accepted",
+        ),
+        (
+            "bpp_item_duplicate_known_min_quality",
+            "json.bpp_item_duplicate_known_min_quality_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_duplicate_known_orientation",
+            "json.mspp_item_duplicate_known_orientation_accepted",
+        ),
+        (
+            "mspp_item_duplicate_known_shape",
+            "json.mspp_item_duplicate_known_shape_accepted",
+        ),
+        (
+            "mspp_item_duplicate_known_min_quality",
+            "json.mspp_item_duplicate_known_min_quality_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_instance_missing_min_item_separation",
+            "json.bpp_instance_missing_min_item_separation_accepted",
+        ),
+        (
+            "bpp_instance_null_min_item_separation",
+            "json.bpp_instance_null_min_item_separation_accepted",
+        ),
+        (
+            "bpp_instance_f32_overflow_min_item_separation",
+            "json.bpp_instance_f32_overflow_min_item_separation_accepted",
+        ),
+        (
+            "bpp_item_u64_overflow_demand",
+            "json.bpp_item_u64_overflow_demand_accepted",
+        ),
+        (
+            "bpp_bin_u64_overflow_stock",
+            "json.bpp_bin_u64_overflow_stock_accepted",
+        ),
+        (
+            "bpp_bin_u64_overflow_cost",
+            "json.bpp_bin_u64_overflow_cost_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_instance_missing_min_item_separation",
+            "json.mspp_instance_missing_min_item_separation_accepted",
+        ),
+        (
+            "mspp_instance_null_min_item_separation",
+            "json.mspp_instance_null_min_item_separation_accepted",
+        ),
+        (
+            "mspp_instance_f32_overflow_min_item_separation",
+            "json.mspp_instance_f32_overflow_min_item_separation_accepted",
+        ),
+        (
+            "mspp_strip_f32_overflow_height",
+            "json.mspp_strip_f32_overflow_height_accepted",
+        ),
+        (
+            "mspp_strip_f32_overflow_max_width",
+            "json.mspp_strip_f32_overflow_max_width_accepted",
+        ),
+        (
+            "mspp_item_u64_overflow_demand",
+            "json.mspp_item_u64_overflow_demand_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        ("bpp_bin_missing_id", "json.bpp_bin_missing_id_accepted"),
+        ("bpp_bin_null_id", "json.bpp_bin_null_id_accepted"),
+        ("bpp_bin_missing_shape", "json.bpp_bin_missing_shape_accepted"),
+        ("bpp_bin_null_shape", "json.bpp_bin_null_shape_accepted"),
+        (
+            "bpp_bin_missing_stock",
+            "json.bpp_bin_missing_stock_accepted",
+        ),
+        ("bpp_bin_null_stock", "json.bpp_bin_null_stock_accepted"),
+        ("bpp_bin_missing_cost", "json.bpp_bin_missing_cost_accepted"),
+        ("bpp_bin_null_cost", "json.bpp_bin_null_cost_accepted"),
+        (
+            "bpp_bin_missing_zones",
+            "json.bpp_bin_missing_zones_accepted",
+        ),
+        ("bpp_bin_null_zones", "json.bpp_bin_null_zones_accepted"),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_strip_missing_height",
+            "json.mspp_strip_missing_height_accepted",
+        ),
+        (
+            "mspp_strip_null_height",
+            "json.mspp_strip_null_height_accepted",
+        ),
+        (
+            "mspp_strip_missing_max_width",
+            "json.mspp_strip_missing_max_width_accepted",
+        ),
+        (
+            "mspp_strip_null_max_width",
+            "json.mspp_strip_null_max_width_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        ("bpp_bin_string_id", "json.bpp_bin_string_id_accepted"),
+        ("bpp_bin_string_shape", "json.bpp_bin_string_shape_accepted"),
+        (
+            "bpp_bin_fractional_stock",
+            "json.bpp_bin_fractional_stock_accepted",
+        ),
+        (
+            "bpp_bin_negative_cost",
+            "json.bpp_bin_negative_cost_accepted",
+        ),
+        (
+            "bpp_bin_object_zones",
+            "json.bpp_bin_object_zones_accepted",
+        ),
+        (
+            "bpp_instance_null_bins",
+            "json.bpp_instance_null_bins_accepted",
+        ),
+        (
+            "bpp_instance_object_bins",
+            "json.bpp_instance_object_bins_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_strip_string_height",
+            "json.mspp_strip_string_height_accepted",
+        ),
+        (
+            "mspp_strip_boolean_max_width",
+            "json.mspp_strip_boolean_max_width_accepted",
+        ),
+        (
+            "mspp_instance_null_strips",
+            "json.mspp_instance_null_strips_accepted",
+        ),
+        (
+            "mspp_instance_array_strips",
+            "json.mspp_instance_array_strips_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_instance_number_name",
+            "json.bpp_instance_number_name_accepted",
+        ),
+        (
+            "bpp_instance_string_min_item_separation",
+            "json.bpp_instance_string_min_item_separation_accepted",
+        ),
+        (
+            "bpp_instance_null_items",
+            "json.bpp_instance_null_items_accepted",
+        ),
+        (
+            "bpp_instance_object_items",
+            "json.bpp_instance_object_items_accepted",
+        ),
+        ("bpp_item_string_id", "json.bpp_item_string_id_accepted"),
+        (
+            "bpp_item_fractional_demand",
+            "json.bpp_item_fractional_demand_accepted",
+        ),
+        (
+            "bpp_item_string_orientation",
+            "json.bpp_item_string_orientation_accepted",
+        ),
+        (
+            "bpp_item_string_shape",
+            "json.bpp_item_string_shape_accepted",
+        ),
+        (
+            "bpp_item_string_min_quality",
+            "json.bpp_item_string_min_quality_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_instance_number_name",
+            "json.mspp_instance_number_name_accepted",
+        ),
+        (
+            "mspp_instance_string_min_item_separation",
+            "json.mspp_instance_string_min_item_separation_accepted",
+        ),
+        (
+            "mspp_instance_null_items",
+            "json.mspp_instance_null_items_accepted",
+        ),
+        (
+            "mspp_instance_object_items",
+            "json.mspp_instance_object_items_accepted",
+        ),
+        ("mspp_item_string_id", "json.mspp_item_string_id_accepted"),
+        (
+            "mspp_item_fractional_demand",
+            "json.mspp_item_fractional_demand_accepted",
+        ),
+        (
+            "mspp_item_string_orientation",
+            "json.mspp_item_string_orientation_accepted",
+        ),
+        (
+            "mspp_item_string_shape",
+            "json.mspp_item_string_shape_accepted",
+        ),
+        (
+            "mspp_item_string_min_quality",
+            "json.mspp_item_string_min_quality_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "bpp_item_missing_orientation",
+            "json.bpp_item_missing_orientation_accepted",
+        ),
+        (
+            "bpp_item_null_orientation",
+            "json.bpp_item_null_orientation_accepted",
+        ),
+        (
+            "bpp_item_empty_orientation",
+            "json.bpp_item_empty_orientation_accepted",
+        ),
+        (
+            "bpp_item_null_rotation",
+            "json.bpp_item_null_rotation_accepted",
+        ),
+        (
+            "bpp_item_empty_rotation",
+            "json.bpp_item_empty_rotation_accepted",
+        ),
+        (
+            "bpp_item_null_rotation_mode",
+            "json.bpp_item_null_rotation_mode_accepted",
+        ),
+        (
+            "bpp_item_unknown_rotation_mode",
+            "json.bpp_item_unknown_rotation_mode_accepted",
+        ),
+        (
+            "bpp_item_continuous_extra_step",
+            "json.bpp_item_continuous_extra_step_accepted",
+        ),
+        (
+            "bpp_item_discrete_missing_angles",
+            "json.bpp_item_discrete_missing_angles_accepted",
+        ),
+        (
+            "bpp_item_discrete_null_angles",
+            "json.bpp_item_discrete_null_angles_accepted",
+        ),
+        (
+            "bpp_item_stepped_missing_step",
+            "json.bpp_item_stepped_missing_step_accepted",
+        ),
+        (
+            "bpp_item_stepped_null_step",
+            "json.bpp_item_stepped_null_step_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_missing_orientation",
+            "json.mspp_item_missing_orientation_accepted",
+        ),
+        (
+            "mspp_item_null_orientation",
+            "json.mspp_item_null_orientation_accepted",
+        ),
+        (
+            "mspp_item_empty_orientation",
+            "json.mspp_item_empty_orientation_accepted",
+        ),
+        (
+            "mspp_item_null_rotation",
+            "json.mspp_item_null_rotation_accepted",
+        ),
+        (
+            "mspp_item_empty_rotation",
+            "json.mspp_item_empty_rotation_accepted",
+        ),
+        (
+            "mspp_item_null_rotation_mode",
+            "json.mspp_item_null_rotation_mode_accepted",
+        ),
+        (
+            "mspp_item_unknown_rotation_mode",
+            "json.mspp_item_unknown_rotation_mode_accepted",
+        ),
+        (
+            "mspp_item_continuous_extra_step",
+            "json.mspp_item_continuous_extra_step_accepted",
+        ),
+        (
+            "mspp_item_discrete_missing_angles",
+            "json.mspp_item_discrete_missing_angles_accepted",
+        ),
+        (
+            "mspp_item_discrete_null_angles",
+            "json.mspp_item_discrete_null_angles_accepted",
+        ),
+        (
+            "mspp_item_stepped_missing_step",
+            "json.mspp_item_stepped_missing_step_accepted",
+        ),
+        (
+            "mspp_item_stepped_null_step",
+            "json.mspp_item_stepped_null_step_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "bpp_item_missing_shape",
+            "json.bpp_item_missing_shape_accepted",
+        ),
+        ("bpp_item_null_shape", "json.bpp_item_null_shape_accepted"),
+        (
+            "bpp_item_missing_shape_type",
+            "json.bpp_item_missing_shape_type_accepted",
+        ),
+        (
+            "bpp_item_null_shape_type",
+            "json.bpp_item_null_shape_type_accepted",
+        ),
+        (
+            "bpp_item_number_shape_type",
+            "json.bpp_item_number_shape_type_accepted",
+        ),
+        (
+            "bpp_item_unknown_shape_type",
+            "json.bpp_item_unknown_shape_type_accepted",
+        ),
+        (
+            "bpp_item_missing_shape_data",
+            "json.bpp_item_missing_shape_data_accepted",
+        ),
+        (
+            "bpp_item_null_shape_data",
+            "json.bpp_item_null_shape_data_accepted",
+        ),
+        (
+            "bpp_item_array_shape_data",
+            "json.bpp_item_array_shape_data_accepted",
+        ),
+        (
+            "bpp_item_rectangle_missing_x_min",
+            "json.bpp_item_rectangle_missing_x_min_accepted",
+        ),
+        (
+            "bpp_item_rectangle_null_x_min",
+            "json.bpp_item_rectangle_null_x_min_accepted",
+        ),
+        (
+            "bpp_item_rectangle_missing_y_min",
+            "json.bpp_item_rectangle_missing_y_min_accepted",
+        ),
+        (
+            "bpp_item_rectangle_null_y_min",
+            "json.bpp_item_rectangle_null_y_min_accepted",
+        ),
+        (
+            "bpp_item_rectangle_missing_width",
+            "json.bpp_item_rectangle_missing_width_accepted",
+        ),
+        (
+            "bpp_item_rectangle_null_width",
+            "json.bpp_item_rectangle_null_width_accepted",
+        ),
+        (
+            "bpp_item_rectangle_missing_height",
+            "json.bpp_item_rectangle_missing_height_accepted",
+        ),
+        (
+            "bpp_item_rectangle_null_height",
+            "json.bpp_item_rectangle_null_height_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_missing_shape",
+            "json.mspp_item_missing_shape_accepted",
+        ),
+        ("mspp_item_null_shape", "json.mspp_item_null_shape_accepted"),
+        (
+            "mspp_item_missing_shape_type",
+            "json.mspp_item_missing_shape_type_accepted",
+        ),
+        (
+            "mspp_item_null_shape_type",
+            "json.mspp_item_null_shape_type_accepted",
+        ),
+        (
+            "mspp_item_number_shape_type",
+            "json.mspp_item_number_shape_type_accepted",
+        ),
+        (
+            "mspp_item_unknown_shape_type",
+            "json.mspp_item_unknown_shape_type_accepted",
+        ),
+        (
+            "mspp_item_missing_shape_data",
+            "json.mspp_item_missing_shape_data_accepted",
+        ),
+        (
+            "mspp_item_null_shape_data",
+            "json.mspp_item_null_shape_data_accepted",
+        ),
+        (
+            "mspp_item_array_shape_data",
+            "json.mspp_item_array_shape_data_accepted",
+        ),
+        (
+            "mspp_item_rectangle_missing_x_min",
+            "json.mspp_item_rectangle_missing_x_min_accepted",
+        ),
+        (
+            "mspp_item_rectangle_null_x_min",
+            "json.mspp_item_rectangle_null_x_min_accepted",
+        ),
+        (
+            "mspp_item_rectangle_missing_y_min",
+            "json.mspp_item_rectangle_missing_y_min_accepted",
+        ),
+        (
+            "mspp_item_rectangle_null_y_min",
+            "json.mspp_item_rectangle_null_y_min_accepted",
+        ),
+        (
+            "mspp_item_rectangle_missing_width",
+            "json.mspp_item_rectangle_missing_width_accepted",
+        ),
+        (
+            "mspp_item_rectangle_null_width",
+            "json.mspp_item_rectangle_null_width_accepted",
+        ),
+        (
+            "mspp_item_rectangle_missing_height",
+            "json.mspp_item_rectangle_missing_height_accepted",
+        ),
+        (
+            "mspp_item_rectangle_null_height",
+            "json.mspp_item_rectangle_null_height_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "bpp_item_simple_polygon_null_data",
+            "json.bpp_item_simple_polygon_null_data_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_object_data",
+            "json.bpp_item_simple_polygon_object_data_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_null_point",
+            "json.bpp_item_simple_polygon_null_point_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_number_point",
+            "json.bpp_item_simple_polygon_number_point_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_one_coordinate",
+            "json.bpp_item_simple_polygon_one_coordinate_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_three_coordinates",
+            "json.bpp_item_simple_polygon_three_coordinates_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_string_coordinate",
+            "json.bpp_item_simple_polygon_string_coordinate_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_null_coordinate",
+            "json.bpp_item_simple_polygon_null_coordinate_accepted",
+        ),
+        (
+            "bpp_item_simple_polygon_empty_points",
+            "json.bpp_item_simple_polygon_empty_points_accepted",
+        ),
+        (
+            "bpp_item_polygon_array_data",
+            "json.bpp_item_polygon_array_data_accepted",
+        ),
+        (
+            "bpp_item_polygon_missing_outer",
+            "json.bpp_item_polygon_missing_outer_accepted",
+        ),
+        (
+            "bpp_item_polygon_null_outer",
+            "json.bpp_item_polygon_null_outer_accepted",
+        ),
+        (
+            "bpp_item_polygon_object_outer",
+            "json.bpp_item_polygon_object_outer_accepted",
+        ),
+        (
+            "bpp_item_polygon_null_inner",
+            "json.bpp_item_polygon_null_inner_accepted",
+        ),
+        (
+            "bpp_item_polygon_object_inner",
+            "json.bpp_item_polygon_object_inner_accepted",
+        ),
+        (
+            "bpp_item_polygon_missing_inner",
+            "json.bpp_item_polygon_missing_inner_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_null_data",
+            "json.bpp_item_multipolygon_null_data_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_object_data",
+            "json.bpp_item_multipolygon_object_data_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_null_element",
+            "json.bpp_item_multipolygon_null_element_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_missing_outer",
+            "json.bpp_item_multipolygon_missing_outer_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_null_outer",
+            "json.bpp_item_multipolygon_null_outer_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_null_inner",
+            "json.bpp_item_multipolygon_null_inner_accepted",
+        ),
+        (
+            "bpp_item_multipolygon_empty_data",
+            "json.bpp_item_multipolygon_empty_data_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_simple_polygon_null_data",
+            "json.mspp_item_simple_polygon_null_data_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_object_data",
+            "json.mspp_item_simple_polygon_object_data_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_null_point",
+            "json.mspp_item_simple_polygon_null_point_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_number_point",
+            "json.mspp_item_simple_polygon_number_point_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_one_coordinate",
+            "json.mspp_item_simple_polygon_one_coordinate_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_three_coordinates",
+            "json.mspp_item_simple_polygon_three_coordinates_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_string_coordinate",
+            "json.mspp_item_simple_polygon_string_coordinate_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_null_coordinate",
+            "json.mspp_item_simple_polygon_null_coordinate_accepted",
+        ),
+        (
+            "mspp_item_simple_polygon_empty_points",
+            "json.mspp_item_simple_polygon_empty_points_accepted",
+        ),
+        (
+            "mspp_item_polygon_array_data",
+            "json.mspp_item_polygon_array_data_accepted",
+        ),
+        (
+            "mspp_item_polygon_missing_outer",
+            "json.mspp_item_polygon_missing_outer_accepted",
+        ),
+        (
+            "mspp_item_polygon_null_outer",
+            "json.mspp_item_polygon_null_outer_accepted",
+        ),
+        (
+            "mspp_item_polygon_object_outer",
+            "json.mspp_item_polygon_object_outer_accepted",
+        ),
+        (
+            "mspp_item_polygon_null_inner",
+            "json.mspp_item_polygon_null_inner_accepted",
+        ),
+        (
+            "mspp_item_polygon_object_inner",
+            "json.mspp_item_polygon_object_inner_accepted",
+        ),
+        (
+            "mspp_item_polygon_missing_inner",
+            "json.mspp_item_polygon_missing_inner_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_null_data",
+            "json.mspp_item_multipolygon_null_data_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_object_data",
+            "json.mspp_item_multipolygon_object_data_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_null_element",
+            "json.mspp_item_multipolygon_null_element_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_missing_outer",
+            "json.mspp_item_multipolygon_missing_outer_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_null_outer",
+            "json.mspp_item_multipolygon_null_outer_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_null_inner",
+            "json.mspp_item_multipolygon_null_inner_accepted",
+        ),
+        (
+            "mspp_item_multipolygon_empty_data",
+            "json.mspp_item_multipolygon_empty_data_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    for (input_name, output_name) in [
+        (
+            "bpp_item_valid_simple_polygon",
+            "json.bpp_item_valid_simple_polygon_accepted",
+        ),
+        (
+            "bpp_item_valid_polygon_no_holes",
+            "json.bpp_item_valid_polygon_no_holes_accepted",
+        ),
+        (
+            "bpp_item_valid_oblique_simple_polygon",
+            "json.bpp_item_valid_oblique_simple_polygon_accepted",
+        ),
+        (
+            "bpp_item_valid_concave_polygon_no_holes",
+            "json.bpp_item_valid_concave_polygon_no_holes_accepted",
+        ),
+        (
+            "bpp_item_positive_separation_simple_polygon",
+            "json.bpp_item_positive_separation_simple_polygon_accepted",
+        ),
+        (
+            "bpp_item_positive_separation_polygon_no_holes",
+            "json.bpp_item_positive_separation_polygon_no_holes_accepted",
+        ),
+        (
+            "bpp_bin_minsep_collapse_exact",
+            "json.bpp_bin_minsep_collapse_exact_accepted",
+        ),
+        (
+            "bpp_bin_minsep_near_collapse_above",
+            "json.bpp_bin_minsep_near_collapse_above_accepted",
+        ),
+        (
+            "bpp_container_minsep_hole_quality_zone",
+            "json.bpp_container_minsep_hole_quality_zone_accepted",
+        ),
+        (
+            "bpp_container_minsep_invalid_hole",
+            "json.bpp_container_minsep_invalid_hole_accepted",
+        ),
+        (
+            "bpp_container_minsep_invalid_quality_zone",
+            "json.bpp_container_minsep_invalid_quality_zone_accepted",
+        ),
+        (
+            "bpp_container_minsep_multi_zone_order",
+            "json.bpp_container_minsep_multi_zone_order_accepted",
+        ),
+        (
+            "bpp_multi_bin_sorted_zero_stock",
+            "json.bpp_multi_bin_sorted_zero_stock_accepted",
+        ),
+        (
+            "bpp_multi_bin_duplicate_zero_stock_id",
+            "json.bpp_multi_bin_duplicate_zero_stock_id_accepted",
+        ),
+        (
+            "bpp_multi_bin_all_zero_stock",
+            "json.bpp_multi_bin_all_zero_stock_accepted",
+        ),
+        (
+            "bpp_multi_bin_u64_boundary_order",
+            "json.bpp_multi_bin_u64_boundary_order_accepted",
+        ),
+    ] {
+        println!("{output_name}={}", json_metadata_b8_bpp_accepts(input_name));
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_valid_simple_polygon",
+            "json.mspp_item_valid_simple_polygon_accepted",
+        ),
+        (
+            "mspp_item_valid_polygon_no_holes",
+            "json.mspp_item_valid_polygon_no_holes_accepted",
+        ),
+        (
+            "mspp_item_valid_oblique_simple_polygon",
+            "json.mspp_item_valid_oblique_simple_polygon_accepted",
+        ),
+        (
+            "mspp_item_valid_concave_polygon_no_holes",
+            "json.mspp_item_valid_concave_polygon_no_holes_accepted",
+        ),
+        (
+            "mspp_item_positive_separation_simple_polygon",
+            "json.mspp_item_positive_separation_simple_polygon_accepted",
+        ),
+        (
+            "mspp_item_positive_separation_polygon_no_holes",
+            "json.mspp_item_positive_separation_polygon_no_holes_accepted",
+        ),
+        (
+            "mspp_strip_minsep_collapse_exact",
+            "json.mspp_strip_minsep_collapse_exact_accepted",
+        ),
+        (
+            "mspp_strip_minsep_near_collapse_above",
+            "json.mspp_strip_minsep_near_collapse_above_accepted",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_accepts(input_name)
+        );
+    }
+
+    let importer = Importer::new(
+        CDEConfig {
+            quadtree_depth: 4,
+            cd_threshold: 32,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+        None,
+        None,
+    );
+    for (input_name, output_name) in [
+        (
+            "bpp_item_simple_polygon_empty_points",
+            "json.bpp_item_simple_polygon_empty_points_import_outcome",
+        ),
+        (
+            "bpp_item_polygon_missing_inner",
+            "json.bpp_item_polygon_missing_inner_import_outcome",
+        ),
+        (
+            "bpp_item_multipolygon_empty_data",
+            "json.bpp_item_multipolygon_empty_data_import_outcome",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_bpp_import_outcome(input_name, &importer)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_simple_polygon_empty_points",
+            "json.mspp_item_simple_polygon_empty_points_import_outcome",
+        ),
+        (
+            "mspp_item_polygon_missing_inner",
+            "json.mspp_item_polygon_missing_inner_import_outcome",
+        ),
+        (
+            "mspp_item_multipolygon_empty_data",
+            "json.mspp_item_multipolygon_empty_data_import_outcome",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_import_outcome(input_name, &importer)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_item_valid_simple_polygon",
+            "json.bpp_item_valid_simple_polygon_import_outcome",
+        ),
+        (
+            "bpp_item_valid_polygon_no_holes",
+            "json.bpp_item_valid_polygon_no_holes_import_outcome",
+        ),
+        (
+            "bpp_item_valid_oblique_simple_polygon",
+            "json.bpp_item_valid_oblique_simple_polygon_import_outcome",
+        ),
+        (
+            "bpp_item_valid_concave_polygon_no_holes",
+            "json.bpp_item_valid_concave_polygon_no_holes_import_outcome",
+        ),
+        (
+            "bpp_item_positive_separation_simple_polygon",
+            "json.bpp_item_positive_separation_simple_polygon_import_outcome",
+        ),
+        (
+            "bpp_item_positive_separation_polygon_no_holes",
+            "json.bpp_item_positive_separation_polygon_no_holes_import_outcome",
+        ),
+        (
+            "bpp_bin_minsep_collapse_exact",
+            "json.bpp_bin_minsep_collapse_exact_import_outcome",
+        ),
+        (
+            "bpp_bin_minsep_near_collapse_above",
+            "json.bpp_bin_minsep_near_collapse_above_import_outcome",
+        ),
+        (
+            "bpp_container_minsep_hole_quality_zone",
+            "json.bpp_container_minsep_hole_quality_zone_import_outcome",
+        ),
+        (
+            "bpp_container_minsep_invalid_hole",
+            "json.bpp_container_minsep_invalid_hole_import_outcome",
+        ),
+        (
+            "bpp_container_minsep_invalid_quality_zone",
+            "json.bpp_container_minsep_invalid_quality_zone_import_outcome",
+        ),
+        (
+            "bpp_container_minsep_multi_zone_order",
+            "json.bpp_container_minsep_multi_zone_order_import_outcome",
+        ),
+        (
+            "bpp_multi_bin_sorted_zero_stock",
+            "json.bpp_multi_bin_sorted_zero_stock_import_outcome",
+        ),
+        (
+            "bpp_multi_bin_duplicate_zero_stock_id",
+            "json.bpp_multi_bin_duplicate_zero_stock_id_import_outcome",
+        ),
+        (
+            "bpp_multi_bin_all_zero_stock",
+            "json.bpp_multi_bin_all_zero_stock_import_outcome",
+        ),
+        (
+            "bpp_multi_bin_u64_boundary_order",
+            "json.bpp_multi_bin_u64_boundary_order_import_outcome",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_bpp_import_outcome(input_name, &importer)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_valid_simple_polygon",
+            "json.mspp_item_valid_simple_polygon_import_outcome",
+        ),
+        (
+            "mspp_item_valid_polygon_no_holes",
+            "json.mspp_item_valid_polygon_no_holes_import_outcome",
+        ),
+        (
+            "mspp_item_valid_oblique_simple_polygon",
+            "json.mspp_item_valid_oblique_simple_polygon_import_outcome",
+        ),
+        (
+            "mspp_item_valid_concave_polygon_no_holes",
+            "json.mspp_item_valid_concave_polygon_no_holes_import_outcome",
+        ),
+        (
+            "mspp_item_positive_separation_simple_polygon",
+            "json.mspp_item_positive_separation_simple_polygon_import_outcome",
+        ),
+        (
+            "mspp_item_positive_separation_polygon_no_holes",
+            "json.mspp_item_positive_separation_polygon_no_holes_import_outcome",
+        ),
+        (
+            "mspp_strip_minsep_collapse_exact",
+            "json.mspp_strip_minsep_collapse_exact_import_outcome",
+        ),
+        (
+            "mspp_strip_minsep_near_collapse_above",
+            "json.mspp_strip_minsep_near_collapse_above_import_outcome",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_import_outcome(input_name, &importer)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_strip_minsep_collapse_exact",
+            "json.mspp_strip_minsep_collapse_exact_container_outcome",
+        ),
+        (
+            "mspp_strip_minsep_near_collapse_above",
+            "json.mspp_strip_minsep_near_collapse_above_container_outcome",
+        ),
+    ] {
+        println!(
+            "{output_name}={}",
+            json_metadata_b8_mspp_strip_container_outcome(input_name, &importer)
+        );
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_item_positive_separation_simple_polygon",
+            "json.bpp_item_positive_separation_simple_polygon_container_shape_state",
+        ),
+        (
+            "bpp_item_positive_separation_polygon_no_holes",
+            "json.bpp_item_positive_separation_polygon_no_holes_container_shape_state",
+        ),
+        (
+            "bpp_bin_minsep_near_collapse_above",
+            "json.bpp_bin_minsep_near_collapse_above_container_shape_state",
+        ),
+    ] {
+        let state = json_metadata_b8_bpp_import_container_shape_state(input_name, &importer)
+            .unwrap_or_else(|| panic!("BPP container import failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    for (input_name, output_name) in [(
+        "bpp_container_minsep_hole_quality_zone",
+        "json.bpp_container_minsep_hole_quality_zone_container_quality_shape_state",
+    )] {
+        let state =
+            json_metadata_b8_bpp_import_container_quality_shape_state(input_name, &importer)
+                .unwrap_or_else(|| panic!("BPP quality-zone import failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    for (input_name, output_name) in [(
+        "bpp_container_minsep_multi_zone_order",
+        "json.bpp_container_minsep_multi_zone_order_container_quality_shape_state",
+    )] {
+        let state =
+            json_metadata_b8_bpp_import_container_quality_shape_state(input_name, &importer)
+                .unwrap_or_else(|| panic!("BPP multi-zone import failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    for (input_name, output_name) in [(
+        "bpp_container_minsep_multi_zone_order",
+        "json.bpp_container_minsep_multi_zone_order_hazard_mapping",
+    )] {
+        let state = json_metadata_b8_bpp_import_container_hazard_probe_state(input_name, &importer)
+            .unwrap_or_else(|| panic!("BPP hazard probe failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    let bin_collection_state = json_metadata_b8_bpp_import_bin_collection_state(
+        "bpp_multi_bin_sorted_zero_stock",
+        &importer,
+    )
+    .expect("BPP multi-bin import failed");
+    println!("json.bpp_multi_bin_sorted_zero_stock_bin_collection_state={bin_collection_state}");
+    let bin_integer_state = json_metadata_b8_bpp_import_bin_integer_state(
+        "bpp_multi_bin_u64_boundary_order",
+        &importer,
+    )
+    .expect("BPP u64-boundary bin import failed");
+    println!("json.bpp_multi_bin_u64_boundary_order_integer_state={bin_integer_state}");
+    for (input_name, output_name) in [
+        (
+            "mspp_item_positive_separation_simple_polygon",
+            "json.mspp_item_positive_separation_simple_polygon_container_shape_state",
+        ),
+        (
+            "mspp_item_positive_separation_polygon_no_holes",
+            "json.mspp_item_positive_separation_polygon_no_holes_container_shape_state",
+        ),
+        (
+            "mspp_strip_minsep_near_collapse_above",
+            "json.mspp_strip_minsep_near_collapse_above_container_shape_state",
+        ),
+    ] {
+        let state = json_metadata_b8_mspp_strip_container_shape_state(input_name, &importer)
+            .unwrap_or_else(|| panic!("MSPP strip container creation failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    for (input_name, output_name) in [
+        (
+            "bpp_item_valid_simple_polygon",
+            "json.bpp_item_valid_simple_polygon_shape_state",
+        ),
+        (
+            "bpp_item_valid_polygon_no_holes",
+            "json.bpp_item_valid_polygon_no_holes_shape_state",
+        ),
+        (
+            "bpp_item_valid_oblique_simple_polygon",
+            "json.bpp_item_valid_oblique_simple_polygon_shape_state",
+        ),
+        (
+            "bpp_item_valid_concave_polygon_no_holes",
+            "json.bpp_item_valid_concave_polygon_no_holes_shape_state",
+        ),
+        (
+            "bpp_item_positive_separation_simple_polygon",
+            "json.bpp_item_positive_separation_simple_polygon_shape_state",
+        ),
+        (
+            "bpp_item_positive_separation_polygon_no_holes",
+            "json.bpp_item_positive_separation_polygon_no_holes_shape_state",
+        ),
+    ] {
+        let state = json_metadata_b8_bpp_import_shape_state(input_name, &importer)
+            .unwrap_or_else(|| panic!("BPP valid polygon import failed: {input_name}"));
+        println!("{output_name}={state}");
+    }
+    for (input_name, output_name) in [
+        (
+            "mspp_item_valid_simple_polygon",
+            "json.mspp_item_valid_simple_polygon_shape_state",
+        ),
+        (
+            "mspp_item_valid_polygon_no_holes",
+            "json.mspp_item_valid_polygon_no_holes_shape_state",
+        ),
+        (
+            "mspp_item_valid_oblique_simple_polygon",
+            "json.mspp_item_valid_oblique_simple_polygon_shape_state",
+        ),
+        (
+            "mspp_item_valid_concave_polygon_no_holes",
+            "json.mspp_item_valid_concave_polygon_no_holes_shape_state",
+        ),
+        (
+            "mspp_item_positive_separation_simple_polygon",
+            "json.mspp_item_positive_separation_simple_polygon_shape_state",
+        ),
+        (
+            "mspp_item_positive_separation_polygon_no_holes",
+            "json.mspp_item_positive_separation_polygon_no_holes_shape_state",
+        ),
+    ] {
+        let state = json_metadata_b8_mspp_import_shape_state(input_name, &importer)
+            .unwrap_or_else(|| panic!("MSPP valid polygon import failed: {input_name}"));
+        println!("{output_name}={state}");
     }
 }
 
@@ -3823,7 +5911,1295 @@ fn run_problem_types_b7_parity_oracle() {
     );
 }
 
+fn svg_collision_layout(
+    positions: &[(f32, f32)],
+    quality_zones: Vec<InferiorQualityZone>,
+    min_quality: Option<usize>,
+) -> Layout {
+    let container = Container::new(
+        OriginalShape {
+            shape: polygon(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]),
+            pre_transform: DTransformation::empty(),
+            modify_mode: ShapeModifyMode::Deflate,
+            modify_config: ShapeModifyConfig::default(),
+        },
+        quality_zones,
+        CDEConfig {
+            quadtree_depth: 1,
+            cd_threshold: 8,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+    )
+    .unwrap();
+    let item = Arc::new(
+        Item::new(
+            0,
+            9001,
+            OriginalShape {
+                shape: polygon(&[(-5.0, -10.0), (5.0, -10.0), (5.0, 10.0), (-5.0, 10.0)]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            RotationRange::None,
+            min_quality,
+            SPSurrogateConfig::none(),
+        )
+        .unwrap(),
+    );
+    let mut layout = Layout::new(container);
+    for (x, y) in positions {
+        layout.place_item(&item, DTransformation::new(0.0, (*x, *y)));
+    }
+    layout
+}
+
+fn svg_collision_zone(quality: usize, rectangles: &[(f32, f32, f32, f32)]) -> InferiorQualityZone {
+    let shapes = rectangles
+        .iter()
+        .map(|(x_min, y_min, x_max, y_max)| OriginalShape {
+            shape: rectangle(*x_min, *y_min, *x_max, *y_max),
+            pre_transform: DTransformation::empty(),
+            modify_mode: ShapeModifyMode::Inflate,
+            modify_config: ShapeModifyConfig::default(),
+        })
+        .collect();
+    InferiorQualityZone::new(quality, shapes).unwrap()
+}
+
+fn svg_path_data_for_group(svg: &str, group_id: &str) -> Vec<String> {
+    svg_path_elements_for_group(svg, group_id)
+        .iter()
+        .map(|element| svg_attribute(element, "d"))
+        .collect()
+}
+
+fn svg_path_elements_for_group(svg: &str, group_id: &str) -> Vec<String> {
+    let group_marker = format!("<g id=\"{group_id}\"");
+    let group_start = svg
+        .find(&group_marker)
+        .unwrap_or_else(|| panic!("missing SVG group {group_id}"));
+    let group_remainder = &svg[group_start..];
+    let group_end = group_remainder
+        .find("</g>")
+        .unwrap_or_else(|| panic!("unterminated SVG group {group_id}"));
+    let group = &group_remainder[..group_end];
+    let mut elements = Vec::new();
+    let mut cursor = 0;
+    while let Some(relative_start) = group[cursor..].find("<path") {
+        let path_start = cursor + relative_start;
+        let tag_end = group[path_start..]
+            .find('>')
+            .map(|offset| path_start + offset)
+            .unwrap_or_else(|| panic!("unterminated path in SVG group {group_id}"));
+        let element_end = if group[path_start..=tag_end].ends_with("/>") {
+            tag_end + 1
+        } else {
+            group[tag_end + 1..]
+                .find("</path>")
+                .map(|offset| tag_end + 1 + offset + "</path>".len())
+                .unwrap_or_else(|| panic!("unterminated path in SVG group {group_id}"))
+        };
+        elements.push(group[path_start..element_end].to_owned());
+        cursor = element_end;
+    }
+    elements
+}
+
+fn svg_circle_elements_for_group(svg: &str, group_id: &str) -> Vec<String> {
+    let group_marker = format!("<g id=\"{group_id}\"");
+    let group_start = svg
+        .find(&group_marker)
+        .unwrap_or_else(|| panic!("missing SVG group {group_id}"));
+    let group_remainder = &svg[group_start..];
+    let group_end = group_remainder
+        .find("</g>")
+        .unwrap_or_else(|| panic!("unterminated SVG group {group_id}"));
+    let group = &group_remainder[..group_end];
+    let mut elements = Vec::new();
+    let mut cursor = 0;
+    while let Some(relative_start) = group[cursor..].find("<circle") {
+        let circle_start = cursor + relative_start;
+        let tag_end = group[circle_start..]
+            .find('>')
+            .map(|offset| circle_start + offset)
+            .unwrap_or_else(|| panic!("unterminated circle in SVG group {group_id}"));
+        elements.push(group[circle_start..=tag_end].to_owned());
+        cursor = tag_end + 1;
+    }
+    elements
+}
+
+fn svg_attribute(element: &str, name: &str) -> String {
+    let marker = format!(" {name}=\"");
+    let value_start = element
+        .find(&marker)
+        .map(|offset| offset + marker.len())
+        .unwrap_or_else(|| panic!("missing SVG attribute {name}"));
+    let value_end = element[value_start..]
+        .find('"')
+        .map(|offset| value_start + offset)
+        .unwrap_or_else(|| panic!("unterminated SVG attribute {name}"));
+    element[value_start..value_end].to_owned()
+}
+
+fn svg_opening_tag_with_attribute(
+    svg: &str,
+    tag_name: &str,
+    attribute: &str,
+    expected_value: &str,
+) -> String {
+    let marker = format!("<{tag_name}");
+    let mut cursor = 0;
+    while let Some(relative_start) = svg[cursor..].find(&marker) {
+        let tag_start = cursor + relative_start;
+        let tag_end = svg[tag_start..]
+            .find('>')
+            .map(|offset| tag_start + offset)
+            .unwrap_or_else(|| panic!("unterminated SVG {tag_name} tag"));
+        let tag = &svg[tag_start..=tag_end];
+        if svg_attribute(tag, attribute) == expected_value {
+            return tag.to_owned();
+        }
+        cursor = tag_end + 1;
+    }
+    panic!("missing SVG {tag_name} with {attribute}={expected_value}");
+}
+
+fn svg_imported_bpp_placed_state(svg: &str) -> String {
+    let original_item_paths = svg_path_elements_for_group(svg, "item_1");
+    let collision_item_paths = svg_path_elements_for_group(svg, "cd_shape_1");
+    let collision_lines = svg_path_elements_for_group(svg, "collision_lines");
+    assert_eq!(original_item_paths.len(), 1);
+    assert_eq!(collision_item_paths.len(), 1);
+    assert_eq!(collision_lines.len(), 1);
+
+    let original_item = &original_item_paths[0];
+    let collision_item = &collision_item_paths[0];
+    let item_use = svg_opening_tag_with_attribute(svg, "use", "href", "#item_1");
+    let cd_use = svg_opening_tag_with_attribute(svg, "use", "href", "#cd_shape_1");
+    let mut state = format!(
+        "item={},fill={},fill-opacity={},fill-rule={},stroke={},stroke-width={},href={},transform={};cd={},fill={},stroke={},stroke-width={},stroke-opacity={},stroke-dasharray={},stroke-linecap={},stroke-linejoin={},href={},transform={};collisions={}",
+        svg_attribute(original_item, "d"),
+        svg_attribute(original_item, "fill"),
+        svg_attribute(original_item, "fill-opacity"),
+        svg_attribute(original_item, "fill-rule"),
+        svg_attribute(original_item, "stroke"),
+        svg_attribute(original_item, "stroke-width"),
+        svg_attribute(&item_use, "href"),
+        svg_attribute(&item_use, "transform"),
+        svg_attribute(collision_item, "d"),
+        svg_attribute(collision_item, "fill"),
+        svg_attribute(collision_item, "stroke"),
+        svg_attribute(collision_item, "stroke-width"),
+        svg_attribute(collision_item, "stroke-opacity"),
+        svg_attribute(collision_item, "stroke-dasharray"),
+        svg_attribute(collision_item, "stroke-linecap"),
+        svg_attribute(collision_item, "stroke-linejoin"),
+        svg_attribute(&cd_use, "href"),
+        svg_attribute(&cd_use, "transform"),
+        collision_lines.len(),
+    );
+    for line in collision_lines {
+        state.push('|');
+        state.push_str(&format!(
+            "{},stroke={},stroke-opacity={},stroke-width={},stroke-dasharray={},stroke-linecap={},stroke-linejoin={}",
+            svg_attribute(&line, "d"),
+            svg_attribute(&line, "stroke"),
+            svg_attribute(&line, "stroke-opacity"),
+            svg_attribute(&line, "stroke-width"),
+            svg_attribute(&line, "stroke-dasharray"),
+            svg_attribute(&line, "stroke-linecap"),
+            svg_attribute(&line, "stroke-linejoin"),
+        ));
+    }
+    state
+}
+
+fn svg_imported_bpp_quality_filter_state(layout: &Layout, svg: &str) -> String {
+    let collision_group = "<g id=\"collision_lines\"";
+    let collision_lines = if svg.contains(collision_group) {
+        svg_path_elements_for_group(svg, "collision_lines")
+    } else {
+        Vec::new()
+    };
+    let mut state = format!(
+        "feasible={};collisions={}",
+        layout.is_feasible(),
+        collision_lines.len()
+    );
+    for line in collision_lines {
+        state.push('|');
+        state.push_str(&format!(
+            "{},stroke={},stroke-opacity={},stroke-width={},stroke-dasharray={},stroke-linecap={},stroke-linejoin={}",
+            svg_attribute(&line, "d"),
+            svg_attribute(&line, "stroke"),
+            svg_attribute(&line, "stroke-opacity"),
+            svg_attribute(&line, "stroke-width"),
+            svg_attribute(&line, "stroke-dasharray"),
+            svg_attribute(&line, "stroke-linecap"),
+            svg_attribute(&line, "stroke-linejoin"),
+        ));
+    }
+    state
+}
+
+fn canonical_svg_collision_line_path(path_data: &str) -> String {
+    let path_data = path_data
+        .strip_prefix('M')
+        .expect("collision path must start with M");
+    let (first_endpoint, second_endpoint) = path_data
+        .split_once(" L")
+        .expect("collision path must contain a line command");
+    if second_endpoint < first_endpoint {
+        format!("M{second_endpoint} L{first_endpoint}")
+    } else {
+        format!("M{first_endpoint} L{second_endpoint}")
+    }
+}
+
+fn svg_imported_bpp_multi_hazard_state(layout: &Layout, svg: &str) -> String {
+    let collision_group = "<g id=\"collision_lines\"";
+    let collision_lines = if svg.contains(collision_group) {
+        svg_path_elements_for_group(svg, "collision_lines")
+    } else {
+        Vec::new()
+    };
+    let mut line_states = collision_lines
+        .iter()
+        .map(|line| {
+            format!(
+                "{},stroke={},stroke-opacity={},stroke-width={},stroke-dasharray={},stroke-linecap={},stroke-linejoin={}",
+                canonical_svg_collision_line_path(&svg_attribute(line, "d")),
+                svg_attribute(line, "stroke"),
+                svg_attribute(line, "stroke-opacity"),
+                svg_attribute(line, "stroke-width"),
+                svg_attribute(line, "stroke-dasharray"),
+                svg_attribute(line, "stroke-linecap"),
+                svg_attribute(line, "stroke-linejoin"),
+            )
+        })
+        .collect::<Vec<_>>();
+    line_states.sort();
+
+    let mut state = format!(
+        "feasible={};collisions={}",
+        layout.is_feasible(),
+        line_states.len()
+    );
+    for line_state in line_states {
+        state.push('|');
+        state.push_str(&line_state);
+    }
+    state
+}
+
+fn svg_imported_bpp_exterior_state(layout: &Layout, svg: &str) -> String {
+    let circles = svg_circle_elements_for_group(svg, "collision_lines");
+    let mut state = format!(
+        "feasible={};exterior_circles={}",
+        layout.is_feasible(),
+        circles.len()
+    );
+    for circle in circles {
+        state.push_str(&format!(
+            "|cx={},cy={},r={},fill={}",
+            svg_attribute(&circle, "cx"),
+            svg_attribute(&circle, "cy"),
+            svg_attribute(&circle, "r"),
+            svg_attribute(&circle, "fill"),
+        ));
+    }
+    state
+}
+
+fn svg_quality_title(element: &str) -> String {
+    let marker = "<title>quality zone, q: ";
+    let value_start = element
+        .find(marker)
+        .map(|offset| offset + marker.len())
+        .unwrap_or_else(|| panic!("missing quality-zone title"));
+    let value_end = element[value_start..]
+        .find("</title>")
+        .map(|offset| value_start + offset)
+        .unwrap_or_else(|| panic!("unterminated quality-zone title"));
+    element[value_start..value_end].to_owned()
+}
+
+fn svg_path_style_state(svg: &str, group_id: &str, attributes: &[&str]) -> Vec<String> {
+    svg_path_elements_for_group(svg, group_id)
+        .iter()
+        .map(|element| {
+            let fields = attributes
+                .iter()
+                .map(|name| format!("{name}={}", svg_attribute(element, name)))
+                .collect::<Vec<_>>()
+                .join(",");
+            if group_id == "quality_zones" {
+                format!("q={},{}", svg_quality_title(element), fields)
+            } else {
+                fields
+            }
+        })
+        .collect()
+}
+
+fn svg_imported_bpp_container_path_style_state(svg: &str) -> String {
+    let container =
+        svg_path_style_state(svg, "container", &["d", "fill", "stroke", "stroke-width"]);
+    assert_eq!(container.len(), 1);
+    format!("container:{}:{}", container.len(), container.join("|"))
+}
+
+fn svg_imported_bpp_quality_zero_hole_path_style_state(svg: &str) -> String {
+    let quality_zones = svg_path_style_state(
+        svg,
+        "quality_zones",
+        &[
+            "d",
+            "fill",
+            "fill-opacity",
+            "stroke",
+            "stroke-width",
+            "stroke-opacity",
+            "stroke-dasharray",
+            "stroke-linecap",
+            "stroke-linejoin",
+        ],
+    );
+    let hole_paths = quality_zones
+        .into_iter()
+        .filter(|state| state.starts_with("q=0,"))
+        .collect::<Vec<_>>();
+    assert!(!hole_paths.is_empty());
+    format!("quality0:{}:{}", hole_paths.len(), hole_paths.join("|"))
+}
+
+fn svg_imported_bpp_quality_two_five_path_style_state(svg: &str) -> String {
+    let quality_zones = svg_path_style_state(
+        svg,
+        "quality_zones",
+        &[
+            "d",
+            "fill",
+            "fill-opacity",
+            "stroke",
+            "stroke-width",
+            "stroke-opacity",
+            "stroke-dasharray",
+            "stroke-linecap",
+            "stroke-linejoin",
+        ],
+    );
+    let selected_paths = quality_zones
+        .into_iter()
+        .filter(|state| state.starts_with("q=2,") || state.starts_with("q=5,"))
+        .collect::<Vec<_>>();
+    assert!(!selected_paths.is_empty());
+    let quality_two_count = selected_paths
+        .iter()
+        .filter(|state| state.starts_with("q=2,"))
+        .count();
+    let quality_five_count = selected_paths
+        .iter()
+        .filter(|state| state.starts_with("q=5,"))
+        .count();
+    format!(
+        "quality2={quality_two_count};quality5={quality_five_count};paths:{}",
+        selected_paths.join("|")
+    )
+}
+
+fn svg_imported_bpp_cd_style_state(svg: &str) -> String {
+    let container = svg_path_style_state(svg, "container", &["fill", "stroke", "stroke-width"]);
+    let quality_zones = svg_path_style_state(
+        svg,
+        "quality_zones",
+        &[
+            "fill",
+            "fill-opacity",
+            "stroke",
+            "stroke-width",
+            "stroke-opacity",
+            "stroke-dasharray",
+            "stroke-linecap",
+            "stroke-linejoin",
+        ],
+    );
+    format!(
+        "container:{}:{};quality_zones:{}:{}",
+        container.len(),
+        container.join("|"),
+        quality_zones.len(),
+        quality_zones.join("|")
+    )
+}
+
+fn run_svg_imported_bpp_parity_oracle() {
+    let importer = Importer::new(
+        CDEConfig {
+            quadtree_depth: 4,
+            cd_threshold: 32,
+            item_surrogate_config: SPSurrogateConfig::none(),
+        },
+        None,
+        None,
+    );
+    let external: ExtBPInstance = serde_json::from_str(json_metadata_b8_input(
+        "bpp_container_minsep_multi_zone_order",
+    ))
+    .unwrap();
+    let instance = import_bpp_instance(&importer, &external).unwrap();
+    assert_eq!(instance.bins.len(), 1);
+    let layout = Layout::new(instance.bins[0].container.clone());
+    let svg = layout_to_svg(&layout, SvgDrawOptions::default(), "oracle").to_string();
+    let svg_root =
+        svg_opening_tag_with_attribute(&svg, "svg", "xmlns", "http://www.w3.org/2000/svg");
+    let container_path_elements = svg_path_elements_for_group(&svg, "container");
+    assert_eq!(container_path_elements.len(), 1);
+    let canvas_state = format!(
+        "viewBox={};container_stroke_width={}",
+        svg_attribute(&svg_root, "viewBox"),
+        svg_attribute(&container_path_elements[0], "stroke-width")
+    );
+    let mut scaled_canvas_options = SvgDrawOptions::default();
+    scaled_canvas_options.theme.stroke_width_multiplier = 3.25;
+    let scaled_canvas_svg = layout_to_svg(&layout, scaled_canvas_options, "oracle").to_string();
+    let scaled_canvas_root = svg_opening_tag_with_attribute(
+        &scaled_canvas_svg,
+        "svg",
+        "xmlns",
+        "http://www.w3.org/2000/svg",
+    );
+    let scaled_canvas_container_paths =
+        svg_path_elements_for_group(&scaled_canvas_svg, "container");
+    assert_eq!(scaled_canvas_container_paths.len(), 1);
+    assert_eq!(
+        svg_attribute(&scaled_canvas_root, "viewBox"),
+        svg_attribute(&svg_root, "viewBox")
+    );
+    let scaled_canvas_state = format!(
+        "viewBox={};stroke_multiplier=3.25;container_stroke_width={}",
+        svg_attribute(&scaled_canvas_root, "viewBox"),
+        svg_attribute(&scaled_canvas_container_paths[0], "stroke-width")
+    );
+    let portrait_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_portrait_canvas")).unwrap();
+    let portrait_instance = import_bpp_instance(&importer, &portrait_external).unwrap();
+    assert_eq!(portrait_instance.bins.len(), 1);
+    let portrait_layout = Layout::new(portrait_instance.bins[0].container.clone());
+    let portrait_svg =
+        layout_to_svg(&portrait_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let portrait_root =
+        svg_opening_tag_with_attribute(&portrait_svg, "svg", "xmlns", "http://www.w3.org/2000/svg");
+    let portrait_container_paths = svg_path_elements_for_group(&portrait_svg, "container");
+    assert_eq!(portrait_container_paths.len(), 1);
+    let portrait_canvas_state = format!(
+        "viewBox={};container_stroke_width={}",
+        svg_attribute(&portrait_root, "viewBox"),
+        svg_attribute(&portrait_container_paths[0], "stroke-width")
+    );
+    let mut portrait_scaled_options = SvgDrawOptions::default();
+    portrait_scaled_options.theme.stroke_width_multiplier = 3.25;
+    let portrait_scaled_svg =
+        layout_to_svg(&portrait_layout, portrait_scaled_options, "oracle").to_string();
+    let portrait_scaled_root = svg_opening_tag_with_attribute(
+        &portrait_scaled_svg,
+        "svg",
+        "xmlns",
+        "http://www.w3.org/2000/svg",
+    );
+    let portrait_scaled_container_paths =
+        svg_path_elements_for_group(&portrait_scaled_svg, "container");
+    assert_eq!(portrait_scaled_container_paths.len(), 1);
+    assert_eq!(
+        svg_attribute(&portrait_scaled_root, "viewBox"),
+        svg_attribute(&portrait_root, "viewBox")
+    );
+    let portrait_scaled_canvas_state = format!(
+        "viewBox={};stroke_multiplier=3.25;container_stroke_width={}",
+        svg_attribute(&portrait_scaled_root, "viewBox"),
+        svg_attribute(&portrait_scaled_container_paths[0], "stroke-width")
+    );
+    let wide_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_wide_canvas")).unwrap();
+    let wide_instance = import_bpp_instance(&importer, &wide_external).unwrap();
+    assert_eq!(wide_instance.bins.len(), 1);
+    let wide_layout = Layout::new(wide_instance.bins[0].container.clone());
+    let wide_svg = layout_to_svg(&wide_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let wide_root =
+        svg_opening_tag_with_attribute(&wide_svg, "svg", "xmlns", "http://www.w3.org/2000/svg");
+    let wide_container_paths = svg_path_elements_for_group(&wide_svg, "container");
+    assert_eq!(wide_container_paths.len(), 1);
+    let wide_canvas_state = format!(
+        "viewBox={};container_stroke_width={}",
+        svg_attribute(&wide_root, "viewBox"),
+        svg_attribute(&wide_container_paths[0], "stroke-width")
+    );
+    let oblique_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_oblique_canvas")).unwrap();
+    let oblique_instance = import_bpp_instance(&importer, &oblique_external).unwrap();
+    assert_eq!(oblique_instance.bins.len(), 1);
+    let oblique_layout = Layout::new(oblique_instance.bins[0].container.clone());
+    let oblique_svg =
+        layout_to_svg(&oblique_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let oblique_root =
+        svg_opening_tag_with_attribute(&oblique_svg, "svg", "xmlns", "http://www.w3.org/2000/svg");
+    let oblique_container_paths = svg_path_elements_for_group(&oblique_svg, "container");
+    assert_eq!(oblique_container_paths.len(), 1);
+    let oblique_canvas_state = format!(
+        "viewBox={};container_stroke_width={}",
+        svg_attribute(&oblique_root, "viewBox"),
+        svg_attribute(&oblique_container_paths[0], "stroke-width")
+    );
+    let oblique_path_state = format!(
+        "d={};fill={};stroke={};stroke-width={}",
+        svg_attribute(&oblique_container_paths[0], "d"),
+        svg_attribute(&oblique_container_paths[0], "fill"),
+        svg_attribute(&oblique_container_paths[0], "stroke"),
+        svg_attribute(&oblique_container_paths[0], "stroke-width")
+    );
+    let concave_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_concave_canvas")).unwrap();
+    let concave_instance = import_bpp_instance(&importer, &concave_external).unwrap();
+    assert_eq!(concave_instance.bins.len(), 1);
+    let concave_layout = Layout::new(concave_instance.bins[0].container.clone());
+    let concave_svg =
+        layout_to_svg(&concave_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let concave_container_paths = svg_path_elements_for_group(&concave_svg, "container");
+    assert_eq!(concave_container_paths.len(), 1);
+    let concave_path_state = format!(
+        "d={};fill={};stroke={};stroke-width={}",
+        svg_attribute(&concave_container_paths[0], "d"),
+        svg_attribute(&concave_container_paths[0], "fill"),
+        svg_attribute(&concave_container_paths[0], "stroke"),
+        svg_attribute(&concave_container_paths[0], "stroke-width")
+    );
+    let hole_external: ExtBPInstance = serde_json::from_str(json_metadata_b8_input(
+        "bpp_container_minsep_hole_quality_zone",
+    ))
+    .unwrap();
+    let hole_instance = import_bpp_instance(&importer, &hole_external).unwrap();
+    assert_eq!(hole_instance.bins.len(), 1);
+    let hole_layout = Layout::new(hole_instance.bins[0].container.clone());
+    let hole_svg = layout_to_svg(&hole_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let hole_quality_zero_state = svg_imported_bpp_quality_zero_hole_path_style_state(&hole_svg);
+    let hole_quality_two_five_state = svg_imported_bpp_quality_two_five_path_style_state(&hole_svg);
+    let hole_container_paths = svg_path_elements_for_group(&hole_svg, "container");
+    assert!(!hole_container_paths.is_empty());
+    let hole_path_state = hole_container_paths
+        .iter()
+        .map(|path| {
+            format!(
+                "d={};fill={};stroke={};stroke-width={}",
+                svg_attribute(path, "d"),
+                svg_attribute(path, "fill"),
+                svg_attribute(path, "stroke"),
+                svg_attribute(path, "stroke-width")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let container_paths = svg_path_data_for_group(&svg, "container");
+    let quality_zone_paths = svg_path_data_for_group(&svg, "quality_zones");
+    let state = format!(
+        "container:{}:{};quality_zones:{}:{}",
+        container_paths.len(),
+        container_paths.join("|"),
+        quality_zone_paths.len(),
+        quality_zone_paths.join("|")
+    );
+    let mut hole_cd_options = SvgDrawOptions::default();
+    hole_cd_options.draw_cd_shapes = true;
+    let hole_cd_svg = layout_to_svg(&hole_layout, hole_cd_options, "oracle").to_string();
+    let hole_cd_path_state = svg_imported_bpp_container_path_style_state(&hole_cd_svg);
+    let hole_cd_quality_zero_state =
+        svg_imported_bpp_quality_zero_hole_path_style_state(&hole_cd_svg);
+    let hole_cd_quality_two_five_state =
+        svg_imported_bpp_quality_two_five_path_style_state(&hole_cd_svg);
+    let cd_svg = layout_to_svg(
+        &layout,
+        SvgDrawOptions {
+            draw_cd_shapes: true,
+            ..SvgDrawOptions::default()
+        },
+        "oracle",
+    )
+    .to_string();
+    let cd_container_paths = svg_path_data_for_group(&cd_svg, "container");
+    let cd_quality_zone_paths = svg_path_data_for_group(&cd_svg, "quality_zones");
+    let cd_state = format!(
+        "container:{}:{};quality_zones:{}:{}",
+        cd_container_paths.len(),
+        cd_container_paths.join("|"),
+        cd_quality_zone_paths.len(),
+        cd_quality_zone_paths.join("|")
+    );
+    let cd_style_state = svg_imported_bpp_cd_style_state(&cd_svg);
+    let mut placed_layout = Layout::new(instance.bins[0].container.clone());
+    placed_layout.place_item(&instance.items[0].0, DTransformation::new(0.0, (5.5, 5.0)));
+    assert_eq!(placed_layout.placed_items.len(), 1);
+    let placed_svg = layout_to_svg(&placed_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let placed_cd_svg = layout_to_svg(
+        &placed_layout,
+        SvgDrawOptions {
+            draw_cd_shapes: true,
+            ..SvgDrawOptions::default()
+        },
+        "oracle",
+    )
+    .to_string();
+    let placed_state = format!(
+        "original{{{}}};cd{{{}}}",
+        svg_imported_bpp_placed_state(&placed_svg),
+        svg_imported_bpp_placed_state(&placed_cd_svg),
+    );
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    println!("{profile}.svg.bpp_container_minsep_multi_zone_order_canvas_state={canvas_state}");
+    println!(
+        "{profile}.svg.bpp_container_minsep_multi_zone_order_scaled_canvas_state={scaled_canvas_state}"
+    );
+    println!("{profile}.svg.bpp_svg_portrait_canvas_state={portrait_canvas_state}");
+    println!("{profile}.svg.bpp_svg_portrait_canvas_scaled_state={portrait_scaled_canvas_state}");
+    println!("{profile}.svg.bpp_svg_wide_canvas_state={wide_canvas_state}");
+    println!("{profile}.svg.bpp_svg_oblique_canvas_state={oblique_canvas_state}");
+    println!("{profile}.svg.bpp_svg_oblique_canvas_path_state={oblique_path_state}");
+    println!("{profile}.svg.bpp_svg_concave_canvas_path_state={concave_path_state}");
+    println!("{profile}.svg.bpp_svg_hole_canvas_path_state={hole_path_state}");
+    println!("{profile}.svg.bpp_svg_hole_canvas_quality_zero_state={hole_quality_zero_state}");
+    println!("{profile}.svg.bpp_svg_hole_canvas_cd_path_state={hole_cd_path_state}");
+    println!(
+        "{profile}.svg.bpp_svg_hole_canvas_cd_quality_zero_state={hole_cd_quality_zero_state}"
+    );
+    println!("{profile}.svg.bpp_svg_hole_canvas_quality_2_5_state={hole_quality_two_five_state}");
+    println!(
+        "{profile}.svg.bpp_svg_hole_canvas_cd_quality_2_5_state={hole_cd_quality_two_five_state}"
+    );
+    println!("{profile}.svg.bpp_container_minsep_multi_zone_order_path_state={state}");
+    println!("svg.bpp_container_minsep_multi_zone_order_cd_path_state={cd_state}");
+    println!("svg.bpp_container_minsep_multi_zone_order_cd_style_state={cd_style_state}");
+    println!("svg.bpp_container_minsep_multi_zone_order_placed_state={placed_state}");
+
+    let min_quality_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_quality_minimum_3")).unwrap();
+    let min_quality_instance = import_bpp_instance(&importer, &min_quality_external).unwrap();
+    assert_eq!(min_quality_instance.bins.len(), 1);
+    let min_quality_item = &min_quality_instance.items[0].0;
+    assert_eq!(min_quality_item.min_quality, Some(3));
+
+    let mut q2_min3_layout = Layout::new(min_quality_instance.bins[0].container.clone());
+    q2_min3_layout.place_item(min_quality_item, DTransformation::new(0.0, (25.0, 5.25)));
+    let q2_min3_svg =
+        layout_to_svg(&q2_min3_layout, SvgDrawOptions::default(), "oracle").to_string();
+
+    let mut q5_unfiltered_layout = Layout::new(instance.bins[0].container.clone());
+    q5_unfiltered_layout.place_item(
+        &instance.items[0].0,
+        DTransformation::new(0.0, (5.0, 13.25)),
+    );
+    let q5_unfiltered_svg =
+        layout_to_svg(&q5_unfiltered_layout, SvgDrawOptions::default(), "oracle").to_string();
+
+    let mut q5_min3_layout = Layout::new(min_quality_instance.bins[0].container.clone());
+    q5_min3_layout.place_item(min_quality_item, DTransformation::new(0.0, (5.0, 13.25)));
+    let q5_min3_svg =
+        layout_to_svg(&q5_min3_layout, SvgDrawOptions::default(), "oracle").to_string();
+
+    let quality_filter_state = format!(
+        "q2_min3{{{}}};q5_unfiltered{{{}}};q5_min3{{{}}}",
+        svg_imported_bpp_quality_filter_state(&q2_min3_layout, &q2_min3_svg),
+        svg_imported_bpp_quality_filter_state(&q5_unfiltered_layout, &q5_unfiltered_svg),
+        svg_imported_bpp_quality_filter_state(&q5_min3_layout, &q5_min3_svg),
+    );
+    println!("{profile}.svg.bpp_svg_quality_zone_filter_state={quality_filter_state}");
+
+    let mut exterior_layout = Layout::new(min_quality_instance.bins[0].container.clone());
+    exterior_layout.place_item(min_quality_item, DTransformation::new(0.0, (0.5, 15.0)));
+    assert!(!exterior_layout.is_feasible());
+    let exterior_svg =
+        layout_to_svg(&exterior_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let exterior_state = svg_imported_bpp_exterior_state(&exterior_layout, &exterior_svg);
+    println!("{profile}.svg.bpp_svg_exterior_collision_state={exterior_state}");
+
+    let multi_hazard_external: ExtBPInstance =
+        serde_json::from_str(json_metadata_b8_input("bpp_svg_multi_hazard_min_quality_3")).unwrap();
+    let multi_hazard_instance = import_bpp_instance(&importer, &multi_hazard_external).unwrap();
+    assert_eq!(multi_hazard_instance.bins.len(), 1);
+    let multi_hazard_item = &multi_hazard_instance.items[0].0;
+    assert_eq!(multi_hazard_item.min_quality, Some(3));
+    let mut multi_hazard_layout = Layout::new(multi_hazard_instance.bins[0].container.clone());
+    multi_hazard_layout.place_item(multi_hazard_item, DTransformation::new(0.0, (12.5, 9.75)));
+    assert!(!multi_hazard_layout.is_feasible());
+    let multi_hazard_svg =
+        layout_to_svg(&multi_hazard_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let multi_hazard_container_paths = svg_path_elements_for_group(&multi_hazard_svg, "container");
+    assert!(!multi_hazard_container_paths.is_empty());
+    let multi_hazard_container_path_state = multi_hazard_container_paths
+        .iter()
+        .map(|path| {
+            format!(
+                "d={};fill={};stroke={};stroke-width={}",
+                svg_attribute(path, "d"),
+                svg_attribute(path, "fill"),
+                svg_attribute(path, "stroke"),
+                svg_attribute(path, "stroke-width")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let multi_hazard_state =
+        svg_imported_bpp_multi_hazard_state(&multi_hazard_layout, &multi_hazard_svg);
+    let multi_hazard_quality_zero_state =
+        svg_imported_bpp_quality_zero_hole_path_style_state(&multi_hazard_svg);
+    let multi_hazard_quality_two_five_state =
+        svg_imported_bpp_quality_two_five_path_style_state(&multi_hazard_svg);
+    assert!(multi_hazard_state.starts_with("feasible=false;collisions=4"));
+    assert!(multi_hazard_state.contains("|M12.5,9.75 L13,5,"));
+    assert!(multi_hazard_state.contains("|M12.5,9.75 L20,5.5,"));
+    assert!(multi_hazard_state.contains("|M12.5,9.75 L5,5,"));
+    assert!(multi_hazard_state.contains("|M12.5,9.75 L9,5,"));
+    assert!(!multi_hazard_state.contains("5.5,13.5"));
+    println!("{profile}.svg.bpp_svg_multi_hazard_collision_state={multi_hazard_state}");
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_path_state={multi_hazard_container_path_state}"
+    );
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_quality_zero_state={multi_hazard_quality_zero_state}"
+    );
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_quality_2_5_state={multi_hazard_quality_two_five_state}"
+    );
+
+    let multi_hazard_cd_svg = layout_to_svg(
+        &multi_hazard_layout,
+        SvgDrawOptions {
+            draw_cd_shapes: true,
+            ..SvgDrawOptions::default()
+        },
+        "oracle",
+    )
+    .to_string();
+    let multi_hazard_cd_state =
+        svg_imported_bpp_multi_hazard_state(&multi_hazard_layout, &multi_hazard_cd_svg);
+    let multi_hazard_cd_container_path_state =
+        svg_imported_bpp_container_path_style_state(&multi_hazard_cd_svg);
+    let multi_hazard_cd_quality_zero_state =
+        svg_imported_bpp_quality_zero_hole_path_style_state(&multi_hazard_cd_svg);
+    let multi_hazard_cd_quality_two_five_state =
+        svg_imported_bpp_quality_two_five_path_style_state(&multi_hazard_cd_svg);
+    assert!(multi_hazard_cd_state.starts_with("feasible=false;collisions=4"));
+    assert_eq!(multi_hazard_cd_state, multi_hazard_state);
+    println!("{profile}.svg.bpp_svg_multi_hazard_cd_collision_state={multi_hazard_cd_state}");
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_cd_path_state={multi_hazard_cd_container_path_state}"
+    );
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_cd_quality_zero_state={multi_hazard_cd_quality_zero_state}"
+    );
+    println!(
+        "{profile}.svg.bpp_svg_multi_hole_container_cd_quality_2_5_state={multi_hazard_cd_quality_two_five_state}"
+    );
+
+    let multi_hazard_disabled_svg = layout_to_svg(
+        &multi_hazard_layout,
+        SvgDrawOptions {
+            highlight_collisions: false,
+            ..SvgDrawOptions::default()
+        },
+        "oracle",
+    )
+    .to_string();
+    let multi_hazard_disabled_state =
+        svg_imported_bpp_multi_hazard_state(&multi_hazard_layout, &multi_hazard_disabled_svg);
+    assert!(!multi_hazard_layout.is_feasible());
+    assert!(!multi_hazard_disabled_svg.contains("id=\"collision_lines\""));
+    assert_eq!(multi_hazard_disabled_state, "feasible=false;collisions=0");
+    println!(
+        "{profile}.svg.bpp_svg_multi_hazard_disabled_collision_state={multi_hazard_disabled_state}"
+    );
+
+    let multi_hazard_original_item_paths = svg_path_elements_for_group(&multi_hazard_svg, "item_1");
+    let multi_hazard_cd_item_paths = svg_path_elements_for_group(&multi_hazard_cd_svg, "item_1");
+    assert_eq!(multi_hazard_original_item_paths.len(), 1);
+    assert_eq!(multi_hazard_cd_item_paths.len(), 1);
+    let multi_hazard_original_item_path = svg_attribute(&multi_hazard_original_item_paths[0], "d");
+    let multi_hazard_cd_item_path = svg_attribute(&multi_hazard_cd_item_paths[0], "d");
+    assert_ne!(multi_hazard_original_item_path, multi_hazard_cd_item_path);
+
+    let multi_hazard_cd_disabled_svg = layout_to_svg(
+        &multi_hazard_layout,
+        SvgDrawOptions {
+            draw_cd_shapes: true,
+            highlight_collisions: false,
+            ..SvgDrawOptions::default()
+        },
+        "oracle",
+    )
+    .to_string();
+    let multi_hazard_cd_disabled_collisions =
+        svg_imported_bpp_multi_hazard_state(&multi_hazard_layout, &multi_hazard_cd_disabled_svg);
+    assert!(!multi_hazard_layout.is_feasible());
+    assert!(!multi_hazard_cd_disabled_svg.contains("id=\"collision_lines\""));
+    let multi_hazard_cd_disabled_item_paths =
+        svg_path_elements_for_group(&multi_hazard_cd_disabled_svg, "item_1");
+    assert_eq!(multi_hazard_cd_disabled_item_paths.len(), 1);
+    assert_eq!(
+        svg_attribute(&multi_hazard_cd_disabled_item_paths[0], "d"),
+        multi_hazard_cd_item_path
+    );
+    let multi_hazard_cd_disabled_state = format!(
+        "{};cd_item={}",
+        multi_hazard_cd_disabled_collisions,
+        svg_attribute(&multi_hazard_cd_disabled_item_paths[0], "d")
+    );
+    assert!(multi_hazard_cd_disabled_state.starts_with("feasible=false;collisions=0;cd_item="));
+    println!(
+        "{profile}.svg.bpp_svg_multi_hazard_cd_disabled_collision_state={multi_hazard_cd_disabled_state}"
+    );
+}
+
+fn run_svg_collision_parity_oracle(output_dir: &str) {
+    let layout = svg_collision_layout(&[(45.0, 50.0), (53.0, 50.0)], vec![], None);
+    let multi_collision_layout =
+        svg_collision_layout(&[(45.0, 50.0), (49.0, 50.0), (53.0, 50.0)], vec![], None);
+    let exterior_layout = svg_collision_layout(&[(1.0, 50.0)], vec![], None);
+    let hole_zone = svg_collision_zone(0, &[(2.0, 2.0, 4.0, 4.0)]);
+    let hole_layout = svg_collision_layout(&[(5.0, 5.0)], vec![hole_zone], None);
+    let inferior_zone = svg_collision_zone(1, &[(60.0, 60.0, 80.0, 80.0)]);
+    let inferior_quality_layout =
+        svg_collision_layout(&[(72.0, 70.0)], vec![inferior_zone], Some(2));
+    let multiple_quality_zones = vec![
+        svg_collision_zone(1, &[(45.0, 45.0, 47.0, 47.0), (48.0, 45.0, 50.0, 47.0)]),
+        svg_collision_zone(2, &[(53.0, 52.0, 55.0, 54.0)]),
+        svg_collision_zone(3, &[(45.0, 52.0, 47.0, 54.0)]),
+    ];
+    let multiple_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], multiple_quality_zones, Some(3));
+    let disabled_options = SvgDrawOptions {
+        highlight_collisions: false,
+        ..SvgDrawOptions::default()
+    };
+    let boundary_quality_zones = vec![
+        svg_collision_zone(0, &[(44.0, 48.0, 48.0, 52.0)]),
+        svg_collision_zone(1, &[(47.0, 48.0, 51.0, 52.0)]),
+        svg_collision_zone(2, &[(50.0, 48.0, 54.0, 52.0)]),
+        svg_collision_zone(3, &[(48.0, 49.0, 52.0, 53.0)]),
+    ];
+    let quality_boundary_svgs: Vec<_> = (0..=4)
+        .map(|min_quality| {
+            let layout = svg_collision_layout(
+                &[(50.0, 50.0)],
+                boundary_quality_zones.clone(),
+                Some(min_quality),
+            );
+            (
+                min_quality,
+                layout_to_svg(&layout, SvgDrawOptions::default(), "oracle").to_string(),
+                layout_to_svg(&layout, disabled_options, "oracle").to_string(),
+            )
+        })
+        .collect();
+    let maximum_quality_zones = vec![
+        InferiorQualityZone::new(7, vec![]).unwrap(),
+        svg_collision_zone(8, &[(44.0, 44.0, 48.0, 48.0), (47.0, 44.0, 51.0, 48.0)]),
+        svg_collision_zone(9, &[(50.0, 48.0, 54.0, 52.0)]),
+    ];
+    let maximum_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], maximum_quality_zones, Some(9));
+    let concave_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![OriginalShape {
+            shape: polygon(&[
+                (40.0, 40.0),
+                (60.0, 40.0),
+                (60.0, 59.0),
+                (59.0, 59.0),
+                (59.0, 60.0),
+                (40.0, 60.0),
+            ]),
+            pre_transform: DTransformation::empty(),
+            modify_mode: ShapeModifyMode::Inflate,
+            modify_config: ShapeModifyConfig::default(),
+        }],
+    )
+    .unwrap();
+    let concave_quality_layout =
+        svg_collision_layout(&[(58.0, 50.0)], vec![concave_quality_zone], Some(9));
+    let slanted_concave_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![OriginalShape {
+            shape: polygon(&[
+                (40.0, 40.0),
+                (60.0, 40.0),
+                (60.0, 58.0),
+                (58.0, 58.0),
+                (59.0, 60.0),
+                (40.0, 60.0),
+            ]),
+            pre_transform: DTransformation::empty(),
+            modify_mode: ShapeModifyMode::Inflate,
+            modify_config: ShapeModifyConfig::default(),
+        }],
+    )
+    .unwrap();
+    let slanted_concave_quality_layout =
+        svg_collision_layout(&[(58.0, 50.0)], vec![slanted_concave_quality_zone], Some(9));
+    let indexed_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![
+            OriginalShape {
+                shape: rectangle(44.0, 44.0, 48.0, 48.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: polygon(&[
+                    (50.0, 40.0),
+                    (70.0, 40.0),
+                    (70.0, 58.0),
+                    (68.0, 58.0),
+                    (69.0, 60.0),
+                    (50.0, 60.0),
+                ]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+        ],
+    )
+    .unwrap();
+    let indexed_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], vec![indexed_quality_zone], Some(9));
+    let offset_indexed_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![
+            OriginalShape {
+                shape: rectangle(5.0, 5.0, 10.0, 10.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: rectangle(44.0, 44.0, 48.0, 48.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: polygon(&[
+                    (50.0, 40.0),
+                    (70.0, 40.0),
+                    (70.0, 58.0),
+                    (68.0, 58.0),
+                    (69.0, 60.0),
+                    (50.0, 60.0),
+                ]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+        ],
+    )
+    .unwrap();
+    let offset_indexed_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], vec![offset_indexed_quality_zone], Some(9));
+    let middle_indexed_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![
+            OriginalShape {
+                shape: rectangle(44.0, 44.0, 48.0, 48.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: rectangle(5.0, 5.0, 10.0, 10.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: polygon(&[
+                    (50.0, 40.0),
+                    (70.0, 40.0),
+                    (70.0, 58.0),
+                    (68.0, 58.0),
+                    (69.0, 60.0),
+                    (50.0, 60.0),
+                ]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+        ],
+    )
+    .unwrap();
+    let middle_indexed_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], vec![middle_indexed_quality_zone], Some(9));
+    let sparse_indexed_quality_zone = InferiorQualityZone::new(
+        8,
+        vec![
+            OriginalShape {
+                shape: rectangle(5.0, 5.0, 10.0, 10.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: rectangle(44.0, 44.0, 48.0, 48.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: rectangle(80.0, 5.0, 85.0, 10.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: polygon(&[
+                    (50.0, 40.0),
+                    (70.0, 40.0),
+                    (70.0, 58.0),
+                    (68.0, 58.0),
+                    (69.0, 60.0),
+                    (50.0, 60.0),
+                ]),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+            OriginalShape {
+                shape: rectangle(5.0, 80.0, 10.0, 85.0),
+                pre_transform: DTransformation::empty(),
+                modify_mode: ShapeModifyMode::Inflate,
+                modify_config: ShapeModifyConfig::default(),
+            },
+        ],
+    )
+    .unwrap();
+    let sparse_indexed_quality_layout =
+        svg_collision_layout(&[(50.0, 50.0)], vec![sparse_indexed_quality_zone], Some(9));
+    let enabled_svg = layout_to_svg(&layout, SvgDrawOptions::default(), "oracle").to_string();
+    let disabled_svg = layout_to_svg(&layout, disabled_options, "oracle").to_string();
+    let multi_collision_enabled_svg =
+        layout_to_svg(&multi_collision_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let multi_collision_disabled_svg =
+        layout_to_svg(&multi_collision_layout, disabled_options, "oracle").to_string();
+    let exterior_enabled_svg =
+        layout_to_svg(&exterior_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let exterior_disabled_svg =
+        layout_to_svg(&exterior_layout, disabled_options, "oracle").to_string();
+    let hole_enabled_svg =
+        layout_to_svg(&hole_layout, SvgDrawOptions::default(), "oracle").to_string();
+    let hole_disabled_svg = layout_to_svg(&hole_layout, disabled_options, "oracle").to_string();
+    let inferior_quality_enabled_svg = layout_to_svg(
+        &inferior_quality_layout,
+        SvgDrawOptions::default(),
+        "oracle",
+    )
+    .to_string();
+    let inferior_quality_disabled_svg =
+        layout_to_svg(&inferior_quality_layout, disabled_options, "oracle").to_string();
+    let multiple_quality_enabled_svg = layout_to_svg(
+        &multiple_quality_layout,
+        SvgDrawOptions::default(),
+        "oracle",
+    )
+    .to_string();
+    let multiple_quality_disabled_svg =
+        layout_to_svg(&multiple_quality_layout, disabled_options, "oracle").to_string();
+    let output_dir = std::path::Path::new(output_dir);
+    std::fs::create_dir_all(output_dir).unwrap();
+    std::fs::write(
+        output_dir.join("RustCollisionHighlightTest.svg"),
+        enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustCollisionHighlightDisabledTest.svg"),
+        disabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMultiCollisionHighlightTest.svg"),
+        multi_collision_enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMultiCollisionHighlightDisabledTest.svg"),
+        multi_collision_disabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustExteriorHighlightTest.svg"),
+        exterior_enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustExteriorHighlightDisabledTest.svg"),
+        exterior_disabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustHoleHighlightTest.svg"),
+        hole_enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustHoleHighlightDisabledTest.svg"),
+        hole_disabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustInferiorQualityZoneHighlightTest.svg"),
+        inferior_quality_enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustInferiorQualityZoneHighlightDisabledTest.svg"),
+        inferior_quality_disabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMultipleQualityZonesHighlightTest.svg"),
+        multiple_quality_enabled_svg,
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMultipleQualityZonesHighlightDisabledTest.svg"),
+        multiple_quality_disabled_svg,
+    )
+    .unwrap();
+    for (min_quality, enabled_svg, disabled_svg) in quality_boundary_svgs {
+        std::fs::write(
+            output_dir.join(format!("RustQualityBoundaryMin{min_quality}Enabled.svg")),
+            enabled_svg,
+        )
+        .unwrap();
+        std::fs::write(
+            output_dir.join(format!("RustQualityBoundaryMin{min_quality}Disabled.svg")),
+            disabled_svg,
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        output_dir.join("RustQualityBoundaryMax9Enabled.svg"),
+        layout_to_svg(&maximum_quality_layout, SvgDrawOptions::default(), "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustQualityBoundaryMax9Disabled.svg"),
+        layout_to_svg(&maximum_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustConcaveQualityZoneCollisionEnabled.svg"),
+        layout_to_svg(&concave_quality_layout, SvgDrawOptions::default(), "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustConcaveQualityZoneCollisionDisabled.svg"),
+        layout_to_svg(&concave_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustSlantedConcaveQualityZoneCollisionEnabled.svg"),
+        layout_to_svg(
+            &slanted_concave_quality_layout,
+            SvgDrawOptions::default(),
+            "oracle",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustSlantedConcaveQualityZoneCollisionDisabled.svg"),
+        layout_to_svg(&slanted_concave_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustIndexedQualityZoneShapesEnabled.svg"),
+        layout_to_svg(&indexed_quality_layout, SvgDrawOptions::default(), "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustIndexedQualityZoneShapesDisabled.svg"),
+        layout_to_svg(&indexed_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustOffsetIndexedQualityZoneShapesEnabled.svg"),
+        layout_to_svg(
+            &offset_indexed_quality_layout,
+            SvgDrawOptions::default(),
+            "oracle",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustOffsetIndexedQualityZoneShapesDisabled.svg"),
+        layout_to_svg(&offset_indexed_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMiddleIndexedQualityZoneShapesEnabled.svg"),
+        layout_to_svg(
+            &middle_indexed_quality_layout,
+            SvgDrawOptions::default(),
+            "oracle",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustMiddleIndexedQualityZoneShapesDisabled.svg"),
+        layout_to_svg(&middle_indexed_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustSparseIndexedQualityZoneShapesEnabled.svg"),
+        layout_to_svg(
+            &sparse_indexed_quality_layout,
+            SvgDrawOptions::default(),
+            "oracle",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        output_dir.join("RustSparseIndexedQualityZoneShapesDisabled.svg"),
+        layout_to_svg(&sparse_indexed_quality_layout, disabled_options, "oracle").to_string(),
+    )
+    .unwrap();
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args
+        .iter()
+        .any(|arg| arg == "--svg-imported-bpp-parity-only")
+    {
+        run_svg_imported_bpp_parity_oracle();
+        return;
+    }
+    if let Some(index) = args
+        .iter()
+        .position(|arg| arg == "--svg-collision-parity-only")
+    {
+        let output_dir = args
+            .get(index + 1)
+            .expect("--svg-collision-parity-only requires an output directory");
+        run_svg_collision_parity_oracle(output_dir);
+        return;
+    }
     if std::env::args().any(|arg| arg == "--boundary-b11-parity-only") {
         run_boundary_b11_oracle();
         return;
@@ -3866,6 +7242,14 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--import-boundary-parity-only") {
         run_import_boundary_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--solution-import-b8-parity-only") {
+        run_solution_import_b8_oracle();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--json-metadata-b8-parity-only") {
+        run_json_metadata_b8_oracle();
         return;
     }
     if std::env::args().any(|arg| arg == "--zero-separation-parity-only") {

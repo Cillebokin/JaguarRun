@@ -1217,6 +1217,8 @@ JsonValue itemJson(const ExternalItem& item)
     object.emplace("shape", shapeJson(item.shape));
     if (item.minQuality.has_value())
         object.emplace("min_quality", JsonValue(static_cast<std::uint64_t>(*item.minQuality)));
+    else
+        object.emplace("min_quality", JsonValue{});
     return JsonValue(std::move(object));
 }
 

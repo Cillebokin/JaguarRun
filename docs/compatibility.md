@@ -115,7 +115,7 @@ Layout 也是合法内部状态，Importer 会保留该 layout，而 BPP 的空 
 - 每个 Item 的原始轮廓、碰撞轮廓、外部旋转/平移、external ID；
 - 可选 Surrogate poles/piers；
 - `data-layout-feasible` 和坐标轴；
-- SVG scene 使用 `translate(...) scale(1 -1)` 保留 JaguarCore 的笛卡尔坐标方向。
+- SVG scene 仅作为分组容器，不再附加translate/scale轴向翻转；布局坐标按与Rust基线一致的方式直接写入SVG。C++保留文档title、class/data诊断属性、collision-debug状态标记和坐标轴等扩展，DOM结构不与Rust逐项相同。
 
 SVG 失败只返回 `SerializationFailure`，不会改变布局或碰撞检测状态。
 

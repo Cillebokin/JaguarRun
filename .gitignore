@@ -22,6 +22,8 @@ Temp/
 !docs/
 !CodeResource/
 
+*.obj
+
 !*.dll
 !*.lib
 !*.a

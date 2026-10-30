@@ -73,15 +73,15 @@ $cases = @(
         Name = 'Debug/AVX2'
         Configuration = 'Debug'
         Checker = 'Debug\Tools\JaguarCoreRuntimeCheck.exe'
-        Dll = 'Debug\AVX2\Bin\JaguarCored.dll'
-        Lib = 'Debug\AVX2\Lib\JaguarCored.lib'
+        Dll = 'Debug\AVX2\Bin\JaguarCore.dll'
+        Lib = 'Debug\AVX2\Lib\JaguarCore.lib'
     },
     @{
         Name = 'Debug/Scalar'
         Configuration = 'Debug'
         Checker = 'Debug\Tools\JaguarCoreRuntimeCheck.exe'
-        Dll = 'Debug\Scalar\Bin\JaguarCored.dll'
-        Lib = 'Debug\Scalar\Lib\JaguarCored.lib'
+        Dll = 'Debug\Scalar\Bin\JaguarCore.dll'
+        Lib = 'Debug\Scalar\Lib\JaguarCore.lib'
     },
     @{
         Name = 'Release/AVX2'

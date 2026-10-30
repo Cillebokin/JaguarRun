@@ -13,7 +13,7 @@ INCLUDEPATH += $$JAGUARCORE_PACKAGE_ROOT/Include
 win32:LIBS += -L$$JAGUARCORE_PACKAGE_ROOT/$$JAGUARCORE_PACKAGE_CONFIGURATION/$$JAGUARCORE_PACKAGE_VARIANT/Lib
 
 CONFIG(debug, debug|release) {
-    LIBS += -lJaguarCored
+    LIBS += -lJaguarCore
 } else {
     LIBS += -lJaguarCore
 }

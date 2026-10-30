@@ -29,10 +29,6 @@ CONFIG += simd
     SOURCES += $$PWD/Source/Collision/SoaGeometryAvx2Fallback.cpp
 }
 
-CONFIG(debug, debug|release) {
-    TARGET = JaguarCored
-}
-
 DEFINES += JAGUARCORE_BUILD
 
 INCLUDEPATH += $$PWD/Include

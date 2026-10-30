@@ -28,8 +28,8 @@ include($$PWD/../Package/JaguarCorePackage.pri)
 
 CONFIG(debug, debug|release) {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Debug
-    LIBS += -L$$JAGUARCORE_BUILD_DIR/Bin -lJaguarCored
-    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCored.lib
+    LIBS += -L$$JAGUARCORE_BUILD_DIR/Bin -lJaguarCore
+    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/Bin/JaguarCore.lib
 } else {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Release
     LIBS += -L$$JAGUARCORE_BUILD_DIR/Bin -lJaguarCore

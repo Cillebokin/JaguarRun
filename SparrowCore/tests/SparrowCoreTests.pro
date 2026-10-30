@@ -26,9 +26,9 @@ isEmpty(SPARROWCORE_BUILD_DIR): SPARROWCORE_BUILD_DIR = $$PWD/../../build-Sparro
 CONFIG(debug, debug|release) {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Debug
     LIBS += -L$$SPARROWCORE_BUILD_DIR/bin -lSparrowCore
-    LIBS += -L$$JAGUARCORE_BUILD_DIR/bin -lJaguarCored
+    LIBS += -L$$JAGUARCORE_BUILD_DIR/bin -lJaguarCore
     PRE_TARGETDEPS += $$SPARROWCORE_BUILD_DIR/bin/SparrowCore.lib
-    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/bin/JaguarCored.lib
+    PRE_TARGETDEPS += $$JAGUARCORE_BUILD_DIR/bin/JaguarCore.lib
 } else {
     isEmpty(JAGUARCORE_BUILD_DIR): JAGUARCORE_BUILD_DIR = $$PWD/../../build-JaguarCore-MSVC2019x64-Release
     LIBS += -L$$SPARROWCORE_BUILD_DIR/bin -lSparrowCore

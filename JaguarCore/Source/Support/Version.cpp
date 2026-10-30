@@ -4,7 +4,7 @@ namespace jaguar
 {
 const char* Version() noexcept
 {
-    return "0.1.0-dev";
+    return "0.0.1.1030_Beta";
 }
 }
 
